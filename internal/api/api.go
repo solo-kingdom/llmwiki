@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -95,6 +96,9 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
+	if status >= 500 {
+		log.Printf("[API ERROR] %d: %s", status, msg)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})

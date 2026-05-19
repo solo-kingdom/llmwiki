@@ -1,34 +1,89 @@
-## ADDED Requirements
+### Requirement: Chat-first Ingest layout
+The Ingest page SHALL present a chat interface as the primary interaction: scrollable message list, bottom composer, attachment affordances, and a primary **归档** action. The model selector SHALL use provider instances (not catalog providers) as the data source.
 
-### Requirement: Chat-first Ingest layout with sidebar
-Ingest 页面 SHALL 在左侧显示 session 侧边栏，右侧显示当前 session 的聊天界面。
+#### Scenario: Default chat view
+- **WHEN** user opens the Ingest tab
+- **THEN** page SHALL display message history (or empty state), input composer, and **归档** button as primary CTA
 
-#### Scenario: 整体布局
-- **WHEN** 用户打开 Ingest tab
-- **THEN** 页面 SHALL 左侧显示 `ChatSidebar` 组件、右侧显示当前 session 的 `IngestChat` 组件（含 provider/model 选择器）
+#### Scenario: Empty session prompt
+- **WHEN** no messages exist in the active session
+- **THEN** page SHALL show centered hint encouraging user to describe a topic or attach files
 
-#### Scenario: 无活跃 session
-- **WHEN** 没有任何 session 或所有 session 都已归档
-- **THEN** 右侧 SHALL 显示欢迎界面和"新建对话"按钮
+#### Scenario: Send message
+- **WHEN** user types text and clicks **发送** or presses Enter (without Shift)
+- **THEN** UI SHALL append user bubble, call session message API, and stream assistant reply into a new assistant bubble
 
-### Requirement: Settings 页面 per-provider Key 管理
-Settings 页面 SHALL 支持按 provider 独立管理 API Key。
+### Requirement: Provider instance model selector
+The UI SHALL provide a two-dropdown model selector: the first dropdown lists user-added provider instances, the second dropdown lists models available for the selected instance's catalog provider.
 
-#### Scenario: Provider Key 列表
-- **WHEN** 用户打开 Settings 页面
-- **THEN** LLM Configuration 区域 SHALL 显示 provider 列表，每个 provider 显示名称、当前 Key 状态（已配置/未配置）、以及 Key 输入框
+#### Scenario: Instance dropdown
+- **WHEN** the chat header renders
+- **THEN** the first dropdown SHALL show all user-added provider instances by name, with no ⚠ warnings (only configured instances appear)
 
-#### Scenario: 输入 API Key
-- **WHEN** 用户在某 provider 行输入 API Key 并保存
-- **THEN** UI SHALL 调用 `PUT /api/v1/settings/provider-keys/{provider_id}` 保存
+#### Scenario: Model dropdown
+- **WHEN** user selects an instance
+- **THEN** the second dropdown SHALL load models from the instance's catalog provider (via `GET /api/v1/providers/{catalog_id}/models`)
 
-#### Scenario: 删除 API Key
-- **WHEN** 用户清空某 provider 的 API Key 输入框并保存
-- **THEN** UI SHALL 发送空字符串删除该 Key
+#### Scenario: No instances configured
+- **WHEN** no provider instances have been added
+- **THEN** both dropdowns SHALL be disabled and the UI SHALL display a message directing user to Settings to add a Provider
 
-### Requirement: Archive 后自动创建新 session
-归档当前 session 后，UI SHALL 自动创建新 session 并切换到它。
+#### Scenario: Model invalidation after instance type change
+- **WHEN** user switches to a session whose instance had its catalog_id changed and the stored model no longer exists in the new provider's model list
+- **THEN** the model dropdown SHALL clear its selection and prompt the user to select a new model
 
-#### Scenario: 归档后新建
-- **WHEN** 用户成功归档一个 session
-- **THEN** UI SHALL 自动创建新 session（继承最近使用的 provider/model），清空聊天区域，侧边栏更新列表
+### Requirement: Message rendering
+The UI SHALL render user and assistant messages with distinct styling and support markdown in assistant content.
+
+#### Scenario: User message bubble
+- **WHEN** a user message is added
+- **THEN** it SHALL appear right-aligned (or visually distinct) with plain text content
+
+#### Scenario: Assistant streaming
+- **WHEN** assistant response is streaming
+- **THEN** UI SHALL incrementally render tokens in the assistant bubble until complete or error
+
+#### Scenario: Assistant error state
+- **WHEN** streaming fails
+- **THEN** UI SHALL show error message with retry affordance on the failed assistant message
+
+### Requirement: Attachment interaction in chat
+The UI SHALL allow attaching images and files from the composer and display attachment summaries as assistant messages.
+
+#### Scenario: Attach via button
+- **WHEN** user clicks attachment control and selects files
+- **THEN** UI SHALL upload via session attachment API and show upload progress
+
+#### Scenario: Attachment understanding message
+- **WHEN** server returns attachment summary message
+- **THEN** UI SHALL render it as an assistant message referencing the attachment name
+
+#### Scenario: Drag and drop on composer
+- **WHEN** user drops files onto the composer area
+- **THEN** UI SHALL upload files using the same attachment flow
+
+### Requirement: Archive flow in UI
+The UI SHALL provide an **归档** action that confirms intent, triggers archive API, and surfaces ingest job feedback.
+
+#### Scenario: Archive confirmation
+- **WHEN** user clicks **归档**
+- **THEN** UI SHALL show confirmation (title editable, optional source note) before submitting
+
+#### Scenario: Archive success feedback
+- **WHEN** archive API returns job id
+- **THEN** UI SHALL show success state with link or navigation to Jobs tab and job id
+
+#### Scenario: Archive disabled when empty
+- **WHEN** session has no user messages
+- **THEN** **归档** button SHALL be disabled with tooltip explaining why
+
+### Requirement: Navigation label Ingest
+Global navigation SHALL label the default ingest tab **Ingest** (not Ingest Hub).
+
+#### Scenario: Tab label
+- **WHEN** user views global header tabs
+- **THEN** the ingest tab label SHALL read `Ingest`
+
+#### Scenario: Dependency warning on Ingest tab
+- **WHEN** runtime dependencies are missing
+- **THEN** warning icon SHALL appear adjacent to the Ingest tab label (same behavior as prior Ingest Hub warning)

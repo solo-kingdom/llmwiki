@@ -8,7 +8,7 @@ import type {
 
 // Mock fetch globally
 const mockFetch = vi.fn()
-global.fetch = mockFetch
+globalThis.fetch = mockFetch
 
 function mockResponse<T>(data: T, ok = true, status = 200) {
   return Promise.resolve({
@@ -33,7 +33,6 @@ describe("listProviders", () => {
         name: "OpenAI",
         api_base: "https://api.openai.com/v1",
         api_format: "openai",
-        has_key: true,
         env_key: "OPENAI_API_KEY",
         doc_url: "https://platform.openai.com",
       },
@@ -42,7 +41,6 @@ describe("listProviders", () => {
         name: "Anthropic",
         api_base: "https://api.anthropic.com",
         api_format: "anthropic",
-        has_key: false,
         env_key: "ANTHROPIC_API_KEY",
         doc_url: "https://docs.anthropic.com",
       },
@@ -57,9 +55,7 @@ describe("listProviders", () => {
     )
     expect(result).toHaveLength(2)
     expect(result[0].id).toBe("openai")
-    expect(result[0].has_key).toBe(true)
     expect(result[1].id).toBe("anthropic")
-    expect(result[1].has_key).toBe(false)
   })
 
   it("throws on server error", async () => {
@@ -110,63 +106,19 @@ describe("updateLastModel", () => {
   it("calls PUT /api/v1/settings/last-model", async () => {
     const { updateLastModel } = await import("@/lib/api")
     mockFetch.mockReturnValue(
-      mockResponse({ last_provider: "openai", last_model: "gpt-4o" }),
+      mockResponse({ status: "ok" }),
     )
 
-    const result = await updateLastModel("openai", "gpt-4o")
+    const result = await updateLastModel("inst-1", "gpt-4o")
 
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/v1/settings/last-model",
       expect.objectContaining({
         method: "PUT",
-        body: JSON.stringify({ provider: "openai", model: "gpt-4o" }),
+        body: JSON.stringify({ instance_id: "inst-1", model: "gpt-4o" }),
       }),
     )
     expect(result).toBeDefined()
-  })
-})
-
-describe("setProviderKey", () => {
-  it("calls PUT /api/v1/settings/provider-keys/{id} with api_key", async () => {
-    const { setProviderKey } = await import("@/lib/api")
-    mockFetch.mockReturnValue(
-      mockResponse({
-        provider_id: "openai",
-        masked_key: "sk-t****",
-        base_url: "",
-      }),
-    )
-
-    const result = await setProviderKey("openai", "sk-test-key")
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/v1/settings/provider-keys/openai",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({ api_key: "sk-test-key" }),
-      }),
-    )
-    expect(result).toBeDefined()
-  })
-
-  it("sends base_url when provided", async () => {
-    const { setProviderKey } = await import("@/lib/api")
-    mockFetch.mockReturnValue(
-      mockResponse({ provider_id: "custom", masked_key: "****", base_url: "https://custom.api.com" }),
-    )
-
-    await setProviderKey("custom", "my-key", "https://custom.api.com")
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/v1/settings/provider-keys/custom",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({
-          api_key: "my-key",
-          base_url: "https://custom.api.com",
-        }),
-      }),
-    )
   })
 })
 
@@ -181,7 +133,7 @@ describe("listIngestSessions", () => {
           id: "s-1",
           title: "Session 1",
           status: "active",
-          llm_provider: "openai",
+          llm_instance_id: "inst-1",
           llm_model: "gpt-4o",
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:00Z",
@@ -190,7 +142,7 @@ describe("listIngestSessions", () => {
           id: "s-2",
           title: "Session 2",
           status: "archived",
-          llm_provider: "anthropic",
+          llm_instance_id: "inst-2",
           llm_model: "claude-3",
           created_at: "2026-01-02T00:00:00Z",
           updated_at: "2026-01-02T00:00:00Z",
@@ -206,7 +158,7 @@ describe("listIngestSessions", () => {
       expect.objectContaining({ headers: expect.any(Headers) }),
     )
     expect(result.sessions).toHaveLength(2)
-    expect(result.sessions[0].llm_provider).toBe("openai")
+    expect(result.sessions[0].llm_instance_id).toBe("inst-1")
     expect(result.sessions[1].status).toBe("archived")
   })
 
@@ -220,14 +172,14 @@ describe("listIngestSessions", () => {
 })
 
 describe("updateIngestSession", () => {
-  it("calls PATCH /api/v1/ingest/sessions/{id} with provider and model", async () => {
+  it("calls PATCH /api/v1/ingest/sessions/{id} with instance_id and model", async () => {
     const { updateIngestSession } = await import("@/lib/api")
     const updatedSession: IngestSession = {
       id: "s-1",
       title: "Session 1",
       status: "active",
       storage_path: "raw/sources/web-ingest/sessions/s-1",
-      llm_provider: "groq",
+      llm_instance_id: "inst-3",
       llm_model: "llama-3.1-70b",
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
@@ -235,7 +187,7 @@ describe("updateIngestSession", () => {
     mockFetch.mockReturnValue(mockResponse({ session: updatedSession }))
 
     const result = await updateIngestSession("s-1", {
-      provider: "groq",
+      instance_id: "inst-3",
       model: "llama-3.1-70b",
     })
 
@@ -243,10 +195,10 @@ describe("updateIngestSession", () => {
       "/api/v1/ingest/sessions/s-1",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ provider: "groq", model: "llama-3.1-70b" }),
+        body: JSON.stringify({ instance_id: "inst-3", model: "llama-3.1-70b" }),
       }),
     )
-    expect(result.session.llm_provider).toBe("groq")
+    expect(result.session.llm_instance_id).toBe("inst-3")
   })
 
   it("sends only title when just title is provided", async () => {
@@ -258,7 +210,7 @@ describe("updateIngestSession", () => {
           title: "New Title",
           status: "active",
           storage_path: "",
-          llm_provider: "",
+          llm_instance_id: "",
           llm_model: "",
           created_at: "",
           updated_at: "",
@@ -284,7 +236,7 @@ describe("updateIngestSession", () => {
     )
 
     await expect(
-      updateIngestSession("nonexistent", { provider: "openai" }),
+      updateIngestSession("nonexistent", { instance_id: "inst-1" }),
     ).rejects.toThrow("session not found")
   })
 })

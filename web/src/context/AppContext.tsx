@@ -278,22 +278,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return
         }
       } catch {
-        // create new below
+        // session not found or error — clear stale ID and create new below
+        setSessionId(null)
+        setActiveSessionId(null)
+        localStorage.removeItem(SESSION_STORAGE_KEY)
       }
     }
-    const instanceId = settings?.last_instance_id
-    const model = settings?.last_model
-    const { session } = await api.createIngestSession()
-    setSessionId(session.id)
-    setActiveSessionId(session.id)
-    localStorage.setItem(SESSION_STORAGE_KEY, session.id)
-    setSessionMessages([])
-    if (instanceId && model) {
-      try {
-        await api.updateIngestSession(session.id, { instance_id: instanceId, model })
-      } catch {
-        // non-critical
+    try {
+      const instanceId = settings?.last_instance_id
+      const model = settings?.last_model
+      const { session } = await api.createIngestSession()
+      setSessionId(session.id)
+      setActiveSessionId(session.id)
+      localStorage.setItem(SESSION_STORAGE_KEY, session.id)
+      setSessionMessages([])
+      setSessionError(null)
+      if (instanceId && model) {
+        try {
+          await api.updateIngestSession(session.id, { instance_id: instanceId, model })
+        } catch {
+          // non-critical
+        }
       }
+    } catch (e) {
+      // Clear stale session ID to prevent retry loops
+      setSessionId(null)
+      setActiveSessionId(null)
+      localStorage.removeItem(SESSION_STORAGE_KEY)
+      setSessionError((e as Error).message)
     }
   }, [sessionId, loadSessionMessages, settings])
 

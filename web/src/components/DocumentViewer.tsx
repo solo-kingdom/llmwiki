@@ -6,7 +6,6 @@ import { useApp } from "@/context/AppContext"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { SearchBar } from "./SearchBar"
 import "highlight.js/styles/github.css"
 
 export function DocumentViewer() {
@@ -41,18 +40,15 @@ export function DocumentViewer() {
 
   if (!currentDoc) {
     return (
-      <div className="flex flex-1 flex-col">
-        <SearchBar />
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-muted-foreground">Select a document to view</p>
-        </div>
+      <div className="flex flex-1 items-center justify-center">
+        <p className="text-muted-foreground">Select a document to view</p>
       </div>
     )
   }
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
-      <div className="flex items-start justify-between border-b px-6 py-3">
+      <div className="border-b px-6 py-3">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold truncate">
             {currentDoc.title || currentDoc.filename}
@@ -84,7 +80,6 @@ export function DocumentViewer() {
             </div>
           )}
         </div>
-        <SearchBar />
       </div>
       <ScrollArea className="flex-1">
         <article

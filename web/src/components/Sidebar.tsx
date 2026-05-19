@@ -2,6 +2,7 @@ import { useState, useMemo } from "react"
 import { useApp } from "@/context/AppContext"
 import { buildTree } from "@/lib/tree"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { SearchBar } from "@/components/SearchBar"
 import type { TreeNode } from "@/types"
 
 function FolderIcon({ open }: { open: boolean }) {
@@ -142,8 +143,8 @@ export function Sidebar() {
 
   return (
     <div className="flex h-full w-64 flex-col border-r bg-card">
-      <div className="border-b px-3 py-2">
-        <h2 className="text-sm font-semibold">Documents</h2>
+      <div className="border-b px-3 py-2 space-y-1">
+        <SearchBar />
         <p className="text-xs text-muted-foreground">{documents.length} files</p>
       </div>
       <ScrollArea className="flex-1">

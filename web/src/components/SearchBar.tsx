@@ -63,7 +63,7 @@ export function SearchBar() {
   }, [])
 
   return (
-    <div ref={containerRef} className="relative w-72">
+    <div ref={containerRef} className="relative w-full">
       <Input
         type="text"
         placeholder="Search documents..."
@@ -73,7 +73,7 @@ export function SearchBar() {
         className="h-8 text-sm"
       />
       {showResults && searchResults && searchResults.results.length > 0 && (
-        <div className="absolute top-full right-0 z-50 mt-1 w-80 rounded-lg border bg-popover shadow-lg">
+        <div className="absolute top-full left-0 z-50 mt-1 min-w-full rounded-lg border bg-popover shadow-lg">
           <ScrollArea className="max-h-80">
             <div className="py-1">
               {searchResults.results.map((chunk, i) => (
@@ -107,7 +107,7 @@ export function SearchBar() {
       {showResults &&
         searchResults &&
         searchResults.results.length === 0 && (
-          <div className="absolute top-full right-0 z-50 mt-1 w-80 rounded-lg border bg-popover p-3 shadow-lg">
+          <div className="absolute top-full left-0 z-50 mt-1 min-w-full rounded-lg border bg-popover p-3 shadow-lg">
             <p className="text-sm text-muted-foreground">
               No results for "{searchQuery}"
             </p>

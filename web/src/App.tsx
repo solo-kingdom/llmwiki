@@ -27,17 +27,19 @@ function AppLayout() {
       onValueChange={(v) => setView(v as View)}
       className="flex h-screen flex-col"
     >
-      <header className="flex items-center border-b px-4 py-2">
-        <h1 className="text-base font-bold mr-4">LLMWiki</h1>
-        <TabsList className="overflow-x-auto">
-          <div className="flex items-center gap-1">
-            <TabsTrigger value="ingest">Ingest</TabsTrigger>
-            <WarningPopover missingDeps={missingDeps} />
-          </div>
-          <TabsTrigger value="jobs">Jobs</TabsTrigger>
-          <TabsTrigger value="wiki">Wiki</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
-        </TabsList>
+      <header className="flex justify-center pt-3 px-4">
+        <div className="inline-flex items-center gap-4 rounded-xl shadow-sm bg-header-bg px-5 py-2.5">
+          <h1 className="text-base font-bold">LLMWiki</h1>
+          <TabsList className="overflow-x-auto">
+            <div className="flex items-center gap-1">
+              <TabsTrigger value="ingest">Ingest</TabsTrigger>
+              <WarningPopover missingDeps={missingDeps} />
+            </div>
+            <TabsTrigger value="jobs">Jobs</TabsTrigger>
+            <TabsTrigger value="wiki">Wiki</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+          </TabsList>
+        </div>
       </header>
       <TabsContent value="ingest" className="flex flex-1 min-h-0">
         <ChatSidebar />

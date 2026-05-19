@@ -4,7 +4,6 @@ import { AppProvider } from "@/context/AppContext"
 import { ChatSidebar } from "@/components/ChatSidebar"
 import type {
   Provider,
-  ModelInfo,
   SessionListItem,
   Settings,
 } from "@/types"
@@ -23,6 +22,7 @@ const mockGetCapabilities = vi.fn()
 const mockGetIngestSession = vi.fn()
 const mockListIngestSessionMessages = vi.fn()
 const mockStreamIngestSessionMessage = vi.fn()
+const mockListProviderInstances = vi.fn()
 
 vi.mock("@/lib/api", () => ({
   listProviders: (...args: unknown[]) => mockListProviders(...args),
@@ -38,12 +38,12 @@ vi.mock("@/lib/api", () => ({
   getIngestSession: (...args: unknown[]) => mockGetIngestSession(...args),
   listIngestSessionMessages: (...args: unknown[]) => mockListIngestSessionMessages(...args),
   streamIngestSessionMessage: (...args: unknown[]) => mockStreamIngestSessionMessage(...args),
+  listProviderInstances: (...args: unknown[]) => mockListProviderInstances(...args),
   uploadIngestSessionAttachment: vi.fn(),
   archiveIngestSession: vi.fn(),
   createConversationIngestJob: vi.fn(),
   createTextIngestJob: vi.fn(),
   uploadIngestJobs: vi.fn(),
-  setProviderKey: vi.fn(),
 }))
 
 function makeProvider(overrides: Partial<Provider> = {}): Provider {
@@ -52,7 +52,6 @@ function makeProvider(overrides: Partial<Provider> = {}): Provider {
     name: "OpenAI",
     api_base: "https://api.openai.com/v1",
     api_format: "openai",
-    has_key: true,
     env_key: "OPENAI_API_KEY",
     doc_url: "",
     ...overrides,
@@ -64,7 +63,7 @@ function makeSession(overrides: Partial<SessionListItem> = {}): SessionListItem 
     id: "sess-1",
     title: "Test Session",
     status: "active",
-    llm_provider: "openai",
+    llm_instance_id: "inst-1",
     llm_model: "gpt-4o",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -74,7 +73,7 @@ function makeSession(overrides: Partial<SessionListItem> = {}): SessionListItem 
 
 function defaultSettings(): Settings {
   return {
-    last_provider: "openai",
+    last_instance_id: "inst-1",
     last_model: "gpt-4o",
     max_tokens: 2048,
     api_key: "",
@@ -83,9 +82,6 @@ function defaultSettings(): Settings {
     chunk_overlap: 64,
     auto_reindex: true,
     watch_sources: false,
-    provider_keys: {
-      openai: { has_key: true, masked: "sk-t****" },
-    },
     llm_provider: "openai",
     llm_model: "gpt-4o",
   }
@@ -100,9 +96,14 @@ function setupDefaultMocks() {
     access_model: "local",
   })
   mockListProviders.mockResolvedValue([
-    makeProvider({ id: "openai", name: "OpenAI", has_key: true }),
-    makeProvider({ id: "anthropic", name: "Anthropic", has_key: false }),
+    makeProvider({ id: "openai", name: "OpenAI" }),
+    makeProvider({ id: "anthropic", name: "Anthropic" }),
   ])
+  mockListProviderInstances.mockResolvedValue({
+    instances: [
+      { id: "inst-1", name: "OpenAI Default", catalog_id: "openai", api_key_masked: "sk-****", base_url: "", created_at: "", updated_at: "" },
+    ],
+  })
   mockListProviderModels.mockResolvedValue([
     { provider_id: "openai", model_id: "gpt-4o", name: "GPT-4o", family: "GPT-4", context_limit: 128000, output_limit: 16384, cost_input: 2.5, cost_output: 10.0, reasoning: true, tool_call: true, attachment: false },
     { provider_id: "openai", model_id: "gpt-4o-mini", name: "GPT-4o Mini", family: "GPT-4", context_limit: 128000, output_limit: 16384, cost_input: 0.15, cost_output: 0.6, reasoning: false, tool_call: false, attachment: false },
@@ -114,7 +115,7 @@ function setupDefaultMocks() {
       title: "",
       status: "active",
       storage_path: "raw/sources/web-ingest/sessions/sess-new",
-      llm_provider: "openai",
+      llm_instance_id: "inst-1",
       llm_model: "gpt-4o",
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
@@ -127,7 +128,7 @@ function setupDefaultMocks() {
       title: "",
       status: "active",
       storage_path: "",
-      llm_provider: "openai",
+      llm_instance_id: "inst-1",
       llm_model: "gpt-4o",
       created_at: "",
       updated_at: "",
@@ -142,7 +143,7 @@ function setupDefaultMocks() {
       title: "",
       status: "active",
       storage_path: "",
-      llm_provider: "anthropic",
+      llm_instance_id: "inst-2",
       llm_model: "claude-3",
       created_at: "",
       updated_at: "",
@@ -161,7 +162,7 @@ describe("ChatSidebar Integration", () => {
     mockListIngestSessions.mockResolvedValue({
       sessions: [
         makeSession({ id: "s-1", title: "Chat 1" }),
-        makeSession({ id: "s-2", title: "Chat 2", llm_provider: "anthropic", llm_model: "claude-3" }),
+        makeSession({ id: "s-2", title: "Chat 2", llm_instance_id: "inst-2", llm_model: "claude-3" }),
       ],
     })
 
@@ -184,7 +185,7 @@ describe("ChatSidebar Integration", () => {
   it("shows provider name for sessions", async () => {
     mockListIngestSessions.mockResolvedValue({
       sessions: [
-        makeSession({ id: "s-1", title: "Chat OpenAI", llm_provider: "openai" }),
+        makeSession({ id: "s-1", title: "Chat OpenAI", llm_instance_id: "inst-1" }),
       ],
     })
 
@@ -262,8 +263,7 @@ describe("Provider/Model Selection Integration", () => {
   })
 
   it("loads models when provider is selected", async () => {
-    const { loadModels } = await import("@/context/AppContext")
-    // This tests the API layer - loadModels calls listProviderModels
+    // This tests the API layer - listProviderModels is the underlying API
     await waitFor(() => {
       expect(mockListProviderModels).toBeDefined()
     })
@@ -277,11 +277,14 @@ describe("Input Guard Logic", () => {
     setupDefaultMocks()
   })
 
-  it("provider without key shows warning status", async () => {
+  it("provider without instance shows no key status", async () => {
     mockListProviders.mockResolvedValue([
-      makeProvider({ id: "openai", name: "OpenAI", has_key: true }),
-      makeProvider({ id: "anthropic", name: "Anthropic", has_key: false }),
+      makeProvider({ id: "openai", name: "OpenAI" }),
+      makeProvider({ id: "anthropic", name: "Anthropic" }),
     ])
+    mockListProviderInstances.mockResolvedValue({
+      instances: [],
+    })
 
     render(
       <AppProvider>
@@ -293,11 +296,11 @@ describe("Input Guard Logic", () => {
       expect(mockListProviders).toHaveBeenCalled()
     })
 
-    // The anthropic provider should show as not having a key
-    // This is verified through the provider data structure
+    // Verify provider data structure
     const providers = await mockListProviders.mock.results[0].value
-    const anthropic = providers.find((p: Provider) => p.id === "anthropic")
-    expect(anthropic.has_key).toBe(false)
+    expect(providers).toHaveLength(2)
+    expect(providers[0].id).toBe("openai")
+    expect(providers[1].id).toBe("anthropic")
   })
 })
 
@@ -308,7 +311,7 @@ describe("Session Update Integration", () => {
     setupDefaultMocks()
   })
 
-  it("calls updateIngestSession when switching provider", async () => {
+  it("calls updateIngestSession when switching instance", async () => {
     // Simulate the API call pattern
     mockUpdateIngestSession.mockResolvedValueOnce({
       session: {
@@ -316,7 +319,7 @@ describe("Session Update Integration", () => {
         title: "",
         status: "active",
         storage_path: "",
-        llm_provider: "anthropic",
+        llm_instance_id: "inst-2",
         llm_model: "claude-3",
         created_at: "",
         updated_at: "",
@@ -325,20 +328,20 @@ describe("Session Update Integration", () => {
 
     const { updateIngestSession } = await import("@/lib/api")
     await updateIngestSession("sess-new", {
-      provider: "anthropic",
+      instance_id: "inst-2",
       model: "claude-3",
     })
 
     expect(mockUpdateIngestSession).toHaveBeenCalledWith("sess-new", {
-      provider: "anthropic",
+      instance_id: "inst-2",
       model: "claude-3",
     })
   })
 
   it("calls updateLastModel when model changes", async () => {
     const { updateLastModel } = await import("@/lib/api")
-    await updateLastModel("anthropic", "claude-3")
+    await updateLastModel("inst-1", "gpt-4o")
 
-    expect(mockUpdateLastModel).toHaveBeenCalledWith("anthropic", "claude-3")
+    expect(mockUpdateLastModel).toHaveBeenCalledWith("inst-1", "gpt-4o")
   })
 })

@@ -69,7 +69,10 @@ export function IngestChat() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  const initRef = useRef(false)
   useEffect(() => {
+    if (initRef.current) return
+    initRef.current = true
     void ensureIngestSession()
     void loadCapabilities()
     void refreshIngestJobs()
@@ -118,7 +121,6 @@ export function IngestChat() {
     }
   }, [currentModels, selectedModel])
 
-  const activeInstance = instances.find((i) => i.id === selectedInstanceId)
   const isReady = !!sessionId && !!selectedInstanceId && !!selectedModel
 
   const handleInstanceChange = async (instanceId: string) => {

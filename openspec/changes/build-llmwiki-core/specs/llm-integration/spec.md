@@ -27,10 +27,10 @@ The system SHALL assemble LLM prompts with system instructions, user messages, a
 - **THEN** the system prompt SHALL include: system instructions, purpose.md content, index.md summary, language rules, and citation format directives
 
 ### Requirement: Timeout and error handling
-The system SHALL implement appropriate timeouts for LLM requests and classify errors (network vs application) for proper retry or user feedback.
+The system SHALL implement configurable timeouts for LLM requests (managed via Web UI settings with environment variable fallback) and classify errors (network vs application) for proper retry or user feedback.
 
 #### Scenario: Request timeout
-- **WHEN** an LLM request exceeds the configured timeout (default 30 minutes)
+- **WHEN** an LLM request exceeds the configured timeout (default 30 minutes, configurable)
 - **THEN** the system SHALL abort the request and return a timeout error message
 
 #### Scenario: Network error classification
@@ -40,3 +40,18 @@ The system SHALL implement appropriate timeouts for LLM requests and classify er
 #### Scenario: Token budget control
 - **WHEN** messages would exceed the configured context window
 - **THEN** the system SHALL truncate chat history from the oldest messages to fit within the budget
+
+### Requirement: Configurable LLM settings via Web UI
+LLM configuration (provider, API key, model, base URL, timeouts) SHALL be managed primarily through Web UI settings stored in `.llmwiki/config.json`, with environment variable fallback when UI-managed values are absent.
+
+#### Scenario: UI updates provider config
+- **WHEN** user updates provider/model/base URL/timeout values in Web UI settings
+- **THEN** subsequent LLM operations use the updated configuration
+
+#### Scenario: Environment variable fallback
+- **WHEN** no UI-stored API key exists for selected provider
+- **THEN** the service attempts to load provider key from environment variables
+
+#### Scenario: Provider extensibility
+- **WHEN** a new provider type is introduced
+- **THEN** its configuration is represented in the UI-centric config model without adding mandatory serve command flags

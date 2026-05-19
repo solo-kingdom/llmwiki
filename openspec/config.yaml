@@ -18,3 +18,4 @@ context: |
     - Tests alongside source files using _test.go convention
   Domain: LLM Wiki — personal knowledge workspaces maintained by LLMs
   Based on: Karpathy's LLM Wiki pattern (https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
+  优先使用简体中文

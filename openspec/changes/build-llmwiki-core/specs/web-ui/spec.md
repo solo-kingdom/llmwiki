@@ -34,8 +34,16 @@ The system SHALL provide a search bar in the Web UI for full-text searching acro
 - **THEN** search results SHALL appear with matched chunk snippets, file names, and relevance scores
 
 ### Requirement: Settings page
-The system SHALL provide a settings page for configuring LLM provider, API key, model, and other preferences.
+The system SHALL provide a settings page as the primary interface for configuring LLM provider, API key, model, base URL, timeouts, and other preferences. Configuration is persisted to `.llmwiki/config.json`.
 
 #### Scenario: LLM configuration
 - **WHEN** user navigates to Settings and enters API key, provider, and model
-- **THEN** the configuration SHALL be persisted and used for all subsequent LLM interactions
+- **THEN** the configuration SHALL be persisted to `.llmwiki/config.json` and used for all subsequent LLM interactions
+
+#### Scenario: Timeout configuration
+- **WHEN** user adjusts request timeout or streaming idle timeout in Settings
+- **THEN** the new timeout values SHALL be applied to subsequent LLM calls
+
+#### Scenario: Environment variable fallback visible
+- **WHEN** a provider has no UI-stored API key and is using an environment variable
+- **THEN** the Settings page SHALL indicate that an environment variable is active for that provider

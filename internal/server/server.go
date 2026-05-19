@@ -13,6 +13,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/solo-kingdom/llmwiki/internal/api"
+	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
 // WebAssets holds the embedded web frontend filesystem.
@@ -32,11 +34,17 @@ type Config struct {
 type Server struct {
 	config Config
 	http   *http.Server
+	db     *sqlite.DB
+	api    *api.API
 }
 
 // New creates a new Server.
-func New(cfg Config) *Server {
-	return &Server{config: cfg}
+func New(cfg Config, db *sqlite.DB) *Server {
+	return &Server{
+		config: cfg,
+		db:     db,
+		api:    api.New(db),
+	}
 }
 
 // Start begins listening and serving. Blocks until Shutdown is called.
@@ -72,26 +80,30 @@ func (s *Server) Start() error {
 		r.Post("/reindex", s.handleReindex)
 
 		r.Route("/documents", func(r chi.Router) {
-			r.Get("/", s.handleListDocuments)
-			r.Get("/{id}", s.handleGetDocument)
-			r.Get("/{id}/content", s.handleGetDocumentContent)
-			r.Post("/", s.handleCreateDocument)
-			r.Put("/{id}/content", s.handleUpdateDocumentContent)
-			r.Patch("/{id}", s.handleUpdateDocumentMetadata)
-			r.Delete("/{id}", s.handleDeleteDocument)
-			r.Post("/bulk-delete", s.handleBulkDeleteDocuments)
+			r.Get("/", s.api.ListDocuments)
+			r.Get("/{id}", s.api.GetDocument)
+			r.Get("/{id}/content", s.api.GetDocumentContent)
+			r.Post("/", s.api.CreateDocument)
+			r.Put("/{id}/content", s.api.UpdateDocumentContent)
+			r.Patch("/{id}", s.api.UpdateDocumentMetadata)
+			r.Delete("/{id}", s.api.DeleteDocument)
+			r.Post("/bulk-delete", s.api.BulkDeleteDocuments)
 		})
 
 		r.Route("/search", func(r chi.Router) {
-			r.Get("/", s.handleSearch)
+			r.Get("/", s.api.Search)
 		})
 
 		r.Route("/graph", func(r chi.Router) {
-			r.Get("/backlinks/{id}", s.handleBacklinks)
-			r.Get("/forward/{id}", s.handleForwardReferences)
-			r.Get("/uncited", s.handleUncitedSources)
-			r.Get("/stale", s.handleStalePages)
+			r.Get("/backlinks/{id}", s.api.Backlinks)
+			r.Get("/forward/{id}", s.api.ForwardReferences)
+			r.Get("/uncited", s.api.UncitedSources)
+			r.Get("/stale", s.api.StalePages)
 		})
+
+		r.Get("/settings", s.api.GetSettings)
+		r.Put("/settings", s.api.UpdateSettings)
+		r.Get("/capabilities", s.api.GetCapabilities)
 	})
 
 	// SPA fallback
@@ -183,57 +195,5 @@ func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleListDocuments(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleGetDocument(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleGetDocumentContent(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleCreateDocument(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleUpdateDocumentContent(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleUpdateDocumentMetadata(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleBulkDeleteDocuments(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleBacklinks(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleForwardReferences(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleUncitedSources(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
-}
-
-func (s *Server) handleStalePages(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
 }

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+	"unicode"
 
 	"github.com/google/uuid"
 )
@@ -58,9 +59,21 @@ type SearchChunk struct {
 	Score            float64 `json:"score"`
 }
 
-// SearchChunks performs a full-text search over document chunks.
-// pathFilter can be "wiki" to restrict to wiki pages, "sources" for source documents, or empty for all.
+// SearchChunks performs full-text search. If FTS5 returns no results and the query
+// contains CJK characters, falls back to LIKE search.
 func (d *DB) SearchChunks(query string, limit int, pathFilter string) ([]SearchChunk, error) {
+	results, err := d.searchFTS5(query, limit, pathFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(results) == 0 && hasCJK(query) {
+		return d.searchLIKE(query, limit, pathFilter)
+	}
+	return results, nil
+}
+
+func (d *DB) searchFTS5(query string, limit int, pathFilter string) ([]SearchChunk, error) {
 	sqlStr := `
 		SELECT dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
 			d.filename, d.title, d.path, d.file_type,
@@ -109,4 +122,63 @@ func (d *DB) SearchChunks(query string, limit int, pathFilter string) ([]SearchC
 		results = append(results, r)
 	}
 	return results, nil
+}
+
+func (d *DB) searchLIKE(query string, limit int, pathFilter string) ([]SearchChunk, error) {
+	sqlStr := `
+		SELECT dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
+			d.filename, d.title, d.path, d.file_type,
+			0.0 as score
+		FROM document_chunks dc
+		JOIN documents d ON dc.document_id = d.id
+		WHERE dc.content LIKE ? AND d.status != 'failed' `
+
+	var args []interface{}
+	args = append(args, "%"+query+"%")
+
+	if pathFilter == "wiki" {
+		sqlStr += "AND d.source_kind = 'wiki' "
+	} else if pathFilter == "sources" {
+		sqlStr += "AND d.source_kind != 'wiki' "
+	}
+
+	sqlStr += "LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := d.db.Query(sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search chunks like: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SearchChunk
+	for rows.Next() {
+		var r SearchChunk
+		var page, chunkIndex sql.NullInt64
+		var headerBreadcrumb sql.NullString
+		if err := rows.Scan(&r.Content, &page, &headerBreadcrumb, &chunkIndex,
+			&r.Filename, &r.Title, &r.Path, &r.FileType, &r.Score); err != nil {
+			return nil, fmt.Errorf("scan search result: %w", err)
+		}
+		if page.Valid {
+			r.Page = int(page.Int64)
+		}
+		if chunkIndex.Valid {
+			r.ChunkIndex = int(chunkIndex.Int64)
+		}
+		if headerBreadcrumb.Valid {
+			r.HeaderBreadcrumb = headerBreadcrumb.String
+		}
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+func hasCJK(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hangul, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) {
+			return true
+		}
+	}
+	return false
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"sync"
 )
@@ -113,6 +114,35 @@ func (s *Server) Run() error {
 			log.Printf("write error: %v", err)
 			return err
 		}
+	}
+}
+
+func NewHTTPHandler(server *Server) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"jsonrpc":"2.0","error":{"code":-32600,"message":"Method not allowed"}}`, http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req JSONRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(JSONRPCResponse{
+				JSONRPC: "2.0",
+				Error:   &JSONRPCError{Code: -32700, Message: "Parse error"},
+			})
+			return
+		}
+
+		resp := server.handleRequest(&req)
+		if resp == nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
 	}
 }
 

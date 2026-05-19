@@ -29,19 +29,12 @@ The system SHALL provide `llmwiki reindex <dir>` to force a full rebuild of the 
 - **WHEN** user runs `llmwiki reindex ~/research`
 - **THEN** the command SHALL report the number of files re-indexed and exit with a success message
 
-### Requirement: MCP command
-The system SHALL provide `llmwiki mcp [dir]` to run the MCP stdio server, for integration with Claude Desktop / Claude Code / Cursor.
-
-#### Scenario: MCP server starts
-- **WHEN** user runs `llmwiki mcp ~/research`
-- **THEN** the MCP server SHALL start listening on stdin/stdout with JSON-RPC 2.0 protocol
-
 ### Requirement: MCP config command
-The system SHALL provide `llmwiki mcp-config [dir]` to print a JSON configuration snippet for Claude's config file.
+The system SHALL provide `llmwiki mcp-config [dir]` to print a JSON configuration snippet for connecting to the RPC MCP endpoint.
 
 #### Scenario: MCP config output
 - **WHEN** user runs `llmwiki mcp-config ~/research`
-- **THEN** the output SHALL include a valid JSON block with the MCP server entry pointing to the llmwiki binary and workspace directory
+- **THEN** the output SHALL include a valid JSON block with the MCP RPC endpoint URL and configuration details for the workspace
 
 ### Requirement: Ingest command
 The system SHALL provide `llmwiki ingest <file>` to trigger the two-step ingestion of a source file into the workspace.

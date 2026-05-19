@@ -15,7 +15,7 @@ type Frontmatter struct {
 }
 
 // frontmatterRegex matches YAML frontmatter delimited by ---.
-var frontmatterRegex = regexp.MustCompile(`\A---[ \t]*\n(.+?\n)---[ \t]*\n`)
+var frontmatterRegex = regexp.MustCompile(`(?s)\A---[ \t]*\n(.+?\n)---[ \t]*\n`)
 
 // ParseFrontmatter extracts YAML frontmatter from markdown content.
 // Returns empty Frontmatter if no frontmatter is found.

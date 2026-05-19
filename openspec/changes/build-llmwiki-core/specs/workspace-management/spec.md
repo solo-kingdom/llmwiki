@@ -39,3 +39,18 @@ The system SHALL ignore changes in `.llmwiki/`, `.git/`, `node_modules/`, `__pyc
 #### Scenario: Ignored directory change
 - **WHEN** a file is created inside `.llmwiki/cache/`
 - **THEN** the file watcher SHALL NOT index it
+
+### Requirement: Tiered source file processing
+The system SHALL support PDF and Office file ingestion via tiered capability levels: Layer A (built-in Go parsing), Layer B (optional system dependencies like pdftotext/LibreOffice), Layer C (degradation with readable limitation markers and remediation hints).
+
+#### Scenario: Tier selection on processing
+- **WHEN** a PDF or Office file is submitted for ingest
+- **THEN** the system selects the highest available processing tier based on runtime capabilities
+
+#### Scenario: Dependency unavailable fallback
+- **WHEN** required optional dependency for high-tier extraction is unavailable
+- **THEN** the system degrades to a lower tier and returns structured reason metadata
+
+#### Scenario: Degradation observability
+- **WHEN** Office processing falls back due to missing converter dependency
+- **THEN** response payload and logs include fallback tier, missing dependency, and remediation hint

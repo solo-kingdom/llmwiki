@@ -70,3 +70,18 @@ The system SHALL process ingest tasks serially within a workspace, persist queue
 #### Scenario: Failed task retries
 - **WHEN** an ingest task fails
 - **THEN** the system SHALL retry up to 3 times before marking it as permanently failed
+
+### Requirement: Concurrent ingest with same-page serialization
+The system SHALL allow concurrent ingestion of different source files, while serializing writes that target the same page path using a page-level mutex keyed by normalized path.
+
+#### Scenario: Parallel ingest on distinct targets
+- **WHEN** two ingest jobs operate on different source files targeting different wiki pages
+- **THEN** both jobs may proceed concurrently without global serialization
+
+#### Scenario: Same-page contention
+- **WHEN** two ingest jobs attempt to update the same wiki page concurrently
+- **THEN** one job acquires the page lock and the other waits until lock release
+
+#### Scenario: Lock contention observability
+- **WHEN** lock wait time exceeds configured threshold
+- **THEN** the system emits structured diagnostics containing page path and wait duration

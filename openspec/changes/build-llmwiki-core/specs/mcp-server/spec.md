@@ -1,23 +1,34 @@
 ## ADDED Requirements
 
-### Requirement: JSON-RPC 2.0 stdio transport
-The system SHALL implement MCP (Model Context Protocol) as a JSON-RPC 2.0 server over stdin/stdout, with stderr reserved for logging.
+### Requirement: JSON-RPC 2.0 RPC transport (RPC-first)
+The system SHALL implement MCP (Model Context Protocol) as a JSON-RPC 2.0 server exposed via HTTP POST endpoint (`/mcp`) within the `llmwiki serve` single process. First release focuses on RPC access and does not require native Claude Desktop stdio direct connection as a release gate.
 
-#### Scenario: Initialization handshake
-- **WHEN** client sends `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{...}}`
+#### Scenario: Initialization handshake via RPC
+- **WHEN** client sends `POST /mcp` with `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{...}}`
 - **THEN** the server SHALL respond with serverInfo (name: "LLM Wiki", version), capabilities (tools: {}), and instructions text
 
-#### Scenario: Tool list discovery
-- **WHEN** client sends `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
-- **THEN** the server SHALL return all 5 registered tools (guide, search, read, write, delete) with their names, descriptions, and inputSchema JSON schemas
+#### Scenario: Tool list discovery via RPC
+- **WHEN** client sends `POST /mcp` with `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+- **THEN** the server SHALL return all 6 registered tools (guide, search, read, write, delete, ping) with their names, descriptions, and inputSchema JSON schemas
 
-#### Scenario: Tool execution
-- **WHEN** client sends `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search","arguments":{...}}}`
+#### Scenario: Tool execution via RPC
+- **WHEN** client sends `POST /mcp` with `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search","arguments":{...}}}`
 - **THEN** the server SHALL parse arguments, dispatch to the search handler, and return the result in `{"content":[{"type":"text","text":"..."}]}` format
 
 #### Scenario: Unknown tool
 - **WHEN** client sends `tools/call` with an unrecognized tool name
 - **THEN** the server SHALL return `{"error":{"code":-32000,"message":"Tool not found: ..."}}`
+
+#### Scenario: MCP compatibility scope documented
+- **WHEN** user reviews product documentation or capabilities endpoint
+- **THEN** the first-release MCP compatibility scope explicitly states RPC-first behavior and non-goal for no-modification Claude Desktop connection
+
+### Requirement: Shared dependency context
+MCP RPC handlers SHALL share the same in-process dependency graph (store, engine, lock manager, config) as HTTP API handlers, ensuring consistent state observation.
+
+#### Scenario: Consistent state across MCP and HTTP
+- **WHEN** a write is made via MCP RPC and a read is made via HTTP API
+- **THEN** both handlers operate on the same in-process state and observe consistent post-write data
 
 ### Requirement: Guide tool
 The system SHALL provide a `guide` tool that returns architecture documentation, wiki writing standards, and a list of available workspaces.

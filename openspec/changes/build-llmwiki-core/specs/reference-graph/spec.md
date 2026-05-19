@@ -66,3 +66,21 @@ The system SHALL rebuild the entire reference graph during reindex by re-parsing
 #### Scenario: Reindex restores references
 - **WHEN** the database is deleted and reindex runs
 - **THEN** all `cites` and `links_to` edges SHALL be reconstructed from wiki page content
+
+### Requirement: Transactional reference graph update
+Reference graph refresh SHALL execute in a database transaction covering stale-edge deletion and new-edge upsert operations, ensuring atomicity.
+
+#### Scenario: Atomic graph refresh
+- **WHEN** a page write triggers reference graph recomputation
+- **THEN** old edges are deleted and new edges are inserted atomically within one transaction
+
+#### Scenario: Mid-update failure rollback
+- **WHEN** an error occurs after deleting old references but before inserting all new references
+- **THEN** transaction rollback restores pre-update graph state
+
+### Requirement: Idempotent edge upsert
+Reference edge writes SHALL be idempotent using uniqueness constraints on `(source_document_id, target_document_id, reference_type)` and upsert semantics.
+
+#### Scenario: Retry-safe edge write
+- **WHEN** the same reference update is retried after transient failure
+- **THEN** duplicate graph edges are not created and final graph state remains correct

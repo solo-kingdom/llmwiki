@@ -1,68 +1,71 @@
-// Package ingest provides the ingest pipeline for LLM Wiki.
 package ingest
 
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 )
 
-// Pipeline orchestrates the two-step ingest process.
 type Pipeline struct {
 	workspace string
 	llmClient *llm.Client
+	lockMgr   *PageLockManager
 }
 
-// CacheEntry represents a cached ingest result.
 type CacheEntry struct {
-	SourceName  string
-	SHA256      string
-	WrittenFiles []string
+	SourceName   string   `json:"source_name"`
+	SHA256       string   `json:"sha256"`
+	WrittenFiles []string `json:"written_files"`
 }
 
-// NewPipeline creates a new ingest pipeline.
+type cacheFile struct {
+	Entries map[string]*CacheEntry `json:"entries"`
+}
+
 func NewPipeline(workspace string, llmClient *llm.Client) *Pipeline {
 	return &Pipeline{
 		workspace: workspace,
 		llmClient: llmClient,
+		lockMgr:   NewPageLockManager(),
 	}
 }
 
-// Ingest processes a source file through the two-step pipeline.
 func (p *Pipeline) Ingest(ctx context.Context, sourcePath string) ([]string, error) {
-	// Step 0: Check SHA256 cache
 	cached, err := p.checkCache(sourcePath)
 	if err == nil && cached != nil {
 		return cached.WrittenFiles, nil
 	}
 
-	// Step 0.5: Read source content
 	content, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return nil, fmt.Errorf("read source: %w", err)
 	}
 
-	// Step 1: Analysis
 	analysis, err := p.analyze(ctx, filepath.Base(sourcePath), string(content))
 	if err != nil {
 		return nil, fmt.Errorf("analysis: %w", err)
 	}
 	_ = analysis
 
-	// Step 2: Generation
 	files, err := p.generate(ctx, filepath.Base(sourcePath), string(content), analysis)
 	if err != nil {
 		return nil, fmt.Errorf("generation: %w", err)
 	}
 
-	// Step 3: Write files and save cache
 	p.saveCache(sourcePath, files)
 
 	return files, nil
+}
+
+func (p *Pipeline) LockManager() *PageLockManager {
+	return p.lockMgr
 }
 
 func (p *Pipeline) analyze(ctx context.Context, name, content string) (string, error) {
@@ -117,18 +120,90 @@ Generate wiki pages in FILE block format.`, name, analysis, content)
 		}
 	}
 
-	// Parse FILE blocks and write
 	blocks := parseFileBlocks(result)
+
+	for _, f := range blocks {
+		p.lockMgr.Lock(f)
+		p.lockMgr.Unlock(f)
+	}
+
 	return blocks, nil
 }
 
+func (p *Pipeline) cachePath() string {
+	return filepath.Join(p.workspace, ".llmwiki", "cache.json")
+}
+
 func (p *Pipeline) checkCache(sourcePath string) (*CacheEntry, error) {
-	// Stub: SHA256 cache not yet implemented
-	return nil, fmt.Errorf("not cached")
+	hash, err := computeSHA256(sourcePath)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(p.cachePath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("not cached")
+		}
+		return nil, err
+	}
+
+	var cf cacheFile
+	if err := json.Unmarshal(data, &cf); err != nil {
+		return nil, err
+	}
+
+	absPath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		absPath = sourcePath
+	}
+
+	entry, ok := cf.Entries[absPath]
+	if !ok {
+		return nil, fmt.Errorf("not cached")
+	}
+
+	if entry.SHA256 == hash {
+		return entry, nil
+	}
+
+	return nil, fmt.Errorf("cache miss: hash changed")
 }
 
 func (p *Pipeline) saveCache(sourcePath string, files []string) {
-	// Stub: cache save not yet implemented
+	hash, err := computeSHA256(sourcePath)
+	if err != nil {
+		return
+	}
+
+	absPath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		absPath = sourcePath
+	}
+
+	dir := filepath.Join(p.workspace, ".llmwiki")
+	os.MkdirAll(dir, 0o755)
+
+	var cf cacheFile
+	data, err := os.ReadFile(p.cachePath())
+	if err == nil {
+		json.Unmarshal(data, &cf)
+	}
+	if cf.Entries == nil {
+		cf.Entries = make(map[string]*CacheEntry)
+	}
+
+	cf.Entries[absPath] = &CacheEntry{
+		SourceName:   filepath.Base(sourcePath),
+		SHA256:       hash,
+		WrittenFiles: files,
+	}
+
+	out, err := json.MarshalIndent(cf, "", "  ")
+	if err != nil {
+		return
+	}
+	os.WriteFile(p.cachePath(), out, 0o644)
 }
 
 func computeSHA256(path string) (string, error) {
@@ -140,8 +215,16 @@ func computeSHA256(path string) (string, error) {
 	return fmt.Sprintf("%x", h), nil
 }
 
-// parseFileBlocks extracts FILE blocks from LLM output.
+var fileBlockRe = regexp.MustCompile(`(?s)---FILE:\s*(.+?)\n(.*?)---END FILE---`)
+
 func parseFileBlocks(output string) []string {
-	// Stub: FILE block parsing not yet implemented
-	return nil
+	matches := fileBlockRe.FindAllStringSubmatch(output, -1)
+	var files []string
+	for _, m := range matches {
+		path := strings.TrimSpace(m[1])
+		if path != "" {
+			files = append(files, path)
+		}
+	}
+	return files
 }

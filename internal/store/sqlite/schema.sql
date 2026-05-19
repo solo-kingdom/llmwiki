@@ -114,6 +114,30 @@ CREATE TABLE IF NOT EXISTS document_references (
     UNIQUE(source_document_id, target_document_id, reference_type)
 );
 
+CREATE TABLE IF NOT EXISTS ingest_jobs (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    parent_job_id TEXT REFERENCES ingest_jobs(id) ON DELETE SET NULL,
+    input_type TEXT NOT NULL DEFAULT 'file',
+    source_path TEXT NOT NULL,
+    source_ref TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (
+        status IN (
+            'queued', 'running', 'succeeded', 'failed', 'cancelled',
+            'pending', 'processing', 'done'
+        )
+    ),
+    retries INTEGER NOT NULL DEFAULT 0,
+    max_retries INTEGER NOT NULL DEFAULT 3,
+    error TEXT NOT NULL DEFAULT '',
+    error_code TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    missing_dependency TEXT NOT NULL DEFAULT '',
+    remediation TEXT NOT NULL DEFAULT '',
+    result_summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- FTS5 full-text search over document chunks
 -- Using external content mode: FTS5 stores only the index, text lives in document_chunks
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
@@ -145,3 +169,5 @@ CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON document_chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_refs_source ON document_references(source_document_id);
 CREATE INDEX IF NOT EXISTS idx_refs_target ON document_references(target_document_id);
+CREATE INDEX IF NOT EXISTS idx_ingest_jobs_status ON ingest_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_ingest_jobs_created_at ON ingest_jobs(created_at);

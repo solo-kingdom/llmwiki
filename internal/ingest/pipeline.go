@@ -48,18 +48,42 @@ func (p *Pipeline) Ingest(ctx context.Context, sourcePath string) ([]string, err
 		return nil, fmt.Errorf("read source: %w", err)
 	}
 
-	analysis, err := p.analyze(ctx, filepath.Base(sourcePath), string(content))
+	normalized, err := NormalizeUpload(filepath.Base(sourcePath), content, "file")
+	if err != nil {
+		return nil, fmt.Errorf("normalize: %w", err)
+	}
+
+	files, err := p.IngestNormalized(ctx, normalized)
+	if err != nil {
+		return nil, err
+	}
+
+	p.saveCache(sourcePath, files)
+
+	return files, nil
+}
+
+func (p *Pipeline) IngestNormalized(ctx context.Context, source *NormalizedSource) ([]string, error) {
+	if source == nil {
+		return nil, fmt.Errorf("normalized source is nil")
+	}
+	if p.llmClient == nil {
+		return nil, fmt.Errorf("LLM client not configured")
+	}
+
+	name := filepath.Base(source.CanonicalPath)
+	content := string(source.Content)
+
+	analysis, err := p.analyze(ctx, name, content)
 	if err != nil {
 		return nil, fmt.Errorf("analysis: %w", err)
 	}
 	_ = analysis
 
-	files, err := p.generate(ctx, filepath.Base(sourcePath), string(content), analysis)
+	files, err := p.generate(ctx, name, content, analysis)
 	if err != nil {
 		return nil, fmt.Errorf("generation: %w", err)
 	}
-
-	p.saveCache(sourcePath, files)
 
 	return files, nil
 }

@@ -101,6 +101,17 @@ After `llmwiki init ~/research`:
 
 **Web UI**: React 19 + Vite + TypeScript, embedded via `go:embed` into the binary. SPA with client-side routing, served with index.html fallback.
 
+### Web-first Ingest Workflow
+
+The Web UI now provides an ingest-first workflow as the default entry point:
+
+- **Conversational ingest**: submit conversation drafts as ingest jobs
+- **Text ingest**: paste markdown/plain text and enqueue processing
+- **File upload ingest**: upload one or multiple files with accepted/rejected feedback
+- **Ingest job observability**: lifecycle states (`queued`, `running`, `succeeded`, `failed`, `cancelled`), retry and cancel controls
+
+All Web-submitted sources are persisted to workspace files under `raw/sources/web-ingest/` before enqueueing.
+
 ## MCP RPC-First Compatibility
 
 The first release uses an **RPC-first** MCP access model. The MCP server is exposed as an HTTP POST endpoint at `/mcp` within the main `llmwiki serve` process.
@@ -168,6 +179,13 @@ Version info is injected via ldflags: `main.Version`, `main.Commit`, `main.Build
 | GET | `/api/v1/settings` | Get settings |
 | PUT | `/api/v1/settings` | Update settings |
 | GET | `/api/v1/capabilities` | Server capabilities |
+| GET | `/api/v1/ingest/jobs` | List ingest jobs |
+| GET | `/api/v1/ingest/jobs/{id}` | Get ingest job detail |
+| POST | `/api/v1/ingest/jobs/{id}/retry` | Retry a failed ingest job |
+| POST | `/api/v1/ingest/jobs/{id}/cancel` | Cancel a queued/running ingest job |
+| POST | `/api/v1/ingest/jobs/conversation` | Create ingest job from conversation draft |
+| POST | `/api/v1/ingest/jobs/text` | Create ingest job from direct text |
+| POST | `/api/v1/ingest/jobs/upload` | Create ingest jobs from uploaded files |
 
 ## License
 

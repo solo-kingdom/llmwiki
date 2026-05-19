@@ -137,6 +137,19 @@ func (s *Server) Start() error {
 		r.Get("/settings", s.api.GetSettings)
 		r.Put("/settings", s.api.UpdateSettings)
 		r.Get("/capabilities", s.api.GetCapabilities)
+
+		r.Route("/ingest", func(r chi.Router) {
+			r.Route("/jobs", func(r chi.Router) {
+				r.Get("/", s.api.ListIngestJobs)
+				r.Get("/{id}", s.api.GetIngestJob)
+				r.Post("/{id}/retry", s.api.RetryIngestJob)
+				r.Post("/{id}/cancel", s.api.CancelIngestJob)
+				r.Post("/{id}/fail", s.api.MarkIngestJobFailed)
+				r.Post("/conversation", s.api.CreateConversationIngestJob)
+				r.Post("/text", s.api.CreateTextIngestJob)
+				r.Post("/upload", s.api.CreateUploadIngestJobs)
+			})
+		})
 	})
 
 	// MCP RPC endpoint — JSON-RPC 2.0 over HTTP POST
@@ -243,14 +256,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "ok",
 		"mode": map[string]interface{}{
-			"topology":     "single-process",
-			"api_enabled":  true,
-			"web_enabled":  true,
-			"mcp_enabled":  mcpEnabled,
+			"topology":      "single-process",
+			"api_enabled":   true,
+			"web_enabled":   true,
+			"mcp_enabled":   mcpEnabled,
 			"mcp_transport": "rpc-http",
 			"watch_enabled": watchEnabled,
 		},
-		"mcp_access_model": "rpc-first",
+		"mcp_access_model":  "rpc-first",
 		"mcp_compatibility": "First release focuses on RPC access. Direct Claude Desktop stdio connection is not a release gate.",
 	})
 }

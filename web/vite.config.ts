@@ -16,4 +16,9 @@ export default defineConfig({
       "/mcp": "http://localhost:8868",
     },
   },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test/setup.ts"],
+  },
 })

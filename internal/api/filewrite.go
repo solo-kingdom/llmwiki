@@ -11,6 +11,11 @@ import (
 // This enforces the file-first write ordering required by the truth-data-persistence-boundary spec.
 // canonicalPath is a relative path like "wiki/concepts/attention.md".
 func (a *API) writeFileFirst(canonicalPath, content string) error {
+	return a.writeFileBytesFirst(canonicalPath, []byte(content))
+}
+
+// writeFileBytesFirst writes raw bytes to the filesystem BEFORE updating DB/index state.
+func (a *API) writeFileBytesFirst(canonicalPath string, content []byte) error {
 	if a.workspace == "" {
 		// If no workspace is configured (e.g., in tests), skip file write
 		return nil
@@ -34,7 +39,7 @@ func (a *API) writeFileFirst(canonicalPath, content string) error {
 	}
 	tmpPath := tmpFile.Name()
 
-	if _, err := tmpFile.WriteString(content); err != nil {
+	if _, err := tmpFile.Write(content); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
 		return fmt.Errorf("write temp file: %w", err)

@@ -86,3 +86,67 @@ export interface TreeNode {
   children: TreeNode[]
   doc?: DocumentListItem
 }
+
+export interface IngestJob {
+  id: string
+  parent_job_id: string
+  input_type: string
+  source_path: string
+  source_ref: string
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+  retries: number
+  max_retries: number
+  error: string
+  error_code: string
+  error_message: string
+  missing_dependency: string
+  remediation: string
+  result_summary: string
+  created_at: string
+  updated_at: string
+}
+
+export interface IngestJobResponse {
+  job: IngestJob
+}
+
+export interface UploadAcceptedItem {
+  filename: string
+  job_id: string
+  status: string
+  source_path: string
+}
+
+export interface UploadRejectedItem {
+  filename: string
+  error_code: string
+  message: string
+  remediation?: string
+}
+
+export interface UploadIngestResponse {
+  accepted: UploadAcceptedItem[]
+  rejected: UploadRejectedItem[]
+}
+
+export interface RuntimeDependency {
+  name: string
+  found: boolean
+  purpose: string
+}
+
+export interface FileTypeCapability {
+  extension: string
+  mime_type: string
+  tier: string
+  can_extract: boolean
+  can_chunk: boolean
+  missing_deps?: string[]
+  remediation?: string
+}
+
+export interface CapabilitiesResponse {
+  file_types: FileTypeCapability[]
+  runtime_dependencies: RuntimeDependency[]
+  access_model: string
+}

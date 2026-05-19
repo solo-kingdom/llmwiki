@@ -1,0 +1,263 @@
+package ingest
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/solo-kingdom/llmwiki/internal/llm"
+	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+)
+
+// JobProcessor polls the database for queued ingest jobs and runs them
+// through the two-step LLM pipeline (analysis → generation).
+type JobProcessor struct {
+	db        *sqlite.DB
+	workspace string
+	pipeline  *Pipeline
+	stop      chan struct{}
+}
+
+// NewJobProcessor creates a new processor. It needs the main DB (not the
+// legacy queue DB) so it can read/write the unified ingest_jobs table.
+func NewJobProcessor(db *sqlite.DB, workspace string, llmClient *llm.Client) *JobProcessor {
+	return &JobProcessor{
+		db:        db,
+		workspace: workspace,
+		pipeline:  NewPipeline(workspace, llmClient),
+		stop:      make(chan struct{}),
+	}
+}
+
+// Start begins the background processing loop. It polls every pollInterval.
+func (p *JobProcessor) Start(pollInterval time.Duration) {
+	if pollInterval <= 0 {
+		pollInterval = 3 * time.Second
+	}
+	go func() {
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-p.stop:
+				return
+			case <-ticker.C:
+				if err := p.processNext(context.Background()); err != nil {
+					log.Printf("ingest processor: %v", err)
+				}
+			}
+		}
+	}()
+}
+
+// Stop signals the processor to stop.
+func (p *JobProcessor) Stop() {
+	close(p.stop)
+}
+
+// ProcessAll runs all queued jobs synchronously (useful for tests).
+func (p *JobProcessor) ProcessAll(ctx context.Context) error {
+	for {
+		if err := p.processNext(ctx); err != nil {
+			if strings.Contains(err.Error(), "no queued jobs") {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+// processNext claims the next queued job and runs it through the pipeline.
+func (p *JobProcessor) processNext(ctx context.Context) error {
+	job, err := p.claimNextJob()
+	if err != nil {
+		return err
+	}
+	if job == nil {
+		return fmt.Errorf("no queued jobs")
+	}
+
+	// Read source content from disk
+	sourcePath := filepath.Join(p.workspace, job.SourcePath)
+	content, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return p.failJob(job.ID, "source_read_failed",
+			fmt.Sprintf("failed to read source file: %v", err),
+			"", "ensure the source file exists on disk and is readable")
+	}
+
+	// Build normalized source from persisted content
+	normalized, err := NormalizeUpload(filepath.Base(sourcePath), content, job.SourceRef)
+	if err != nil {
+		return p.failJob(job.ID, "normalize_failed",
+			fmt.Sprintf("normalization failed: %v", err), "", "")
+	}
+
+	// Run through the two-step LLM pipeline
+	files, err := p.pipeline.IngestNormalized(ctx, normalized)
+	if err != nil {
+		errCode := classifyPipelineError(err)
+		return p.failJob(job.ID, errCode, err.Error(), "", remediationForCode(errCode))
+	}
+
+	// Mark job succeeded with result summary
+	summary := fmt.Sprintf("generated %d wiki page(s)", len(files))
+	if _, updateErr := p.db.DB().Exec(`
+		UPDATE ingest_jobs
+		SET status = 'succeeded', result_summary = ?, updated_at = datetime('now')
+		WHERE id = ?`, summary, job.ID); updateErr != nil {
+		log.Printf("processor: failed to mark job %s succeeded: %v", job.ID, updateErr)
+	}
+
+	return nil
+}
+
+// claimNextJob atomically transitions the next queued job to "running".
+func (p *JobProcessor) claimNextJob() (*sqlite.IngestJob, error) {
+	rows, err := p.db.DB().Query(`
+		SELECT
+			COALESCE(id, ''), COALESCE(parent_job_id, ''), COALESCE(input_type, ''),
+			COALESCE(source_path, ''), COALESCE(source_ref, ''), COALESCE(status, ''),
+			COALESCE(retries, 0), COALESCE(max_retries, 3), COALESCE(error, ''),
+			COALESCE(error_code, ''), COALESCE(error_message, ''),
+			COALESCE(missing_dependency, ''), COALESCE(remediation, ''),
+			COALESCE(result_summary, ''), COALESCE(created_at, ''), COALESCE(updated_at, '')
+		FROM ingest_jobs
+		WHERE status = 'queued'
+		ORDER BY datetime(created_at) ASC
+		LIMIT 1`)
+	if err != nil {
+		return nil, fmt.Errorf("query queued jobs: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return nil, nil
+	}
+
+	var job sqlite.IngestJob
+	if err := scanJobRow(rows, &job); err != nil {
+		return nil, fmt.Errorf("scan queued job: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Transition to running
+	result, err := p.db.DB().Exec(`
+		UPDATE ingest_jobs
+		SET status = 'running', updated_at = datetime('now')
+		WHERE id = ? AND status = 'queued'`, job.ID)
+	if err != nil {
+		return nil, fmt.Errorf("claim job %s: %w", job.ID, err)
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil, nil // someone else claimed it
+	}
+
+	job.Status = "running"
+	return &job, nil
+}
+
+func (p *JobProcessor) failJob(id, errorCode, message, missingDep, remediation string) error {
+	return p.db.UpdateIngestJobFailure(id, errorCode, message, missingDep, remediation)
+}
+
+// scanJobRow scans a row into an IngestJob using the standard column order.
+func scanJobRow(scanner interface{ Scan(...interface{}) error }, job *sqlite.IngestJob) error {
+	return scanner.Scan(
+		&job.ID, &job.ParentJobID, &job.InputType,
+		&job.SourcePath, &job.SourceRef, &job.Status,
+		&job.Retries, &job.MaxRetries, &job.Error,
+		&job.ErrorCode, &job.ErrorMessage,
+		&job.MissingDependency, &job.Remediation,
+		&job.ResultSummary, &job.CreatedAt, &job.UpdatedAt,
+	)
+}
+
+// ClaimNextQueuedJob is a convenience for tests to claim and return a job.
+func (p *JobProcessor) ClaimNextQueuedJob(ctx context.Context) (*sqlite.IngestJob, error) {
+	return p.claimNextJob()
+}
+
+// RunPipelineForJob runs the pipeline for an already-claimed job (for test use).
+func (p *JobProcessor) RunPipelineForJob(ctx context.Context, job *sqlite.IngestJob) error {
+	sourcePath := filepath.Join(p.workspace, job.SourcePath)
+	content, err := os.ReadFile(sourcePath)
+	if err != nil {
+		_ = p.failJob(job.ID, "source_read_failed",
+			fmt.Sprintf("failed to read source file: %v", err),
+			"", "ensure the source file exists on disk and is readable")
+		return err
+	}
+
+	normalized, err := NormalizeUpload(filepath.Base(sourcePath), content, job.SourceRef)
+	if err != nil {
+		_ = p.failJob(job.ID, "normalize_failed", err.Error(), "", "")
+		return err
+	}
+
+	files, err := p.pipeline.IngestNormalized(ctx, normalized)
+	if err != nil {
+		errCode := classifyPipelineError(err)
+		_ = p.failJob(job.ID, errCode, err.Error(), "", remediationForCode(errCode))
+		return err
+	}
+
+	summary := fmt.Sprintf("generated %d wiki page(s)", len(files))
+	_, updateErr := p.db.DB().Exec(`
+		UPDATE ingest_jobs
+		SET status = 'succeeded', result_summary = ?, updated_at = datetime('now')
+		WHERE id = ?`, summary, job.ID)
+	return updateErr
+}
+
+// classifyPipelineError maps a pipeline error to a structured error code.
+func classifyPipelineError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "API key") || strings.Contains(msg, "unauthorized") || strings.Contains(msg, "401"):
+		return "llm_auth_failed"
+	case strings.Contains(msg, "quota") || strings.Contains(msg, "429") || strings.Contains(msg, "rate limit"):
+		return "llm_rate_limited"
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded"):
+		return "llm_timeout"
+	case strings.Contains(msg, "unsupported format") || strings.Contains(msg, "unsupported file"):
+		return "unsupported_format"
+	case strings.Contains(msg, "analysis:") || strings.Contains(msg, "analyze"):
+		return "analysis_failed"
+	case strings.Contains(msg, "generation:") || strings.Contains(msg, "generate"):
+		return "generation_failed"
+	default:
+		return "pipeline_error"
+	}
+}
+
+func remediationForCode(code string) string {
+	switch code {
+	case "llm_auth_failed":
+		return "check your API key in Settings"
+	case "llm_rate_limited":
+		return "wait a moment and retry, or reduce batch size"
+	case "llm_timeout":
+		return "the LLM request timed out; try again or use a smaller input"
+	case "unsupported_format":
+		return "convert the file to a supported format before uploading"
+	case "analysis_failed", "generation_failed":
+		return "the LLM pipeline encountered an error; check logs for details"
+	default:
+		return ""
+	}
+}
+
+// Ensure JobProcessor uses sql.DB through the sqlite.DB accessor.
+var _ = (*sql.DB)(nil)

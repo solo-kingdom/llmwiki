@@ -12,6 +12,9 @@ import type {
   DocumentListItem,
   SearchResponse,
   Settings,
+  IngestJob,
+  UploadIngestResponse,
+  CapabilitiesResponse,
 } from "@/types"
 import * as api from "@/lib/api"
 
@@ -24,6 +27,8 @@ interface AppState {
   loading: boolean
   error: string | null
   searchQuery: string
+  ingestJobs: IngestJob[]
+  capabilities: CapabilitiesResponse | null
 
   selectDocument: (id: string) => void
   search: (q: string) => void
@@ -31,6 +36,22 @@ interface AppState {
   refreshDocuments: () => void
   loadSettings: () => void
   saveSettings: (s: Partial<Settings>) => Promise<void>
+  refreshIngestJobs: () => Promise<void>
+  submitConversation: (payload: {
+    content: string
+    title?: string
+    source_ref?: string
+  }) => Promise<void>
+  submitText: (payload: {
+    content: string
+    title?: string
+    filename?: string
+    source_ref?: string
+  }) => Promise<void>
+  submitUpload: (files: File[]) => Promise<UploadIngestResponse>
+  retryIngest: (id: string) => Promise<void>
+  cancelIngest: (id: string) => Promise<void>
+  loadCapabilities: () => Promise<void>
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -44,6 +65,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
   const [searchQuery, setSearchQuery] = useState("")
   const [settings, setSettings] = useState<Settings | null>(null)
+  const [ingestJobs, setIngestJobs] = useState<IngestJob[]>([])
+  const [capabilities, setCapabilities] = useState<CapabilitiesResponse | null>(
+    null,
+  )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -109,6 +134,70 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  const refreshIngestJobs = useCallback(async () => {
+    try {
+      const jobs = await api.listIngestJobs()
+      setIngestJobs(jobs)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }, [])
+
+  const submitConversation = useCallback(
+    async (payload: { content: string; title?: string; source_ref?: string }) => {
+      await api.createConversationIngestJob(payload)
+      await refreshIngestJobs()
+    },
+    [refreshIngestJobs],
+  )
+
+  const submitText = useCallback(
+    async (payload: {
+      content: string
+      title?: string
+      filename?: string
+      source_ref?: string
+    }) => {
+      await api.createTextIngestJob(payload)
+      await refreshIngestJobs()
+    },
+    [refreshIngestJobs],
+  )
+
+  const submitUpload = useCallback(
+    async (files: File[]) => {
+      const result = await api.uploadIngestJobs(files)
+      await refreshIngestJobs()
+      return result
+    },
+    [refreshIngestJobs],
+  )
+
+  const retryIngest = useCallback(
+    async (id: string) => {
+      await api.retryIngestJob(id)
+      await refreshIngestJobs()
+    },
+    [refreshIngestJobs],
+  )
+
+  const cancelIngest = useCallback(
+    async (id: string) => {
+      await api.cancelIngestJob(id)
+      await refreshIngestJobs()
+    },
+    [refreshIngestJobs],
+  )
+
+  const loadCapabilities = useCallback(async () => {
+    try {
+      const caps = await api.getCapabilities()
+      setCapabilities(caps)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }, [])
+
   return (
     <AppContext.Provider
       value={{
@@ -118,6 +207,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         searchResults,
         searchQuery,
         settings,
+        ingestJobs,
+        capabilities,
         loading,
         error,
         selectDocument,
@@ -126,6 +217,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         refreshDocuments,
         loadSettings,
         saveSettings,
+        refreshIngestJobs,
+        submitConversation,
+        submitText,
+        submitUpload,
+        retryIngest,
+        cancelIngest,
+        loadCapabilities,
       }}
     >
       {children}

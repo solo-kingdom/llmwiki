@@ -1,40 +1,48 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import { useApp } from "@/context/AppContext"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { PastePreview, analyzePaste } from "@/components/PastePreview"
+import { TextIngestDialog } from "@/components/TextIngestDialog"
+import { Upload, FileText, ChevronDown, ChevronRight, Loader2 } from "lucide-react"
+import type { PasteInfo } from "@/components/PastePreview"
 
-function StatusBadge({ status }: { status: string }) {
-  const cls =
-    status === "succeeded"
-      ? "text-green-700"
-      : status === "failed"
-        ? "text-red-700"
-        : status === "running"
-          ? "text-blue-700"
-          : "text-muted-foreground"
-  return <span className={`text-xs font-medium ${cls}`}>{status}</span>
+interface UploadResult {
+  accepted: number
+  rejected: number
+  details: string
 }
 
 export function IngestHub() {
-  const {
-    ingestJobs,
-    capabilities,
-    refreshIngestJobs,
-    submitConversation,
-    submitText,
-    submitUpload,
-    retryIngest,
-    cancelIngest,
-    loadCapabilities,
-  } = useApp()
+  const { submitConversation, submitText, submitUpload, refreshIngestJobs, loadCapabilities } =
+    useApp()
 
-  const [convTitle, setConvTitle] = useState("")
+  // Conversation input state
   const [convContent, setConvContent] = useState("")
-  const [textTitle, setTextTitle] = useState("")
-  const [textContent, setTextContent] = useState("")
-  const [uploadResult, setUploadResult] = useState<string>("")
-  const [busy, setBusy] = useState(false)
+  const [convTitle, setConvTitle] = useState("")
+  const [convSource, setConvSource] = useState("")
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+
+  // Paste preview state
+  const [pasteInfo, setPasteInfo] = useState<PasteInfo | null>(null)
+
+  // File upload state
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
+
+  // Drag state
+  const [isDragging, setIsDragging] = useState(false)
+
+  // Text dialog state
+  const [textDialogOpen, setTextDialogOpen] = useState(false)
+
+  // Submit feedback state
+  const [submitBusy, setSubmitBusy] = useState(false)
+  const [showSuccess, setShowSuccess] = useState(false)
+
+  // Auto-resize textarea ref
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     refreshIngestJobs()
@@ -45,179 +53,270 @@ export function IngestHub() {
     return () => clearInterval(t)
   }, [refreshIngestJobs, loadCapabilities])
 
-  const missingDeps = useMemo(() => {
-    if (!capabilities) return []
-    return capabilities.runtime_dependencies.filter((d) => !d.found)
-  }, [capabilities])
+  const adjustTextareaHeight = useCallback(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.6)}px`
+  }, [])
+
+  const handleContentChange = (value: string) => {
+    setConvContent(value)
+    // Clear paste info on manual input
+    setPasteInfo(null)
+    // Adjust height on next frame
+    requestAnimationFrame(adjustTextareaHeight)
+  }
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const text = e.clipboardData.getData("text")
+    if (text) {
+      const info = analyzePaste(text)
+      setPasteInfo(info)
+    }
+  }, [])
+
+  const handleSubmitConversation = async () => {
+    if (!convContent.trim()) return
+    setSubmitBusy(true)
+    try {
+      await submitConversation({
+        content: convContent,
+        title: convTitle || undefined,
+        source_ref: convSource || undefined,
+      })
+      setConvContent("")
+      setConvTitle("")
+      setConvSource("")
+      setPasteInfo(null)
+      setShowSuccess(true)
+      setTimeout(() => setShowSuccess(false), 1500)
+      // Reset textarea height
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto"
+      }
+    } finally {
+      setSubmitBusy(false)
+    }
+  }
+
+  const handleFileUpload = async (files: File[]) => {
+    if (files.length === 0) return
+    setUploadBusy(true)
+    setUploadResult(null)
+    try {
+      const result = await submitUpload(files)
+      setUploadResult({
+        accepted: result.accepted.length,
+        rejected: result.rejected.length,
+        details: result.rejected
+          .map((r) => `${r.filename}: ${r.message}`)
+          .join("; "),
+      })
+    } finally {
+      setUploadBusy(false)
+    }
+  }
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+  }, [])
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setIsDragging(false)
+      const files = Array.from(e.dataTransfer.files)
+      if (files.length > 0) {
+        handleFileUpload(files)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+
+  const handleTextSubmit = async (payload: {
+    title?: string
+    content: string
+    filename?: string
+  }) => {
+    await submitText(payload)
+    await refreshIngestJobs()
+  }
+
+  const isEmpty = !convContent.trim()
 
   return (
-    <div className="flex-1 overflow-auto p-6 space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Ingest Hub</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          默认数据摄入入口：对话、文本、文件上传统一入队处理。
-        </p>
-      </div>
+    <div className="flex-1 overflow-auto">
+      <div className="max-w-2xl mx-auto px-4 py-8 flex flex-col gap-3 min-h-full justify-center">
+        {/* Paste preview bar */}
+        <PastePreview info={pasteInfo} />
 
-      {missingDeps.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Runtime Dependencies</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm space-y-1">
-            {missingDeps.map((d) => (
-              <p key={d.name}>
-                <strong>{d.name}</strong> 未安装：{d.purpose}
+        {/* Main textarea area */}
+        <div
+          className={`relative rounded-xl border transition-colors ${
+            isDragging
+              ? "border-blue-400 border-dashed bg-blue-50/50"
+              : "border-input bg-transparent"
+          }`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {/* Empty state placeholder */}
+          {isEmpty && !isDragging && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-8 text-center">
+              <p className="text-lg text-muted-foreground/60 mb-1">
+                粘贴对话内容开始摄入...
               </p>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+              <p className="text-xs text-muted-foreground/40">
+                支持 Ctrl+V 粘贴、拖放文件，或直接输入
+              </p>
+            </div>
+          )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">对话式摄入</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Input
-              placeholder="会话标题（可选）"
-              value={convTitle}
-              onChange={(e) => setConvTitle(e.target.value)}
-            />
-            <textarea
-              className="w-full min-h-32 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
-              placeholder="输入会话内容..."
-              value={convContent}
-              onChange={(e) => setConvContent(e.target.value)}
-            />
-            <Button
-              disabled={busy || !convContent.trim()}
-              onClick={async () => {
-                setBusy(true)
-                try {
-                  await submitConversation({
-                    title: convTitle,
-                    content: convContent,
-                  })
-                  setConvContent("")
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
-              提交会话摄入
-            </Button>
-          </CardContent>
-        </Card>
+          {/* Drag overlay */}
+          {isDragging && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+              <p className="text-blue-600 font-medium">
+                释放文件以上传
+              </p>
+            </div>
+          )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">文本提交摄入</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Input
-              placeholder="文本标题（可选）"
-              value={textTitle}
-              onChange={(e) => setTextTitle(e.target.value)}
-            />
-            <textarea
-              className="w-full min-h-32 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
-              placeholder="粘贴文本或 Markdown..."
-              value={textContent}
-              onChange={(e) => setTextContent(e.target.value)}
-            />
-            <Button
-              disabled={busy || !textContent.trim()}
-              onClick={async () => {
-                setBusy(true)
-                try {
-                  await submitText({
-                    title: textTitle,
-                    content: textContent,
-                  })
-                  setTextContent("")
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
-              提交文本摄入
-            </Button>
-          </CardContent>
-        </Card>
+          <textarea
+            ref={textareaRef}
+            className="w-full min-h-40 max-h-[60vh] rounded-xl bg-transparent px-4 py-3 text-sm outline-none resize-y placeholder-transparent"
+            placeholder="输入对话内容..."
+            value={convContent}
+            onChange={(e) => handleContentChange(e.target.value)}
+            onPaste={handlePaste}
+          />
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">文件上传摄入</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Input
-              type="file"
-              multiple
-              onChange={async (e) => {
-                const files = Array.from(e.target.files || [])
-                if (files.length === 0) return
-                setBusy(true)
-                try {
-                  const result = await submitUpload(files)
-                  setUploadResult(
-                    `accepted: ${result.accepted.length}, rejected: ${result.rejected.length}`,
-                  )
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            />
-            {uploadResult && (
-              <p className="text-xs text-muted-foreground">{uploadResult}</p>
+        {/* Advanced options */}
+        <div>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors outline-none focus-visible:underline"
+            onClick={() => setAdvancedOpen((v) => !v)}
+          >
+            {advancedOpen ? (
+              <ChevronDown className="size-3" />
+            ) : (
+              <ChevronRight className="size-3" />
             )}
-          </CardContent>
-        </Card>
+            高级选项
+          </button>
+          {advancedOpen && (
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <Input
+                placeholder="会话标题（可选）"
+                value={convTitle}
+                onChange={(e) => setConvTitle(e.target.value)}
+              />
+              <Input
+                placeholder="来源（可选）"
+                value={convSource}
+                onChange={(e) => setConvSource(e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Action bar */}
+        <div className="flex items-center gap-2">
+          <Button
+            disabled={submitBusy || isEmpty}
+            onClick={handleSubmitConversation}
+          >
+            {submitBusy ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                提交中...
+              </>
+            ) : (
+              "提交摄入"
+            )}
+          </Button>
+
+          {showSuccess && (
+            <span className="text-xs text-green-600 font-medium animate-in fade-in duration-300">
+              ✓ 已提交
+            </span>
+          )}
+
+          <div className="flex-1" />
+
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={uploadBusy}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {uploadBusy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Upload className="size-3.5" />
+            )}
+            上传文件
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = Array.from(e.target.files || [])
+              handleFileUpload(files)
+              // Reset input so same file can be re-selected
+              e.target.value = ""
+            }}
+          />
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTextDialogOpen(true)}
+          >
+            <FileText className="size-3.5" />
+            文本
+          </Button>
+        </div>
+
+        {/* Upload result inline */}
+        {uploadResult && (
+          <div className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+            <span className="text-green-600">
+              ✓ {uploadResult.accepted} accepted
+            </span>
+            {uploadResult.rejected > 0 && (
+              <>
+                {" · "}
+                <span className="text-red-600">
+                  {uploadResult.rejected} rejected: {uploadResult.details}
+                </span>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Ingest Jobs</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {ingestJobs.length === 0 && (
-            <p className="text-sm text-muted-foreground">暂无摄入任务</p>
-          )}
-          {ingestJobs.map((job) => (
-            <div
-              key={job.id}
-              className="border rounded-lg px-3 py-2 flex items-center justify-between gap-3"
-            >
-              <div className="min-w-0">
-                <p className="text-sm font-medium truncate">{job.source_path}</p>
-                <p className="text-xs text-muted-foreground">
-                  {job.input_type} · {new Date(job.created_at).toLocaleString()}
-                </p>
-                {(job.error_message || job.remediation) && (
-                  <p className="text-xs text-red-700 mt-1">
-                    {job.error_message || job.error}
-                    {job.remediation ? `（${job.remediation}）` : ""}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <StatusBadge status={job.status} />
-                {job.status === "failed" && (
-                  <Button size="sm" variant="outline" onClick={() => retryIngest(job.id)}>
-                    Retry
-                  </Button>
-                )}
-                {(job.status === "queued" || job.status === "running") && (
-                  <Button size="sm" variant="outline" onClick={() => cancelIngest(job.id)}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      {/* Text ingest dialog */}
+      <TextIngestDialog
+        open={textDialogOpen}
+        onOpenChange={setTextDialogOpen}
+        onSubmit={handleTextSubmit}
+      />
     </div>
   )
 }

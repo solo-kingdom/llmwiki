@@ -48,9 +48,9 @@ function MockIngestHub() {
   return (
     <div data-testid="ingest-hub">
       <h2>Ingest Hub</h2>
-      <div data-testid="conversation-card">Conversation</div>
-      <div data-testid="text-card">Text</div>
-      <div data-testid="upload-card">Upload</div>
+      <div data-testid="conversation-input">Conversation Input</div>
+      <div data-testid="upload-button">Upload File</div>
+      <div data-testid="text-button">Text</div>
     </div>
   )
 }
@@ -182,13 +182,13 @@ describe("AppContext Ingest Actions", () => {
 })
 
 describe("IngestHub Rendering", () => {
-  it("renders ingest hub with all cards", () => {
+  it("renders ingest hub with conversation input and action buttons", () => {
     renderWithProvider(<MockIngestHub />)
 
     expect(screen.getByTestId("ingest-hub")).toBeInTheDocument()
-    expect(screen.getByTestId("conversation-card")).toBeInTheDocument()
-    expect(screen.getByTestId("text-card")).toBeInTheDocument()
-    expect(screen.getByTestId("upload-card")).toBeInTheDocument()
+    expect(screen.getByTestId("conversation-input")).toBeInTheDocument()
+    expect(screen.getByTestId("upload-button")).toBeInTheDocument()
+    expect(screen.getByTestId("text-button")).toBeInTheDocument()
   })
 })
 

@@ -1,16 +1,24 @@
-import { useState } from "react"
-import { AppProvider } from "@/context/AppContext"
+import { useState, useMemo } from "react"
+import { AppProvider, useApp } from "@/context/AppContext"
 import { Sidebar } from "@/components/Sidebar"
 import { DocumentViewer } from "@/components/DocumentViewer"
 import { SettingsPage } from "@/components/SettingsPage"
 import { IngestHub } from "@/components/IngestHub"
+import { JobsPage } from "@/components/JobsPage"
+import { WarningPopover } from "@/components/WarningPopover"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import "./App.css"
 
-type View = "ingest" | "wiki" | "settings"
+type View = "ingest" | "jobs" | "wiki" | "settings"
 
 function AppLayout() {
   const [view, setView] = useState<View>("ingest")
+  const { capabilities } = useApp()
+
+  const missingDeps = useMemo(() => {
+    if (!capabilities) return []
+    return capabilities.runtime_dependencies.filter((d) => !d.found)
+  }, [capabilities])
 
   return (
     <Tabs
@@ -20,14 +28,21 @@ function AppLayout() {
     >
       <header className="flex items-center border-b px-4 py-2">
         <h1 className="text-base font-bold mr-4">LLMWiki</h1>
-        <TabsList>
-          <TabsTrigger value="ingest">Ingest</TabsTrigger>
+        <TabsList className="overflow-x-auto">
+          <div className="flex items-center gap-1">
+            <TabsTrigger value="ingest">Ingest Hub</TabsTrigger>
+            <WarningPopover missingDeps={missingDeps} />
+          </div>
+          <TabsTrigger value="jobs">Jobs</TabsTrigger>
           <TabsTrigger value="wiki">Wiki</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
       </header>
       <TabsContent value="ingest" className="flex flex-1 min-h-0">
         <IngestHub />
+      </TabsContent>
+      <TabsContent value="jobs" className="flex flex-1 min-h-0">
+        <JobsPage />
       </TabsContent>
       <TabsContent value="wiki" className="flex flex-1 min-h-0">
         <Sidebar />

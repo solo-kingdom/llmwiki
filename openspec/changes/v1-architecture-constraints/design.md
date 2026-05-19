@@ -161,6 +161,13 @@
 ## Open Questions
 
 1. MCP RPC 端点采用何种传输风格（纯 JSON-RPC POST / SSE / 两者）作为首版默认？
-2. “可缓存部分真理数据”的白名单边界是什么（例如 frontmatter 镜像是否允许）？
-3. PDF/Office Layer A 的最小内建能力定义（哪些格式必须达到“可用”）？
+   **Resolved**: 首版采用纯 JSON-RPC POST（`/mcp` 端点，HTTP POST）。SSE 支持推迟到后续版本。
+
+2. "可缓存部分真理数据"的白名单边界是什么（例如 frontmatter 镜像是否允许）？
+   **Resolved**: 首版允许缓存 frontmatter 衍生的 tags、date、title 到 DB 的 documents 表对应字段。这些字段在 reindex 时从文件重建。DB 中的 content 字段作为搜索便利缓存，非权威。详见 `schema.sql` 中的 DATA BOUNDARY CLASSIFICATION 注释。
+
+3. PDF/Office Layer A 的最小内建能力定义（哪些格式必须达到"可用"）？
+   **Resolved**: Layer A 仅覆盖 `.md` 和 `.txt`（纯文本，内建解析）。PDF/Office 格式依赖 Layer B（系统依赖）或 Layer C（降级）。首版不要求 PDF/Office 在无系统依赖时可用。
+
 4. Web UI 配置持久化路径与加密策略（尤其 API Key 存储）采用何级别保护？
+   **Resolved**: 首版配置存储在 `.llmwiki/config.json`（与工作区绑定），API Key 以明文存储在 JSON 中（文件权限 0644）。加密策略推迟到后续版本（可考虑 OS keychain 集成或加密存储）。

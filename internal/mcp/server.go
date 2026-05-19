@@ -179,6 +179,11 @@ func (s *Server) handleInitialize(req *JSONRPCRequest) *JSONRPCResponse {
 				"version": "0.1.0",
 			},
 			"instructions": s.instructions,
+			"_meta": map[string]interface{}{
+				"accessModel":    "rpc-first",
+				"transport":      "http-post",
+				"compatibility":  "First release focuses on RPC access via HTTP POST. Direct Claude Desktop stdio connection is not required.",
+			},
 		},
 	}
 }

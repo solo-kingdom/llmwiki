@@ -31,7 +31,7 @@ func setupTestAPI(t *testing.T) (*API, *chi.Mux) {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	api := New(db)
+	api := New(db, nil)
 	r := chi.NewRouter()
 
 	r.Get("/api/v1/health", api.Health)

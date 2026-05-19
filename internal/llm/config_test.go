@@ -297,3 +297,122 @@ func TestLoadConfigPriorityFileOverEnv(t *testing.T) {
 		t.Errorf("expected file key 'file-key' to win over env, got %q", cfg.APIKey)
 	}
 }
+
+// --- Provider extensibility tests (per llm-config-management spec) ---
+// These verify that new provider types can be added via UI config
+// without requiring startup command flag changes.
+
+func TestProviderExtensibility_NewProviderViaConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	// Simulate adding a new provider (e.g., "deepseek") via UI config file
+	newProvider := WorkspaceConfig{
+		Provider:          "deepseek",
+		APIKey:            "ds-test-key",
+		Model:             "deepseek-chat",
+		BaseURL:           "https://api.deepseek.com/v1",
+		RequestTimeout:    600,
+		StreamIdleTimeout: 60,
+	}
+	if err := SaveConfig(dir, newProvider); err != nil {
+		t.Fatalf("SaveConfig() for new provider: %v", err)
+	}
+
+	cm, err := NewConfigManager(dir)
+	if err != nil {
+		t.Fatalf("NewConfigManager() for new provider: %v", err)
+	}
+
+	cfg := cm.GetConfig()
+	if cfg.Provider != "deepseek" {
+		t.Errorf("expected provider 'deepseek', got %q", cfg.Provider)
+	}
+	if cfg.Model != "deepseek-chat" {
+		t.Errorf("expected model 'deepseek-chat', got %q", cfg.Model)
+	}
+	if cfg.BaseURL != "https://api.deepseek.com/v1" {
+		t.Errorf("expected base URL 'https://api.deepseek.com/v1', got %q", cfg.BaseURL)
+	}
+
+	// Client should be created without errors
+	client := cm.GetClient()
+	if client == nil {
+		t.Error("expected non-nil client for new provider")
+	}
+}
+
+func TestProviderExtensibility_ConfigChangeWithoutRestart(t *testing.T) {
+	dir := t.TempDir()
+
+	// Start with one provider
+	initial := WorkspaceConfig{
+		Provider: "openai",
+		APIKey:   "openai-key",
+		Model:    "gpt-4o",
+	}
+	SaveConfig(dir, initial)
+
+	cm, _ := NewConfigManager(dir)
+
+	// Verify initial provider
+	cfg := cm.GetConfig()
+	if cfg.Provider != "openai" {
+		t.Fatalf("initial provider: got %q, want 'openai'", cfg.Provider)
+	}
+
+	// Switch to a new provider via UpdateConfig (simulates UI change)
+	updated := WorkspaceConfig{
+		Provider:          "groq",
+		APIKey:            "groq-key",
+		Model:             "llama-3.1-70b",
+		BaseURL:           "https://api.groq.com/openai/v1",
+		RequestTimeout:    300,
+		StreamIdleTimeout: 45,
+	}
+	if err := cm.UpdateConfig(updated); err != nil {
+		t.Fatalf("UpdateConfig() to new provider: %v", err)
+	}
+
+	// Verify config was updated without restart
+	cfg = cm.GetConfig()
+	if cfg.Provider != "groq" {
+		t.Errorf("expected provider 'groq' after update, got %q", cfg.Provider)
+	}
+	if cfg.Model != "llama-3.1-70b" {
+		t.Errorf("expected model 'llama-3.1-70b' after update, got %q", cfg.Model)
+	}
+	if cfg.RequestTimeout != 300 {
+		t.Errorf("expected request_timeout 300, got %d", cfg.RequestTimeout)
+	}
+	if cfg.StreamIdleTimeout != 45 {
+		t.Errorf("expected stream_idle_timeout 45, got %d", cfg.StreamIdleTimeout)
+	}
+
+	// New client should reflect new config
+	client := cm.GetClient()
+	if client == nil {
+		t.Error("expected non-nil client after provider switch")
+	}
+}
+
+func TestProviderExtensibility_TimeoutConfigurable(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := WorkspaceConfig{
+		Provider:          "openai",
+		Model:             "gpt-4o",
+		RequestTimeout:    42,
+		StreamIdleTimeout: 7,
+	}
+	SaveConfig(dir, cfg)
+
+	cm, _ := NewConfigManager(dir)
+
+	got := cm.GetConfig()
+	if got.RequestTimeout != 42 {
+		t.Errorf("expected request_timeout 42, got %d", got.RequestTimeout)
+	}
+	if got.StreamIdleTimeout != 7 {
+		t.Errorf("expected stream_idle_timeout 7, got %d", got.StreamIdleTimeout)
+	}
+}

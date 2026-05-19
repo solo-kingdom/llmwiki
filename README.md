@@ -32,7 +32,7 @@ make dev
 | `llmwiki init <dir>` | Initialize a workspace directory with scaffold files and SQLite index |
 | `llmwiki serve [dir]` | Start HTTP API server with embedded web UI |
 | `llmwiki reindex [dir]` | Force full rebuild of the SQLite index from filesystem |
-| `llmwiki mcp [dir]` | Run MCP JSON-RPC 2.0 server on stdin/stdout |
+| `llmwiki mcp [dir]` | Run MCP JSON-RPC 2.0 server on stdin/stdout (legacy local mode) |
 | `llmwiki mcp-config` | Print MCP configuration JSON for Claude Desktop / Claude Code |
 | `llmwiki version` | Print version, commit, and build date |
 
@@ -89,11 +89,13 @@ After `llmwiki init ~/research`:
 
 ## Architecture
 
-**Three entry points** into a single Go binary:
+**Single-process, single-binary** architecture — all components run in one Go process:
 
-1. **MCP (stdio)** — For LLM agents (Claude, Cursor). JSON-RPC 2.0 over stdin/stdout.
-2. **HTTP REST API** — For the web UI and remote clients. Serves at `/api/v1/`.
-3. **CLI** — For humans and scripts. Powered by cobra.
+1. **HTTP REST API** — For the web UI and remote clients. Serves at `/api/v1/`.
+2. **MCP RPC Endpoint** — JSON-RPC 2.0 over HTTP POST at `/mcp`. This is the primary MCP access model.
+3. **Embedded Web UI** — React 19 + Vite + TypeScript, served with SPA fallback.
+4. **CLI** — For humans and scripts. Powered by cobra.
+5. **File Watcher** — Automatic index updates on file changes.
 
 **Data model**: Files are the source of truth. SQLite is an index only — deleting the database and running `reindex` fully rebuilds it. FTS5 provides full-text search with BM25 ranking.
 
@@ -101,13 +103,32 @@ After `llmwiki init ~/research`:
 
 ## MCP RPC-First Compatibility
 
-The MCP server follows the JSON-RPC 2.0 specification over stdio. It supports:
+The first release uses an **RPC-first** MCP access model. The MCP server is exposed as an HTTP POST endpoint at `/mcp` within the main `llmwiki serve` process.
 
-- `initialize` — Returns server info and capabilities
+**What works:**
+- `initialize` — Returns server info, capabilities, and RPC-first metadata
 - `tools/list` — Returns available tools with schemas
 - `tools/call` — Dispatches to tool handlers
+- Any HTTP-capable MCP client can connect
 
-For remote usage, the HTTP server can proxy MCP requests. Use `llmwiki mcp-config` to generate configuration for your MCP client.
+**First release does NOT require:**
+- Direct Claude Desktop stdio connection (not a release gate)
+- MCP proxy tool
+- Zero system dependencies for PDF/Office processing
+
+**Use `llmwiki mcp-config`** to generate configuration JSON for your MCP client. The generated config points to the RPC endpoint (`http-post` transport).
+
+## Source Processing Tiers
+
+First release supports PDF and Office documents via tiered processing:
+
+| Tier | Description | Requirements |
+|------|-------------|-------------|
+| **A** | Built-in text extraction | None (always available) |
+| **B** | System dependency extraction | `pdftotext` (PDF) or `libreoffice` (Office) |
+| **C** | Degraded fallback | None (file recognized, extraction unavailable) |
+
+Run `GET /api/v1/capabilities` to see current tier status and missing dependencies.
 
 ## Build Targets
 

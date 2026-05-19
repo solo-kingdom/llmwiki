@@ -191,10 +191,10 @@ func (d *DB) ReplaceReferencesInTx(sourceDocID string, edges []RefEdge) error {
 		return fmt.Errorf("delete old refs: %w", err)
 	}
 
-	// Insert new references
+	// Insert new references using INSERT OR REPLACE for idempotency
 	for _, e := range edges {
 		_, err := tx.Exec(`
-			INSERT INTO document_references
+			INSERT OR REPLACE INTO document_references
 			(source_document_id, target_document_id, reference_type, page)
 			VALUES (?, ?, ?, ?)`,
 			e.SourceID, e.TargetID, e.RefType, e.Page)

@@ -6,15 +6,20 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/solo-kingdom/llmwiki/internal/ingest"
+	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
 type API struct {
-	db       *sqlite.DB
-	settings *SettingsConfig
+	db        *sqlite.DB
+	settings  *SettingsConfig
+	configMgr *llm.ConfigManager
+	workspace string // workspace root directory for file-first writes
+	lockMgr   *ingest.PageLockManager
 }
 
-func New(db *sqlite.DB) *API {
+func New(db *sqlite.DB, configMgr *llm.ConfigManager) *API {
 	return &API{
 		db: db,
 		settings: &SettingsConfig{
@@ -29,7 +34,18 @@ func New(db *sqlite.DB) *API {
 			AutoReindex:    true,
 			WatchSources:   true,
 		},
+		configMgr: configMgr,
 	}
+}
+
+// SetWorkspace sets the workspace root directory for file-first write operations.
+func (a *API) SetWorkspace(ws string) {
+	a.workspace = ws
+}
+
+// SetLockManager sets the page-level lock manager for same-page serialization.
+func (a *API) SetLockManager(lm *ingest.PageLockManager) {
+	a.lockMgr = lm
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

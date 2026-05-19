@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -14,7 +15,10 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/solo-kingdom/llmwiki/internal/api"
+	"github.com/solo-kingdom/llmwiki/internal/ingest"
+	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/watcher"
 )
 
 // WebAssets holds the embedded web frontend filesystem.
@@ -23,28 +27,57 @@ var WebAssets fs.FS
 
 // Config holds the server configuration.
 type Config struct {
-	BindAddr string
-	Port     int
-	Token    string
-	NoMCP    bool
-	NoWatch  bool
+	BindAddr  string
+	Port      int
+	Token     string
+	NoMCP     bool
+	NoWatch   bool
+	Workspace string
+	DB        *sqlite.DB
+	ConfigMgr *llm.ConfigManager
+	LockMgr   *ingest.PageLockManager
 }
 
 // Server is the LLM Wiki HTTP server.
+// All components (API, Web UI, MCP RPC, watcher) share this single process context.
 type Server struct {
-	config Config
-	http   *http.Server
-	db     *sqlite.DB
-	api    *api.API
+	config     Config
+	http       *http.Server
+	db         *sqlite.DB
+	api        *api.API
+	mcpHandler http.HandlerFunc
+	watcher    *watcher.Watcher
 }
 
-// New creates a new Server.
-func New(cfg Config, db *sqlite.DB) *Server {
-	return &Server{
-		config: cfg,
-		db:     db,
-		api:    api.New(db),
+// New creates a new Server with shared dependency context.
+func New(cfg Config) *Server {
+	var configMgr *llm.ConfigManager
+	if cfg.ConfigMgr != nil {
+		configMgr = cfg.ConfigMgr
 	}
+
+	srv := &Server{
+		config: cfg,
+		db:     cfg.DB,
+		api:    api.New(cfg.DB, configMgr),
+	}
+	if cfg.Workspace != "" {
+		srv.api.SetWorkspace(cfg.Workspace)
+	}
+	if cfg.LockMgr != nil {
+		srv.api.SetLockManager(cfg.LockMgr)
+	}
+	return srv
+}
+
+// SetMCPHandler sets the MCP RPC handler (HTTP POST JSON-RPC 2.0).
+func (s *Server) SetMCPHandler(h http.HandlerFunc) {
+	s.mcpHandler = h
+}
+
+// SetWatcher sets the file watcher for automatic index updates.
+func (s *Server) SetWatcher(w *watcher.Watcher) {
+	s.watcher = w
 }
 
 // Start begins listening and serving. Blocks until Shutdown is called.
@@ -106,6 +139,12 @@ func (s *Server) Start() error {
 		r.Get("/capabilities", s.api.GetCapabilities)
 	})
 
+	// MCP RPC endpoint — JSON-RPC 2.0 over HTTP POST
+	if s.mcpHandler != nil {
+		r.Post("/mcp", s.mcpHandler)
+		log.Println("MCP RPC endpoint enabled at /mcp")
+	}
+
 	// SPA fallback
 	r.Handle("/*", s.spaHandler())
 
@@ -118,12 +157,22 @@ func (s *Server) Start() error {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Printf("LLM Wiki server starting on http://%s", addr)
+	// Start watcher in background
+	if s.watcher != nil {
+		if err := s.watcher.Start(); err != nil {
+			log.Printf("Warning: watcher start failed: %v", err)
+		}
+	}
+
+	log.Printf("LLM Wiki server starting on http://%s (single-process: API + Web + MCP RPC + watcher)", addr)
 	return s.http.ListenAndServe()
 }
 
-// Shutdown gracefully stops the server.
+// Shutdown gracefully stops the server and watcher.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.watcher != nil {
+		s.watcher.Stop()
+	}
 	return s.http.Shutdown(ctx)
 }
 
@@ -187,7 +236,23 @@ func authMiddleware(token string) func(http.Handler) http.Handler {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"ok"}`))
+
+	mcpEnabled := s.mcpHandler != nil
+	watchEnabled := s.watcher != nil
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+		"mode": map[string]interface{}{
+			"topology":     "single-process",
+			"api_enabled":  true,
+			"web_enabled":  true,
+			"mcp_enabled":  mcpEnabled,
+			"mcp_transport": "rpc-http",
+			"watch_enabled": watchEnabled,
+		},
+		"mcp_access_model": "rpc-first",
+		"mcp_compatibility": "First release focuses on RPC access. Direct Claude Desktop stdio connection is not a release gate.",
+	})
 }
 
 func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {

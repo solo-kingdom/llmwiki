@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
@@ -103,6 +104,20 @@ func (a *API) CreateDocument(w http.ResponseWriter, r *http.Request) {
 		RelativePath: req.Path + "/" + req.Filename,
 	}
 
+	// Acquire page-level lock for same-page serialization
+	if a.lockMgr != nil && doc.RelativePath != "" {
+		a.lockMgr.Lock(doc.RelativePath)
+		defer a.lockMgr.Unlock(doc.RelativePath)
+	}
+
+	// FILE-FIRST: Write canonical content to filesystem before DB insert
+	if doc.RelativePath != "" && doc.Content != "" {
+		if err := a.writeFileFirst(doc.RelativePath, doc.Content); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("file write failed: %v", err))
+			return
+		}
+	}
+
 	if err := a.db.CreateDocument(doc); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -123,11 +138,7 @@ func (a *API) UpdateDocumentContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.db.UpdateDocument(id, req.Content, "", nil, "", ""); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
+	// Fetch existing doc to get file path
 	doc, err := a.db.GetDocument(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -137,7 +148,33 @@ func (a *API) UpdateDocumentContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "document not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, doc)
+
+	// Acquire page-level lock for same-page serialization
+	if a.lockMgr != nil && doc.RelativePath != "" {
+		a.lockMgr.Lock(doc.RelativePath)
+		defer a.lockMgr.Unlock(doc.RelativePath)
+	}
+
+	// FILE-FIRST: Write canonical content to filesystem before DB update
+	if doc.RelativePath != "" {
+		if err := a.writeFileFirst(doc.RelativePath, req.Content); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("file write failed: %v", err))
+			return
+		}
+	}
+
+	// Now update the DB index (derived data)
+	if err := a.db.UpdateDocument(id, req.Content, "", nil, "", ""); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	updated, err := a.db.GetDocument(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
 }
 
 func (a *API) UpdateDocumentMetadata(w http.ResponseWriter, r *http.Request) {

@@ -421,3 +421,134 @@ func TestCascadeDelete(t *testing.T) {
 		t.Errorf("expected 0 refs after cascade, got %d", refCount)
 	}
 }
+
+// --- Transactional reference graph tests (per reference-graph-transactional-update spec) ---
+
+func TestReplaceReferencesInTxAtomic(t *testing.T) {
+	db := helperDB(t)
+
+	source := createTestDoc(t, db, "atomic-source.md", "/wiki", "wiki/atomic-source.md")
+	target1 := createTestDoc(t, db, "atomic-target1.md", "/wiki", "wiki/atomic-target1.md")
+	target2 := createTestDoc(t, db, "atomic-target2.md", "/wiki", "wiki/atomic-target2.md")
+
+	// Insert initial references
+	if err := db.UpsertReference(source.ID, target1.ID, "links_to", nil); err != nil {
+		t.Fatalf("initial UpsertReference() error = %v", err)
+	}
+
+	// Atomically replace with new set of references
+	edges := []RefEdge{
+		{SourceID: source.ID, TargetID: target2.ID, RefType: "cites"},
+	}
+	if err := db.ReplaceReferencesInTx(source.ID, edges); err != nil {
+		t.Fatalf("ReplaceReferencesInTx() error = %v", err)
+	}
+
+	// Old reference should be gone
+	var count int
+	err := db.DB().QueryRow("SELECT COUNT(*) FROM document_references WHERE source_document_id = ? AND target_document_id = ?",
+		source.ID, target1.ID).Scan(&count)
+	if err != nil {
+		t.Fatalf("count old ref error = %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 old references, got %d", count)
+	}
+
+	// New reference should exist
+	err = db.DB().QueryRow("SELECT COUNT(*) FROM document_references WHERE source_document_id = ? AND target_document_id = ?",
+		source.ID, target2.ID).Scan(&count)
+	if err != nil {
+		t.Fatalf("count new ref error = %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 new reference, got %d", count)
+	}
+}
+
+func TestReplaceReferencesInTxIdempotent(t *testing.T) {
+	db := helperDB(t)
+
+	source := createTestDoc(t, db, "idem-tx-source.md", "/wiki", "wiki/idem-tx-source.md")
+	target := createTestDoc(t, db, "idem-tx-target.md", "/wiki", "wiki/idem-tx-target.md")
+
+	edges := []RefEdge{
+		{SourceID: source.ID, TargetID: target.ID, RefType: "links_to"},
+	}
+
+	// Call twice
+	if err := db.ReplaceReferencesInTx(source.ID, edges); err != nil {
+		t.Fatalf("first ReplaceReferencesInTx() error = %v", err)
+	}
+	if err := db.ReplaceReferencesInTx(source.ID, edges); err != nil {
+		t.Fatalf("second ReplaceReferencesInTx() error = %v", err)
+	}
+
+	// Should still have exactly 1 reference (idempotent upsert)
+	var count int
+	err := db.DB().QueryRow("SELECT COUNT(*) FROM document_references WHERE source_document_id = ?", source.ID).Scan(&count)
+	if err != nil {
+		t.Fatalf("count error = %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 reference after idempotent replace, got %d", count)
+	}
+}
+
+func TestReplaceReferencesInTxRollbackOnInvalidTarget(t *testing.T) {
+	db := helperDB(t)
+
+	source := createTestDoc(t, db, "rollback-source.md", "/wiki", "wiki/rollback-source.md")
+	target := createTestDoc(t, db, "rollback-target.md", "/wiki", "wiki/rollback-target.md")
+
+	// Insert initial reference
+	if err := db.UpsertReference(source.ID, target.ID, "links_to", nil); err != nil {
+		t.Fatalf("initial UpsertReference() error = %v", err)
+	}
+
+	// Try to replace with invalid target (nonexistent doc ID) — should fail and rollback
+	edges := []RefEdge{
+		{SourceID: source.ID, TargetID: "nonexistent-doc-id", RefType: "cites"},
+	}
+
+	err := db.ReplaceReferencesInTx(source.ID, edges)
+	if err == nil {
+		t.Fatal("expected error for invalid target, got nil")
+	}
+
+	// Original reference should still exist (rollback)
+	var count int
+	err = db.DB().QueryRow("SELECT COUNT(*) FROM document_references WHERE source_document_id = ?", source.ID).Scan(&count)
+	if err != nil {
+		t.Fatalf("count error = %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 reference after rollback, got %d (original should be preserved)", count)
+	}
+}
+
+func TestReplaceReferencesInTxEmpty(t *testing.T) {
+	db := helperDB(t)
+
+	source := createTestDoc(t, db, "empty-tx-source.md", "/wiki", "wiki/empty-tx-source.md")
+	target := createTestDoc(t, db, "empty-tx-target.md", "/wiki", "wiki/empty-tx-target.md")
+
+	// Insert initial reference
+	if err := db.UpsertReference(source.ID, target.ID, "links_to", nil); err != nil {
+		t.Fatalf("UpsertReference() error = %v", err)
+	}
+
+	// Replace with empty set — should clear all references
+	if err := db.ReplaceReferencesInTx(source.ID, nil); err != nil {
+		t.Fatalf("ReplaceReferencesInTx() with empty error = %v", err)
+	}
+
+	var count int
+	err := db.DB().QueryRow("SELECT COUNT(*) FROM document_references WHERE source_document_id = ?", source.ID).Scan(&count)
+	if err != nil {
+		t.Fatalf("count error = %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 references after empty replace, got %d", count)
+	}
+}

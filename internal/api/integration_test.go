@@ -17,11 +17,17 @@ func setupIntegrationRoutes(api *API, r chi.Router) {
 	r.Get("/api/v1/providers", api.ListProviders)
 	r.Get("/api/v1/providers/{id}/models", api.ListProviderModels)
 
+	// Provider Instances
+	r.Post("/api/v1/provider-instances", api.CreateProviderInstance)
+	r.Get("/api/v1/provider-instances", api.ListProviderInstances)
+	r.Get("/api/v1/provider-instances/{id}", api.GetProviderInstance)
+	r.Put("/api/v1/provider-instances/{id}", api.UpdateProviderInstanceHandler)
+	r.Delete("/api/v1/provider-instances/{id}", api.DeleteProviderInstanceHandler)
+
 	// Settings
 	r.Get("/api/v1/settings", api.GetSettings)
 	r.Put("/api/v1/settings", api.UpdateSettings)
 	r.Put("/api/v1/settings/last-model", api.UpdateLastModel)
-	r.Put("/api/v1/settings/provider-keys/{id}", api.UpdateProviderKey)
 
 	// Sessions
 	r.Post("/api/v1/ingest/sessions", api.CreateIngestSession)
@@ -32,7 +38,7 @@ func setupIntegrationRoutes(api *API, r chi.Router) {
 }
 
 // TestBackendIntegration exercises the full flow:
-// GET /providers → set API key → GET /models → create session → update session → verify config
+// GET /providers → create instance → GET /models → create session → update session → verify config
 func TestBackendIntegration(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupIntegrationRoutes(api, r)
@@ -55,7 +61,7 @@ func TestBackendIntegration(t *testing.T) {
 		t.Fatalf("seed models: %v", err)
 	}
 
-	// Step 2: GET /providers — initially no keys
+	// Step 2: GET /providers — catalog listing (no key status)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/providers", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -68,36 +74,42 @@ func TestBackendIntegration(t *testing.T) {
 	if len(providers) != 2 {
 		t.Fatalf("expected 2 providers, got %d", len(providers))
 	}
-	for _, p := range providers {
-		if p.HasKey {
-			t.Errorf("provider %s should not have key initially", p.ID)
-		}
-	}
 
-	// Step 3: Set API key for openai
-	keyBody, _ := json.Marshal(map[string]string{
-		"api_key": "sk-integration-test-key-12345678",
+	// Step 3: Create a provider instance for openai
+	instBody, _ := json.Marshal(map[string]string{
+		"name":       "OpenAI Work",
+		"catalog_id": "openai",
+		"api_key":    "sk-integration-test-key-12345678",
 	})
-	req = httptest.NewRequest(http.MethodPut, "/api/v1/settings/provider-keys/openai", bytes.NewReader(keyBody))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/provider-instances", bytes.NewReader(instBody))
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("set provider key: %d %s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create instance: %d %s", w.Code, w.Body.String())
 	}
 
-	// Step 4: GET /providers — openai now has key
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/providers", nil)
+	var instResp instanceResponse
+	json.NewDecoder(w.Body).Decode(&instResp)
+	instanceID := instResp.Instance.ID
+	if instanceID == "" {
+		t.Fatal("expected instance ID")
+	}
+	if instResp.Instance.APIKey != "" {
+		t.Error("API key should be masked in response")
+	}
+	if instResp.Instance.APIKeyMask == "" {
+		t.Error("API key mask should be present")
+	}
+
+	// Step 4: GET /provider-instances — should list 1 instance
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/provider-instances", nil)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	json.NewDecoder(w.Body).Decode(&providers)
-	for _, p := range providers {
-		if p.ID == "openai" && !p.HasKey {
-			t.Error("openai should have key after setting it")
-		}
-		if p.ID == "anthropic" && p.HasKey {
-			t.Error("anthropic should not have key")
-		}
+	var listResp instanceListResponse
+	json.NewDecoder(w.Body).Decode(&listResp)
+	if len(listResp.Instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(listResp.Instances))
 	}
 
 	// Step 5: GET /providers/openai/models
@@ -114,11 +126,11 @@ func TestBackendIntegration(t *testing.T) {
 		t.Fatalf("expected 2 openai models, got %d", len(models))
 	}
 
-	// Step 6: Create session with provider/model
+	// Step 6: Create session with instance_id/model
 	sessionBody, _ := json.Marshal(map[string]string{
-		"title":    "Integration Test Session",
-		"provider": "openai",
-		"model":    "gpt-4o",
+		"title":       "Integration Test Session",
+		"instance_id": instanceID,
+		"model":       "gpt-4o",
 	})
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(sessionBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -134,24 +146,23 @@ func TestBackendIntegration(t *testing.T) {
 	if sessionID == "" {
 		t.Fatal("expected session ID")
 	}
-	if createResp.Session.LLMProvider != "openai" {
-		t.Errorf("provider = %q, want openai", createResp.Session.LLMProvider)
+	if createResp.Session.LLMInstanceID != instanceID {
+		t.Errorf("instance_id = %q, want %q", createResp.Session.LLMInstanceID, instanceID)
 	}
 	if createResp.Session.LLMModel != "gpt-4o" {
 		t.Errorf("model = %q, want gpt-4o", createResp.Session.LLMModel)
 	}
 
-	// Step 7: Verify global last_provider/last_model NOT set by create
-	// (only set by PATCH update)
-	lp, _ := api.db.GetConfig("last_provider")
-	if lp == "openai" {
-		t.Error("last_provider should not be set by create session")
+	// Step 7: Verify global last_instance_id/last_model NOT set by create
+	li, _ := api.db.GetConfig("last_instance_id")
+	if li == instanceID {
+		t.Error("last_instance_id should not be set by create session")
 	}
 
-	// Step 8: Update session provider → changes global last_provider
+	// Step 8: Update session instance → changes global last_instance_id
 	patchBody, _ := json.Marshal(map[string]string{
-		"provider": "openai",
-		"model":    "gpt-4o",
+		"instance_id": instanceID,
+		"model":       "gpt-4o",
 	})
 	req = httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+sessionID, bytes.NewReader(patchBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -161,9 +172,9 @@ func TestBackendIntegration(t *testing.T) {
 		t.Fatalf("update session: %d %s", w.Code, w.Body.String())
 	}
 
-	lp, _ = api.db.GetConfig("last_provider")
-	if lp != "openai" {
-		t.Errorf("last_provider = %q, want openai (updated by PATCH)", lp)
+	li, _ = api.db.GetConfig("last_instance_id")
+	if li != instanceID {
+		t.Errorf("last_instance_id = %q, want %q (updated by PATCH)", li, instanceID)
 	}
 	lm, _ := api.db.GetConfig("last_model")
 	if lm != "gpt-4o" {
@@ -178,9 +189,9 @@ func TestBackendIntegration(t *testing.T) {
 		t.Fatalf("list sessions: %d %s", w.Code, w.Body.String())
 	}
 
-	var listResp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&listResp)
-	sessions, ok := listResp["sessions"].([]interface{})
+	var sessionsList map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&sessionsList)
+	sessions, ok := sessionsList["sessions"].([]interface{})
 	if !ok {
 		t.Fatal("expected sessions array")
 	}
@@ -188,7 +199,7 @@ func TestBackendIntegration(t *testing.T) {
 		t.Fatalf("expected 1 session, got %d", len(sessions))
 	}
 
-	// Step 10: GET /settings — verify provider key status
+	// Step 10: GET /settings — verify last_instance_id
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -198,26 +209,16 @@ func TestBackendIntegration(t *testing.T) {
 
 	var settings settingsResponse
 	json.NewDecoder(w.Body).Decode(&settings)
-	if settings.LastProvider != "openai" {
-		t.Errorf("settings.last_provider = %q, want openai", settings.LastProvider)
+	if settings.LastInstanceID != instanceID {
+		t.Errorf("settings.last_instance_id = %q, want %q", settings.LastInstanceID, instanceID)
 	}
 	if settings.LastModel != "gpt-4o" {
 		t.Errorf("settings.last_model = %q, want gpt-4o", settings.LastModel)
 	}
-	openaiKey, ok := settings.ProviderKeys["openai"]
-	if !ok {
-		t.Fatal("openai provider key not in settings")
-	}
-	if !openaiKey.Has {
-		t.Error("openai should have key in settings")
-	}
-	if openaiKey.Masked == "" {
-		t.Error("openai masked key should not be empty")
-	}
 }
 
 // TestBackendIntegrationStreamingGuard verifies the stream guard logic:
-// session without provider → 400, session without key → 400
+// session without instance → 400, session with non-existent instance → 400
 func TestBackendIntegrationStreamingGuard(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupIntegrationRoutes(api, r)
@@ -227,7 +228,7 @@ func TestBackendIntegrationStreamingGuard(t *testing.T) {
 		{ID: "openai", Name: "OpenAI", APIFormat: "openai", EnvKey: "OPENAI_API_KEY"},
 	})
 
-	// Create session without provider
+	// Create session without instance
 	sessionBody, _ := json.Marshal(map[string]string{"title": "Guard Test"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(sessionBody))
 	w := httptest.NewRecorder()
@@ -235,27 +236,27 @@ func TestBackendIntegrationStreamingGuard(t *testing.T) {
 	var createResp sessionResponse
 	json.NewDecoder(w.Body).Decode(&createResp)
 
-	// Try streaming — no provider → 400
+	// Try streaming — no instance → 400
 	msgBody, _ := json.Marshal(map[string]string{"content": "hello"})
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+createResp.Session.ID+"/messages?stream=1", bytes.NewReader(msgBody))
 	req.Header.Set("Accept", "text/event-stream")
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 (no provider), got %d", w.Code)
+		t.Fatalf("expected 400 (no instance), got %d", w.Code)
 	}
 
-	// Update session to have provider/model but no key
+	// Update session to have non-existent instance
 	patchBody, _ := json.Marshal(map[string]string{
-		"provider": "openai",
-		"model":    "gpt-4o",
+		"instance_id": "inst_notexist",
+		"model":       "gpt-4o",
 	})
 	req = httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+createResp.Session.ID, bytes.NewReader(patchBody))
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	// Try streaming — no key → 400
+	// Try streaming — no instance → 400
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+createResp.Session.ID+"/messages?stream=1", bytes.NewReader(msgBody))
 	req.Header.Set("Accept", "text/event-stream")
 	w = httptest.NewRecorder()
@@ -263,7 +264,4 @@ func TestBackendIntegrationStreamingGuard(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 (no api key), got %d", w.Code)
 	}
-
-	// Set API key — now it should proceed (but will fail on actual LLM call, which is fine)
-	api.db.SetProviderKey("openai", "sk-test-key-for-guard-test", "")
 }

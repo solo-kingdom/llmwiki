@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
@@ -36,62 +35,45 @@ func (a *API) SetLockManager(lm *ingest.PageLockManager) {
 }
 
 // sessionLLMClient creates an LLM client for the given session.
-// It reads provider/model from the session, falls back to global defaults,
-// then reads API key from provider_keys table.
+// It reads instance/model from the session, falls back to global defaults,
+// then reads API key from provider_instances table.
 func (a *API) sessionLLMClient(session *sqlite.IngestSession) (*llm.Client, string, string) {
-	provider := session.LLMProvider
+	instanceID := session.LLMInstanceID
 	model := session.LLMModel
 
-	if provider == "" {
-		provider, _ = a.db.GetConfig("last_provider")
+	if instanceID == "" {
+		instanceID, _ = a.db.GetConfig("last_instance_id")
 	}
 	if model == "" {
 		model, _ = a.db.GetConfig("last_model")
 	}
-	if provider == "" || model == "" {
+	if instanceID == "" || model == "" {
 		return nil, "", ""
 	}
 
-	return a.providerLLMClient(provider, model)
+	return a.instanceLLMClient(instanceID, model)
 }
 
-// providerLLMClient creates an LLM client for a given provider and model.
-func (a *API) providerLLMClient(provider, model string) (*llm.Client, string, string) {
-	apiKey, baseURL, _ := a.db.GetProviderKey(provider)
-
-	// Check environment variable fallback
-	if apiKey == "" {
-		pInfo, _ := a.db.GetProviderInfo(provider)
-		if pInfo != nil && pInfo.EnvKey != "" {
-			envKey := pInfo.EnvKey
-			// Check the env var
-			if v := getEnvOrDefault(envKey, ""); v != "" {
-				apiKey = v
-			}
-		}
+// instanceLLMClient creates an LLM client for a given provider instance and model.
+func (a *API) instanceLLMClient(instanceID, model string) (*llm.Client, string, string) {
+	inst, err := a.db.GetProviderInstance(instanceID)
+	if err != nil || inst == nil {
+		return nil, instanceID, model
 	}
 
+	apiKey := inst.APIKey
 	if apiKey == "" {
-		return nil, provider, model
+		return nil, instanceID, model
 	}
 
-	// Determine API format and base URL
+	// Determine API format and base URL from catalog
 	apiFormat := "openai"
-	pInfo, _ := a.db.GetProviderInfo(provider)
+	baseURL := inst.BaseURL
+	pInfo, _ := a.db.GetProviderInfo(inst.CatalogID)
 	if pInfo != nil {
 		apiFormat = pInfo.APIFormat
 		if baseURL == "" {
 			baseURL = pInfo.APIBase
-		}
-	}
-
-	// Set default base URLs for providers without cached info
-	if baseURL == "" {
-		switch provider {
-		case "openai":
-			baseURL = "https://api.openai.com/v1"
-		case "anthropic":
-			baseURL = "https://api.anthropic.com"
 		}
 	}
 
@@ -103,7 +85,7 @@ func (a *API) providerLLMClient(provider, model string) (*llm.Client, string, st
 		Timeout:           30 * time.Minute,
 		StreamIdleTimeout: 2 * time.Minute,
 	}
-	return llm.NewClient(cfg), provider, model
+	return llm.NewClient(cfg), instanceID, model
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -134,10 +116,4 @@ func getIntQuery(r *http.Request, key string, defaultVal int) int {
 	return n
 }
 
-// getEnvOrDefault reads an environment variable or returns fallback.
-func getEnvOrDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
+

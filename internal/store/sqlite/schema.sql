@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS ingest_sessions (
     title TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
     storage_path TEXT NOT NULL DEFAULT '',
-    llm_provider TEXT NOT NULL DEFAULT '',
+    llm_instance_id TEXT NOT NULL DEFAULT '',
     llm_model TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
@@ -206,7 +206,18 @@ CREATE TABLE IF NOT EXISTS app_config (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
--- Per-provider API keys and optional base URL overrides
+-- Provider instances: user-added provider configurations with custom names
+CREATE TABLE IF NOT EXISTS provider_instances (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    catalog_id TEXT NOT NULL,
+    api_key TEXT NOT NULL DEFAULT '',
+    base_url TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Per-provider API keys and optional base URL overrides (DEPRECATED: use provider_instances)
 CREATE TABLE IF NOT EXISTS provider_keys (
     provider_id TEXT PRIMARY KEY,
     api_key TEXT NOT NULL DEFAULT '',

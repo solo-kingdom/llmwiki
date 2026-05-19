@@ -9,7 +9,6 @@ type providerResponse struct {
 	Name      string `json:"name"`
 	APIBase   string `json:"api_base"`
 	APIFormat string `json:"api_format"`
-	HasKey    bool   `json:"has_key"`
 	EnvKey    string `json:"env_key"`
 	DocURL    string `json:"doc_url"`
 }
@@ -37,13 +36,11 @@ func (a *API) ListProviders(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]providerResponse, 0, len(providers))
 	for _, p := range providers {
-		hasKey, _ := a.db.HasProviderKey(p.ID)
 		result = append(result, providerResponse{
 			ID:        p.ID,
 			Name:      p.Name,
 			APIBase:   p.APIBase,
 			APIFormat: p.APIFormat,
-			HasKey:    hasKey,
 			EnvKey:    p.EnvKey,
 			DocURL:    p.DocURL,
 		})

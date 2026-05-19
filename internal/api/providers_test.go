@@ -49,11 +49,6 @@ func TestListProvidersWithData(t *testing.T) {
 		t.Fatalf("seed providers: %v", err)
 	}
 
-	// Set key for openai only
-	if err := api.db.SetProviderKey("openai", "sk-test-key-12345678", ""); err != nil {
-		t.Fatalf("set provider key: %v", err)
-	}
-
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/providers", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -85,15 +80,15 @@ func TestListProvidersWithData(t *testing.T) {
 	if openai == nil {
 		t.Fatal("openai provider not found")
 	}
-	if !openai.HasKey {
-		t.Error("expected openai has_key=true")
+	if openai.Name != "OpenAI" {
+		t.Errorf("openai name = %q, want OpenAI", openai.Name)
 	}
 
 	if anthropic == nil {
 		t.Fatal("anthropic provider not found")
 	}
-	if anthropic.HasKey {
-		t.Error("expected anthropic has_key=false")
+	if anthropic.Name != "Anthropic" {
+		t.Errorf("anthropic name = %q, want Anthropic", anthropic.Name)
 	}
 }
 

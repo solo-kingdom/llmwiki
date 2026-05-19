@@ -188,9 +188,9 @@ func TestIngestSessionsWithLLM(t *testing.T) {
 	db := openTestDB(t)
 
 	session := &IngestSession{
-		Title:       "test session",
-		LLMProvider: "anthropic",
-		LLMModel:    "claude-3.5",
+		Title:         "test session",
+		LLMInstanceID: "inst_test1234",
+		LLMModel:      "claude-3.5",
 	}
 	if err := db.CreateIngestSession(session); err != nil {
 		t.Fatalf("CreateIngestSession: %v", err)
@@ -198,16 +198,16 @@ func TestIngestSessionsWithLLM(t *testing.T) {
 	if session.ID == "" {
 		t.Fatal("expected session ID to be set")
 	}
-	if session.LLMProvider != "anthropic" {
-		t.Errorf("expected provider 'anthropic', got %q", session.LLMProvider)
+	if session.LLMInstanceID != "inst_test1234" {
+		t.Errorf("expected instance_id 'inst_test1234', got %q", session.LLMInstanceID)
 	}
 
 	got, err := db.GetIngestSession(session.ID)
 	if err != nil {
 		t.Fatalf("GetIngestSession: %v", err)
 	}
-	if got.LLMProvider != "anthropic" {
-		t.Errorf("expected provider 'anthropic', got %q", got.LLMProvider)
+	if got.LLMInstanceID != "inst_test1234" {
+		t.Errorf("expected instance_id 'inst_test1234', got %q", got.LLMInstanceID)
 	}
 	if got.LLMModel != "claude-3.5" {
 		t.Errorf("expected model 'claude-3.5', got %q", got.LLMModel)
@@ -221,12 +221,12 @@ func TestIngestSessionsWithLLM(t *testing.T) {
 		t.Fatalf("expected 1 session, got %d", len(sessions))
 	}
 
-	if err := db.UpdateIngestSessionLLM(session.ID, "openai", "gpt-4o"); err != nil {
+	if err := db.UpdateIngestSessionLLM(session.ID, "inst_other12", "gpt-4o"); err != nil {
 		t.Fatalf("UpdateIngestSessionLLM: %v", err)
 	}
 	got, _ = db.GetIngestSession(session.ID)
-	if got.LLMProvider != "openai" {
-		t.Errorf("expected provider 'openai' after update, got %q", got.LLMProvider)
+	if got.LLMInstanceID != "inst_other12" {
+		t.Errorf("expected instance_id 'inst_other12' after update, got %q", got.LLMInstanceID)
 	}
 	if got.LLMModel != "gpt-4o" {
 		t.Errorf("expected model 'gpt-4o' after update, got %q", got.LLMModel)

@@ -13,6 +13,7 @@ import type {
   IngestSessionMessage,
   ArchiveSessionResponse,
   Provider,
+  ProviderInstance,
   ModelInfo,
   SessionListItem,
 } from "@/types"
@@ -277,26 +278,63 @@ export function listProviderModels(providerId: string): Promise<ModelInfo[]> {
 }
 
 export function updateLastModel(
-  provider: string,
+  instanceId: string,
   model: string,
 ): Promise<{ status: string }> {
   return request<{ status: string }>("/api/v1/settings/last-model", {
     method: "PUT",
-    body: JSON.stringify({ provider, model }),
+    body: JSON.stringify({ instance_id: instanceId, model }),
   })
 }
 
-export function setProviderKey(
-  providerId: string,
-  apiKey: string,
-  baseURL?: string,
-): Promise<{ status: string }> {
-  return request<{ status: string }>(
-    `/api/v1/settings/provider-keys/${encodeURIComponent(providerId)}`,
+export function createProviderInstance(payload: {
+  name: string
+  catalog_id: string
+  api_key: string
+  base_url?: string
+}): Promise<{ instance: ProviderInstance }> {
+  return request<{ instance: ProviderInstance }>("/api/v1/provider-instances", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function listProviderInstances(): Promise<{ instances: ProviderInstance[] }> {
+  return request<{ instances: ProviderInstance[] }>("/api/v1/provider-instances")
+}
+
+export function getProviderInstance(
+  id: string,
+): Promise<{ instance: ProviderInstance }> {
+  return request<{ instance: ProviderInstance }>(
+    `/api/v1/provider-instances/${encodeURIComponent(id)}`,
+  )
+}
+
+export function updateProviderInstance(
+  id: string,
+  payload: {
+    name?: string
+    catalog_id?: string
+    api_key?: string
+    base_url?: string
+  },
+): Promise<{ instance: ProviderInstance }> {
+  return request<{ instance: ProviderInstance }>(
+    `/api/v1/provider-instances/${encodeURIComponent(id)}`,
     {
       method: "PUT",
-      body: JSON.stringify({ api_key: apiKey, ...(baseURL ? { base_url: baseURL } : {}) }),
+      body: JSON.stringify(payload),
     },
+  )
+}
+
+export function deleteProviderInstance(
+  id: string,
+): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/api/v1/provider-instances/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
   )
 }
 
@@ -306,7 +344,7 @@ export function listIngestSessions(): Promise<{ sessions: SessionListItem[] }> {
 
 export function updateIngestSession(
   id: string,
-  patch: { provider?: string; model?: string; title?: string },
+  patch: { instance_id?: string; model?: string; title?: string },
 ): Promise<{ session: IngestSession }> {
   return request<{ session: IngestSession }>(
     `/api/v1/ingest/sessions/${encodeURIComponent(id)}`,

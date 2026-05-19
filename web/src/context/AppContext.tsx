@@ -17,6 +17,7 @@ import type {
   CapabilitiesResponse,
   IngestSessionMessage,
   Provider,
+  ProviderInstance,
   ModelInfo,
   SessionListItem,
 } from "@/types"
@@ -44,6 +45,7 @@ interface AppState {
   sessions: SessionListItem[]
   activeSessionId: string | null
   providers: Provider[]
+  instances: ProviderInstance[]
   currentModels: ModelInfo[]
 
   selectDocument: (id: string) => void
@@ -76,20 +78,32 @@ interface AppState {
 
   loadProviders: () => Promise<void>
   loadModels: (providerId: string) => Promise<void>
+  loadInstances: () => Promise<void>
+  createInstance: (payload: {
+    name: string
+    catalog_id: string
+    api_key: string
+    base_url?: string
+  }) => Promise<ProviderInstance | null>
+  updateInstance: (
+    id: string,
+    payload: {
+      name?: string
+      catalog_id?: string
+      api_key?: string
+      base_url?: string
+    },
+  ) => Promise<ProviderInstance | null>
+  deleteInstance: (id: string) => Promise<boolean>
   listSessions: () => Promise<void>
-  createSession: (provider?: string, model?: string) => Promise<void>
+  createSession: (instanceId?: string, model?: string) => Promise<void>
   switchSession: (id: string) => Promise<void>
   updateSessionLLM: (
     id: string,
-    provider: string,
+    instanceId: string,
     model: string,
   ) => Promise<void>
-  updateLastModel: (provider: string, model: string) => Promise<void>
-  setProviderKey: (
-    providerId: string,
-    apiKey: string,
-    baseURL?: string,
-  ) => Promise<void>
+  updateLastModel: (instanceId: string, model: string) => Promise<void>
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -124,6 +138,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [sessions, setSessions] = useState<SessionListItem[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [providers, setProviders] = useState<Provider[]>([])
+  const [instances, setInstances] = useState<ProviderInstance[]>([])
   const [currentModels, setCurrentModels] = useState<ModelInfo[]>([])
 
   const refreshDocuments = useCallback(() => {
@@ -266,16 +281,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // create new below
       }
     }
-    const provider = settings?.last_provider
+    const instanceId = settings?.last_instance_id
     const model = settings?.last_model
     const { session } = await api.createIngestSession()
     setSessionId(session.id)
     setActiveSessionId(session.id)
     localStorage.setItem(SESSION_STORAGE_KEY, session.id)
     setSessionMessages([])
-    if (provider && model) {
+    if (instanceId && model) {
       try {
-        await api.updateIngestSession(session.id, { provider, model })
+        await api.updateIngestSession(session.id, { instance_id: instanceId, model })
       } catch {
         // non-critical
       }
@@ -380,16 +395,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSessionError(null)
       try {
         const res = await api.archiveIngestSession(sessionId, title)
-        const provider = settings?.last_provider
+        const instanceId = settings?.last_instance_id
         const model = settings?.last_model
         const { session } = await api.createIngestSession()
         setSessionId(session.id)
         setActiveSessionId(session.id)
         localStorage.setItem(SESSION_STORAGE_KEY, session.id)
         setSessionMessages([])
-        if (provider && model) {
+        if (instanceId && model) {
           try {
-            await api.updateIngestSession(session.id, { provider, model })
+            await api.updateIngestSession(session.id, { instance_id: instanceId, model })
           } catch {
             // non-critical
           }
@@ -434,16 +449,68 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const loadInstances = useCallback(async () => {
+    try {
+      const { instances: inst } = await api.listProviderInstances()
+      setInstances(inst)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }, [])
+
+  const createInstanceFn = useCallback(async (payload: {
+    name: string
+    catalog_id: string
+    api_key: string
+    base_url?: string
+  }) => {
+    try {
+      const { instance } = await api.createProviderInstance(payload)
+      await loadInstances()
+      return instance
+    } catch (e) {
+      setError((e as Error).message)
+      return null
+    }
+  }, [loadInstances])
+
+  const updateInstanceFn = useCallback(async (id: string, payload: {
+    name?: string
+    catalog_id?: string
+    api_key?: string
+    base_url?: string
+  }) => {
+    try {
+      const { instance } = await api.updateProviderInstance(id, payload)
+      await loadInstances()
+      return instance
+    } catch (e) {
+      setError((e as Error).message)
+      return null
+    }
+  }, [loadInstances])
+
+  const deleteInstanceFn = useCallback(async (id: string) => {
+    try {
+      await api.deleteProviderInstance(id)
+      await loadInstances()
+      return true
+    } catch (e) {
+      setError((e as Error).message)
+      return false
+    }
+  }, [loadInstances])
+
   const listSessions = useCallback(async () => {
     await listSessionsInternal()
   }, [])
 
   const createSession = useCallback(
-    async (provider?: string, model?: string) => {
+    async (instanceId?: string, model?: string) => {
       const { session } = await api.createIngestSession()
-      if (provider && model) {
+      if (instanceId && model) {
         try {
-          await api.updateIngestSession(session.id, { provider, model })
+          await api.updateIngestSession(session.id, { instance_id: instanceId, model })
         } catch {
           // non-critical
         }
@@ -465,22 +532,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await loadSessionMessages(id)
       try {
         const { session } = await api.getIngestSession(id)
-        if (session.llm_provider) {
-          await loadModels(session.llm_provider)
+        if (session.llm_instance_id) {
+          // Find the instance to get its catalog_id for loading models
+          const inst = instances.find((i) => i.id === session.llm_instance_id)
+          if (inst) {
+            await loadModels(inst.catalog_id)
+          }
         }
       } catch {
         // non-critical
       }
     },
-    [loadSessionMessages, loadModels],
+    [loadSessionMessages, loadModels, instances],
   )
 
   const updateSessionLLM = useCallback(
-    async (id: string, provider: string, model: string) => {
-      await api.updateIngestSession(id, { provider, model })
-      await api.updateLastModel(provider, model)
+    async (id: string, instanceId: string, model: string) => {
+      await api.updateIngestSession(id, { instance_id: instanceId, model })
+      await api.updateLastModel(instanceId, model)
       setSettings((prev) =>
-        prev ? { ...prev, last_provider: provider, last_model: model } : prev,
+        prev ? { ...prev, last_instance_id: instanceId, last_model: model } : prev,
       )
       await listSessionsInternal()
     },
@@ -488,22 +559,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const updateLastModelFn = useCallback(
-    async (provider: string, model: string) => {
-      await api.updateLastModel(provider, model)
+    async (instanceId: string, model: string) => {
+      await api.updateLastModel(instanceId, model)
       setSettings((prev) =>
-        prev ? { ...prev, last_provider: provider, last_model: model } : prev,
+        prev ? { ...prev, last_instance_id: instanceId, last_model: model } : prev,
       )
     },
     [],
-  )
-
-  const setProviderKeyFn = useCallback(
-    async (providerId: string, apiKey: string, baseURL?: string) => {
-      await api.setProviderKey(providerId, apiKey, baseURL)
-      await loadSettings()
-      await loadProviders()
-    },
-    [loadSettings, loadProviders],
   )
 
   return (
@@ -526,6 +588,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sessions,
         activeSessionId,
         providers,
+        instances,
         currentModels,
         selectDocument,
         search,
@@ -546,12 +609,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         archiveSession,
         loadProviders,
         loadModels,
+        loadInstances,
+        createInstance: createInstanceFn,
+        updateInstance: updateInstanceFn,
+        deleteInstance: deleteInstanceFn,
         listSessions,
         createSession,
         switchSession,
         updateSessionLLM,
         updateLastModel: updateLastModelFn,
-        setProviderKey: setProviderKeyFn,
       }}
     >
       {children}

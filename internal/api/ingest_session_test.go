@@ -122,21 +122,19 @@ func TestIngestSessionArchivePersistsFile(t *testing.T) {
 	}
 }
 
-// --- Task 4.6: Session LLM provider/model tests ---
-
-func TestCreateSessionWithProviderModel(t *testing.T) {
+func TestCreateSessionWithInstanceModel(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 
 	// Set global defaults
-	api.db.SetConfig("last_provider", "openai")
+	api.db.SetConfig("last_instance_id", "inst_global12")
 	api.db.SetConfig("last_model", "gpt-4o")
 
-	// Create session with explicit provider/model
+	// Create session with explicit instance/model
 	body, _ := json.Marshal(map[string]string{
-		"title":    "Custom Session",
-		"provider": "anthropic",
-		"model":    "claude-3",
+		"title":       "Custom Session",
+		"instance_id": "inst_abc12345",
+		"model":       "claude-3",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -154,8 +152,8 @@ func TestCreateSessionWithProviderModel(t *testing.T) {
 	if resp.Session == nil {
 		t.Fatal("expected session")
 	}
-	if resp.Session.LLMProvider != "anthropic" {
-		t.Errorf("provider = %q, want anthropic", resp.Session.LLMProvider)
+	if resp.Session.LLMInstanceID != "inst_abc12345" {
+		t.Errorf("instance_id = %q, want inst_abc12345", resp.Session.LLMInstanceID)
 	}
 	if resp.Session.LLMModel != "claude-3" {
 		t.Errorf("model = %q, want claude-3", resp.Session.LLMModel)
@@ -167,10 +165,10 @@ func TestCreateSessionFallsBackToGlobalConfig(t *testing.T) {
 	setupSessionRoutes(api, r)
 
 	// Set global defaults
-	api.db.SetConfig("last_provider", "openai")
+	api.db.SetConfig("last_instance_id", "inst_global12")
 	api.db.SetConfig("last_model", "gpt-4o")
 
-	// Create session without provider/model
+	// Create session without instance/model
 	body, _ := json.Marshal(map[string]string{
 		"title": "Default Session",
 	})
@@ -185,19 +183,19 @@ func TestCreateSessionFallsBackToGlobalConfig(t *testing.T) {
 
 	var resp sessionResponse
 	json.NewDecoder(w.Body).Decode(&resp)
-	if resp.Session.LLMProvider != "openai" {
-		t.Errorf("provider = %q, want openai (from global)", resp.Session.LLMProvider)
+	if resp.Session.LLMInstanceID != "inst_global12" {
+		t.Errorf("instance_id = %q, want inst_global12 (from global)", resp.Session.LLMInstanceID)
 	}
 	if resp.Session.LLMModel != "gpt-4o" {
 		t.Errorf("model = %q, want gpt-4o (from global)", resp.Session.LLMModel)
 	}
 }
 
-func TestCreateSessionNoProviderNoGlobal(t *testing.T) {
+func TestCreateSessionNoInstanceNoGlobal(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 
-	// No global defaults set, no provider/model in request
+	// No global defaults set, no instance/model in request
 	body, _ := json.Marshal(map[string]string{
 		"title": "Empty Session",
 	})
@@ -212,9 +210,8 @@ func TestCreateSessionNoProviderNoGlobal(t *testing.T) {
 
 	var resp sessionResponse
 	json.NewDecoder(w.Body).Decode(&resp)
-	// Session should be created with empty provider/model
-	if resp.Session.LLMProvider != "" {
-		t.Errorf("provider = %q, want empty", resp.Session.LLMProvider)
+	if resp.Session.LLMInstanceID != "" {
+		t.Errorf("instance_id = %q, want empty", resp.Session.LLMInstanceID)
 	}
 	if resp.Session.LLMModel != "" {
 		t.Errorf("model = %q, want empty", resp.Session.LLMModel)
@@ -225,7 +222,6 @@ func TestListSessionsHandler(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 
-	// Create two sessions
 	for _, title := range []string{"Session A", "Session B"} {
 		body, _ := json.Marshal(map[string]string{"title": title})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
@@ -237,7 +233,6 @@ func TestListSessionsHandler(t *testing.T) {
 		}
 	}
 
-	// List sessions
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/sessions", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -282,11 +277,10 @@ func TestListSessionsEmpty(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionProviderModel(t *testing.T) {
+func TestUpdateSessionInstanceModel(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 
-	// Create session without provider/model
 	body, _ := json.Marshal(map[string]string{"title": "Test"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -295,10 +289,10 @@ func TestUpdateSessionProviderModel(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&createResp)
 	sessionID := createResp.Session.ID
 
-	// Update provider/model
+	// Update instance/model
 	patchBody, _ := json.Marshal(map[string]string{
-		"provider": "groq",
-		"model":    "llama-3.1-70b",
+		"instance_id": "inst_groq1234",
+		"model":       "llama-3.1-70b",
 	})
 	req = httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+sessionID, bytes.NewReader(patchBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -311,17 +305,17 @@ func TestUpdateSessionProviderModel(t *testing.T) {
 
 	var updateResp sessionResponse
 	json.NewDecoder(w.Body).Decode(&updateResp)
-	if updateResp.Session.LLMProvider != "groq" {
-		t.Errorf("provider = %q, want groq", updateResp.Session.LLMProvider)
+	if updateResp.Session.LLMInstanceID != "inst_groq1234" {
+		t.Errorf("instance_id = %q, want inst_groq1234", updateResp.Session.LLMInstanceID)
 	}
 	if updateResp.Session.LLMModel != "llama-3.1-70b" {
 		t.Errorf("model = %q, want llama-3.1-70b", updateResp.Session.LLMModel)
 	}
 
-	// Verify global last_provider/last_model updated
-	lp, _ := api.db.GetConfig("last_provider")
-	if lp != "groq" {
-		t.Errorf("last_provider = %q, want groq", lp)
+	// Verify global last_instance_id/last_model updated
+	li, _ := api.db.GetConfig("last_instance_id")
+	if li != "inst_groq1234" {
+		t.Errorf("last_instance_id = %q, want inst_groq1234", li)
 	}
 	lm, _ := api.db.GetConfig("last_model")
 	if lm != "llama-3.1-70b" {
@@ -333,7 +327,6 @@ func TestUpdateSessionTitle(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 
-	// Create session
 	body, _ := json.Marshal(map[string]string{"title": "Original"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -342,7 +335,6 @@ func TestUpdateSessionTitle(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&createResp)
 	sessionID := createResp.Session.ID
 
-	// Update title
 	patchBody, _ := json.Marshal(map[string]string{
 		"title": "Updated Title",
 	})
@@ -366,7 +358,6 @@ func TestUpdateSessionNoFields(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 
-	// Create session
 	body, _ := json.Marshal(map[string]string{"title": "Test"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -374,7 +365,6 @@ func TestUpdateSessionNoFields(t *testing.T) {
 	var createResp sessionResponse
 	json.NewDecoder(w.Body).Decode(&createResp)
 
-	// Update with no fields
 	patchBody, _ := json.Marshal(map[string]string{})
 	req = httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+createResp.Session.ID, bytes.NewReader(patchBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -391,7 +381,7 @@ func TestUpdateSessionNotFound(t *testing.T) {
 	setupSessionRoutes(api, r)
 
 	patchBody, _ := json.Marshal(map[string]string{
-		"provider": "openai",
+		"instance_id": "inst_openai1",
 	})
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/nonexistent-id", bytes.NewReader(patchBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -403,19 +393,17 @@ func TestUpdateSessionNotFound(t *testing.T) {
 	}
 }
 
-func TestStreamSessionReplyNoProvider(t *testing.T) {
+func TestStreamSessionReplyNoInstance(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 
-	// Create session without provider/model
-	body, _ := json.Marshal(map[string]string{"title": "No Provider"})
+	body, _ := json.Marshal(map[string]string{"title": "No Instance"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	var createResp sessionResponse
 	json.NewDecoder(w.Body).Decode(&createResp)
 
-	// Try to send message with stream=1 — should fail because no provider configured
 	msgBody, _ := json.Marshal(map[string]string{"content": "hello"})
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+createResp.Session.ID+"/messages?stream=1", bytes.NewReader(msgBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -424,7 +412,7 @@ func TestStreamSessionReplyNoProvider(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 (no provider), got %d; body=%s", w.Code, w.Body.String())
+		t.Fatalf("expected 400 (no instance), got %d; body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -432,11 +420,11 @@ func TestStreamSessionReplyNoAPIKey(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 
-	// Create session with provider/model but no API key configured
+	// Create session with instance/model but no actual provider instance with API key
 	body, _ := json.Marshal(map[string]string{
-		"title":    "No Key",
-		"provider": "openai",
-		"model":    "gpt-4o",
+		"title":       "No Key",
+		"instance_id": "inst_notexist",
+		"model":       "gpt-4o",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -444,7 +432,6 @@ func TestStreamSessionReplyNoAPIKey(t *testing.T) {
 	var createResp sessionResponse
 	json.NewDecoder(w.Body).Decode(&createResp)
 
-	// Try to send message with stream=1 — should fail because no API key
 	msgBody, _ := json.Marshal(map[string]string{"content": "hello"})
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+createResp.Session.ID+"/messages?stream=1", bytes.NewReader(msgBody))
 	req.Header.Set("Content-Type", "application/json")

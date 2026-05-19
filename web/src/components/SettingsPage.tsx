@@ -10,7 +10,38 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import type { Settings } from "@/types"
-import { Key, ExternalLink } from "lucide-react"
+import { Key, Plus, Pencil, Trash2, X, ExternalLink } from "lucide-react"
+
+type AddFormState = {
+  mode: false
+} | {
+  mode: "add"
+  catalog_id: string
+  name: string
+  api_key: string
+  base_url: string
+  saving: boolean
+  error: string
+}
+
+type EditFormState = {
+  mode: false
+} | {
+  mode: "edit"
+  id: string
+  name: string
+  catalog_id: string
+  original_catalog_id: string
+  api_key: string
+  base_url: string
+  saving: boolean
+  error: string
+}
+
+type DeleteConfirmState = {
+  id: string
+  name: string
+} | null
 
 export function SettingsPage() {
   const {
@@ -19,20 +50,25 @@ export function SettingsPage() {
     saveSettings,
     providers,
     loadProviders,
-    setProviderKey,
+    instances,
+    loadInstances,
+    createInstance,
+    updateInstance,
+    deleteInstance,
   } = useApp()
 
   const [form, setForm] = useState<Partial<Settings> | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [providerKeyForms, setProviderKeyForms] = useState<
-    Record<string, { apiKey: string; baseURL: string; saving: boolean; saved: boolean }>
-  >({})
+  const [addForm, setAddForm] = useState<AddFormState>({ mode: false })
+  const [editForm, setEditForm] = useState<EditFormState>({ mode: false })
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>(null)
 
   useEffect(() => {
     void loadSettings()
     void loadProviders()
-  }, [loadSettings, loadProviders])
+    void loadInstances()
+  }, [loadSettings, loadProviders, loadInstances])
 
   const mergedForm = useMemo(() => {
     if (form) return form
@@ -57,29 +93,83 @@ export function SettingsPage() {
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     setForm((prev) => ({ ...(prev ?? settings ?? {}), [key]: value }))
 
-  const getKeyForm = (providerId: string) =>
-    providerKeyForms[providerId] ?? { apiKey: "", baseURL: "", saving: false, saved: false }
+  // --- Add form ---
+  const handleStartAdd = () => {
+    setEditForm({ mode: false })
+    setAddForm({
+      mode: "add",
+      catalog_id: providers[0]?.id ?? "",
+      name: providers[0]?.name ?? "",
+      api_key: "",
+      base_url: "",
+      saving: false,
+      error: "",
+    })
+  }
 
-  const setKeyForm = (
-    providerId: string,
-    patch: Partial<{ apiKey: string; baseURL: string; saving: boolean; saved: boolean }>,
-  ) =>
-    setProviderKeyForms((prev) => ({
-      ...prev,
-      [providerId]: { ...getKeyForm(providerId), ...patch },
-    }))
+  const handleAddCatalogChange = (catalogId: string) => {
+    const p = providers.find((pr) => pr.id === catalogId)
+    setAddForm((prev) =>
+      prev.mode === "add"
+        ? { ...prev, catalog_id: catalogId, name: p?.name ?? catalogId }
+        : prev,
+    )
+  }
 
-  const handleSaveProviderKey = async (providerId: string) => {
-    const kf = getKeyForm(providerId)
-    if (!kf.apiKey) return
-    setKeyForm(providerId, { saving: true, saved: false })
-    try {
-      await setProviderKey(providerId, kf.apiKey, kf.baseURL || undefined)
-      setKeyForm(providerId, { saving: false, saved: true, apiKey: "", baseURL: "" })
-      setTimeout(() => setKeyForm(providerId, { saved: false }), 2000)
-    } catch {
-      setKeyForm(providerId, { saving: false })
+  const handleAddSubmit = async () => {
+    if (addForm.mode !== "add") return
+    if (!addForm.catalog_id || !addForm.name.trim()) return
+    setAddForm((prev) => (prev.mode === "add" ? { ...prev, saving: true, error: "" } : prev))
+    const result = await createInstance({
+      name: addForm.name.trim(),
+      catalog_id: addForm.catalog_id,
+      api_key: addForm.api_key,
+      base_url: addForm.base_url || undefined,
+    })
+    if (result) {
+      setAddForm({ mode: false })
+    } else {
+      setAddForm((prev) => (prev.mode === "add" ? { ...prev, saving: false, error: "添加失败" } : prev))
     }
+  }
+
+  // --- Edit form ---
+  const handleStartEdit = (inst: typeof instances[0]) => {
+    setAddForm({ mode: false })
+    setEditForm({
+      mode: "edit",
+      id: inst.id,
+      name: inst.name,
+      catalog_id: inst.catalog_id,
+      original_catalog_id: inst.catalog_id,
+      api_key: "",
+      base_url: inst.base_url,
+      saving: false,
+      error: "",
+    })
+  }
+
+  const handleEditSubmit = async () => {
+    if (editForm.mode !== "edit") return
+    setEditForm((prev) => (prev.mode === "edit" ? { ...prev, saving: true, error: "" } : prev))
+    const result = await updateInstance(editForm.id, {
+      name: editForm.name.trim(),
+      catalog_id: editForm.catalog_id,
+      api_key: editForm.api_key || undefined,
+      base_url: editForm.base_url || undefined,
+    })
+    if (result) {
+      setEditForm({ mode: false })
+    } else {
+      setEditForm((prev) => (prev.mode === "edit" ? { ...prev, saving: false, error: "保存失败" } : prev))
+    }
+  }
+
+  // --- Delete ---
+  const handleDelete = async () => {
+    if (!deleteConfirm) return
+    const ok = await deleteInstance(deleteConfirm.id)
+    if (ok) setDeleteConfirm(null)
   }
 
   return (
@@ -88,68 +178,255 @@ export function SettingsPage() {
       <form onSubmit={handleSubmit} className="max-w-xl space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle>Provider Keys</CardTitle>
-            <CardDescription>
-              Configure API keys per provider. Keys are stored securely on the server.
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Providers</CardTitle>
+                <CardDescription>
+                  管理已添加的 Provider 实例
+                </CardDescription>
+              </div>
+              <Button
+                size="sm"
+                onClick={handleStartAdd}
+                disabled={addForm.mode !== false || editForm.mode !== false}
+              >
+                <Plus className="size-3.5 mr-1" />
+                添加
+              </Button>
+            </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {providers.map((p) => {
-              const keyStatus = settings?.provider_keys?.[p.id]
-              const hasKey = keyStatus?.has_key ?? false
-              const kf = getKeyForm(p.id)
+          <CardContent className="space-y-3">
+            {/* Instance list */}
+            {instances.length === 0 && addForm.mode === false && editForm.mode === false && (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                还没有添加任何 Provider，点击上方「添加」开始
+              </p>
+            )}
+            {instances.map((inst) => {
+              const catalogInfo = providers.find((p) => p.id === inst.catalog_id)
+              const isEditing = editForm.mode === "edit" && editForm.id === inst.id
               return (
-                <div key={p.id} className="space-y-2 border rounded-lg p-3">
-                  <div className="flex items-center gap-2">
-                    <Key className="size-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">{p.name}</span>
-                    {hasKey && (
+                <div key={inst.id} className="space-y-2 border rounded-lg p-3">
+                  {isEditing ? (
+                    /* Edit form */
+                    <>
+                      <div className="space-y-2">
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">Provider 类型</label>
+                          <select
+                            value={editForm.catalog_id}
+                            onChange={(e) => setEditForm((prev) =>
+                              prev.mode === "edit" ? { ...prev, catalog_id: e.target.value } : prev,
+                            )}
+                            className="mt-0.5 w-full h-7 rounded-md border border-input bg-transparent px-2 text-sm"
+                          >
+                            {providers.map((p) => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {editForm.catalog_id !== editForm.original_catalog_id && (
+                          <p className="text-xs text-amber-600">
+                            ⚠ 更改类型后，当前选定的模型将被重置
+                          </p>
+                        )}
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">名称</label>
+                          <Input
+                            value={editForm.name}
+                            onChange={(e) => setEditForm((prev) =>
+                              prev.mode === "edit" ? { ...prev, name: e.target.value } : prev,
+                            )}
+                            className="h-7 text-sm mt-0.5"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">
+                            API Key{inst.api_key_masked ? ` (当前: ${inst.api_key_masked})` : ""}
+                          </label>
+                          <Input
+                            type="password"
+                            placeholder="输入新 key 以更换"
+                            value={editForm.api_key}
+                            onChange={(e) => setEditForm((prev) =>
+                              prev.mode === "edit" ? { ...prev, api_key: e.target.value } : prev,
+                            )}
+                            className="h-7 text-sm mt-0.5"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">Base URL (可选)</label>
+                          <Input
+                            value={editForm.base_url}
+                            onChange={(e) => setEditForm((prev) =>
+                              prev.mode === "edit" ? { ...prev, base_url: e.target.value } : prev,
+                            )}
+                            placeholder={catalogInfo?.api_base ?? ""}
+                            className="h-7 text-sm mt-0.5"
+                          />
+                        </div>
+                        {editForm.error && (
+                          <p className="text-xs text-destructive">{editForm.error}</p>
+                        )}
+                        <div className="flex gap-2 justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setEditForm({ mode: false })}
+                          >
+                            取消
+                          </Button>
+                          <Button
+                            size="sm"
+                            disabled={editForm.saving || !editForm.name.trim()}
+                            onClick={handleEditSubmit}
+                          >
+                            {editForm.saving ? "保存中..." : "保存"}
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    /* Display row */
+                    <div className="flex items-center gap-2">
+                      <Key className="size-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm font-medium truncate">{inst.name}</span>
                       <span className="text-xs text-muted-foreground">
-                        ({keyStatus?.masked})
+                        ({catalogInfo?.name ?? inst.catalog_id})
                       </span>
-                    )}
-                    {!hasKey && (
-                      <span className="text-xs text-amber-600">No key set</span>
-                    )}
-                    {p.doc_url && (
-                      <a
-                        href={p.doc_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-auto text-xs text-primary hover:underline inline-flex items-center gap-0.5"
+                      {inst.api_key_masked && (
+                        <span className="text-xs text-muted-foreground">
+                          {inst.api_key_masked}
+                        </span>
+                      )}
+                      {!inst.api_key_masked && (
+                        <span className="text-xs text-amber-600">未设置 Key</span>
+                      )}
+                      {catalogInfo?.doc_url && (
+                        <a
+                          href={catalogInfo.doc_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-auto text-xs text-primary hover:underline inline-flex items-center gap-0.5 shrink-0"
+                        >
+                          Docs <ExternalLink className="size-3" />
+                        </a>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="size-7 p-0 shrink-0"
+                        onClick={() => handleStartEdit(inst)}
+                        disabled={editForm.mode !== false || addForm.mode !== false}
                       >
-                        Docs <ExternalLink className="size-3" />
-                      </a>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="password"
-                      placeholder={hasKey ? "Enter new key to replace" : "sk-..."}
-                      value={kf.apiKey}
-                      onChange={(e) => setKeyForm(p.id, { apiKey: e.target.value })}
-                      className="flex-1 h-7 text-sm"
-                    />
-                    <Input
-                      placeholder="Custom base URL (optional)"
-                      value={kf.baseURL}
-                      onChange={(e) => setKeyForm(p.id, { baseURL: e.target.value })}
-                      className="flex-1 h-7 text-sm"
-                    />
-                    <Button
-                      size="sm"
-                      disabled={!kf.apiKey || kf.saving}
-                      onClick={() => void handleSaveProviderKey(p.id)}
-                    >
-                      {kf.saving ? "Saving..." : "Save Key"}
-                    </Button>
-                  </div>
-                  {kf.saved && (
-                    <p className="text-xs text-green-600">Key saved</p>
+                        <Pencil className="size-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="size-7 p-0 text-destructive hover:text-destructive shrink-0"
+                        onClick={() => setDeleteConfirm({ id: inst.id, name: inst.name })}
+                        disabled={editForm.mode !== false || addForm.mode !== false}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
                   )}
                 </div>
               )
             })}
+
+            {/* Add form */}
+            {addForm.mode === "add" && (
+              <div className="border rounded-lg p-3 space-y-2 bg-muted/30">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">添加 Provider</span>
+                  <Button size="sm" variant="ghost" className="size-6 p-0" onClick={() => setAddForm({ mode: false })}>
+                    <X className="size-3.5" />
+                  </Button>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Provider 类型</label>
+                  <select
+                    value={addForm.catalog_id}
+                    onChange={(e) => handleAddCatalogChange(e.target.value)}
+                    className="mt-0.5 w-full h-7 rounded-md border border-input bg-transparent px-2 text-sm"
+                  >
+                    <option value="">选择 Provider</option>
+                    {providers.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">名称</label>
+                  <Input
+                    value={addForm.name}
+                    onChange={(e) => setAddForm((prev) =>
+                      prev.mode === "add" ? { ...prev, name: e.target.value } : prev,
+                    )}
+                    placeholder="自定义名称"
+                    className="h-7 text-sm mt-0.5"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">API Key</label>
+                  <Input
+                    type="password"
+                    value={addForm.api_key}
+                    onChange={(e) => setAddForm((prev) =>
+                      prev.mode === "add" ? { ...prev, api_key: e.target.value } : prev,
+                    )}
+                    placeholder="sk-..."
+                    className="h-7 text-sm mt-0.5"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Base URL (可选)</label>
+                  <Input
+                    value={addForm.base_url}
+                    onChange={(e) => setAddForm((prev) =>
+                      prev.mode === "add" ? { ...prev, base_url: e.target.value } : prev,
+                    )}
+                    placeholder="使用默认"
+                    className="h-7 text-sm mt-0.5"
+                  />
+                </div>
+                {addForm.error && (
+                  <p className="text-xs text-destructive">{addForm.error}</p>
+                )}
+                <div className="flex gap-2 justify-end">
+                  <Button size="sm" variant="outline" onClick={() => setAddForm({ mode: false })}>
+                    取消
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={addForm.saving || !addForm.catalog_id || !addForm.name.trim()}
+                    onClick={handleAddSubmit}
+                  >
+                    {addForm.saving ? "添加中..." : "添加"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Delete confirm */}
+            {deleteConfirm && (
+              <div className="border rounded-lg p-3 space-y-2 bg-destructive/5">
+                <p className="text-sm">
+                  确认删除「{deleteConfirm.name}」？此操作不可撤销。
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <Button size="sm" variant="outline" onClick={() => setDeleteConfirm(null)}>
+                    取消
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={handleDelete}>
+                    删除
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {providers.length === 0 && (
               <p className="text-sm text-muted-foreground">
                 Loading providers...

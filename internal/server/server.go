@@ -134,11 +134,18 @@ func (s *Server) Start() error {
 		r.Get("/settings", s.api.GetSettings)
 		r.Put("/settings", s.api.UpdateSettings)
 		r.Put("/settings/last-model", s.api.UpdateLastModel)
-		r.Put("/settings/provider-keys/{id}", s.api.UpdateProviderKey)
 		r.Get("/capabilities", s.api.GetCapabilities)
 
 		r.Get("/providers", s.api.ListProviders)
 		r.Get("/providers/{id}/models", s.api.ListProviderModels)
+
+		r.Route("/provider-instances", func(r chi.Router) {
+			r.Get("/", s.api.ListProviderInstances)
+			r.Post("/", s.api.CreateProviderInstance)
+			r.Get("/{id}", s.api.GetProviderInstance)
+			r.Put("/{id}", s.api.UpdateProviderInstanceHandler)
+			r.Delete("/{id}", s.api.DeleteProviderInstanceHandler)
+		})
 
 		r.Route("/ingest", func(r chi.Router) {
 			r.Route("/sessions", func(r chi.Router) {

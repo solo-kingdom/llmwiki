@@ -50,29 +50,29 @@ func (a *API) CreateIngestSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Title    string `json:"title"`
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
+		Title      string `json:"title"`
+		InstanceID string `json:"instance_id"`
+		Model      string `json:"model"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	// Read provider/model: request overrides, fallback to global defaults
-	provider := req.Provider
+	// Read instance/model: request overrides, fallback to global defaults
+	instanceID := req.InstanceID
 	model := req.Model
-	if provider == "" {
-		provider, _ = a.db.GetConfig("last_provider")
+	if instanceID == "" {
+		instanceID, _ = a.db.GetConfig("last_instance_id")
 	}
 	if model == "" {
 		model, _ = a.db.GetConfig("last_model")
 	}
 
 	session := &sqlite.IngestSession{
-		Title:       strings.TrimSpace(req.Title),
-		Status:      "active",
-		LLMProvider: provider,
-		LLMModel:    model,
+		Title:         strings.TrimSpace(req.Title),
+		Status:        "active",
+		LLMInstanceID: instanceID,
+		LLMModel:      model,
 	}
 	if err := a.db.CreateIngestSession(session); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -165,12 +165,12 @@ func (a *API) AppendIngestSessionMessage(w http.ResponseWriter, r *http.Request)
 }
 
 func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session *sqlite.IngestSession, userContent string) {
-	client, provider, model := a.sessionLLMClient(session)
+	client, instanceID, model := a.sessionLLMClient(session)
 	if client == nil {
-		if provider == "" || model == "" {
-			writeError(w, http.StatusBadRequest, "请先选择 Provider 和 Model")
+		if instanceID == "" || model == "" {
+			writeError(w, http.StatusBadRequest, "请先选择 Provider 实例和 Model")
 		} else {
-			writeError(w, http.StatusBadRequest, "请先配置 "+provider+" 的 API Key")
+			writeError(w, http.StatusBadRequest, "Provider 实例不存在或未配置 API Key")
 		}
 		return
 	}
@@ -324,9 +324,9 @@ func (a *API) UploadIngestSessionAttachment(w http.ResponseWriter, r *http.Reque
 func (a *API) summarizeAttachment(ctx context.Context, filename, relPath string, data []byte) string {
 	extracted := extractAttachmentText(filename, data)
 	// For attachment summarization, use global defaults
-	lastProvider, _ := a.db.GetConfig("last_provider")
+	lastInstanceID, _ := a.db.GetConfig("last_instance_id")
 	lastModel, _ := a.db.GetConfig("last_model")
-	client, _, _ := a.providerLLMClient(lastProvider, lastModel)
+	client, _, _ := a.instanceLLMClient(lastInstanceID, lastModel)
 	if client == nil {
 		if extracted != "" {
 			return fmt.Sprintf("已上传附件 **%s**。\n\n提取内容摘要：\n%s", filename, truncateRunes(extracted, 500))
@@ -485,9 +485,9 @@ func (a *API) UpdateIngestSessionHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
-		Title    string `json:"title"`
+		InstanceID string `json:"instance_id"`
+		Model      string `json:"model"`
+		Title      string `json:"title"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -495,14 +495,14 @@ func (a *API) UpdateIngestSessionHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	updated := false
-	if req.Provider != "" || req.Model != "" {
-		if err := a.db.UpdateIngestSessionLLM(sessionID, req.Provider, req.Model); err != nil {
+	if req.InstanceID != "" || req.Model != "" {
+		if err := a.db.UpdateIngestSessionLLM(sessionID, req.InstanceID, req.Model); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		// Also update last_used globally
-		if req.Provider != "" {
-			_ = a.db.SetConfig("last_provider", req.Provider)
+		if req.InstanceID != "" {
+			_ = a.db.SetConfig("last_instance_id", req.InstanceID)
 		}
 		if req.Model != "" {
 			_ = a.db.SetConfig("last_model", req.Model)

@@ -15,12 +15,12 @@ export function ChatSidebar() {
   const {
     sessions,
     activeSessionId,
-    providers,
+    instances,
     settings,
     createSession,
     switchSession,
     listSessions,
-    loadProviders,
+    loadInstances,
     loadSettings,
   } = useApp()
 
@@ -28,27 +28,22 @@ export function ChatSidebar() {
 
   useEffect(() => {
     void listSessions()
-    void loadProviders()
+    void loadInstances()
     void loadSettings()
-  }, [listSessions, loadProviders, loadSettings])
+  }, [listSessions, loadInstances, loadSettings])
 
   const activeSessions = sessions.filter((s) => s.status === "active")
   const archivedSessions = sessions.filter((s) => s.status === "archived")
 
-  const getProviderName = (providerId: string) => {
-    const p = providers.find((pr) => pr.id === providerId)
-    return p?.name ?? providerId
-  }
-
-  const getProviderHasKey = (providerId: string) => {
-    if (!providerId) return false
-    return settings?.provider_keys?.[providerId]?.has_key ?? false
+  const getInstanceName = (instanceId: string) => {
+    const inst = instances.find((i) => i.id === instanceId)
+    return inst?.name ?? instanceId
   }
 
   const handleNewChat = async () => {
-    const provider = settings?.last_provider
+    const instanceId = settings?.last_instance_id
     const model = settings?.last_model
-    await createSession(provider, model)
+    await createSession(instanceId, model)
   }
 
   if (collapsed) {
@@ -122,17 +117,12 @@ export function ChatSidebar() {
                   {s.title || "Untitled"}
                 </span>
               </div>
-              {(s.llm_provider || s.llm_model) && (
+              {(s.llm_instance_id || s.llm_model) && (
                 <div className="flex items-center gap-1 mt-1 ml-5.5">
                   <span className="text-xs text-muted-foreground truncate">
-                    {getProviderName(s.llm_provider)}
+                    {getInstanceName(s.llm_instance_id)}
                     {s.llm_model ? ` / ${s.llm_model}` : ""}
                   </span>
-                  {!getProviderHasKey(s.llm_provider) && s.llm_provider && (
-                    <span className="text-xs text-amber-500" title="No API key configured">
-                      &#9888;
-                    </span>
-                  )}
                 </div>
               )}
             </button>

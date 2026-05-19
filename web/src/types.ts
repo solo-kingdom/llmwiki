@@ -57,9 +57,18 @@ export interface Provider {
   name: string
   api_base: string
   api_format: string
-  has_key: boolean
   env_key: string
   doc_url: string
+}
+
+export interface ProviderInstance {
+  id: string
+  name: string
+  catalog_id: string
+  api_key_masked: string
+  base_url: string
+  created_at: string
+  updated_at: string
 }
 
 export interface ModelInfo {
@@ -76,23 +85,18 @@ export interface ModelInfo {
   attachment: boolean
 }
 
-export interface ProviderKeyStatus {
-  has_key: boolean
-  masked: string
-}
-
 export interface SessionListItem {
   id: string
   title: string
   status: "active" | "archived"
-  llm_provider: string
+  llm_instance_id: string
   llm_model: string
   created_at: string
   updated_at: string
 }
 
 export interface Settings {
-  last_provider: string
+  last_instance_id: string
   last_model: string
   max_tokens: number
   api_key: string
@@ -101,7 +105,6 @@ export interface Settings {
   chunk_overlap: number
   auto_reindex: boolean
   watch_sources: boolean
-  provider_keys: Record<string, ProviderKeyStatus>
   llm_provider: string
   llm_model: string
 }
@@ -198,7 +201,7 @@ export interface IngestSession {
   title: string
   status: "active" | "archived"
   storage_path: string
-  llm_provider: string
+  llm_instance_id: string
   llm_model: string
   created_at: string
   updated_at: string

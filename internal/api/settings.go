@@ -18,20 +18,14 @@ func maskKey(key string) string {
 
 // settingsResponse is the response payload for GET /settings.
 type settingsResponse struct {
-	LastProvider string                       `json:"last_provider"`
-	LastModel    string                       `json:"last_model"`
-	Temperature  string                       `json:"temperature"`
-	MaxTokens    string                       `json:"max_tokens"`
-	ChunkSize    string                       `json:"chunk_size"`
-	ChunkOverlap string                       `json:"chunk_overlap"`
-	AutoReindex  string                       `json:"auto_reindex"`
-	WatchSources string                       `json:"watch_sources"`
-	ProviderKeys map[string]providerKeyStatus `json:"provider_keys"`
-}
-
-type providerKeyStatus struct {
-	Has    bool   `json:"has_key"`
-	Masked string `json:"masked"`
+	LastInstanceID string `json:"last_instance_id"`
+	LastModel      string `json:"last_model"`
+	Temperature    string `json:"temperature"`
+	MaxTokens      string `json:"max_tokens"`
+	ChunkSize      string `json:"chunk_size"`
+	ChunkOverlap   string `json:"chunk_overlap"`
+	AutoReindex    string `json:"auto_reindex"`
+	WatchSources   string `json:"watch_sources"`
 }
 
 func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
@@ -41,30 +35,15 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pkeys, err := a.db.ListProviderKeys()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	pkMap := make(map[string]providerKeyStatus)
-	for _, pk := range pkeys {
-		pkMap[pk.ProviderID] = providerKeyStatus{
-			Has:    pk.APIKey != "",
-			Masked: maskKey(pk.APIKey),
-		}
-	}
-
 	writeJSON(w, http.StatusOK, settingsResponse{
-		LastProvider: all["last_provider"],
-		LastModel:    all["last_model"],
-		Temperature:  all["temperature"],
-		MaxTokens:    all["max_tokens"],
-		ChunkSize:    all["chunk_size"],
-		ChunkOverlap: all["chunk_overlap"],
-		AutoReindex:  all["auto_reindex"],
-		WatchSources: all["watch_sources"],
-		ProviderKeys: pkMap,
+		LastInstanceID: all["last_instance_id"],
+		LastModel:      all["last_model"],
+		Temperature:    all["temperature"],
+		MaxTokens:      all["max_tokens"],
+		ChunkSize:      all["chunk_size"],
+		ChunkOverlap:   all["chunk_overlap"],
+		AutoReindex:    all["auto_reindex"],
+		WatchSources:   all["watch_sources"],
 	})
 }
 
@@ -96,18 +75,18 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) UpdateLastModel(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
+		InstanceID string `json:"instance_id"`
+		Model      string `json:"model"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Provider == "" || req.Model == "" {
-		writeError(w, http.StatusBadRequest, "provider and model are required")
+	if req.InstanceID == "" || req.Model == "" {
+		writeError(w, http.StatusBadRequest, "instance_id and model are required")
 		return
 	}
-	if err := a.db.SetConfig("last_provider", req.Provider); err != nil {
+	if err := a.db.SetConfig("last_instance_id", req.InstanceID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -116,46 +95,7 @@ func (a *API) UpdateLastModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
-		"last_provider": req.Provider,
-		"last_model":    req.Model,
-	})
-}
-
-func (a *API) UpdateProviderKey(w http.ResponseWriter, r *http.Request) {
-	providerID := getID(r)
-	if providerID == "" {
-		writeError(w, http.StatusBadRequest, "provider_id is required")
-		return
-	}
-
-	var req struct {
-		APIKey  string `json:"api_key"`
-		BaseURL string `json:"base_url"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	if req.APIKey == "" {
-		// Delete the key
-		if err := a.db.DeleteProviderKey(providerID); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-		return
-	}
-
-	if err := a.db.SetProviderKey(providerID, req.APIKey, req.BaseURL); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	key, baseURL, _ := a.db.GetProviderKey(providerID)
-	writeJSON(w, http.StatusOK, map[string]string{
-		"provider_id": providerID,
-		"masked_key":  maskKey(key),
-		"base_url":    baseURL,
+		"last_instance_id": req.InstanceID,
+		"last_model":       req.Model,
 	})
 }

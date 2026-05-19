@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { IngestSessionMessage } from "@/types"
-import { Archive, Loader2, Paperclip, Send, AlertTriangle } from "lucide-react"
+import { Archive, Loader2, Paperclip, Send, Settings } from "lucide-react"
 
 function MessageBubble({ msg }: { msg: IngestSessionMessage }) {
   const isUser = msg.role === "user"
@@ -45,7 +45,7 @@ export function IngestChat() {
     sessionBusy,
     sessionError,
     settings,
-    providers,
+    instances,
     currentModels,
     ensureIngestSession,
     sendSessionMessage,
@@ -53,7 +53,7 @@ export function IngestChat() {
     archiveSession,
     refreshIngestJobs,
     loadCapabilities,
-    loadProviders,
+    loadInstances,
     loadModels,
     updateSessionLLM,
     loadSettings,
@@ -64,7 +64,7 @@ export function IngestChat() {
   const [archiveTitle, setArchiveTitle] = useState("")
   const [archiveResult, setArchiveResult] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [selectedProvider, setSelectedProvider] = useState("")
+  const [selectedInstanceId, setSelectedInstanceId] = useState("")
   const [selectedModel, setSelectedModel] = useState("")
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -73,9 +73,9 @@ export function IngestChat() {
     void ensureIngestSession()
     void loadCapabilities()
     void refreshIngestJobs()
-    void loadProviders()
+    void loadInstances()
     void loadSettings()
-  }, [ensureIngestSession, loadCapabilities, refreshIngestJobs, loadProviders, loadSettings])
+  }, [ensureIngestSession, loadCapabilities, refreshIngestJobs, loadInstances, loadSettings])
 
   useEffect(() => {
     const el = bottomRef.current
@@ -84,34 +84,59 @@ export function IngestChat() {
     }
   }, [sessionMessages])
 
+  // Auto-select instance from settings
   useEffect(() => {
-    if (!selectedProvider && settings?.last_provider) {
-      setSelectedProvider(settings.last_provider)
-      void loadModels(settings.last_provider)
+    if (!selectedInstanceId && settings?.last_instance_id) {
+      setSelectedInstanceId(settings.last_instance_id)
     }
-  }, [settings, selectedProvider, loadModels])
+  }, [settings, selectedInstanceId])
 
+  // Load models when instance changes
+  useEffect(() => {
+    if (selectedInstanceId) {
+      const inst = instances.find((i) => i.id === selectedInstanceId)
+      if (inst) {
+        void loadModels(inst.catalog_id)
+      }
+    }
+  }, [selectedInstanceId, instances, loadModels])
+
+  // Auto-select model from settings
   useEffect(() => {
     if (!selectedModel && settings?.last_model) {
       setSelectedModel(settings.last_model)
     }
   }, [settings, selectedModel])
 
-  const activeProvider = providers.find((p) => p.id === selectedProvider)
-  const providerHaskey = settings?.provider_keys?.[selectedProvider]?.has_key ?? false
-  const isReady = !!sessionId && !!selectedProvider && !!selectedModel && providerHaskey
+  // Detect model invalidation: if current model not in model list, clear selection
+  useEffect(() => {
+    if (selectedModel && currentModels.length > 0) {
+      const exists = currentModels.some((m) => m.model_id === selectedModel)
+      if (!exists) {
+        setSelectedModel("")
+      }
+    }
+  }, [currentModels, selectedModel])
 
-  const handleProviderChange = async (providerId: string) => {
-    setSelectedProvider(providerId)
+  const activeInstance = instances.find((i) => i.id === selectedInstanceId)
+  const isReady = !!sessionId && !!selectedInstanceId && !!selectedModel
+
+  const handleInstanceChange = async (instanceId: string) => {
+    setSelectedInstanceId(instanceId)
     setSelectedModel("")
-    await loadModels(providerId)
+    if (instanceId) {
+      const inst = instances.find((i) => i.id === instanceId)
+      if (inst) {
+        await loadModels(inst.catalog_id)
+      }
+    }
   }
 
   const handleModelChange = async (modelId: string) => {
     setSelectedModel(modelId)
-    if (sessionId && selectedProvider) {
+    if (sessionId && selectedInstanceId) {
       try {
-        await updateSessionLLM(sessionId, selectedProvider, modelId)
+        await updateSessionLLM(sessionId, selectedInstanceId, modelId)
       } catch {
         // non-critical
       }
@@ -155,41 +180,39 @@ export function IngestChat() {
   return (
     <div className="flex flex-1 flex-col min-h-0 max-w-3xl mx-auto w-full">
       <div className="flex items-center gap-2 px-4 py-2 border-b bg-card">
-        <div className="flex items-center gap-1.5">
-          <select
-            value={selectedProvider}
-            onChange={(e) => void handleProviderChange(e.target.value)}
-            className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
-          >
-            <option value="">Provider</option>
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {!settings?.provider_keys?.[p.id]?.has_key ? " ⚠" : ""}
-              </option>
-            ))}
-          </select>
-          {!providerHaskey && selectedProvider && (
-            <AlertTriangle className="size-3.5 text-amber-500" />
-          )}
-        </div>
-        <select
-          value={selectedModel}
-          onChange={(e) => void handleModelChange(e.target.value)}
-          disabled={!selectedProvider || currentModels.length === 0}
-          className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring disabled:opacity-50"
-        >
-          <option value="">Model</option>
-          {currentModels.map((m) => (
-            <option key={m.model_id} value={m.model_id}>
-              {m.name}
-            </option>
-          ))}
-        </select>
-        {activeProvider && !providerHaskey && (
-          <span className="text-xs text-amber-600">
-            Set API key in Settings
-          </span>
+        {instances.length === 0 ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>请先在 Settings 添加 Provider</span>
+            <Settings className="size-3.5" />
+          </div>
+        ) : (
+          <>
+            <select
+              value={selectedInstanceId}
+              onChange={(e) => void handleInstanceChange(e.target.value)}
+              className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
+            >
+              <option value="">选择实例</option>
+              {instances.map((inst) => (
+                <option key={inst.id} value={inst.id}>
+                  {inst.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={selectedModel}
+              onChange={(e) => void handleModelChange(e.target.value)}
+              disabled={!selectedInstanceId || currentModels.length === 0}
+              className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring disabled:opacity-50"
+            >
+              <option value="">Model</option>
+              {currentModels.map((m) => (
+                <option key={m.model_id} value={m.model_id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </>
         )}
       </div>
 
@@ -198,13 +221,13 @@ export function IngestChat() {
           {!isReady && (
             <div className="text-center py-8 text-amber-600 bg-amber-50 dark:bg-amber-950/20 rounded-lg">
               <p className="text-sm">
-                {!selectedProvider
-                  ? "Select a provider to begin"
-                  : !selectedModel
-                    ? "Select a model to begin"
-                    : !providerHaskey
-                      ? `Configure API key for ${activeProvider?.name ?? selectedProvider} in Settings`
-                      : "Setting up session..."}
+                {instances.length === 0
+                  ? "请先在 Settings 添加 Provider"
+                  : !selectedInstanceId
+                    ? "选择一个 Provider 实例"
+                    : !selectedModel
+                      ? "选择一个模型"
+                      : "正在设置会话..."}
               </p>
             </div>
           )}
@@ -270,7 +293,7 @@ export function IngestChat() {
           className="w-full min-h-[72px] max-h-40 resize-y bg-transparent px-2 py-2 text-sm outline-none"
           placeholder={
             !isReady
-              ? "Select a provider and model first..."
+              ? "选择 Provider 和 Model 后开始..."
               : "输入消息…（Shift+Enter 换行）"
           }
           value={input}

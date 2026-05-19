@@ -7,14 +7,14 @@ import (
 )
 
 type IngestSession struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	StoragePath string `json:"storage_path"`
-	LLMProvider string `json:"llm_provider"`
-	LLMModel    string `json:"llm_model"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Status         string `json:"status"`
+	StoragePath    string `json:"storage_path"`
+	LLMInstanceID  string `json:"llm_instance_id"`
+	LLMModel       string `json:"llm_model"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
 }
 
 type IngestSessionMessage struct {
@@ -31,7 +31,7 @@ type IngestSessionMessage struct {
 func scanIngestSession(scanner interface{ Scan(...interface{}) error }, s *IngestSession) error {
 	return scanner.Scan(
 		&s.ID, &s.Title, &s.Status, &s.StoragePath,
-		&s.LLMProvider, &s.LLMModel,
+		&s.LLMInstanceID, &s.LLMModel,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
@@ -51,12 +51,12 @@ func (d *DB) CreateIngestSession(session *IngestSession) error {
 		session.Status = "active"
 	}
 	_, err := d.db.Exec(`
-		INSERT INTO ingest_sessions (title, status, storage_path, llm_provider, llm_model, created_at, updated_at)
+		INSERT INTO ingest_sessions (title, status, storage_path, llm_instance_id, llm_model, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		strings.TrimSpace(session.Title),
 		session.Status,
 		strings.TrimSpace(session.StoragePath),
-		session.LLMProvider,
+		session.LLMInstanceID,
 		session.LLMModel,
 	)
 	if err != nil {
@@ -64,7 +64,7 @@ func (d *DB) CreateIngestSession(session *IngestSession) error {
 	}
 	created, err := d.db.Query(`
 		SELECT COALESCE(id,''), COALESCE(title,''), COALESCE(status,''),
-		       COALESCE(storage_path,''), COALESCE(llm_provider,''), COALESCE(llm_model,''),
+		       COALESCE(storage_path,''), COALESCE(llm_instance_id,''), COALESCE(llm_model,''),
 		       COALESCE(created_at,''), COALESCE(updated_at,'')
 		FROM ingest_sessions WHERE rowid = last_insert_rowid()`)
 	if err != nil {
@@ -83,7 +83,7 @@ func (d *DB) GetIngestSession(id string) (*IngestSession, error) {
 	s := &IngestSession{}
 	err := scanIngestSession(d.db.QueryRow(`
 		SELECT COALESCE(id,''), COALESCE(title,''), COALESCE(status,''),
-		       COALESCE(storage_path,''), COALESCE(llm_provider,''), COALESCE(llm_model,''),
+		       COALESCE(storage_path,''), COALESCE(llm_instance_id,''), COALESCE(llm_model,''),
 		       COALESCE(created_at,''), COALESCE(updated_at,'')
 		FROM ingest_sessions WHERE id = ?`, id), s)
 	if err != nil {
@@ -219,7 +219,7 @@ func (d *DB) CountUserSessionMessages(sessionID string) (int, error) {
 func (d *DB) ListIngestSessions() ([]IngestSession, error) {
 	rows, err := d.db.Query(`
 		SELECT COALESCE(id,''), COALESCE(title,''), COALESCE(status,''),
-		       COALESCE(storage_path,''), COALESCE(llm_provider,''), COALESCE(llm_model,''),
+		       COALESCE(storage_path,''), COALESCE(llm_instance_id,''), COALESCE(llm_model,''),
 		       COALESCE(created_at,''), COALESCE(updated_at,'')
 		FROM ingest_sessions
 		ORDER BY datetime(updated_at) DESC`)
@@ -238,9 +238,9 @@ func (d *DB) ListIngestSessions() ([]IngestSession, error) {
 	return out, rows.Err()
 }
 
-func (d *DB) UpdateIngestSessionLLM(id, provider, model string) error {
+func (d *DB) UpdateIngestSessionLLM(id, instanceID, model string) error {
 	_, err := d.db.Exec(`
-		UPDATE ingest_sessions SET llm_provider = ?, llm_model = ?, updated_at = datetime('now')
-		WHERE id = ?`, provider, model, id)
+		UPDATE ingest_sessions SET llm_instance_id = ?, llm_model = ?, updated_at = datetime('now')
+		WHERE id = ?`, instanceID, model, id)
 	return err
 }

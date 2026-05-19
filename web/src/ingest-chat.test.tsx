@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { AppProvider } from "@/context/AppContext"
 import { IngestChat } from "@/components/IngestChat"
-import * as api from "@/lib/api"
-
 vi.mock("@/lib/api", () => ({
   listDocuments: vi.fn().mockResolvedValue([]),
   listIngestJobs: vi.fn().mockResolvedValue([]),

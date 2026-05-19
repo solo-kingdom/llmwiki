@@ -1,7 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { AppProvider } from "@/context/AppContext"
+import type {
+  IngestJob,
+  UploadIngestResponse,
+  CapabilitiesResponse,
+} from "@/types"
 import * as api from "@/lib/api"
+
+// Helper: create a complete IngestJob with all required fields
+function makeIngestJob(overrides: Partial<IngestJob> = {}): IngestJob {
+  return {
+    id: "job-1",
+    parent_job_id: "",
+    input_type: "text",
+    source_path: "raw/sources/web-ingest/test.md",
+    source_ref: "text",
+    status: "queued",
+    retries: 0,
+    max_retries: 3,
+    error: "",
+    error_code: "",
+    error_message: "",
+    missing_dependency: "",
+    remediation: "",
+    result_summary: "",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  }
+}
 
 // Mock the API module
 vi.mock("@/lib/api", () => ({
@@ -12,15 +40,7 @@ vi.mock("@/lib/api", () => ({
   uploadIngestJobs: vi.fn().mockResolvedValue({ accepted: [], rejected: [] }),
   retryIngestJob: vi.fn().mockResolvedValue({}),
   cancelIngestJob: vi.fn().mockResolvedValue({ status: "cancelled" }),
-  getCapabilities: vi.fn().mockResolvedValue({
-    source_processing: {
-      tiers: {
-        A: { formats: ["md", "txt"], available: true },
-        B: { formats: ["pdf"], available: true },
-        C: { formats: ["docx", "pptx"], available: false, missing: ["libreoffice"] },
-      },
-    },
-  }),
+  getCapabilities: vi.fn().mockResolvedValue({}),
 }))
 
 // Mock IngestHub component for integration testing
@@ -45,11 +65,11 @@ describe("AppContext Ingest Actions", () => {
   })
 
   it("submitConversation calls API and refreshes jobs", async () => {
-    const mockedJobs = [
-      { id: "1", status: "queued", input_type: "conversation", source_path: "test.md" },
-    ]
-    vi.mocked(api.createConversationIngestJob).mockResolvedValueOnce({ job: mockedJobs[0] })
-    vi.mocked(api.listIngestJobs).mockResolvedValueOnce(mockedJobs)
+    const mockJob = makeIngestJob({ input_type: "conversation" })
+    vi.mocked(api.createConversationIngestJob).mockResolvedValueOnce({
+      job: mockJob,
+    })
+    vi.mocked(api.listIngestJobs).mockResolvedValueOnce([mockJob])
 
     const result = await api.createConversationIngestJob({
       content: "hello",
@@ -65,7 +85,7 @@ describe("AppContext Ingest Actions", () => {
 
   it("submitText calls createTextIngestJob", async () => {
     vi.mocked(api.createTextIngestJob).mockResolvedValueOnce({
-      job: { id: "2", status: "queued" },
+      job: makeIngestJob({ id: "2", input_type: "text" }),
     })
 
     await api.createTextIngestJob({
@@ -80,9 +100,22 @@ describe("AppContext Ingest Actions", () => {
   })
 
   it("uploadIngestJobs handles accepted/rejected response", async () => {
-    const uploadResponse = {
-      accepted: [{ filename: "test.md", job_id: "3", status: "queued" }],
-      rejected: [{ filename: "test.exe", error_code: "unsupported_file_type", message: "unsupported" }],
+    const uploadResponse: UploadIngestResponse = {
+      accepted: [
+        {
+          filename: "test.md",
+          job_id: "3",
+          status: "queued",
+          source_path: "raw/sources/web-ingest/test.md",
+        },
+      ],
+      rejected: [
+        {
+          filename: "test.exe",
+          error_code: "unsupported_file_type",
+          message: "unsupported",
+        },
+      ],
     }
     vi.mocked(api.uploadIngestJobs).mockResolvedValueOnce(uploadResponse)
 
@@ -96,7 +129,7 @@ describe("AppContext Ingest Actions", () => {
 
   it("retryIngestJob calls API", async () => {
     vi.mocked(api.retryIngestJob).mockResolvedValueOnce({
-      job: { id: "4", status: "queued", parent_job_id: "1" },
+      job: makeIngestJob({ id: "4", status: "queued", parent_job_id: "1" }),
     })
 
     await api.retryIngestJob("1")
@@ -105,19 +138,46 @@ describe("AppContext Ingest Actions", () => {
   })
 
   it("cancelIngestJob calls API", async () => {
-    vi.mocked(api.cancelIngestJob).mockResolvedValueOnce({ status: "cancelled" })
+    vi.mocked(api.cancelIngestJob).mockResolvedValueOnce({
+      status: "cancelled",
+    })
 
     await api.cancelIngestJob("2")
 
     expect(api.cancelIngestJob).toHaveBeenCalledWith("2")
   })
 
-  it("getCapabilities returns tier information", async () => {
-    const caps = await api.getCapabilities()
+  it("getCapabilities returns capability information", async () => {
+    const caps: CapabilitiesResponse = {
+      file_types: [
+        {
+          extension: ".md",
+          mime_type: "text/markdown",
+          tier: "A",
+          can_extract: true,
+          can_chunk: true,
+        },
+        {
+          extension: ".docx",
+          mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          tier: "C",
+          can_extract: false,
+          can_chunk: false,
+          missing_deps: ["libreoffice"],
+          remediation: "Install LibreOffice",
+        },
+      ],
+      runtime_dependencies: [],
+      access_model: "local",
+    }
+    vi.mocked(api.getCapabilities).mockResolvedValueOnce(caps)
 
-    expect(caps.source_processing.tiers.A.available).toBe(true)
-    expect(caps.source_processing.tiers.C.available).toBe(false)
-    expect(caps.source_processing.tiers.C.missing).toContain("libreoffice")
+    const result = await api.getCapabilities()
+
+    expect(result.file_types).toHaveLength(2)
+    expect(result.file_types[0].tier).toBe("A")
+    expect(result.file_types[1].can_extract).toBe(false)
+    expect(result.file_types[1].missing_deps).toContain("libreoffice")
   })
 })
 
@@ -135,7 +195,6 @@ describe("IngestHub Rendering", () => {
 describe("Job Status Display", () => {
   it("displays job status badges correctly", () => {
     const statuses = ["queued", "running", "succeeded", "failed", "cancelled"]
-    // Verify all statuses are valid display values
     for (const status of statuses) {
       expect(status).toBeTruthy()
       expect(typeof status).toBe("string")
@@ -145,28 +204,26 @@ describe("Job Status Display", () => {
 
 describe("Failure Diagnostics Display", () => {
   it("formats structured error for display", () => {
-    const failedJob = {
-      id: "1",
+    const failedJob = makeIngestJob({
       status: "failed",
       error_code: "llm_auth_failed",
       error_message: "Invalid API key",
       missing_dependency: "OpenAI API key",
       remediation: "check your API key in Settings",
-    }
+    })
 
     expect(failedJob.error_code).toBe("llm_auth_failed")
     expect(failedJob.remediation).toBeTruthy()
   })
 
   it("formats missing dependency error", () => {
-    const failedJob = {
-      id: "2",
+    const failedJob = makeIngestJob({
       status: "failed",
       error_code: "unsupported_format",
       error_message: "Cannot process .docx files",
       missing_dependency: "libreoffice",
       remediation: "Install LibreOffice",
-    }
+    })
 
     expect(failedJob.missing_dependency).toBe("libreoffice")
     expect(failedJob.remediation).toContain("LibreOffice")

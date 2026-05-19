@@ -12,7 +12,7 @@ export interface Document {
   status: string
   page_count: number
   content: string
-  tags: string[]
+  tags: string[] | null
   date: string
   metadata: string
   error_message: string

@@ -107,3 +107,16 @@ After a wiki page is written, the system SHALL report which other pages referenc
 #### Scenario: Impact surface reported
 - **WHEN** client updates a wiki page that has 4 backlinks
 - **THEN** the response SHALL include: "**4 page(s) reference this document** — consider updating:" followed by the list of referencing pages
+
+<!-- v1-architecture-constraints codified: single-process-service-topology (shared dependency context already present), mcp-rpc-access-model (RPC-first, no-stdio-dep, compatibility statement already present) -->
+
+<!-- Added by change: v1-architecture-constraints -->
+
+## Constraints from v1-architecture-constraints
+
+### Requirement: Operational mode declaration
+The service SHALL expose current runtime mode metadata indicating single-process topology and enabled subcomponents.
+
+#### Scenario: Runtime mode introspection
+- **WHEN** a client calls service health/capabilities endpoint
+- **THEN** the response includes flags for enabled API, Web UI, MCP RPC, and watcher/index workers

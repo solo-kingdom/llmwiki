@@ -39,3 +39,5 @@ web/dist/*
 llmwiki
 *.test
 coverage.*
+
+lwiki

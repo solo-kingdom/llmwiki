@@ -1,7 +1,7 @@
-.PHONY: build run test lint clean build-web build-go build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64
+.PHONY: build run test lint clean install build-web build-go build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64
 
 # Binary name
-BINARY := llmwiki
+BINARY := lwiki
 
 # Go parameters
 GOCMD := go
@@ -75,6 +75,17 @@ clean:
 	rm -f coverage.out coverage.html
 	rm -rf $(WEB_BUILD)
 
+## Install
+PREFIX ?= $(HOME)/.local
+
+install: build
+	install -d $(PREFIX)/bin
+	install -m 755 $(BINARY) $(PREFIX)/bin/$(BINARY)
+
+## Uninstall
+uninstall:
+	rm -f $(PREFIX)/bin/$(BINARY)
+
 ## Help
 help:
 	@echo "Available targets:"
@@ -88,3 +99,5 @@ help:
 	@echo "  lint        - Run golangci-lint"
 	@echo "  tidy        - Tidy Go modules"
 	@echo "  clean       - Remove build artifacts"
+	@echo "  install     - Install binary to PREFIX/bin (default: ~/.local/bin)"
+	@echo "  uninstall   - Remove installed binary"

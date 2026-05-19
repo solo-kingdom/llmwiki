@@ -84,3 +84,5 @@ Reference edge writes SHALL be idempotent using uniqueness constraints on `(sour
 #### Scenario: Retry-safe edge write
 - **WHEN** the same reference update is retried after transient failure
 - **THEN** duplicate graph edges are not created and final graph state remains correct
+
+<!-- v1-architecture-constraints codified: reference-graph-transactional-update (transactional update, idempotent upsert, failure rollback already present) -->

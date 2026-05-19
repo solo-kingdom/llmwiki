@@ -85,3 +85,5 @@ The system SHALL allow concurrent ingestion of different source files, while ser
 #### Scenario: Lock contention observability
 - **WHEN** lock wait time exceeds configured threshold
 - **THEN** the system emits structured diagnostics containing page path and wait duration
+
+<!-- v1-architecture-constraints codified: ingest-concurrency-control (cross-file concurrent ingest, same-page serialization, lock scope visibility already present) -->

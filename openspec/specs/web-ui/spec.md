@@ -47,3 +47,16 @@ The system SHALL provide a settings page as the primary interface for configurin
 #### Scenario: Environment variable fallback visible
 - **WHEN** a provider has no UI-stored API key and is using an environment variable
 - **THEN** the Settings page SHALL indicate that an environment variable is active for that provider
+
+<!-- v1-architecture-constraints codified: llm-config-management (UI-first config, env var fallback, configurable timeout already present) -->
+
+<!-- Added by change: v1-architecture-constraints -->
+
+## Constraints from v1-architecture-constraints
+
+### Requirement: Provider extensibility
+Configuration model SHALL be extensible to support additional model providers without redesigning startup command flags.
+
+#### Scenario: New provider addition
+- **WHEN** a new provider type is introduced
+- **THEN** its configuration is represented in the UI-centric config model without adding mandatory serve command flags

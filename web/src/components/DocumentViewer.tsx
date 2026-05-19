@@ -74,7 +74,7 @@ export function DocumentViewer() {
               </>
             )}
           </div>
-          {currentDoc.tags.length > 0 && (
+          {currentDoc.tags && currentDoc.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-2">
               {currentDoc.tags.map((tag) => (
                 <Badge key={tag} variant="secondary" className="text-xs">

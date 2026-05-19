@@ -55,3 +55,5 @@ LLM configuration (provider, API key, model, base URL, timeouts) SHALL be manage
 #### Scenario: Provider extensibility
 - **WHEN** a new provider type is introduced
 - **THEN** its configuration is represented in the UI-centric config model without adding mandatory serve command flags
+
+<!-- v1-architecture-constraints codified: llm-config-management (UI-first config, env var fallback, configurable timeout, provider extensibility already present) -->

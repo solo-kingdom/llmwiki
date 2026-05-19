@@ -15,8 +15,11 @@ import type {
   IngestJob,
   UploadIngestResponse,
   CapabilitiesResponse,
+  IngestSessionMessage,
 } from "@/types"
 import * as api from "@/lib/api"
+
+const SESSION_STORAGE_KEY = "llmwiki.ingest.sessionId"
 
 interface AppState {
   documents: DocumentListItem[]
@@ -29,6 +32,11 @@ interface AppState {
   searchQuery: string
   ingestJobs: IngestJob[]
   capabilities: CapabilitiesResponse | null
+
+  sessionId: string | null
+  sessionMessages: IngestSessionMessage[]
+  sessionBusy: boolean
+  sessionError: string | null
 
   selectDocument: (id: string) => void
   search: (q: string) => void
@@ -52,6 +60,11 @@ interface AppState {
   retryIngest: (id: string) => Promise<void>
   cancelIngest: (id: string) => Promise<void>
   loadCapabilities: () => Promise<void>
+
+  ensureIngestSession: () => Promise<void>
+  sendSessionMessage: (content: string) => Promise<void>
+  uploadSessionAttachment: (file: File) => Promise<void>
+  archiveSession: (title?: string) => Promise<string>
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -71,6 +84,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const [sessionId, setSessionId] = useState<string | null>(() =>
+    typeof localStorage !== "undefined"
+      ? localStorage.getItem(SESSION_STORAGE_KEY)
+      : null,
+  )
+  const [sessionMessages, setSessionMessages] = useState<
+    IngestSessionMessage[]
+  >([])
+  const [sessionBusy, setSessionBusy] = useState(false)
+  const [sessionError, setSessionError] = useState<string | null>(null)
 
   const refreshDocuments = useCallback(() => {
     api
@@ -126,13 +150,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch((e) => setError(e.message))
   }, [])
 
-  const saveSettings = useCallback(
-    async (s: Partial<Settings>) => {
-      const updated = await api.updateSettings(s)
-      setSettings(updated)
-    },
-    [],
-  )
+  const saveSettings = useCallback(async (s: Partial<Settings>) => {
+    const updated = await api.updateSettings(s)
+    setSettings(updated)
+  }, [])
 
   const refreshIngestJobs = useCallback(async () => {
     try {
@@ -198,6 +219,142 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const loadSessionMessages = useCallback(async (id: string) => {
+    const { messages } = await api.listIngestSessionMessages(id)
+    setSessionMessages(messages)
+  }, [])
+
+  const ensureIngestSession = useCallback(async () => {
+    if (sessionId) {
+      try {
+        const { session } = await api.getIngestSession(sessionId)
+        if (session.status === "active") {
+          await loadSessionMessages(sessionId)
+          return
+        }
+      } catch {
+        // create new below
+      }
+    }
+    const { session } = await api.createIngestSession()
+    setSessionId(session.id)
+    localStorage.setItem(SESSION_STORAGE_KEY, session.id)
+    setSessionMessages([])
+  }, [sessionId, loadSessionMessages])
+
+  const sendSessionMessage = useCallback(
+    async (content: string) => {
+      if (!sessionId) return
+      setSessionBusy(true)
+      setSessionError(null)
+      const tempUser: IngestSessionMessage = {
+        id: `temp-user-${Date.now()}`,
+        session_id: sessionId,
+        role: "user",
+        content,
+        message_type: "text",
+        attachment_id: "",
+        stream_status: "complete",
+        created_at: new Date().toISOString(),
+      }
+      const tempAssistant: IngestSessionMessage = {
+        id: `temp-assistant-${Date.now()}`,
+        session_id: sessionId,
+        role: "assistant",
+        content: "",
+        message_type: "text",
+        attachment_id: "",
+        stream_status: "streaming",
+        created_at: new Date().toISOString(),
+      }
+      setSessionMessages((prev) => [...prev, tempUser, tempAssistant])
+      try {
+        await api.streamIngestSessionMessage(sessionId, content, (event, data) => {
+          if (event === "user_message" && data && typeof data === "object") {
+            const um = data as IngestSessionMessage
+            setSessionMessages((prev) =>
+              prev.map((m) => (m.id === tempUser.id ? um : m)),
+            )
+          }
+          if (event === "token" && data && typeof data === "object") {
+            const tok = (data as { content?: string }).content ?? ""
+            setSessionMessages((prev) =>
+              prev.map((m) =>
+                m.id === tempAssistant.id
+                  ? { ...m, content: m.content + tok }
+                  : m,
+              ),
+            )
+          }
+          if (event === "done" && data && typeof data === "object") {
+            const am = data as IngestSessionMessage
+            setSessionMessages((prev) =>
+              prev.map((m) => (m.id === tempAssistant.id ? am : m)),
+            )
+          }
+          if (event === "error") {
+            setSessionMessages((prev) =>
+              prev.map((m) =>
+                m.id === tempAssistant.id
+                  ? { ...m, stream_status: "failed", content: "回复失败" }
+                  : m,
+              ),
+            )
+          }
+        })
+        await loadSessionMessages(sessionId)
+      } catch (e) {
+        setSessionError((e as Error).message)
+        await loadSessionMessages(sessionId)
+      } finally {
+        setSessionBusy(false)
+      }
+    },
+    [sessionId, loadSessionMessages],
+  )
+
+  const uploadSessionAttachment = useCallback(
+    async (file: File) => {
+      if (!sessionId) return
+      setSessionBusy(true)
+      setSessionError(null)
+      try {
+        const { message } = await api.uploadIngestSessionAttachment(
+          sessionId,
+          file,
+        )
+        setSessionMessages((prev) => [...prev, message])
+      } catch (e) {
+        setSessionError((e as Error).message)
+      } finally {
+        setSessionBusy(false)
+      }
+    },
+    [sessionId],
+  )
+
+  const archiveSession = useCallback(
+    async (title?: string) => {
+      if (!sessionId) throw new Error("no session")
+      setSessionBusy(true)
+      setSessionError(null)
+      try {
+        const res = await api.archiveIngestSession(sessionId, title)
+        const { session } = await api.createIngestSession()
+        setSessionId(session.id)
+        localStorage.setItem(SESSION_STORAGE_KEY, session.id)
+        setSessionMessages([])
+        return res.job_id
+      } catch (e) {
+        setSessionError((e as Error).message)
+        throw e
+      } finally {
+        setSessionBusy(false)
+      }
+    },
+    [sessionId],
+  )
+
   return (
     <AppContext.Provider
       value={{
@@ -211,6 +368,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         capabilities,
         loading,
         error,
+        sessionId,
+        sessionMessages,
+        sessionBusy,
+        sessionError,
         selectDocument,
         search,
         clearSearch,
@@ -224,6 +385,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         retryIngest,
         cancelIngest,
         loadCapabilities,
+        ensureIngestSession,
+        sendSessionMessage,
+        uploadSessionAttachment,
+        archiveSession,
       }}
     >
       {children}

@@ -9,6 +9,9 @@ import type {
   IngestJobResponse,
   UploadIngestResponse,
   CapabilitiesResponse,
+  IngestSession,
+  IngestSessionMessage,
+  ArchiveSessionResponse,
 } from "@/types"
 
 const BASE = ""
@@ -141,4 +144,121 @@ export function cancelIngestJob(id: string): Promise<{ status: string; message?:
 
 export function getCapabilities(): Promise<CapabilitiesResponse> {
   return request<CapabilitiesResponse>("/api/v1/capabilities")
+}
+
+export function createIngestSession(title?: string): Promise<{ session: IngestSession }> {
+  return request<{ session: IngestSession }>("/api/v1/ingest/sessions", {
+    method: "POST",
+    body: JSON.stringify({ title: title ?? "" }),
+  })
+}
+
+export function getIngestSession(id: string): Promise<{ session: IngestSession }> {
+  return request<{ session: IngestSession }>(
+    `/api/v1/ingest/sessions/${encodeURIComponent(id)}`,
+  )
+}
+
+export function listIngestSessionMessages(
+  sessionId: string,
+): Promise<{ messages: IngestSessionMessage[] }> {
+  return request<{ messages: IngestSessionMessage[] }>(
+    `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/messages`,
+  )
+}
+
+export function appendIngestSessionMessage(
+  sessionId: string,
+  content: string,
+): Promise<{ message: IngestSessionMessage }> {
+  return request<{ message: IngestSessionMessage }>(
+    `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    },
+  )
+}
+
+export type SessionStreamHandler = (
+  event: string,
+  data: unknown,
+) => void
+
+export async function streamIngestSessionMessage(
+  sessionId: string,
+  content: string,
+  onEvent: SessionStreamHandler,
+): Promise<void> {
+  const res = await fetch(
+    `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/messages?stream=1`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify({ content }),
+    },
+  )
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(body.error || res.statusText)
+  }
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error("no response body")
+  const decoder = new TextDecoder()
+  let buffer = ""
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split("\n\n")
+    buffer = parts.pop() ?? ""
+    for (const part of parts) {
+      const lines = part.split("\n")
+      let event = "message"
+      let data = ""
+      for (const line of lines) {
+        if (line.startsWith("event:")) event = line.slice(6).trim()
+        if (line.startsWith("data:")) data = line.slice(5).trim()
+      }
+      if (data) {
+        try {
+          onEvent(event, JSON.parse(data))
+        } catch {
+          onEvent(event, data)
+        }
+      }
+    }
+  }
+}
+
+export function uploadIngestSessionAttachment(
+  sessionId: string,
+  file: File,
+): Promise<{
+  attachment_id: string
+  path: string
+  message: IngestSessionMessage
+}> {
+  const form = new FormData()
+  form.append("file", file)
+  return request(`/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/attachments`, {
+    method: "POST",
+    body: form,
+  })
+}
+
+export function archiveIngestSession(
+  sessionId: string,
+  title?: string,
+): Promise<ArchiveSessionResponse> {
+  return request<ArchiveSessionResponse>(
+    `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/archive`,
+    {
+      method: "POST",
+      body: JSON.stringify({ title: title ?? "" }),
+    },
+  )
 }

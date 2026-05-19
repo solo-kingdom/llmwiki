@@ -171,3 +171,28 @@ CREATE INDEX IF NOT EXISTS idx_refs_source ON document_references(source_documen
 CREATE INDEX IF NOT EXISTS idx_refs_target ON document_references(target_document_id);
 CREATE INDEX IF NOT EXISTS idx_ingest_jobs_status ON ingest_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_ingest_jobs_created_at ON ingest_jobs(created_at);
+
+CREATE TABLE IF NOT EXISTS ingest_sessions (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    title TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+    storage_path TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS ingest_session_messages (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    session_id TEXT NOT NULL REFERENCES ingest_sessions(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    content TEXT NOT NULL DEFAULT '',
+    message_type TEXT NOT NULL DEFAULT 'text' CHECK (message_type IN ('text', 'attachment_summary')),
+    attachment_id TEXT NOT NULL DEFAULT '',
+    stream_status TEXT NOT NULL DEFAULT 'complete' CHECK (
+        stream_status IN ('streaming', 'complete', 'incomplete', 'failed')
+    ),
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingest_session_messages_session
+    ON ingest_session_messages(session_id, datetime(created_at));

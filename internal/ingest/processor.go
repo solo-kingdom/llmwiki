@@ -82,17 +82,7 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		return fmt.Errorf("no queued jobs")
 	}
 
-	// Read source content from disk
-	sourcePath := filepath.Join(p.workspace, job.SourcePath)
-	content, err := os.ReadFile(sourcePath)
-	if err != nil {
-		return p.failJob(job.ID, "source_read_failed",
-			fmt.Sprintf("failed to read source file: %v", err),
-			"", "ensure the source file exists on disk and is readable")
-	}
-
-	// Build normalized source from persisted content
-	normalized, err := NormalizeUpload(filepath.Base(sourcePath), content, job.SourceRef)
+	normalized, err := NormalizeJobSource(p.workspace, job.InputType, job.SourcePath, job.SourceRef)
 	if err != nil {
 		return p.failJob(job.ID, "normalize_failed",
 			fmt.Sprintf("normalization failed: %v", err), "", "")
@@ -188,16 +178,14 @@ func (p *JobProcessor) ClaimNextQueuedJob(ctx context.Context) (*sqlite.IngestJo
 
 // RunPipelineForJob runs the pipeline for an already-claimed job (for test use).
 func (p *JobProcessor) RunPipelineForJob(ctx context.Context, job *sqlite.IngestJob) error {
-	sourcePath := filepath.Join(p.workspace, job.SourcePath)
-	content, err := os.ReadFile(sourcePath)
-	if err != nil {
+	if _, err := os.Stat(filepath.Join(p.workspace, job.SourcePath)); err != nil {
 		_ = p.failJob(job.ID, "source_read_failed",
 			fmt.Sprintf("failed to read source file: %v", err),
 			"", "ensure the source file exists on disk and is readable")
 		return err
 	}
 
-	normalized, err := NormalizeUpload(filepath.Base(sourcePath), content, job.SourceRef)
+	normalized, err := NormalizeJobSource(p.workspace, job.InputType, job.SourcePath, job.SourceRef)
 	if err != nil {
 		_ = p.failJob(job.ID, "normalize_failed", err.Error(), "", "")
 		return err

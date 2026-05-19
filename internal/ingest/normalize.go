@@ -14,9 +14,10 @@ const WebIngestBaseDir = "raw/sources/web-ingest"
 type InputKind string
 
 const (
-	InputKindConversation InputKind = "conversation"
-	InputKindText         InputKind = "text"
-	InputKindUpload       InputKind = "upload"
+	InputKindConversation   InputKind = "conversation"
+	InputKindText           InputKind = "text"
+	InputKindUpload         InputKind = "upload"
+	InputKindSessionArchive InputKind = "session_archive"
 )
 
 type NormalizedSource struct {

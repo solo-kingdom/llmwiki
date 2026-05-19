@@ -88,6 +88,8 @@ func (a *API) createQueuedIngestJob(inputType, sourcePath, sourceRef string) (*s
 	return job, nil
 }
 
+// CreateConversationIngestJob is the legacy one-shot ingest path (paste → job).
+// Web UI primary flow uses ingest sessions + Archive; this endpoint remains for scripts/MCP compatibility.
 func (a *API) CreateConversationIngestJob(w http.ResponseWriter, r *http.Request) {
 	if !a.requireWorkspaceForIngest(w) {
 		return

@@ -3,7 +3,7 @@ import { AppProvider, useApp } from "@/context/AppContext"
 import { Sidebar } from "@/components/Sidebar"
 import { DocumentViewer } from "@/components/DocumentViewer"
 import { SettingsPage } from "@/components/SettingsPage"
-import { IngestHub } from "@/components/IngestHub"
+import { IngestChat } from "@/components/IngestChat"
 import { JobsPage } from "@/components/JobsPage"
 import { WarningPopover } from "@/components/WarningPopover"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -30,7 +30,7 @@ function AppLayout() {
         <h1 className="text-base font-bold mr-4">LLMWiki</h1>
         <TabsList className="overflow-x-auto">
           <div className="flex items-center gap-1">
-            <TabsTrigger value="ingest">Ingest Hub</TabsTrigger>
+            <TabsTrigger value="ingest">Ingest</TabsTrigger>
             <WarningPopover missingDeps={missingDeps} />
           </div>
           <TabsTrigger value="jobs">Jobs</TabsTrigger>
@@ -39,7 +39,7 @@ function AppLayout() {
         </TabsList>
       </header>
       <TabsContent value="ingest" className="flex flex-1 min-h-0">
-        <IngestHub />
+        <IngestChat />
       </TabsContent>
       <TabsContent value="jobs" className="flex flex-1 min-h-0">
         <JobsPage />

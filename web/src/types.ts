@@ -150,3 +150,29 @@ export interface CapabilitiesResponse {
   runtime_dependencies: RuntimeDependency[]
   access_model: string
 }
+
+export interface IngestSession {
+  id: string
+  title: string
+  status: "active" | "archived"
+  storage_path: string
+  created_at: string
+  updated_at: string
+}
+
+export interface IngestSessionMessage {
+  id: string
+  session_id: string
+  role: "user" | "assistant" | "system"
+  content: string
+  message_type: "text" | "attachment_summary"
+  attachment_id: string
+  stream_status: "streaming" | "complete" | "incomplete" | "failed"
+  created_at: string
+}
+
+export interface ArchiveSessionResponse {
+  job_id: string
+  source_path: string
+  session_id: string
+}

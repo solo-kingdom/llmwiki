@@ -139,6 +139,14 @@ func (s *Server) Start() error {
 		r.Get("/capabilities", s.api.GetCapabilities)
 
 		r.Route("/ingest", func(r chi.Router) {
+			r.Route("/sessions", func(r chi.Router) {
+				r.Post("/", s.api.CreateIngestSession)
+				r.Get("/{id}", s.api.GetIngestSession)
+				r.Get("/{id}/messages", s.api.ListIngestSessionMessages)
+				r.Post("/{id}/messages", s.api.AppendIngestSessionMessage)
+				r.Post("/{id}/attachments", s.api.UploadIngestSessionAttachment)
+				r.Post("/{id}/archive", s.api.ArchiveIngestSession)
+			})
 			r.Route("/jobs", func(r chi.Router) {
 				r.Get("/", s.api.ListIngestJobs)
 				r.Get("/{id}", s.api.GetIngestJob)

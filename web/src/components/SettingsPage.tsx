@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import type { Settings } from "@/types"
+import { PageContainer } from "@/components/PageContainer"
 import { Key, Plus, Pencil, Trash2, X, ExternalLink } from "lucide-react"
 
 type AddFormState = {
@@ -173,9 +174,9 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="flex-1 overflow-auto p-6">
-      <h1 className="text-xl font-semibold mb-6">Settings</h1>
-      <form onSubmit={handleSubmit} className="max-w-xl space-y-6">
+    <PageContainer>
+      <h1 className="mb-6 text-xl font-semibold">Settings</h1>
+      <form onSubmit={handleSubmit} className="space-y-6">
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -524,6 +525,6 @@ export function SettingsPage() {
           )}
         </div>
       </form>
-    </div>
+    </PageContainer>
   )
 }

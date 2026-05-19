@@ -5,8 +5,18 @@ import { useApp } from "@/context/AppContext"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { ModelSelectDialog } from "@/components/ModelSelectDialog"
+import { SessionControls } from "@/components/SessionControls"
 import type { IngestSessionMessage } from "@/types"
-import { Archive, Loader2, Paperclip, Send, Settings } from "lucide-react"
+import {
+  Archive,
+  Bot,
+  Cpu,
+  Loader2,
+  Paperclip,
+  Send,
+  SlidersHorizontal,
+} from "lucide-react"
 
 function MessageBubble({ msg }: { msg: IngestSessionMessage }) {
   const isUser = msg.role === "user"
@@ -31,7 +41,7 @@ function MessageBubble({ msg }: { msg: IngestSessionMessage }) {
           </div>
         )}
         {msg.stream_status === "failed" && (
-          <p className="text-xs text-destructive mt-1">回复失败</p>
+          <p className="mt-1 text-xs text-destructive">回复失败</p>
         )}
       </div>
     </div>
@@ -47,6 +57,8 @@ export function IngestChat() {
     settings,
     instances,
     currentModels,
+    activeSessionId,
+    sessions,
     ensureIngestSession,
     sendSessionMessage,
     uploadSessionAttachment,
@@ -57,6 +69,7 @@ export function IngestChat() {
     loadModels,
     updateSessionLLM,
     loadSettings,
+    listSessions,
   } = useApp()
 
   const [input, setInput] = useState("")
@@ -64,6 +77,7 @@ export function IngestChat() {
   const [archiveTitle, setArchiveTitle] = useState("")
   const [archiveResult, setArchiveResult] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [modelDialogOpen, setModelDialogOpen] = useState(false)
   const [selectedInstanceId, setSelectedInstanceId] = useState("")
   const [selectedModel, setSelectedModel] = useState("")
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -78,7 +92,15 @@ export function IngestChat() {
     void refreshIngestJobs()
     void loadInstances()
     void loadSettings()
-  }, [ensureIngestSession, loadCapabilities, refreshIngestJobs, loadInstances, loadSettings])
+    void listSessions()
+  }, [
+    ensureIngestSession,
+    loadCapabilities,
+    refreshIngestJobs,
+    loadInstances,
+    loadSettings,
+    listSessions,
+  ])
 
   useEffect(() => {
     const el = bottomRef.current
@@ -87,58 +109,55 @@ export function IngestChat() {
     }
   }, [sessionMessages])
 
-  // Auto-select instance from settings
   useEffect(() => {
     if (!selectedInstanceId && settings?.last_instance_id) {
       setSelectedInstanceId(settings.last_instance_id)
     }
   }, [settings, selectedInstanceId])
 
-  // Load models when instance changes
+  useEffect(() => {
+    const active = sessions.find(
+      (s) => s.id === (activeSessionId ?? sessionId),
+    )
+    if (active?.llm_instance_id) {
+      setSelectedInstanceId(active.llm_instance_id)
+    }
+    if (active?.llm_model) {
+      setSelectedModel(active.llm_model)
+    }
+  }, [activeSessionId, sessionId, sessions])
+
   useEffect(() => {
     if (selectedInstanceId) {
       const inst = instances.find((i) => i.id === selectedInstanceId)
-      if (inst) {
-        void loadModels(inst.catalog_id)
-      }
+      if (inst) void loadModels(inst.catalog_id)
     }
   }, [selectedInstanceId, instances, loadModels])
 
-  // Auto-select model from settings
   useEffect(() => {
     if (!selectedModel && settings?.last_model) {
       setSelectedModel(settings.last_model)
     }
   }, [settings, selectedModel])
 
-  // Detect model invalidation: if current model not in model list, clear selection
   useEffect(() => {
     if (selectedModel && currentModels.length > 0) {
       const exists = currentModels.some((m) => m.model_id === selectedModel)
-      if (!exists) {
-        setSelectedModel("")
-      }
+      if (!exists) setSelectedModel("")
     }
   }, [currentModels, selectedModel])
 
   const isReady = !!sessionId && !!selectedInstanceId && !!selectedModel
 
-  const handleInstanceChange = async (instanceId: string) => {
-    setSelectedInstanceId(instanceId)
-    setSelectedModel("")
-    if (instanceId) {
-      const inst = instances.find((i) => i.id === instanceId)
-      if (inst) {
-        await loadModels(inst.catalog_id)
-      }
-    }
-  }
+  const selectedInstance = instances.find((i) => i.id === selectedInstanceId)
+  const selectedModelInfo = currentModels.find((m) => m.model_id === selectedModel)
 
-  const handleModelChange = async (modelId: string) => {
+  const handleModelConfirm = async (instanceId: string, modelId: string) => {
+    setSelectedInstanceId(instanceId)
     setSelectedModel(modelId)
-    if (sessionId && selectedInstanceId) {
+    if (sessionId) {
       try {
-        await updateSessionLLM(sessionId, selectedInstanceId, modelId)
+        await updateSessionLLM(sessionId, instanceId, modelId)
       } catch {
         // non-critical
       }
@@ -180,62 +199,27 @@ export function IngestChat() {
   const inputDisabled = sessionBusy || !sessionId || !isReady
 
   return (
-    <div className="flex flex-1 flex-col min-h-0 max-w-3xl mx-auto w-full">
-      <div className="flex items-center gap-2 px-4 py-2 border-b bg-card">
-        {instances.length === 0 ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>请先在 Settings 添加 Provider</span>
-            <Settings className="size-3.5" />
-          </div>
-        ) : (
-          <>
-            <select
-              value={selectedInstanceId}
-              onChange={(e) => void handleInstanceChange(e.target.value)}
-              className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
-            >
-              <option value="">选择实例</option>
-              {instances.map((inst) => (
-                <option key={inst.id} value={inst.id}>
-                  {inst.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={selectedModel}
-              onChange={(e) => void handleModelChange(e.target.value)}
-              disabled={!selectedInstanceId || currentModels.length === 0}
-              className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring disabled:opacity-50"
-            >
-              <option value="">Model</option>
-              {currentModels.map((m) => (
-                <option key={m.model_id} value={m.model_id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </>
-        )}
+    <div className="mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-2 border-b bg-card px-4 py-2">
+        <SessionControls />
       </div>
 
       <ScrollArea className="flex-1 px-4 py-4">
         <div className="space-y-4 pb-4">
           {!isReady && (
-            <div className="text-center py-8 text-amber-600 bg-amber-50 dark:bg-amber-950/20 rounded-lg">
+            <div className="rounded-lg bg-amber-50 py-8 text-center text-amber-600 dark:bg-amber-950/20">
               <p className="text-sm">
                 {instances.length === 0
                   ? "请先在 Settings 添加 Provider"
-                  : !selectedInstanceId
-                    ? "选择一个 Provider 实例"
-                    : !selectedModel
-                      ? "选择一个模型"
-                      : "正在设置会话..."}
+                  : !selectedInstanceId || !selectedModel
+                    ? "请点击下方「模型」选择 Provider 和 Model"
+                    : "正在设置会话..."}
               </p>
             </div>
           )}
           {sessionMessages.length === 0 && isReady && (
-            <div className="text-center py-16 text-muted-foreground">
-              <p className="text-lg mb-2">开始一个话题</p>
+            <div className="py-16 text-center text-muted-foreground">
+              <p className="mb-2 text-lg">开始一个话题</p>
               <p className="text-sm">
                 与助手多轮对话探索清楚后，点击「归档」写入 wiki
               </p>
@@ -258,18 +242,26 @@ export function IngestChat() {
       )}
 
       {archiveOpen && (
-        <div className="mx-4 mb-2 p-4 border rounded-lg bg-card space-y-3">
+        <div className="mx-4 mb-2 space-y-3 rounded-lg border bg-card p-4">
           <p className="text-sm font-medium">确认归档</p>
           <Input
             placeholder="会话标题（可选）"
             value={archiveTitle}
             onChange={(e) => setArchiveTitle(e.target.value)}
           />
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={() => setArchiveOpen(false)}>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setArchiveOpen(false)}
+            >
               取消
             </Button>
-            <Button size="sm" disabled={sessionBusy} onClick={() => void handleArchive()}>
+            <Button
+              size="sm"
+              disabled={sessionBusy}
+              onClick={() => void handleArchive()}
+            >
               确认归档
             </Button>
           </div>
@@ -291,8 +283,24 @@ export function IngestChat() {
           if (e.dataTransfer.files.length) void handleFiles(e.dataTransfer.files)
         }}
       >
+        {(selectedInstance || selectedModel) && (
+          <div className="mb-1 flex flex-wrap items-center gap-2 px-2 pt-1 text-xs text-muted-foreground">
+            {selectedInstance && (
+              <span className="inline-flex items-center gap-1">
+                <Bot className="size-3" />
+                {selectedInstance.name}
+              </span>
+            )}
+            {selectedModel && (
+              <span className="inline-flex items-center gap-1">
+                <Cpu className="size-3" />
+                {selectedModelInfo?.name ?? selectedModel}
+              </span>
+            )}
+          </div>
+        )}
         <textarea
-          className="w-full min-h-[72px] max-h-40 resize-y bg-transparent px-2 py-2 text-sm outline-none"
+          className="max-h-40 min-h-[72px] w-full resize-y bg-transparent px-2 py-2 text-sm outline-none"
           placeholder={
             !isReady
               ? "选择 Provider 和 Model 后开始..."
@@ -324,6 +332,15 @@ export function IngestChat() {
           />
           <Button
             size="sm"
+            variant="outline"
+            onClick={() => setModelDialogOpen(true)}
+            title="选择模型"
+          >
+            <SlidersHorizontal className="size-3.5" />
+            模型
+          </Button>
+          <Button
+            size="sm"
             variant="secondary"
             disabled={inputDisabled || !input.trim()}
             onClick={() => void handleSend()}
@@ -347,6 +364,17 @@ export function IngestChat() {
           </Button>
         </div>
       </div>
+
+      <ModelSelectDialog
+        open={modelDialogOpen}
+        onOpenChange={setModelDialogOpen}
+        instances={instances}
+        models={currentModels}
+        selectedInstanceId={selectedInstanceId}
+        selectedModel={selectedModel}
+        onLoadModels={(catalogId) => void loadModels(catalogId)}
+        onConfirm={(instanceId, modelId) => void handleModelConfirm(instanceId, modelId)}
+      />
     </div>
   )
 }

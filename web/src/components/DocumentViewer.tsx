@@ -1,4 +1,4 @@
-import { useCallback } from "react"
+import { useCallback, useEffect, type ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import rehypeHighlight from "rehype-highlight"
@@ -6,10 +6,55 @@ import { useApp } from "@/context/AppContext"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { extractHeadings, slugifyHeading } from "@/lib/markdown"
+import type { OutlineItem } from "@/types"
 import "highlight.js/styles/github.css"
 
-export function DocumentViewer() {
+function headingId(children: ReactNode): string {
+  const text =
+    typeof children === "string"
+      ? children
+      : Array.isArray(children)
+        ? children.map((c) => (typeof c === "string" ? c : "")).join("")
+        : String(children ?? "")
+  return slugifyHeading(text)
+}
+
+function makeHeading(Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
+  return function Heading({ children }: { children?: ReactNode }) {
+    const id = headingId(children)
+    return (
+      <Tag id={id} className="scroll-mt-20">
+        {children}
+      </Tag>
+    )
+  }
+}
+
+const markdownComponents = {
+  h1: makeHeading("h1"),
+  h2: makeHeading("h2"),
+  h3: makeHeading("h3"),
+  h4: makeHeading("h4"),
+  h5: makeHeading("h5"),
+  h6: makeHeading("h6"),
+}
+
+interface DocumentViewerProps {
+  onOutlineChange?: (items: OutlineItem[]) => void
+}
+
+export function DocumentViewer({ onOutlineChange }: DocumentViewerProps) {
   const { currentDoc, currentDocId, loading, error, selectDocument } = useApp()
+
+  useEffect(() => {
+    if (!onOutlineChange) return
+    if (currentDoc?.content) {
+      onOutlineChange(extractHeadings(currentDoc.content))
+    } else {
+      onOutlineChange([])
+    }
+  }, [currentDoc?.content, onOutlineChange])
 
   const handleWikilink = useCallback(
     (href: string) => {
@@ -47,13 +92,13 @@ export function DocumentViewer() {
   }
 
   return (
-    <div className="flex flex-1 flex-col min-w-0">
+    <div className="flex min-w-0 flex-1 flex-col">
       <div className="border-b px-6 py-3">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold truncate">
+          <h1 className="truncate text-lg font-semibold">
             {currentDoc.title || currentDoc.filename}
           </h1>
-          <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
             <span>{currentDoc.path || "/"}</span>
             <Separator orientation="vertical" className="h-3" />
             <span>{currentDoc.file_type}</span>
@@ -71,7 +116,7 @@ export function DocumentViewer() {
             )}
           </div>
           {currentDoc.tags && currentDoc.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-2">
+            <div className="mt-2 flex flex-wrap gap-1">
               {currentDoc.tags.map((tag) => (
                 <Badge key={tag} variant="secondary" className="text-xs">
                   {tag}
@@ -100,6 +145,7 @@ export function DocumentViewer() {
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeHighlight]}
+              components={markdownComponents}
             >
               {currentDoc.content}
             </ReactMarkdown>

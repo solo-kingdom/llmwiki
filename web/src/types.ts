@@ -223,3 +223,9 @@ export interface ArchiveSessionResponse {
   source_path: string
   session_id: string
 }
+
+export interface OutlineItem {
+  level: number
+  text: string
+  slug: string
+}

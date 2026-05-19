@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
-import { AppProvider } from "@/context/AppContext"
-import { IngestChat } from "@/components/IngestChat"
+import { render, screen, fireEvent, within } from "@testing-library/react"
+import App from "@/App"
 
 vi.mock("@/lib/api", () => ({
   listDocuments: vi.fn().mockResolvedValue([]),
@@ -31,7 +30,7 @@ vi.mock("@/lib/api", () => ({
       id: "sess-1",
       title: "",
       status: "active",
-      storage_path: "raw/sources/web-ingest/sessions/sess-1",
+      storage_path: "",
       llm_instance_id: "",
       llm_model: "",
       created_at: "",
@@ -51,7 +50,7 @@ vi.mock("@/lib/api", () => ({
     },
   }),
   listIngestSessionMessages: vi.fn().mockResolvedValue({ messages: [] }),
-  streamIngestSessionMessage: vi.fn().mockResolvedValue(undefined),
+  streamIngestSessionMessage: vi.fn(),
   uploadIngestSessionAttachment: vi.fn(),
   archiveIngestSession: vi.fn(),
   createConversationIngestJob: vi.fn(),
@@ -60,23 +59,27 @@ vi.mock("@/lib/api", () => ({
   listProviders: vi.fn().mockResolvedValue([]),
 }))
 
-describe("IngestChat", () => {
+describe("App navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
   })
 
-  it("shows provider guard when no provider is configured and archive disabled", async () => {
-    render(
-      <AppProvider>
-        <IngestChat />
-      </AppProvider>,
+  it("defaults to ingest and uses button navigation", async () => {
+    render(<App />)
+    expect(await screen.findByRole("button", { name: "Ingest" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "模型" })).toBeInTheDocument()
+
+    fireEvent.click(
+      within(screen.getByRole("navigation")).getByRole("button", {
+        name: "Settings",
+      }),
     )
     expect(
-      await screen.findByText(/请先在 Settings 添加 Provider/),
+      await screen.findByRole("heading", { name: "Settings" }),
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /模型/ })).toBeInTheDocument()
-    const archiveBtn = screen.getByRole("button", { name: /归档/ })
-    expect(archiveBtn).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Jobs" }))
+    expect(await screen.findByText("暂无摄入任务")).toBeInTheDocument()
   })
 })

@@ -1,16 +1,46 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, type ReactNode } from "react"
 import { AppProvider, useApp } from "@/context/AppContext"
-import { Sidebar } from "@/components/Sidebar"
-import { DocumentViewer } from "@/components/DocumentViewer"
 import { SettingsPage } from "@/components/SettingsPage"
 import { IngestChat } from "@/components/IngestChat"
-import { ChatSidebar } from "@/components/ChatSidebar"
 import { JobsPage } from "@/components/JobsPage"
+import { WikiPage } from "@/components/WikiPage"
 import { WarningPopover } from "@/components/WarningPopover"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { cn } from "@/lib/utils"
 import "./App.css"
 
 type View = "ingest" | "jobs" | "wiki" | "settings"
+
+const NAV_ITEMS: { id: View; label: string }[] = [
+  { id: "ingest", label: "Ingest" },
+  { id: "jobs", label: "Jobs" },
+  { id: "wiki", label: "Wiki" },
+  { id: "settings", label: "Settings" },
+]
+
+function NavButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+        active
+          ? "bg-background text-foreground shadow-sm"
+          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  )
+}
 
 function AppLayout() {
   const [view, setView] = useState<View>("ingest")
@@ -22,40 +52,51 @@ function AppLayout() {
   }, [capabilities])
 
   return (
-    <Tabs
-      value={view}
-      onValueChange={(v) => setView(v as View)}
-      className="flex h-screen flex-col"
-    >
-      <header className="flex justify-center pt-3 px-4">
-        <div className="inline-flex items-center gap-4 rounded-xl shadow-sm bg-header-bg px-5 py-2.5">
+    <div className="flex h-screen flex-col">
+      <header className="flex justify-center px-4 pt-3">
+        <div className="inline-flex items-center gap-4 rounded-xl bg-header-bg px-5 py-2.5 shadow-sm">
           <h1 className="text-base font-bold">LLMWiki</h1>
-          <TabsList className="overflow-x-auto">
-            <div className="flex items-center gap-1">
-              <TabsTrigger value="ingest">Ingest</TabsTrigger>
-              <WarningPopover missingDeps={missingDeps} />
-            </div>
-            <TabsTrigger value="jobs">Jobs</TabsTrigger>
-            <TabsTrigger value="wiki">Wiki</TabsTrigger>
-            <TabsTrigger value="settings">Settings</TabsTrigger>
-          </TabsList>
+          <nav className="flex items-center gap-1">
+            {NAV_ITEMS.map((item) =>
+              item.id === "ingest" ? (
+                <div key={item.id} className="flex items-center gap-1">
+                  <NavButton
+                    active={view === item.id}
+                    onClick={() => setView(item.id)}
+                  >
+                    {item.label}
+                  </NavButton>
+                  <WarningPopover missingDeps={missingDeps} />
+                </div>
+              ) : (
+                <NavButton
+                  key={item.id}
+                  active={view === item.id}
+                  onClick={() => setView(item.id)}
+                >
+                  {item.label}
+                </NavButton>
+              ),
+            )}
+          </nav>
         </div>
       </header>
-      <TabsContent value="ingest" className="flex flex-1 min-h-0">
-        <ChatSidebar />
-        <IngestChat />
-      </TabsContent>
-      <TabsContent value="jobs" className="flex flex-1 min-h-0">
-        <JobsPage />
-      </TabsContent>
-      <TabsContent value="wiki" className="flex flex-1 min-h-0">
-        <Sidebar />
-        <DocumentViewer />
-      </TabsContent>
-      <TabsContent value="settings" className="flex flex-1 min-h-0">
-        <SettingsPage />
-      </TabsContent>
-    </Tabs>
+
+      <main className="flex min-h-0 flex-1 flex-col">
+        {view === "ingest" && (
+          <div className="flex min-h-0 flex-1">
+            <IngestChat />
+          </div>
+        )}
+        {view === "jobs" && <JobsPage />}
+        {view === "wiki" && (
+          <div className="relative flex min-h-0 flex-1">
+            <WikiPage />
+          </div>
+        )}
+        {view === "settings" && <SettingsPage />}
+      </main>
+    </div>
   )
 }
 

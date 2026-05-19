@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { AppProvider } from "@/context/AppContext"
-import { ChatSidebar } from "@/components/ChatSidebar"
+import { SessionControls } from "@/components/SessionControls"
 import type {
   Provider,
   SessionListItem,
@@ -151,7 +151,7 @@ function setupDefaultMocks() {
   })
 }
 
-describe("ChatSidebar Integration", () => {
+describe("SessionControls Integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
@@ -168,7 +168,7 @@ describe("ChatSidebar Integration", () => {
 
     render(
       <AppProvider>
-        <ChatSidebar />
+        <SessionControls />
       </AppProvider>,
     )
 
@@ -177,7 +177,7 @@ describe("ChatSidebar Integration", () => {
       expect(mockListIngestSessions).toHaveBeenCalled()
     })
 
-    // Session titles should appear
+    fireEvent.click(screen.getByRole("button", { name: /切换/ }))
     expect(await screen.findByText("Chat 1")).toBeInTheDocument()
     expect(screen.getByText("Chat 2")).toBeInTheDocument()
   })
@@ -191,15 +191,15 @@ describe("ChatSidebar Integration", () => {
 
     render(
       <AppProvider>
-        <ChatSidebar />
+        <SessionControls />
       </AppProvider>,
     )
 
     await waitFor(() => {
-      expect(mockListProviders).toHaveBeenCalled()
+      expect(mockListIngestSessions).toHaveBeenCalled()
     })
 
-    // Provider name should be shown (it's in the format "OpenAI / gpt-4o")
+    fireEvent.click(screen.getByRole("button", { name: /切换/ }))
     const providerElements = await screen.findAllByText(/OpenAI/)
     expect(providerElements.length).toBeGreaterThanOrEqual(1)
   })
@@ -207,11 +207,11 @@ describe("ChatSidebar Integration", () => {
   it("creates new session on button click", async () => {
     render(
       <AppProvider>
-        <ChatSidebar />
+        <SessionControls />
       </AppProvider>,
     )
 
-    const newBtn = await screen.findByRole("button", { name: /New chat/i })
+    const newBtn = await screen.findByRole("button", { name: /新建/ })
     fireEvent.click(newBtn)
 
     await waitFor(() => {
@@ -229,10 +229,11 @@ describe("ChatSidebar Integration", () => {
 
     render(
       <AppProvider>
-        <ChatSidebar />
+        <SessionControls />
       </AppProvider>,
     )
 
+    fireEvent.click(screen.getByRole("button", { name: /切换/ }))
     const firstChat = await screen.findByText("First Chat")
     fireEvent.click(firstChat)
 
@@ -250,15 +251,15 @@ describe("Provider/Model Selection Integration", () => {
     setupDefaultMocks()
   })
 
-  it("loads provider list on mount", async () => {
+  it("loads provider instances on mount", async () => {
     render(
       <AppProvider>
-        <ChatSidebar />
+        <SessionControls />
       </AppProvider>,
     )
 
     await waitFor(() => {
-      expect(mockListProviders).toHaveBeenCalled()
+      expect(mockListProviderInstances).toHaveBeenCalled()
     })
   })
 
@@ -288,19 +289,16 @@ describe("Input Guard Logic", () => {
 
     render(
       <AppProvider>
-        <ChatSidebar />
+        <SessionControls />
       </AppProvider>,
     )
 
     await waitFor(() => {
-      expect(mockListProviders).toHaveBeenCalled()
+      expect(mockListProviderInstances).toHaveBeenCalled()
     })
 
-    // Verify provider data structure
-    const providers = await mockListProviders.mock.results[0].value
-    expect(providers).toHaveLength(2)
-    expect(providers[0].id).toBe("openai")
-    expect(providers[1].id).toBe("anthropic")
+    const result = await mockListProviderInstances.mock.results[0].value
+    expect(result.instances).toHaveLength(0)
   })
 })
 

@@ -27,6 +27,14 @@ go.work.sum
 # env file
 .env
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# .llmwiki runtime directory
+.llmwiki/
+
+# Web frontend
+web/node_modules/
+web/dist/
+
+# Build output
+llmwiki
+*.test
+coverage.*

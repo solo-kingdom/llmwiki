@@ -1,0 +1,20 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Go 1.24+, modernc.org/sqlite, chi (HTTP router), cobra (CLI), fsnotify
+  Frontend: React 19 + TypeScript + Vite + Tailwind CSS
+  Architecture: Single Go binary with embedded React SPA, SQLite for indexing
+  Key principles:
+    - Filesystem is source of truth, SQLite is derived performance index
+    - Wiki pages stored as markdown with YAML frontmatter
+    - Three entry points: MCP (for LLM agents), HTTP/Web UI (for humans), CLI (for both)
+    - All user data survives SQLite deletion (reindex rebuildable)
+  Conventions:
+    - Go package layout: cmd/llmwiki (entry), internal/{server,api,mcp,store,engine,watcher,llm,ingest}
+    - Use Go standard library where possible; prefer modernc.org/sqlite over CGO-dependent mattn/go-sqlite3
+    - HTTP handlers in internal/api/handler/, middleware in internal/api/middleware/
+    - Store layer in internal/store/sqlite/ with clean interfaces
+    - MCP JSON-RPC 2.0 over stdio, tools in internal/mcp/tools/
+    - Tests alongside source files using _test.go convention
+  Domain: LLM Wiki — personal knowledge workspaces maintained by LLMs
+  Based on: Karpathy's LLM Wiki pattern (https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)

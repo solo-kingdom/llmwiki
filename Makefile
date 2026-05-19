@@ -1,0 +1,77 @@
+.PHONY: build run test lint clean build-web build-go
+
+# Binary name
+BINARY := llmwiki
+
+# Go parameters
+GOCMD := go
+GOBUILD := $(GOCMD) build
+GOTEST := $(GOCMD) test
+GOLINT := golangci-lint
+GOMOD := $(GOCMD) mod
+
+# Version info (injected via ldflags)
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+LDFLAGS := -s -w \
+	-X main.Version=$(VERSION) \
+	-X main.Commit=$(COMMIT) \
+	-X main.BuildDate=$(BUILD_DATE)
+
+# Web frontend
+WEB_DIR := web
+WEB_BUILD := $(WEB_DIR)/dist
+
+## Build targets
+build: build-web build-go
+
+build-go:
+	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/llmwiki/
+
+build-web:
+	cd $(WEB_DIR) && npm run build
+
+## Run targets
+run: build
+	./$(BINARY) serve
+
+dev:
+	$(GOCMD) run ./cmd/llmwiki/ serve
+
+## Test targets
+test:
+	$(GOTEST) -race -count=1 ./...
+
+test-cover:
+	$(GOTEST) -race -count=1 -coverprofile=coverage.out ./...
+	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+
+## Lint
+lint:
+	$(GOLINT) run ./...
+
+## Dependency management
+tidy:
+	$(GOMOD) tidy
+
+## Clean
+clean:
+	rm -f $(BINARY)
+	rm -f coverage.out coverage.html
+	rm -rf $(WEB_BUILD)
+
+## Help
+help:
+	@echo "Available targets:"
+	@echo "  build       - Build web frontend + Go binary"
+	@echo "  build-go    - Build Go binary only"
+	@echo "  build-web   - Build web frontend only"
+	@echo "  run         - Build and start server"
+	@echo "  dev         - Run with go run (no web build)"
+	@echo "  test        - Run all tests with race detector"
+	@echo "  test-cover  - Run tests with coverage report"
+	@echo "  lint        - Run golangci-lint"
+	@echo "  tidy        - Tidy Go modules"
+	@echo "  clean       - Remove build artifacts"

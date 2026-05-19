@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/Sidebar"
 import { DocumentViewer } from "@/components/DocumentViewer"
 import { SettingsPage } from "@/components/SettingsPage"
 import { IngestChat } from "@/components/IngestChat"
+import { ChatSidebar } from "@/components/ChatSidebar"
 import { JobsPage } from "@/components/JobsPage"
 import { WarningPopover } from "@/components/WarningPopover"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -39,6 +40,7 @@ function AppLayout() {
         </TabsList>
       </header>
       <TabsContent value="ingest" className="flex flex-1 min-h-0">
+        <ChatSidebar />
         <IngestChat />
       </TabsContent>
       <TabsContent value="jobs" className="flex flex-1 min-h-0">

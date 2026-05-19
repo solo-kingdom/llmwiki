@@ -32,7 +32,7 @@ func setupTestAPI(t *testing.T) (*API, *chi.Mux) {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	api := New(db, nil)
+	api := New(db)
 	api.SetWorkspace(dir)
 	r := chi.NewRouter()
 
@@ -444,7 +444,7 @@ func TestIngestRequiresWorkspace(t *testing.T) {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	api := New(db, nil)
+	api := New(db)
 	r := chi.NewRouter()
 	r.Post("/api/v1/ingest/jobs/text", api.CreateTextIngestJob)
 

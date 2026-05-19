@@ -177,6 +177,8 @@ CREATE TABLE IF NOT EXISTS ingest_sessions (
     title TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
     storage_path TEXT NOT NULL DEFAULT '',
+    llm_provider TEXT NOT NULL DEFAULT '',
+    llm_model TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -196,3 +198,47 @@ CREATE TABLE IF NOT EXISTS ingest_session_messages (
 
 CREATE INDEX IF NOT EXISTS idx_ingest_session_messages_session
     ON ingest_session_messages(session_id, datetime(created_at));
+
+-- Application configuration key-value store
+CREATE TABLE IF NOT EXISTS app_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '',
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Per-provider API keys and optional base URL overrides
+CREATE TABLE IF NOT EXISTS provider_keys (
+    provider_id TEXT PRIMARY KEY,
+    api_key TEXT NOT NULL DEFAULT '',
+    base_url TEXT NOT NULL DEFAULT '',
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Cached provider metadata from models.dev (or built-in snapshot)
+CREATE TABLE IF NOT EXISTS provider_info_cache (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    api_base TEXT NOT NULL DEFAULT '',
+    api_format TEXT NOT NULL DEFAULT 'openai' CHECK (api_format IN ('openai', 'anthropic', 'ollama')),
+    env_key TEXT NOT NULL DEFAULT '',
+    doc_url TEXT NOT NULL DEFAULT ''
+);
+
+-- Cached model metadata from models.dev (or built-in snapshot)
+CREATE TABLE IF NOT EXISTS provider_models_cache (
+    provider_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    family TEXT NOT NULL DEFAULT '',
+    context_limit INTEGER NOT NULL DEFAULT 0,
+    output_limit INTEGER NOT NULL DEFAULT 0,
+    cost_input REAL NOT NULL DEFAULT 0,
+    cost_output REAL NOT NULL DEFAULT 0,
+    reasoning INTEGER NOT NULL DEFAULT 0,
+    tool_call INTEGER NOT NULL DEFAULT 0,
+    attachment INTEGER NOT NULL DEFAULT 0,
+    modalities TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (provider_id, model_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_models_provider ON provider_models_cache(provider_id);

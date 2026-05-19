@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { IngestSessionMessage } from "@/types"
-import { Archive, Loader2, Paperclip, Send } from "lucide-react"
+import { Archive, Loader2, Paperclip, Send, AlertTriangle } from "lucide-react"
 
 function MessageBubble({ msg }: { msg: IngestSessionMessage }) {
   const isUser = msg.role === "user"
@@ -44,12 +44,19 @@ export function IngestChat() {
     sessionMessages,
     sessionBusy,
     sessionError,
+    settings,
+    providers,
+    currentModels,
     ensureIngestSession,
     sendSessionMessage,
     uploadSessionAttachment,
     archiveSession,
     refreshIngestJobs,
     loadCapabilities,
+    loadProviders,
+    loadModels,
+    updateSessionLLM,
+    loadSettings,
   } = useApp()
 
   const [input, setInput] = useState("")
@@ -57,6 +64,8 @@ export function IngestChat() {
   const [archiveTitle, setArchiveTitle] = useState("")
   const [archiveResult, setArchiveResult] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [selectedProvider, setSelectedProvider] = useState("")
+  const [selectedModel, setSelectedModel] = useState("")
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -64,7 +73,9 @@ export function IngestChat() {
     void ensureIngestSession()
     void loadCapabilities()
     void refreshIngestJobs()
-  }, [ensureIngestSession, loadCapabilities, refreshIngestJobs])
+    void loadProviders()
+    void loadSettings()
+  }, [ensureIngestSession, loadCapabilities, refreshIngestJobs, loadProviders, loadSettings])
 
   useEffect(() => {
     const el = bottomRef.current
@@ -73,11 +84,45 @@ export function IngestChat() {
     }
   }, [sessionMessages])
 
+  useEffect(() => {
+    if (!selectedProvider && settings?.last_provider) {
+      setSelectedProvider(settings.last_provider)
+      void loadModels(settings.last_provider)
+    }
+  }, [settings, selectedProvider, loadModels])
+
+  useEffect(() => {
+    if (!selectedModel && settings?.last_model) {
+      setSelectedModel(settings.last_model)
+    }
+  }, [settings, selectedModel])
+
+  const activeProvider = providers.find((p) => p.id === selectedProvider)
+  const providerHaskey = settings?.provider_keys?.[selectedProvider]?.has_key ?? false
+  const isReady = !!sessionId && !!selectedProvider && !!selectedModel && providerHaskey
+
+  const handleProviderChange = async (providerId: string) => {
+    setSelectedProvider(providerId)
+    setSelectedModel("")
+    await loadModels(providerId)
+  }
+
+  const handleModelChange = async (modelId: string) => {
+    setSelectedModel(modelId)
+    if (sessionId && selectedProvider) {
+      try {
+        await updateSessionLLM(sessionId, selectedProvider, modelId)
+      } catch {
+        // non-critical
+      }
+    }
+  }
+
   const hasUserMessage = sessionMessages.some((m) => m.role === "user")
 
   const handleSend = async () => {
     const text = input.trim()
-    if (!text || sessionBusy) return
+    if (!text || sessionBusy || !isReady) return
     setInput("")
     await sendSessionMessage(text)
   }
@@ -105,11 +150,65 @@ export function IngestChat() {
     await refreshIngestJobs()
   }
 
+  const inputDisabled = sessionBusy || !sessionId || !isReady
+
   return (
     <div className="flex flex-1 flex-col min-h-0 max-w-3xl mx-auto w-full">
+      <div className="flex items-center gap-2 px-4 py-2 border-b bg-card">
+        <div className="flex items-center gap-1.5">
+          <select
+            value={selectedProvider}
+            onChange={(e) => void handleProviderChange(e.target.value)}
+            className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
+          >
+            <option value="">Provider</option>
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {!settings?.provider_keys?.[p.id]?.has_key ? " ⚠" : ""}
+              </option>
+            ))}
+          </select>
+          {!providerHaskey && selectedProvider && (
+            <AlertTriangle className="size-3.5 text-amber-500" />
+          )}
+        </div>
+        <select
+          value={selectedModel}
+          onChange={(e) => void handleModelChange(e.target.value)}
+          disabled={!selectedProvider || currentModels.length === 0}
+          className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring disabled:opacity-50"
+        >
+          <option value="">Model</option>
+          {currentModels.map((m) => (
+            <option key={m.model_id} value={m.model_id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+        {activeProvider && !providerHaskey && (
+          <span className="text-xs text-amber-600">
+            Set API key in Settings
+          </span>
+        )}
+      </div>
+
       <ScrollArea className="flex-1 px-4 py-4">
         <div className="space-y-4 pb-4">
-          {sessionMessages.length === 0 && (
+          {!isReady && (
+            <div className="text-center py-8 text-amber-600 bg-amber-50 dark:bg-amber-950/20 rounded-lg">
+              <p className="text-sm">
+                {!selectedProvider
+                  ? "Select a provider to begin"
+                  : !selectedModel
+                    ? "Select a model to begin"
+                    : !providerHaskey
+                      ? `Configure API key for ${activeProvider?.name ?? selectedProvider} in Settings`
+                      : "Setting up session..."}
+              </p>
+            </div>
+          )}
+          {sessionMessages.length === 0 && isReady && (
             <div className="text-center py-16 text-muted-foreground">
               <p className="text-lg mb-2">开始一个话题</p>
               <p className="text-sm">
@@ -169,17 +268,21 @@ export function IngestChat() {
       >
         <textarea
           className="w-full min-h-[72px] max-h-40 resize-y bg-transparent px-2 py-2 text-sm outline-none"
-          placeholder="输入消息…（Shift+Enter 换行）"
+          placeholder={
+            !isReady
+              ? "Select a provider and model first..."
+              : "输入消息…（Shift+Enter 换行）"
+          }
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={sessionBusy || !sessionId}
+          disabled={inputDisabled}
         />
         <div className="flex items-center gap-2 pt-1">
           <Button
             size="sm"
             variant="outline"
-            disabled={sessionBusy || !sessionId}
+            disabled={inputDisabled}
             onClick={() => fileRef.current?.click()}
           >
             <Paperclip className="size-3.5" />
@@ -197,7 +300,7 @@ export function IngestChat() {
           <Button
             size="sm"
             variant="secondary"
-            disabled={sessionBusy || !input.trim() || !sessionId}
+            disabled={inputDisabled || !input.trim()}
             onClick={() => void handleSend()}
           >
             {sessionBusy ? (

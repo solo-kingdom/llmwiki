@@ -34,7 +34,6 @@ type Config struct {
 	NoWatch   bool
 	Workspace string
 	DB        *sqlite.DB
-	ConfigMgr *llm.ConfigManager
 	LockMgr   *ingest.PageLockManager
 }
 
@@ -51,15 +50,10 @@ type Server struct {
 
 // New creates a new Server with shared dependency context.
 func New(cfg Config) *Server {
-	var configMgr *llm.ConfigManager
-	if cfg.ConfigMgr != nil {
-		configMgr = cfg.ConfigMgr
-	}
-
 	srv := &Server{
 		config: cfg,
 		db:     cfg.DB,
-		api:    api.New(cfg.DB, configMgr),
+		api:    api.New(cfg.DB),
 	}
 	if cfg.Workspace != "" {
 		srv.api.SetWorkspace(cfg.Workspace)
@@ -82,6 +76,9 @@ func (s *Server) SetWatcher(w *watcher.Watcher) {
 
 // Start begins listening and serving. Blocks until Shutdown is called.
 func (s *Server) Start() error {
+	// Start provider/model data sync from models.dev in background
+	s.startProviderSync()
+
 	r := chi.NewRouter()
 
 	// Middleware
@@ -136,12 +133,19 @@ func (s *Server) Start() error {
 
 		r.Get("/settings", s.api.GetSettings)
 		r.Put("/settings", s.api.UpdateSettings)
+		r.Put("/settings/last-model", s.api.UpdateLastModel)
+		r.Put("/settings/provider-keys/{id}", s.api.UpdateProviderKey)
 		r.Get("/capabilities", s.api.GetCapabilities)
+
+		r.Get("/providers", s.api.ListProviders)
+		r.Get("/providers/{id}/models", s.api.ListProviderModels)
 
 		r.Route("/ingest", func(r chi.Router) {
 			r.Route("/sessions", func(r chi.Router) {
+				r.Get("/", s.api.ListIngestSessionsHandler)
 				r.Post("/", s.api.CreateIngestSession)
 				r.Get("/{id}", s.api.GetIngestSession)
+				r.Patch("/{id}", s.api.UpdateIngestSessionHandler)
 				r.Get("/{id}/messages", s.api.ListIngestSessionMessages)
 				r.Post("/{id}/messages", s.api.AppendIngestSessionMessage)
 				r.Post("/{id}/attachments", s.api.UploadIngestSessionAttachment)
@@ -282,4 +286,56 @@ func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
+}
+
+// startProviderSync loads the built-in snapshot, then kicks off background
+// sync from models.dev. Runs as goroutines — does not block server startup.
+func (s *Server) startProviderSync() {
+	if s.db == nil {
+		return
+	}
+
+	// Load built-in snapshot if cache is empty
+	go func() {
+		empty, err := s.db.CacheIsEmpty()
+		if err != nil {
+			log.Printf("provider cache check: %v", err)
+			return
+		}
+		if empty {
+			pInfo, mInfo, err := llm.LoadSnapshot()
+			if err != nil {
+				log.Printf("load provider snapshot: %v", err)
+				return
+			}
+			if len(pInfo) > 0 {
+				if err := s.db.UpsertProviderInfo(pInfo); err != nil {
+					log.Printf("write snapshot providers: %v", err)
+				}
+			}
+			if len(mInfo) > 0 {
+				if err := s.db.UpsertModels(mInfo); err != nil {
+					log.Printf("write snapshot models: %v", err)
+				}
+			}
+			log.Printf("loaded built-in snapshot: %d providers, %d models", len(pInfo), len(mInfo))
+		}
+	}()
+
+	// Sync from models.dev in background (non-blocking)
+	go func() {
+		ctx := context.Background()
+		if err := llm.SyncModelsDev(ctx, s.db); err != nil {
+			log.Printf("models.dev sync failed (will retry later): %v", err)
+		}
+
+		// Periodic sync every hour
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := llm.SyncModelsDev(ctx, s.db); err != nil {
+				log.Printf("models.dev periodic sync failed: %v", err)
+			}
+		}
+	}()
 }

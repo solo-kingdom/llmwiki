@@ -12,6 +12,9 @@ import type {
   IngestSession,
   IngestSessionMessage,
   ArchiveSessionResponse,
+  Provider,
+  ModelInfo,
+  SessionListItem,
 } from "@/types"
 
 const BASE = ""
@@ -259,6 +262,57 @@ export function archiveIngestSession(
     {
       method: "POST",
       body: JSON.stringify({ title: title ?? "" }),
+    },
+  )
+}
+
+export function listProviders(): Promise<Provider[]> {
+  return request<Provider[]>("/api/v1/providers")
+}
+
+export function listProviderModels(providerId: string): Promise<ModelInfo[]> {
+  return request<ModelInfo[]>(
+    `/api/v1/providers/${encodeURIComponent(providerId)}/models`,
+  )
+}
+
+export function updateLastModel(
+  provider: string,
+  model: string,
+): Promise<{ status: string }> {
+  return request<{ status: string }>("/api/v1/settings/last-model", {
+    method: "PUT",
+    body: JSON.stringify({ provider, model }),
+  })
+}
+
+export function setProviderKey(
+  providerId: string,
+  apiKey: string,
+  baseURL?: string,
+): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/api/v1/settings/provider-keys/${encodeURIComponent(providerId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ api_key: apiKey, ...(baseURL ? { base_url: baseURL } : {}) }),
+    },
+  )
+}
+
+export function listIngestSessions(): Promise<{ sessions: SessionListItem[] }> {
+  return request<{ sessions: SessionListItem[] }>("/api/v1/ingest/sessions")
+}
+
+export function updateIngestSession(
+  id: string,
+  patch: { provider?: string; model?: string; title?: string },
+): Promise<{ session: IngestSession }> {
+  return request<{ session: IngestSession }>(
+    `/api/v1/ingest/sessions/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(patch),
     },
   )
 }

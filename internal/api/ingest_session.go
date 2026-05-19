@@ -45,22 +45,35 @@ type archiveResponse struct {
 	SessionID   string `json:"session_id"`
 }
 
-func (a *API) llmClient() *llm.Client {
-	if a.configMgr == nil {
-		return nil
-	}
-	return a.configMgr.GetClient()
-}
-
 func (a *API) CreateIngestSession(w http.ResponseWriter, r *http.Request) {
 	if !a.requireWorkspaceForIngest(w) {
 		return
 	}
-	var req createSessionRequest
+	var req struct {
+		Title    string `json:"title"`
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	session := &sqlite.IngestSession{Title: strings.TrimSpace(req.Title), Status: "active"}
+
+	// Read provider/model: request overrides, fallback to global defaults
+	provider := req.Provider
+	model := req.Model
+	if provider == "" {
+		provider, _ = a.db.GetConfig("last_provider")
+	}
+	if model == "" {
+		model, _ = a.db.GetConfig("last_model")
+	}
+
+	session := &sqlite.IngestSession{
+		Title:       strings.TrimSpace(req.Title),
+		Status:      "active",
+		LLMProvider: provider,
+		LLMModel:    model,
+	}
 	if err := a.db.CreateIngestSession(session); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -152,9 +165,13 @@ func (a *API) AppendIngestSessionMessage(w http.ResponseWriter, r *http.Request)
 }
 
 func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session *sqlite.IngestSession, userContent string) {
-	client := a.llmClient()
+	client, provider, model := a.sessionLLMClient(session)
 	if client == nil {
-		writeError(w, http.StatusServiceUnavailable, "LLM not configured; set API key in Settings")
+		if provider == "" || model == "" {
+			writeError(w, http.StatusBadRequest, "请先选择 Provider 和 Model")
+		} else {
+			writeError(w, http.StatusBadRequest, "请先配置 "+provider+" 的 API Key")
+		}
 		return
 	}
 
@@ -306,7 +323,10 @@ func (a *API) UploadIngestSessionAttachment(w http.ResponseWriter, r *http.Reque
 
 func (a *API) summarizeAttachment(ctx context.Context, filename, relPath string, data []byte) string {
 	extracted := extractAttachmentText(filename, data)
-	client := a.llmClient()
+	// For attachment summarization, use global defaults
+	lastProvider, _ := a.db.GetConfig("last_provider")
+	lastModel, _ := a.db.GetConfig("last_model")
+	client, _, _ := a.providerLLMClient(lastProvider, lastModel)
 	if client == nil {
 		if extracted != "" {
 			return fmt.Sprintf("已上传附件 **%s**。\n\n提取内容摘要：\n%s", filename, truncateRunes(extracted, 500))
@@ -441,4 +461,65 @@ func (a *API) loadSession(id string, w http.ResponseWriter) (*sqlite.IngestSessi
 		return nil, fmt.Errorf("not found")
 	}
 	return session, nil
+}
+
+func (a *API) ListIngestSessionsHandler(w http.ResponseWriter, r *http.Request) {
+	sessions, err := a.db.ListIngestSessions()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sessions == nil {
+		sessions = []sqlite.IngestSession{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sessions": sessions,
+	})
+}
+
+func (a *API) UpdateIngestSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := getID(r)
+	session, err := a.loadSession(sessionID, w)
+	if err != nil || session == nil {
+		return
+	}
+
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		Title    string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	updated := false
+	if req.Provider != "" || req.Model != "" {
+		if err := a.db.UpdateIngestSessionLLM(sessionID, req.Provider, req.Model); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// Also update last_used globally
+		if req.Provider != "" {
+			_ = a.db.SetConfig("last_provider", req.Provider)
+		}
+		if req.Model != "" {
+			_ = a.db.SetConfig("last_model", req.Model)
+		}
+		updated = true
+	}
+	if req.Title != "" {
+		_ = a.db.UpdateIngestSessionTitle(sessionID, req.Title)
+		updated = true
+	}
+
+	if !updated {
+		writeError(w, http.StatusBadRequest, "no fields to update")
+		return
+	}
+
+	// Return updated session
+	session, _ = a.db.GetIngestSession(sessionID)
+	writeJSON(w, http.StatusOK, sessionResponse{Session: session})
 }

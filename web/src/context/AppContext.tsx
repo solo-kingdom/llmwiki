@@ -16,6 +16,9 @@ import type {
   UploadIngestResponse,
   CapabilitiesResponse,
   IngestSessionMessage,
+  Provider,
+  ModelInfo,
+  SessionListItem,
 } from "@/types"
 import * as api from "@/lib/api"
 
@@ -37,6 +40,11 @@ interface AppState {
   sessionMessages: IngestSessionMessage[]
   sessionBusy: boolean
   sessionError: string | null
+
+  sessions: SessionListItem[]
+  activeSessionId: string | null
+  providers: Provider[]
+  currentModels: ModelInfo[]
 
   selectDocument: (id: string) => void
   search: (q: string) => void
@@ -65,6 +73,23 @@ interface AppState {
   sendSessionMessage: (content: string) => Promise<void>
   uploadSessionAttachment: (file: File) => Promise<void>
   archiveSession: (title?: string) => Promise<string>
+
+  loadProviders: () => Promise<void>
+  loadModels: (providerId: string) => Promise<void>
+  listSessions: () => Promise<void>
+  createSession: (provider?: string, model?: string) => Promise<void>
+  switchSession: (id: string) => Promise<void>
+  updateSessionLLM: (
+    id: string,
+    provider: string,
+    model: string,
+  ) => Promise<void>
+  updateLastModel: (provider: string, model: string) => Promise<void>
+  setProviderKey: (
+    providerId: string,
+    apiKey: string,
+    baseURL?: string,
+  ) => Promise<void>
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -95,6 +120,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   >([])
   const [sessionBusy, setSessionBusy] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
+
+  const [sessions, setSessions] = useState<SessionListItem[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [providers, setProviders] = useState<Provider[]>([])
+  const [currentModels, setCurrentModels] = useState<ModelInfo[]>([])
 
   const refreshDocuments = useCallback(() => {
     api
@@ -236,11 +266,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // create new below
       }
     }
+    const provider = settings?.last_provider
+    const model = settings?.last_model
     const { session } = await api.createIngestSession()
     setSessionId(session.id)
+    setActiveSessionId(session.id)
     localStorage.setItem(SESSION_STORAGE_KEY, session.id)
     setSessionMessages([])
-  }, [sessionId, loadSessionMessages])
+    if (provider && model) {
+      try {
+        await api.updateIngestSession(session.id, { provider, model })
+      } catch {
+        // non-critical
+      }
+    }
+  }, [sessionId, loadSessionMessages, settings])
 
   const sendSessionMessage = useCallback(
     async (content: string) => {
@@ -340,10 +380,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSessionError(null)
       try {
         const res = await api.archiveIngestSession(sessionId, title)
+        const provider = settings?.last_provider
+        const model = settings?.last_model
         const { session } = await api.createIngestSession()
         setSessionId(session.id)
+        setActiveSessionId(session.id)
         localStorage.setItem(SESSION_STORAGE_KEY, session.id)
         setSessionMessages([])
+        if (provider && model) {
+          try {
+            await api.updateIngestSession(session.id, { provider, model })
+          } catch {
+            // non-critical
+          }
+        }
+        void listSessionsInternal()
         return res.job_id
       } catch (e) {
         setSessionError((e as Error).message)
@@ -352,7 +403,107 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSessionBusy(false)
       }
     },
-    [sessionId],
+    [sessionId, settings],
+  )
+
+  const listSessionsInternal = async () => {
+    try {
+      const { sessions: s } = await api.listIngestSessions()
+      setSessions(s)
+    } catch {
+      // non-critical
+    }
+  }
+
+  const loadProviders = useCallback(async () => {
+    try {
+      const p = await api.listProviders()
+      setProviders(p)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }, [])
+
+  const loadModels = useCallback(async (providerId: string) => {
+    try {
+      const m = await api.listProviderModels(providerId)
+      setCurrentModels(m)
+    } catch (e) {
+      setError((e as Error).message)
+      setCurrentModels([])
+    }
+  }, [])
+
+  const listSessions = useCallback(async () => {
+    await listSessionsInternal()
+  }, [])
+
+  const createSession = useCallback(
+    async (provider?: string, model?: string) => {
+      const { session } = await api.createIngestSession()
+      if (provider && model) {
+        try {
+          await api.updateIngestSession(session.id, { provider, model })
+        } catch {
+          // non-critical
+        }
+      }
+      setSessionId(session.id)
+      setActiveSessionId(session.id)
+      localStorage.setItem(SESSION_STORAGE_KEY, session.id)
+      setSessionMessages([])
+      await listSessionsInternal()
+    },
+    [],
+  )
+
+  const switchSession = useCallback(
+    async (id: string) => {
+      setSessionId(id)
+      setActiveSessionId(id)
+      localStorage.setItem(SESSION_STORAGE_KEY, id)
+      await loadSessionMessages(id)
+      try {
+        const { session } = await api.getIngestSession(id)
+        if (session.llm_provider) {
+          await loadModels(session.llm_provider)
+        }
+      } catch {
+        // non-critical
+      }
+    },
+    [loadSessionMessages, loadModels],
+  )
+
+  const updateSessionLLM = useCallback(
+    async (id: string, provider: string, model: string) => {
+      await api.updateIngestSession(id, { provider, model })
+      await api.updateLastModel(provider, model)
+      setSettings((prev) =>
+        prev ? { ...prev, last_provider: provider, last_model: model } : prev,
+      )
+      await listSessionsInternal()
+    },
+    [],
+  )
+
+  const updateLastModelFn = useCallback(
+    async (provider: string, model: string) => {
+      await api.updateLastModel(provider, model)
+      setSettings((prev) =>
+        prev ? { ...prev, last_provider: provider, last_model: model } : prev,
+      )
+    },
+    [],
+  )
+
+  const setProviderKeyFn = useCallback(
+    async (providerId: string, apiKey: string, baseURL?: string) => {
+      await api.setProviderKey(providerId, apiKey, baseURL)
+      await loadSettings()
+      await loadProviders()
+    },
+    [loadSettings, loadProviders],
   )
 
   return (
@@ -372,6 +523,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sessionMessages,
         sessionBusy,
         sessionError,
+        sessions,
+        activeSessionId,
+        providers,
+        currentModels,
         selectDocument,
         search,
         clearSearch,
@@ -389,6 +544,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sendSessionMessage,
         uploadSessionAttachment,
         archiveSession,
+        loadProviders,
+        loadModels,
+        listSessions,
+        createSession,
+        switchSession,
+        updateSessionLLM,
+        updateLastModel: updateLastModelFn,
+        setProviderKey: setProviderKeyFn,
       }}
     >
       {children}

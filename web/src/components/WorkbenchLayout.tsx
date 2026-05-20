@@ -144,7 +144,12 @@ export function WorkbenchLayout() {
           }
         />
 
-        <main className="flex min-h-0 flex-1 flex-col pb-4">
+        <main
+          className={cn(
+            "flex min-h-0 flex-1 flex-col",
+            view === "ingest" ? "pb-2" : "pb-4",
+          )}
+        >
           {view === "ingest" && (
             <div className="flex min-h-0 flex-1">
               <IngestChat />

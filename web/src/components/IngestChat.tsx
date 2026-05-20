@@ -400,7 +400,7 @@ export function IngestChat() {
       )}
 
       <div
-        className={`mb-6 rounded-xl border p-2 ${
+        className={`mb-2 rounded-xl border p-2 ${
           isDragging ? "border-blue-400 border-dashed bg-blue-50/50" : ""
         }`}
         onDragOver={(e) => {

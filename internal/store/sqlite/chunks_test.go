@@ -98,7 +98,7 @@ func TestDeleteChunks(t *testing.T) {
 func TestSearchChunks(t *testing.T) {
 	db := helperDB(t)
 
-	doc := createTestDoc(t, db, "searchable.md", "/wiki", "wiki/searchable.md")
+	doc := createTestDoc(t, db, "searchable.md", "/wiki/", "wiki/searchable.md")
 
 	chunks := []Chunk{
 		{ChunkIndex: 0, Content: "The quick brown fox jumps over the lazy dog", TokenCount: 10},
@@ -134,7 +134,7 @@ func TestSearchChunksWithPathFilter(t *testing.T) {
 	db := helperDB(t)
 
 	// Wiki doc
-	wikiDoc := createTestDocWithKind(t, db, "wiki-page.md", "/wiki", "wiki/wiki-page.md", "wiki")
+	wikiDoc := createTestDocWithKind(t, db, "wiki-page.md", "/wiki/", "wiki/wiki-page.md", "wiki")
 	// Source doc
 	srcDoc := createTestDocWithKind(t, db, "paper.pdf", "/sources", "sources/paper.pdf", "source")
 
@@ -158,8 +158,8 @@ func TestSearchChunksWithPathFilter(t *testing.T) {
 		t.Fatalf("SearchChunks() wiki error = %v", err)
 	}
 	for _, r := range wikiResults {
-		if r.Path != "/wiki" {
-			t.Errorf("wiki filter: expected Path='/wiki', got %q", r.Path)
+		if r.Path != "/wiki/" {
+			t.Errorf("wiki filter: expected Path='/wiki/', got %q", r.Path)
 		}
 	}
 
@@ -222,10 +222,49 @@ func TestFTSTriggers(t *testing.T) {
 	}
 }
 
+func TestSearchChunksByFilename(t *testing.T) {
+	db := helperDB(t)
+
+	doc := createTestDoc(t, db, "unique-filename-report.md", "/wiki/", "wiki/unique-filename-report.md")
+
+	if err := db.StoreChunks(doc.ID, []Chunk{
+		{ChunkIndex: 0, Content: "body without the filename token inside", TokenCount: 5},
+	}); err != nil {
+		t.Fatalf("StoreChunks() error = %v", err)
+	}
+
+	results, err := db.SearchChunks("unique-filename-report", 10, "wiki")
+	if err != nil {
+		t.Fatalf("SearchChunks() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected filename search results, got none")
+	}
+	if results[0].Filename != "unique-filename-report.md" {
+		t.Errorf("filename = %q", results[0].Filename)
+	}
+}
+
+func TestSearchChunksFTSSpecialChars(t *testing.T) {
+	db := helperDB(t)
+
+	doc := createTestDoc(t, db, "special.md", "/wiki/", "wiki/special.md")
+	if err := db.StoreChunks(doc.ID, []Chunk{
+		{ChunkIndex: 0, Content: "mentioning stars and parens", TokenCount: 4},
+	}); err != nil {
+		t.Fatalf("StoreChunks() error = %v", err)
+	}
+
+	// Query with FTS-special characters should not error.
+	if _, err := db.SearchChunks(`foo"bar*baz`, 10, ""); err != nil {
+		t.Fatalf("SearchChunks() special chars error = %v", err)
+	}
+}
+
 func TestSearchChunkCJK(t *testing.T) {
 	db := helperDB(t)
 
-	doc := createTestDoc(t, db, "cjk.md", "/wiki", "wiki/cjk.md")
+	doc := createTestDoc(t, db, "cjk.md", "/wiki/", "wiki/cjk.md")
 
 	chunks := []Chunk{
 		{ChunkIndex: 0, Content: "这是一段中文测试文本，用于验证全文搜索功能", TokenCount: 10},

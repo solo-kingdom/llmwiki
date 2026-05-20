@@ -15,8 +15,10 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/solo-kingdom/llmwiki/internal/api"
+	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/watcher"
 )
@@ -74,6 +76,11 @@ func (s *Server) SetMCPHandler(h http.HandlerFunc) {
 // SetWatcher sets the file watcher for automatic index updates.
 func (s *Server) SetWatcher(w *watcher.Watcher) {
 	s.watcher = w
+}
+
+// SetFileIndexer sets the workspace file indexer for API-driven search updates.
+func (s *Server) SetFileIndexer(indexer *engine.WorkspaceFileIndexer) {
+	s.api.SetFileIndexer(indexer)
 }
 
 // Start begins listening and serving. Blocks until Shutdown is called.
@@ -362,7 +369,28 @@ func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if s.db == nil || s.config.Workspace == "" {
+		http.Error(w, `{"error":"workspace not configured"}`, http.StatusInternalServerError)
+		return
+	}
+
+	adapter := storesvc.NewStoreAdapter(s.db)
+	reindexer := engine.NewReindexer(adapter, s.config.Workspace)
+	count, err := reindexer.Rebuild("default")
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"indexed": count,
+		"status":  "ok",
+	})
 }
 
 // startProviderSync loads the built-in snapshot, then kicks off background

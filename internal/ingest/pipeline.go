@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 )
@@ -149,14 +147,14 @@ Generate wiki pages in FILE block format.`, name, analysis, content)
 		}
 	}
 
-	blocks := parseFileBlocks(result)
+	blocks := parseFileBlocksWithContent(result)
 
-	for _, f := range blocks {
-		p.lockMgr.Lock(f)
-		p.lockMgr.Unlock(f)
+	for path := range blocks {
+		p.lockMgr.Lock(path)
+		p.lockMgr.Unlock(path)
 	}
 
-	return blocks, nil
+	return ApplyWikiBlocks(p.workspace, blocks)
 }
 
 func (p *Pipeline) cachePath() string {
@@ -242,18 +240,4 @@ func computeSHA256(path string) (string, error) {
 	}
 	h := sha256.Sum256(data)
 	return fmt.Sprintf("%x", h), nil
-}
-
-var fileBlockRe = regexp.MustCompile(`(?s)---FILE:\s*(.+?)\n(.*?)---END FILE---`)
-
-func parseFileBlocks(output string) []string {
-	matches := fileBlockRe.FindAllStringSubmatch(output, -1)
-	var files []string
-	for _, m := range matches {
-		path := strings.TrimSpace(m[1])
-		if path != "" {
-			files = append(files, path)
-		}
-	}
-	return files
 }

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
@@ -14,12 +15,12 @@ func RunLocalMCP(workspace string, db *sqlite.DB) error {
 		"You are connected to an LLM Wiki workspace. Call the `guide` tool first to see available knowledge bases and learn the full workflow.",
 	)
 
-	RegisterTools(server, workspace, db)
+	RegisterTools(server, workspace, db, nil)
 
 	return server.Run()
 }
 
-func RegisterTools(server *Server, workspace string, db *sqlite.DB) {
+func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *engine.WorkspaceFileIndexer) {
 	server.RegisterTool(Tool{
 		Name:        "guide",
 		Description: "Get started with LLM Wiki. Call this to understand how the knowledge vault works and see your available knowledge bases.",
@@ -290,10 +291,28 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB) {
 		}
 
 		if existing != nil {
+			if workspace != "" {
+				if err := writeWikiPageFile(workspace, relPath, content); err != nil {
+					return "", fmt.Errorf("write file: %w", err)
+				}
+			}
 			if err := db.UpdateDocument(existing.ID, content, title, tags, "", ""); err != nil {
 				return "", fmt.Errorf("update document: %w", err)
 			}
+			if indexer != nil {
+				if workspace != "" {
+					_ = indexer.IndexFile(relPath)
+				} else {
+					_ = indexer.IndexDocumentContent(existing.ID, content)
+				}
+			}
 			return fmt.Sprintf("Updated: %s (ID: %s, version incremented)", title, existing.ID), nil
+		}
+
+		if workspace != "" {
+			if err := writeWikiPageFile(workspace, relPath, content); err != nil {
+				return "", fmt.Errorf("write file: %w", err)
+			}
 		}
 
 		doc := &sqlite.Document{
@@ -309,6 +328,14 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB) {
 		}
 		if err := db.CreateDocument(doc); err != nil {
 			return "", fmt.Errorf("create document: %w", err)
+		}
+
+		if indexer != nil {
+			if workspace != "" {
+				_ = indexer.IndexFile(relPath)
+			} else {
+				_ = indexer.IndexDocumentContent(doc.ID, content)
+			}
 		}
 
 		return fmt.Sprintf("Created: %s (ID: %s, path: %s)", title, doc.ID, relPath), nil
@@ -373,6 +400,17 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB) {
 	}, func(args map[string]interface{}) (string, error) {
 		return "pong", nil
 	})
+}
+
+func writeWikiPageFile(workspace, relPath, content string) error {
+	if !strings.HasPrefix(relPath, "wiki/") {
+		return fmt.Errorf("refusing to write outside wiki/: %s", relPath)
+	}
+	fullPath := filepath.Join(workspace, relPath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(fullPath, []byte(content), 0o644)
 }
 
 var _ = os.Args

@@ -186,34 +186,8 @@ func (p *JobProcessor) executeRollback(ctx context.Context, rbCtx *RollbackConte
 
 // applyRollbackContent parses FILE blocks from LLM output and applies them.
 func (p *JobProcessor) applyRollbackContent(output string) error {
-	blocks := parseFileBlocksWithContent(output)
-	for path, content := range blocks {
-		// Only write to wiki/ paths (security check)
-		if !strings.HasPrefix(path, "wiki/") {
-			log.Printf("rollback: skipping non-wiki path: %s", path)
-			continue
-		}
-
-		fullPath := filepath.Join(p.workspace, path)
-
-		if content == "---DELETE---\n" {
-			// Delete the file
-			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-				log.Printf("rollback: failed to delete %s: %v", path, err)
-			}
-			continue
-		}
-
-		// Write the file
-		dir := filepath.Dir(fullPath)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create dir %s: %w", dir, err)
-		}
-		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", path, err)
-		}
-	}
-	return nil
+	_, err := ApplyWikiBlocks(p.workspace, parseFileBlocksWithContent(output))
+	return err
 }
 
 // archiveRollbackSource moves the raw source file to revert/ directory.
@@ -274,17 +248,3 @@ func parseDiffFiles(diff string) []string {
 	return files
 }
 
-// parseFileBlocksWithContent parses FILE blocks and returns path->content map.
-func parseFileBlocksWithContent(output string) map[string]string {
-	result := make(map[string]string)
-	// Use the regex from pipeline.go but capture content too
-	matches := fileBlockRe.FindAllStringSubmatch(output, -1)
-	for _, m := range matches {
-		path := strings.TrimSpace(m[1])
-		content := m[2]
-		if path != "" {
-			result[path] = content
-		}
-	}
-	return result
-}

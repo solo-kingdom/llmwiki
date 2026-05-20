@@ -100,16 +100,17 @@ func runServe(dir string, opts serveOptions) error {
 		LockMgr:    lockMgr,
 	})
 
+	adapter := storesvc.NewStoreAdapter(db)
+	fileIndexer := engine.NewWorkspaceFileIndexer(adapter, ws)
+	srv.SetFileIndexer(fileIndexer)
+
 	if !opts.noMCP {
 		mcpServer := mcp.NewServer("LLM Wiki",
 			"You are connected to an LLM Wiki workspace. Call the `guide` tool first to see available knowledge bases and learn the full workflow.",
 		)
-		mcp.RegisterTools(mcpServer, ws, db)
+		mcp.RegisterTools(mcpServer, ws, db, fileIndexer)
 		srv.SetMCPHandler(mcp.NewHTTPHandler(mcpServer))
 	}
-
-	adapter := storesvc.NewStoreAdapter(db)
-	fileIndexer := engine.NewWorkspaceFileIndexer(adapter, ws)
 
 	if !opts.noWatch {
 		w, err := watcher.New(ws, nil)

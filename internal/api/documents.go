@@ -122,6 +122,11 @@ func (a *API) CreateDocument(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if doc.RelativePath != "" {
+		a.indexDocumentRelPath(doc.RelativePath)
+	} else {
+		a.indexDocumentContent(doc.ID, doc.Content)
+	}
 	writeJSON(w, http.StatusCreated, doc)
 }
 
@@ -169,6 +174,12 @@ func (a *API) UpdateDocumentContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if doc.RelativePath != "" {
+		a.indexDocumentRelPath(doc.RelativePath)
+	} else {
+		a.indexDocumentContent(id, req.Content)
+	}
+
 	updated, err := a.db.GetDocument(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -211,6 +222,12 @@ func (a *API) UpdateDocumentMetadata(w http.ResponseWriter, r *http.Request) {
 	if err := a.db.UpdateDocument(id, existing.Content, title, tags, date, metadata); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	if existing.RelativePath != "" {
+		a.indexDocumentRelPath(existing.RelativePath)
+	} else {
+		a.indexDocumentContent(id, existing.Content)
 	}
 
 	doc, _ := a.db.GetDocument(id)

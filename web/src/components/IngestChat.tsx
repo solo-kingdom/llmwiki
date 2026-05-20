@@ -320,7 +320,10 @@ export function IngestChat() {
     await refreshIngestJobs()
   }
 
-  const inputDisabled = sessionBusy || !sessionId || !isReady
+  const textareaDisabled = !sessionId || !isReady
+  const sendDisabled =
+    sessionBusy || textareaDisabled || !input.trim()
+  const attachDisabled = sessionBusy || textareaDisabled
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-2">
@@ -415,15 +418,12 @@ export function IngestChat() {
         }}
       >
         {sessionId && (
-          <div className="mb-1 flex items-center justify-between gap-2 px-2 pt-1 text-xs">
-            <span
-              className="min-w-0 truncate font-medium text-foreground"
-              title={sessionTitle}
-            >
+          <div className="mb-1 flex items-center justify-between gap-2 px-2 pt-1 text-xs text-muted-foreground">
+            <span className="min-w-0 truncate" title={sessionTitle}>
               {sessionTitle}
             </span>
             {(selectedInstance || selectedModel) && (
-              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-muted-foreground">
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                 {selectedInstance && (
                   <span className="inline-flex items-center gap-1">
                     <Bot className="size-3" />
@@ -450,7 +450,7 @@ export function IngestChat() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={inputDisabled}
+          disabled={textareaDisabled}
         />
         <div className="flex items-center gap-2 pt-1">
           <SessionControls />
@@ -476,7 +476,7 @@ export function IngestChat() {
           <Button
             size="sm"
             variant="outline"
-            disabled={inputDisabled}
+            disabled={attachDisabled}
             onClick={() => fileRef.current?.click()}
             title="附件"
           >
@@ -495,7 +495,7 @@ export function IngestChat() {
           <Button
             size="sm"
             variant="secondary"
-            disabled={inputDisabled || !input.trim()}
+            disabled={sendDisabled}
             onClick={() => void handleSend()}
           >
             {sessionBusy ? (

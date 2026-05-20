@@ -143,14 +143,7 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		}
 	}
 
-	// Index generated wiki files for search (best-effort)
-	if p.indexer != nil {
-		for _, rel := range files {
-			if err := p.indexer.IndexFile(rel); err != nil {
-				log.Printf("processor: index %s after job %s: %v", rel, job.ID, err)
-			}
-		}
-	}
+	p.indexGeneratedWikiFiles(files, job.ID)
 
 	// Mark job succeeded with result summary
 	summary := fmt.Sprintf("generated %d wiki page(s)", len(files))
@@ -314,12 +307,25 @@ func (p *JobProcessor) RunPipelineForJob(ctx context.Context, job *sqlite.Ingest
 		}
 	}
 
+	p.indexGeneratedWikiFiles(files, job.ID)
+
 	summary := fmt.Sprintf("generated %d wiki page(s)", len(files))
 	_, updateErr := p.db.DB().Exec(`
 		UPDATE ingest_jobs
 		SET status = 'succeeded', result_summary = ?, updated_at = datetime('now')
 		WHERE id = ?`, summary, job.ID)
 	return updateErr
+}
+
+func (p *JobProcessor) indexGeneratedWikiFiles(files []string, jobID string) {
+	if p.indexer == nil {
+		return
+	}
+	for _, rel := range files {
+		if err := p.indexer.IndexFile(rel); err != nil {
+			log.Printf("processor: index %s after job %s: %v", rel, jobID, err)
+		}
+	}
 }
 
 // classifyPipelineError maps a pipeline error to a structured error code.

@@ -30,6 +30,11 @@ func (w *WorkspaceFileIndexer) UpdateFile(relPath string) error {
 	return w.IndexFile(relPath)
 }
 
+// IndexDocumentContent indexes document body text without reading from disk.
+func (w *WorkspaceFileIndexer) IndexDocumentContent(docID, content string) error {
+	return IndexDocumentContent(w.store, docID, content)
+}
+
 func (w *WorkspaceFileIndexer) RemoveFile(relPath string) error {
 	relPath = filepathToSlash(relPath)
 	dir := "/"

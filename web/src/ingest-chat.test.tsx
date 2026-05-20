@@ -119,6 +119,32 @@ describe("IngestChat", () => {
   it("shows spinner while assistant is streaming with empty content", async () => {
     const api = await import("@/lib/api")
     localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+    })
     vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
       messages: [
         {
@@ -141,6 +167,16 @@ describe("IngestChat", () => {
     )
 
     expect(await screen.findByLabelText("正在回复")).toBeInTheDocument()
+
+    const textarea = screen.getByPlaceholderText(/输入消息/)
+    expect(textarea).not.toBeDisabled()
+    fireEvent.change(textarea, { target: { value: "draft while streaming" } })
+    expect(textarea).toHaveValue("draft while streaming")
+
+    const sendBtn = screen.getByRole("button", { name: /发送/ })
+    await waitFor(() => {
+      expect(sendBtn).toBeDisabled()
+    })
   })
 
   it("copies message content when copy button is clicked", async () => {

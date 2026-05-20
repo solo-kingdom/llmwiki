@@ -192,6 +192,11 @@ func (r *Reindexer) IndexRelPath(relPath string) error {
 	return r.indexFile("default", relPath, fullPath)
 }
 
+// IndexDocumentContent chunks and stores search index rows for a document by ID.
+func IndexDocumentContent(store Store, docID, content string) error {
+	return storeSearchChunks(store, docID, content)
+}
+
 func storeSearchChunks(store Store, docID, content string) error {
 	if strings.TrimSpace(content) == "" {
 		return store.StoreChunks(docID, nil)

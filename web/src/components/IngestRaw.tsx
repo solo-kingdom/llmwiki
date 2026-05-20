@@ -160,7 +160,7 @@ export function IngestRaw() {
   return (
     <PageContainer>
       <div
-        className="mx-auto flex w-full max-w-3xl flex-col gap-6"
+        className="flex w-full flex-col gap-6"
         data-testid="ingest-raw-page"
       >
         <div className="space-y-1">

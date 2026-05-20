@@ -203,6 +203,35 @@ func TestLogWithStats(t *testing.T) {
 	if entries[0].FilesChanged < 1 {
 		t.Errorf("expected at least 1 file changed, got %d", entries[0].FilesChanged)
 	}
+	// Root baseline commit is not an ingest change
+	if entries[1].FilesChanged != 0 {
+		t.Errorf("expected 0 files on initial commit, got %d", entries[1].FilesChanged)
+	}
+}
+
+func TestDiffRootCommitEmpty(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	repo, _ := InitRepo(dir)
+
+	entries, err := repo.Log(1)
+	if err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	diff, err := repo.Diff(entries[0].SHA)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if diff != "" {
+		t.Errorf("expected empty diff for root commit, got %d bytes", len(diff))
+	}
 }
 
 func TestDiff(t *testing.T) {

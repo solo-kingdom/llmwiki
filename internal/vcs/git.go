@@ -153,21 +153,21 @@ func (r *GitRepo) Log(limit int) ([]CommitEntry, error) {
 	return parseLogOutput(out), nil
 }
 
+// isRootCommit reports whether the commit has no parent (repository root).
+func (r *GitRepo) isRootCommit(sha string) bool {
+	_, err := r.gitOutput("rev-parse", "--verify", sha+"^")
+	return err != nil
+}
+
 // Diff returns the unified diff for a given commit SHA.
+// Root commits return an empty diff (baseline snapshot, not an ingest change).
 func (r *GitRepo) Diff(commitSHA string) (string, error) {
-	// Check if this is the initial commit (no parent)
-	parentRef := commitSHA + "^"
-	_, err := r.gitOutput("rev-parse", "--verify", parentRef)
-	if err != nil {
-		// Likely initial commit, use diff against empty tree
-		out, err := r.gitOutput("diff", "--root", commitSHA)
-		if err != nil {
-			return "", fmt.Errorf("git diff (initial): %w", err)
-		}
-		return out, nil
+	if r.isRootCommit(commitSHA) {
+		return "", nil
 	}
 
-	out, err := r.gitOutput("diff", parentRef, commitSHA)
+	parentRef := commitSHA + "^"
+	out, err := r.gitOutput("-c", "core.quotepath=false", "diff", parentRef, commitSHA)
 	if err != nil {
 		return "", fmt.Errorf("git diff: %w", err)
 	}
@@ -370,14 +370,13 @@ func (r *GitRepo) LogWithStats(limit int) ([]CommitEntry, error) {
 
 // filesChanged returns the number of files changed in a commit.
 func (r *GitRepo) filesChanged(sha string) (int, error) {
-	out, err := r.gitOutput("diff", "--name-only", sha+"^", sha)
+	if r.isRootCommit(sha) {
+		return 0, nil
+	}
+
+	out, err := r.gitOutput("-c", "core.quotepath=false", "diff", "--name-only", sha+"^", sha)
 	if err != nil {
-		// Initial commit
-		out2, err2 := r.gitOutput("diff", "--name-only", "--root", sha)
-		if err2 != nil {
-			return 0, err2
-		}
-		out = out2
+		return 0, err
 	}
 	files := strings.Split(strings.TrimSpace(out), "\n")
 	count := 0

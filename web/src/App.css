@@ -228,3 +228,36 @@
   padding-left: 1rem;
   color: var(--muted-foreground);
 }
+
+/* Commit diff viewer (react-diff-view) */
+.commit-diff-view {
+  --diff-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --diff-background-color: var(--background);
+  --diff-text-color: var(--foreground);
+  --diff-gutter-insert-background-color: oklch(0.95 0.05 145);
+  --diff-gutter-delete-background-color: oklch(0.95 0.05 25);
+  --diff-code-insert-background-color: oklch(0.97 0.03 145);
+  --diff-code-delete-background-color: oklch(0.97 0.03 25);
+}
+
+.commit-diff-view .diff {
+  font-size: 0.75rem;
+}
+
+.commit-diff-view .hljs {
+  background: transparent;
+  padding: 0;
+}
+
+.dark .commit-diff-view {
+  --diff-gutter-insert-background-color: oklch(0.28 0.06 145);
+  --diff-gutter-delete-background-color: oklch(0.28 0.06 25);
+  --diff-code-insert-background-color: oklch(0.22 0.04 145);
+  --diff-code-delete-background-color: oklch(0.22 0.04 25);
+  --diff-code-insert-edit-background-color: oklch(0.32 0.08 145);
+  --diff-code-delete-edit-background-color: oklch(0.32 0.08 25);
+}
+
+.dark .commit-diff-view .hljs {
+  color: var(--foreground);
+}

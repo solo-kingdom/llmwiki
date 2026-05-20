@@ -5,6 +5,8 @@ import { getVCStatus, getVCLog, getVCDiff, createRollback } from "@/lib/api"
 import type { VCStatus, VCLogEntry } from "@/types"
 import { GitBranch, Clock, FileText, RotateCcw, Eye, ChevronDown, Settings, AlertTriangle } from "lucide-react"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
+import { CommitDiffDialog } from "@/components/CommitDiffDialog"
+import { formatGitCommitTimestamp } from "@/lib/format-timestamp"
 
 export function TimelinePage() {
   const [status, setStatus] = useState<VCStatus | null>(null)
@@ -45,9 +47,15 @@ export function TimelinePage() {
     setDiffEntry({ sha, diff: "", loading: true })
     try {
       const result = await getVCDiff(sha)
-      setDiffEntry({ sha, diff: result.diff, loading: false })
+      setDiffEntry((prev) =>
+        prev?.sha !== sha ? prev : { sha, diff: result.diff, loading: false },
+      )
     } catch {
-      setDiffEntry({ sha, diff: "Failed to load diff", loading: false })
+      setDiffEntry((prev) =>
+        prev?.sha !== sha
+          ? prev
+          : { sha, diff: "Failed to load diff", loading: false },
+      )
     }
   }
 
@@ -134,7 +142,7 @@ export function TimelinePage() {
                     <span className="font-mono">{entry.sha}</span>
                     <span className="flex items-center gap-1">
                       <Clock className="size-3" />
-                      {formatTimestamp(entry.timestamp)}
+                      {formatGitCommitTimestamp(entry.timestamp)}
                     </span>
                     <span className="flex items-center gap-1">
                       <FileText className="size-3" />
@@ -179,33 +187,14 @@ export function TimelinePage() {
         </div>
       )}
 
-      {/* Diff Modal */}
-      {diffEntry && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDiffEntry(null)}>
-          <div
-            className="bg-background border rounded-lg shadow-lg max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="font-semibold text-sm">
-                Diff: <span className="font-mono">{diffEntry.sha}</span>
-              </h2>
-              <Button size="sm" variant="ghost" onClick={() => setDiffEntry(null)}>
-                ✕
-              </Button>
-            </div>
-            <div className="flex-1 overflow-auto p-4">
-              {diffEntry.loading ? (
-                <p className="text-muted-foreground text-sm">Loading diff...</p>
-              ) : (
-                <pre className="text-xs font-mono whitespace-pre-wrap break-all bg-muted/50 p-3 rounded">
-                  {diffEntry.diff || "(empty diff)"}
-                </pre>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <CommitDiffDialog
+        key={diffEntry?.sha ?? "closed"}
+        open={diffEntry !== null}
+        sha={diffEntry?.sha ?? ""}
+        diff={diffEntry?.diff ?? ""}
+        loading={diffEntry?.loading ?? false}
+        onClose={() => setDiffEntry(null)}
+      />
 
       {/* Rollback Confirm Modal */}
       {rollbackEntry && (
@@ -252,24 +241,4 @@ export function TimelinePage() {
       )}
     </PageContainer>
   )
-}
-
-function formatTimestamp(ts: string): string {
-  if (!ts) return ""
-  try {
-    const date = new Date(ts.replace(" ", "T"))
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffMin = Math.floor(diffMs / 60000)
-    const diffHr = Math.floor(diffMin / 60)
-    const diffDay = Math.floor(diffHr / 24)
-
-    if (diffMin < 1) return "just now"
-    if (diffMin < 60) return `${diffMin}m ago`
-    if (diffHr < 24) return `${diffHr}h ago`
-    if (diffDay < 7) return `${diffDay}d ago`
-    return date.toLocaleDateString()
-  } catch {
-    return ts
-  }
 }

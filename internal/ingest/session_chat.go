@@ -27,6 +27,9 @@ func AssembleIngestChatMessages(history []sqlite.IngestSessionMessage, userConte
 		if m.StreamStatus == "streaming" {
 			continue
 		}
+		if m.Role == "assistant" && (m.StreamStatus == "failed" || m.StreamStatus == "incomplete") {
+			continue
+		}
 		if strings.TrimSpace(m.Content) == "" && m.MessageType != "attachment_summary" {
 			continue
 		}

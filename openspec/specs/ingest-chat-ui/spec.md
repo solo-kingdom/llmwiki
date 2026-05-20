@@ -52,8 +52,9 @@ The UI SHALL render user and assistant messages with distinct styling and suppor
 - **THEN** UI SHALL incrementally render tokens in the assistant bubble until complete or error
 
 #### Scenario: Assistant error state
-- **WHEN** streaming fails
+- **WHEN** streaming fails or is incomplete
 - **THEN** UI SHALL show error message with retry affordance on the failed assistant message
+- **AND** retry SHALL reuse the same assistant message row and SHALL NOT create duplicate user messages
 
 ### Requirement: Attachment interaction in chat
 The UI SHALL allow attaching images and files from the composer and display attachment summaries as assistant messages.

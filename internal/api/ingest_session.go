@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
@@ -176,9 +177,71 @@ func (a *API) AppendIngestSessionMessage(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, messageResponse{Message: userMsg})
 }
 
+func (a *API) RetryIngestSessionMessage(w http.ResponseWriter, r *http.Request) {
+	sessionID := getID(r)
+	messageID := chi.URLParam(r, "messageId")
+	if !a.requireWorkspaceForIngest(w) {
+		return
+	}
+	session, err := a.loadSession(sessionID, w)
+	if err != nil || session == nil {
+		return
+	}
+
+	stream := r.URL.Query().Get("stream") == "1" || strings.Contains(r.Header.Get("Accept"), "text/event-stream")
+	if !stream {
+		writeError(w, http.StatusBadRequest, "streaming is required for retry")
+		return
+	}
+
+	assistantMsg, err := a.db.GetIngestSessionMessage(messageID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if assistantMsg == nil || assistantMsg.SessionID != session.ID {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+	if assistantMsg.Role != "assistant" {
+		writeError(w, http.StatusBadRequest, "only assistant messages can be retried")
+		return
+	}
+	if assistantMsg.StreamStatus != "failed" && assistantMsg.StreamStatus != "incomplete" {
+		writeError(w, http.StatusBadRequest, "message is not in a retriable state")
+		return
+	}
+
+	history, err := a.db.ListIngestSessionMessages(session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sessionHasStreamingAssistant(history) {
+		writeError(w, http.StatusConflict, "another message is still streaming")
+		return
+	}
+
+	userMsg := findPairedUserMessage(history, assistantMsg.ID)
+	if userMsg == nil || strings.TrimSpace(userMsg.Content) == "" {
+		writeError(w, http.StatusBadRequest, "no user message found for retry")
+		return
+	}
+
+	if err := a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, "", "streaming"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	assistantMsg.Content = ""
+	assistantMsg.StreamStatus = "streaming"
+
+	filtered := filterHistoryForRetry(history, assistantMsg.ID, userMsg.ID)
+	a.streamAssistantReply(w, r, session, filtered, userMsg.Content, assistantMsg, nil)
+}
+
 func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session *sqlite.IngestSession, userContent string) {
-	client, instanceID, model := a.sessionLLMClient(session)
-	if client == nil {
+	llmClient, instanceID, model := a.sessionLLMClient(session)
+	if llmClient == nil {
 		if instanceID == "" || model == "" {
 			writeError(w, http.StatusBadRequest, "请先选择 Provider 实例和 Model")
 		} else {
@@ -193,6 +256,10 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 	history, err := a.db.ListIngestSessionMessages(session.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sessionHasStreamingAssistant(history) {
+		writeError(w, http.StatusConflict, "another message is still streaming")
 		return
 	}
 
@@ -220,6 +287,31 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 
+	a.streamAssistantReply(w, r, session, history, userContent, assistantMsg, userMsg)
+}
+
+func (a *API) streamAssistantReply(
+	w http.ResponseWriter,
+	r *http.Request,
+	session *sqlite.IngestSession,
+	history []sqlite.IngestSessionMessage,
+	userContent string,
+	assistantMsg *sqlite.IngestSessionMessage,
+	userMsg *sqlite.IngestSessionMessage,
+) {
+	client, instanceID, model := a.sessionLLMClient(session)
+	if client == nil {
+		if instanceID == "" || model == "" {
+			writeError(w, http.StatusBadRequest, "请先选择 Provider 实例和 Model")
+		} else {
+			writeError(w, http.StatusBadRequest, "Provider 实例不存在或未配置 API Key")
+		}
+		activity.LogSession(a.db, "stream_error", session.ID,
+			"LLM 客户端初始化失败", "failure", "api",
+			map[string]interface{}{"instance_id": instanceID, "model": model})
+		return
+	}
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "streaming not supported")
@@ -236,7 +328,9 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		flusher.Flush()
 	}
 
-	sendEvent("user_message", userMsg)
+	if userMsg != nil {
+		sendEvent("user_message", userMsg)
+	}
 	sendEvent("assistant_start", map[string]string{"id": assistantMsg.ID})
 
 	msgs := ingest.AssembleIngestChatMessages(history, userContent)
@@ -328,6 +422,45 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 	sendEvent("done", assistantMsg)
+}
+
+func sessionHasStreamingAssistant(msgs []sqlite.IngestSessionMessage) bool {
+	for _, m := range msgs {
+		if m.Role == "assistant" && m.StreamStatus == "streaming" {
+			return true
+		}
+	}
+	return false
+}
+
+func findPairedUserMessage(msgs []sqlite.IngestSessionMessage, assistantID string) *sqlite.IngestSessionMessage {
+	idx := -1
+	for i, m := range msgs {
+		if m.ID == assistantID {
+			idx = i
+			break
+		}
+	}
+	if idx <= 0 {
+		return nil
+	}
+	for i := idx - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" && strings.TrimSpace(msgs[i].Content) != "" {
+			return &msgs[i]
+		}
+	}
+	return nil
+}
+
+func filterHistoryForRetry(history []sqlite.IngestSessionMessage, assistantID, userID string) []sqlite.IngestSessionMessage {
+	out := make([]sqlite.IngestSessionMessage, 0, len(history))
+	for _, m := range history {
+		if m.ID == assistantID || m.ID == userID {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func (a *API) UploadIngestSessionAttachment(w http.ResponseWriter, r *http.Request) {

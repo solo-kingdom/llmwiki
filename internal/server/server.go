@@ -200,6 +200,7 @@ func (s *Server) Start() error {
 				r.Delete("/{id}", s.api.DeleteIngestSessionHandler)
 				r.Get("/{id}/messages", s.api.ListIngestSessionMessages)
 				r.Post("/{id}/messages", s.api.AppendIngestSessionMessage)
+				r.Post("/{id}/messages/{messageId}/retry", s.api.RetryIngestSessionMessage)
 				r.Post("/{id}/attachments", s.api.UploadIngestSessionAttachment)
 				r.Post("/{id}/archive", s.api.ArchiveIngestSession)
 			})
@@ -331,6 +332,10 @@ func isIngestSessionStream(r *http.Request) bool {
 	}
 	if !strings.Contains(r.URL.Path, "/ingest/sessions/") {
 		return false
+	}
+	if strings.HasSuffix(r.URL.Path, "/retry") {
+		return r.URL.Query().Get("stream") == "1" ||
+			strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 	}
 	if !strings.HasSuffix(r.URL.Path, "/messages") {
 		return false

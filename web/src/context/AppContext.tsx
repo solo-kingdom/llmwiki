@@ -102,7 +102,7 @@ interface AppState {
   search: (q: string) => void
   clearSearch: () => void
   refreshDocuments: () => void
-  loadSettings: () => void
+  loadSettings: () => Promise<void>
   saveSettings: (s: Partial<Settings>) => Promise<void>
   refreshIngestJobs: () => Promise<void>
   submitConversation: (payload: {
@@ -126,6 +126,7 @@ interface AppState {
 
   ensureIngestSession: () => Promise<void>
   sendSessionMessage: (content: string) => Promise<void>
+  retrySessionMessage: (assistantMessageId: string) => Promise<void>
   uploadSessionAttachment: (file: File) => Promise<void>
   archiveSession: (title?: string) => Promise<string>
 
@@ -261,11 +262,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSearchQuery("")
   }, [])
 
-  const loadSettings = useCallback(() => {
-    api
-      .getSettings()
-      .then(setSettings)
-      .catch((e) => setError(e.message))
+  const loadSettings = useCallback(async () => {
+    try {
+      const s = await api.getSettings()
+      setSettings(s)
+    } catch (e) {
+      setError((e as Error).message)
+    }
   }, [])
 
   const saveSettings = useCallback(async (s: Partial<Settings>) => {
@@ -435,6 +438,73 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [sessionId, loadSessionMessagesAndWatch, settings])
 
+  const applyAssistantStreamEvent = useCallback(
+    (
+      event: string,
+      data: unknown,
+      assistantIdRef: { current: string },
+      tempAssistantId: string,
+      tempUserId?: string,
+    ) => {
+      const isStreamingAssistant = (id: string) =>
+        id === assistantIdRef.current || id === tempAssistantId
+
+      if (event === "user_message" && tempUserId && data && typeof data === "object") {
+        const um = data as IngestSessionMessage
+        setSessionMessages((prev) =>
+          prev.map((m) => (m.id === tempUserId ? um : m)),
+        )
+      }
+      if (event === "assistant_start" && data && typeof data === "object") {
+        const serverId = (data as { id?: string }).id
+        if (serverId) {
+          assistantIdRef.current = serverId
+          setSessionMessages((prev) =>
+            prev.map((m) =>
+              m.id === tempAssistantId ? { ...m, id: serverId } : m,
+            ),
+          )
+        }
+      }
+      if (event === "token" && data && typeof data === "object") {
+        const tok = (data as { content?: string }).content ?? ""
+        setSessionMessages((prev) =>
+          prev.map((m) =>
+            isStreamingAssistant(m.id)
+              ? { ...m, content: m.content + tok }
+              : m,
+          ),
+        )
+      }
+      if (event === "done" && data && typeof data === "object") {
+        const am = data as IngestSessionMessage
+        setSessionMessages((prev) =>
+          prev.map((m) => {
+            if (!isStreamingAssistant(m.id)) return m
+            if (m.stream_status === "failed") return m
+            return am
+          }),
+        )
+      }
+      if (event === "error") {
+        const reason = streamErrorMessage(data)
+        setSessionMessages((prev) =>
+          prev.map((m) =>
+            isStreamingAssistant(m.id)
+              ? {
+                  ...m,
+                  stream_status: "failed",
+                  error_message: reason,
+                  content: m.content || reason,
+                }
+              : m,
+          ),
+        )
+      }
+    },
+    [],
+  )
+
   const sendSessionMessage = useCallback(
     async (content: string) => {
       if (!sessionId) return
@@ -469,62 +539,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSessionMessages((prev) => [...prev, tempUser, tempAssistant])
       try {
         await api.streamIngestSessionMessage(sessionId, content, (event, data) => {
-          if (event === "user_message" && data && typeof data === "object") {
-            const um = data as IngestSessionMessage
-            setSessionMessages((prev) =>
-              prev.map((m) => (m.id === tempUser.id ? um : m)),
-            )
-          }
-          if (
-            event === "assistant_start" &&
-            data &&
-            typeof data === "object"
-          ) {
-            const serverId = (data as { id?: string }).id
-            if (serverId) {
-              assistantIdRef.current = serverId
-              setSessionMessages((prev) =>
-                prev.map((m) =>
-                  m.id === tempAssistant.id ? { ...m, id: serverId } : m,
-                ),
-              )
-            }
-          }
-          if (event === "token" && data && typeof data === "object") {
-            const tok = (data as { content?: string }).content ?? ""
-            setSessionMessages((prev) =>
-              prev.map((m) =>
-                isStreamingAssistant(m.id)
-                  ? { ...m, content: m.content + tok }
-                  : m,
-              ),
-            )
-          }
-          if (event === "done" && data && typeof data === "object") {
-            const am = data as IngestSessionMessage
-            setSessionMessages((prev) =>
-              prev.map((m) => {
-                if (!isStreamingAssistant(m.id)) return m
-                if (m.stream_status === "failed") return m
-                return am
-              }),
-            )
-          }
-          if (event === "error") {
-            const reason = streamErrorMessage(data)
-            setSessionMessages((prev) =>
-              prev.map((m) =>
-                isStreamingAssistant(m.id)
-                  ? {
-                      ...m,
-                      stream_status: "failed",
-                      error_message: reason,
-                      content: m.content || reason,
-                    }
-                  : m,
-              ),
-            )
-          }
+          applyAssistantStreamEvent(
+            event,
+            data,
+            assistantIdRef,
+            tempAssistant.id,
+            tempUser.id,
+          )
         })
         const { messages: loaded } = await api.listIngestSessionMessages(sessionId)
         setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
@@ -555,7 +576,76 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSessionBusy(false)
       }
     },
-    [sessionId],
+    [sessionId, applyAssistantStreamEvent],
+  )
+
+  const retrySessionMessage = useCallback(
+    async (assistantMessageId: string) => {
+      if (!sessionId) return
+      pollGenerationRef.current += 1
+      activeStreamRef.current = true
+      setSessionBusy(true)
+      setSessionError(null)
+
+      const assistantIdRef = { current: assistantMessageId }
+      setSessionMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMessageId
+            ? {
+                ...m,
+                content: "",
+                stream_status: "streaming",
+                error_message: undefined,
+              }
+            : m,
+        ),
+      )
+
+      const isStreamingAssistant = (id: string) => id === assistantIdRef.current
+
+      try {
+        await api.streamRetryIngestSessionMessage(
+          sessionId,
+          assistantMessageId,
+          (event, data) => {
+            applyAssistantStreamEvent(
+              event,
+              data,
+              assistantIdRef,
+              assistantMessageId,
+            )
+          },
+        )
+        const { messages: loaded } = await api.listIngestSessionMessages(sessionId)
+        setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
+      } catch (e) {
+        const reason = (e as Error).message
+        setSessionError(reason)
+        setSessionMessages((prev) =>
+          prev.map((m) =>
+            isStreamingAssistant(m.id)
+              ? {
+                  ...m,
+                  stream_status: "failed",
+                  error_message: reason,
+                  content: m.content || reason,
+                }
+              : m,
+          ),
+        )
+        try {
+          const { messages: loaded } =
+            await api.listIngestSessionMessages(sessionId)
+          setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
+        } catch {
+          // keep optimistic failed message
+        }
+      } finally {
+        activeStreamRef.current = false
+        setSessionBusy(false)
+      }
+    },
+    [sessionId, applyAssistantStreamEvent],
   )
 
   const uploadSessionAttachment = useCallback(
@@ -856,6 +946,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadCapabilities,
         ensureIngestSession,
         sendSessionMessage,
+        retrySessionMessage,
         uploadSessionAttachment,
         archiveSession,
         loadProviders,

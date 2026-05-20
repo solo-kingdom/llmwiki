@@ -21,19 +21,11 @@ import {
   SlidersHorizontal,
 } from "lucide-react"
 
-function findRetryUserContent(
-  messages: IngestSessionMessage[],
-  failedMsgId: string,
-): string | null {
-  const idx = messages.findIndex((m) => m.id === failedMsgId)
-  if (idx <= 0) return null
-  for (let i = idx - 1; i >= 0; i--) {
-    const m = messages[i]
-    if (m.role === "user" && m.content.trim()) {
-      return m.content
-    }
-  }
-  return null
+function canRetryAssistant(msg: IngestSessionMessage): boolean {
+  return (
+    msg.role === "assistant" &&
+    (msg.stream_status === "failed" || msg.stream_status === "incomplete")
+  )
 }
 
 function assistantErrorText(msg: IngestSessionMessage): string | null {
@@ -45,13 +37,11 @@ function assistantErrorText(msg: IngestSessionMessage): string | null {
 
 function MessageBubble({
   msg,
-  messages,
   onRetry,
   sessionBusy,
 }: {
   msg: IngestSessionMessage
-  messages: IngestSessionMessage[]
-  onRetry: (content: string) => void
+  onRetry: (assistantMessageId: string) => void
   sessionBusy: boolean
 }) {
   const [copied, setCopied] = useState(false)
@@ -61,10 +51,7 @@ function MessageBubble({
   const isFailed =
     msg.stream_status === "failed" || msg.stream_status === "incomplete"
   const errorText = !isUser ? assistantErrorText(msg) : null
-  const retryContent =
-    msg.stream_status === "failed"
-      ? findRetryUserContent(messages, msg.id)
-      : null
+  const showRetry = canRetryAssistant(msg)
 
   const isStreaming = msg.stream_status === "streaming"
   const hasContent = !!msg.content?.trim()
@@ -132,16 +119,16 @@ function MessageBubble({
             {hasContent && errorText && (
               <p className="text-xs text-destructive">{errorText}</p>
             )}
-            {retryContent && (
+            {showRetry && (
               <Button
                 size="sm"
                 variant="outline"
                 className="h-7 text-xs"
                 disabled={sessionBusy}
-                onClick={() => onRetry(retryContent)}
+                onClick={() => onRetry(msg.id)}
               >
                 <RotateCcw className="size-3" />
-                重新发送
+                重试
               </Button>
             )}
           </div>
@@ -164,6 +151,7 @@ export function IngestChat() {
     sessions,
     ensureIngestSession,
     sendSessionMessage,
+    retrySessionMessage,
     uploadSessionAttachment,
     archiveSession,
     refreshIngestJobs,
@@ -182,6 +170,7 @@ export function IngestChat() {
   const [modelDialogOpen, setModelDialogOpen] = useState(false)
   const [selectedInstanceId, setSelectedInstanceId] = useState("")
   const [selectedModel, setSelectedModel] = useState("")
+  const [configLoaded, setConfigLoaded] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -189,12 +178,20 @@ export function IngestChat() {
   useEffect(() => {
     if (initRef.current) return
     initRef.current = true
-    void ensureIngestSession()
-    void loadCapabilities()
-    void refreshIngestJobs()
-    void loadInstances()
-    void loadSettings()
-    void listSessions()
+    void (async () => {
+      try {
+        await Promise.all([
+          ensureIngestSession(),
+          loadInstances(),
+          loadSettings(),
+          listSessions(),
+        ])
+      } finally {
+        setConfigLoaded(true)
+      }
+      void loadCapabilities()
+      void refreshIngestJobs()
+    })()
   }, [
     ensureIngestSession,
     loadCapabilities,
@@ -249,16 +246,32 @@ export function IngestChat() {
     }
   }, [currentModels, selectedModel])
 
-  const isReady = !!sessionId && !!selectedInstanceId && !!selectedModel
-
   const activeSession = sessions.find(
     (s) => s.id === (activeSessionId ?? sessionId),
   )
   const sessionTitle =
     activeSession?.title.trim() || "Untitled"
 
-  const selectedInstance = instances.find((i) => i.id === selectedInstanceId)
-  const selectedModelInfo = currentModels.find((m) => m.model_id === selectedModel)
+  const effectiveInstanceId =
+    selectedInstanceId ||
+    activeSession?.llm_instance_id ||
+    settings?.last_instance_id ||
+    ""
+  const effectiveModel =
+    selectedModel ||
+    activeSession?.llm_model ||
+    settings?.last_model ||
+    ""
+
+  const isReady =
+    !!sessionId && !!effectiveInstanceId && !!effectiveModel
+
+  const selectedInstance = instances.find(
+    (i) => i.id === effectiveInstanceId,
+  )
+  const selectedModelInfo = currentModels.find(
+    (m) => m.model_id === effectiveModel,
+  )
 
   const handleLoadModels = useCallback(
     (catalogId: string) => {
@@ -289,11 +302,11 @@ export function IngestChat() {
   }
 
   const handleRetry = useCallback(
-    (content: string) => {
-      if (!content.trim() || sessionBusy || !isReady) return
-      void sendSessionMessage(content)
+    (assistantMessageId: string) => {
+      if (!assistantMessageId || sessionBusy || !isReady) return
+      void retrySessionMessage(assistantMessageId)
     },
-    [sessionBusy, isReady, sendSessionMessage],
+    [sessionBusy, isReady, retrySessionMessage],
   )
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -336,12 +349,12 @@ export function IngestChat() {
       >
         <ScrollArea className="min-h-0 flex-1">
           <div className="w-full space-y-4 px-2 py-4 sm:px-3">
-            {!isReady && (
+            {configLoaded && !isReady && (
               <div className="rounded-lg bg-amber-50 py-8 text-center text-amber-600 dark:bg-amber-950/20">
                 <p className="text-sm">
                   {instances.length === 0
                     ? "请先在 Settings 添加 Provider"
-                    : !selectedInstanceId || !selectedModel
+                    : !effectiveInstanceId || !effectiveModel
                       ? "请点击下方「模型」选择 Provider 和 Model"
                       : "正在设置会话..."}
                 </p>
@@ -359,7 +372,6 @@ export function IngestChat() {
               <MessageBubble
                 key={m.id}
                 msg={m}
-                messages={sessionMessages}
                 onRetry={handleRetry}
                 sessionBusy={sessionBusy}
               />
@@ -416,7 +428,7 @@ export function IngestChat() {
             <span className="min-w-0 truncate" title={sessionTitle}>
               {sessionTitle}
             </span>
-            {(selectedInstance || selectedModel) && (
+            {(selectedInstance || effectiveModel) && (
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                 {selectedInstance && (
                   <span className="inline-flex items-center gap-1">
@@ -424,10 +436,10 @@ export function IngestChat() {
                     {selectedInstance.name}
                   </span>
                 )}
-                {selectedModel && (
+                {effectiveModel && (
                   <span className="inline-flex items-center gap-1">
                     <Cpu className="size-3" />
-                    {selectedModelInfo?.name ?? selectedModel}
+                    {selectedModelInfo?.name ?? effectiveModel}
                   </span>
                 )}
               </div>

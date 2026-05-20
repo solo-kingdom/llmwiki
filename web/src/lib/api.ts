@@ -290,22 +290,10 @@ function parseSSEPart(part: string, onEvent: SessionStreamHandler) {
   }
 }
 
-export async function streamIngestSessionMessage(
-  sessionId: string,
-  content: string,
+async function consumeSessionSSE(
+  res: Response,
   onEvent: SessionStreamHandler,
 ): Promise<void> {
-  const res = await fetch(
-    `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/messages?stream=1`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      },
-      body: JSON.stringify({ content }),
-    },
-  )
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error(body.error || res.statusText)
@@ -335,6 +323,40 @@ export async function streamIngestSessionMessage(
     }
     throw e instanceof Error ? e : new Error(msg)
   }
+}
+
+export async function streamIngestSessionMessage(
+  sessionId: string,
+  content: string,
+  onEvent: SessionStreamHandler,
+): Promise<void> {
+  const res = await fetch(
+    `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/messages?stream=1`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify({ content }),
+    },
+  )
+  await consumeSessionSSE(res, onEvent)
+}
+
+export async function streamRetryIngestSessionMessage(
+  sessionId: string,
+  assistantMessageId: string,
+  onEvent: SessionStreamHandler,
+): Promise<void> {
+  const res = await fetch(
+    `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(assistantMessageId)}/retry?stream=1`,
+    {
+      method: "POST",
+      headers: { Accept: "text/event-stream" },
+    },
+  )
+  await consumeSessionSSE(res, onEvent)
 }
 
 export function uploadIngestSessionAttachment(

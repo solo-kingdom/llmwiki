@@ -59,6 +59,7 @@ vi.mock("@/lib/api", () => ({
   }),
   listIngestSessionMessages: vi.fn().mockResolvedValue({ messages: [] }),
   streamIngestSessionMessage: vi.fn().mockResolvedValue(undefined),
+  streamRetryIngestSessionMessage: vi.fn().mockResolvedValue(undefined),
   uploadIngestSessionAttachment: vi.fn(),
   archiveIngestSession: vi.fn(),
   createConversationIngestJob: vi.fn(),
@@ -405,7 +406,164 @@ describe("IngestChat", () => {
     )
 
     expect(await screen.findByText("回复失败")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "重新发送" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument()
+  })
+
+  it("shows retry button for incomplete assistant", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "hello",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          id: "msg-assistant",
+          session_id: "sess-1",
+          role: "assistant",
+          content: "partial",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "incomplete",
+          created_at: "2026-01-01T00:00:01Z",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    expect(await screen.findByText("回复未完成")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument()
+  })
+
+  it("retry calls streamRetryIngestSessionMessage not streamIngestSessionMessage", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+    })
+    vi.mocked(api.listProviderModels).mockResolvedValue([
+      {
+        provider_id: "cat-1",
+        model_id: "gpt-4",
+        name: "GPT-4",
+        family: "GPT-4",
+        context_limit: 128000,
+        output_limit: 16384,
+        cost_input: 2.5,
+        cost_output: 10,
+        reasoning: false,
+        tool_call: true,
+        attachment: true,
+      },
+    ])
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "trigger fail",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          id: "msg-assistant",
+          session_id: "sess-1",
+          role: "assistant",
+          content: "",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "failed",
+          created_at: "2026-01-01T00:00:01Z",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    const retryBtn = await screen.findByRole("button", { name: "重试" })
+    await waitFor(() => {
+      expect(
+        screen.getByPlaceholderText(/输入消息/),
+      ).not.toBeDisabled()
+    })
+    fireEvent.click(retryBtn)
+
+    await waitFor(() => {
+      expect(api.streamRetryIngestSessionMessage).toHaveBeenCalledWith(
+        "sess-1",
+        "msg-assistant",
+        expect.any(Function),
+      )
+    })
+    expect(api.streamIngestSessionMessage).not.toHaveBeenCalled()
   })
 
   it("shows archive success as toast that auto-dismisses after 3 seconds", async () => {

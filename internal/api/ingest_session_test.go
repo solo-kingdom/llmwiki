@@ -26,6 +26,7 @@ func setupSessionRoutes(api *API, r chi.Router) {
 		r.Delete("/{id}", api.DeleteIngestSessionHandler)
 		r.Get("/{id}/messages", api.ListIngestSessionMessages)
 		r.Post("/{id}/messages", api.AppendIngestSessionMessage)
+		r.Post("/{id}/messages/{messageId}/retry", api.RetryIngestSessionMessage)
 		r.Post("/{id}/archive", api.ArchiveIngestSession)
 	})
 }
@@ -826,5 +827,142 @@ func TestStreamSessionReplyClientDisconnectMarksIncomplete(t *testing.T) {
 	}
 	if !strings.Contains(assistant.Content, "partial") {
 		t.Fatalf("content = %q, want partial persisted text", assistant.Content)
+	}
+}
+
+func TestRetryIngestSessionMessageReusesSameRows(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+	seedOpenAIProviderForStream(t, api)
+
+	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		fmt.Fprint(w, openAIStreamChunk("retry success"))
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	t.Cleanup(llmSrv.Close)
+
+	inst := &sqlite.ProviderInstance{
+		Name:      "Mock OpenAI",
+		CatalogID: "openai",
+		APIKey:    "sk-test",
+		BaseURL:   llmSrv.URL + "/v1",
+	}
+	if err := api.db.CreateProviderInstance(inst); err != nil {
+		t.Fatalf("CreateProviderInstance: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"title":       "Retry Test",
+		"instance_id": inst.ID,
+		"model":       "gpt-4o",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var createResp sessionResponse
+	if err := json.NewDecoder(w.Body).Decode(&createResp); err != nil {
+		t.Fatal(err)
+	}
+
+	userMsg := &sqlite.IngestSessionMessage{
+		SessionID:    createResp.Session.ID,
+		Role:         "user",
+		Content:      "hello retry",
+		MessageType:  "text",
+		StreamStatus: "complete",
+	}
+	if err := api.db.CreateIngestSessionMessage(userMsg); err != nil {
+		t.Fatalf("CreateIngestSessionMessage user: %v", err)
+	}
+
+	assistant := &sqlite.IngestSessionMessage{
+		SessionID:    createResp.Session.ID,
+		Role:         "assistant",
+		Content:      "LLM stream failed",
+		MessageType:  "text",
+		StreamStatus: "failed",
+	}
+	if err := api.db.CreateIngestSessionMessage(assistant); err != nil {
+		t.Fatalf("CreateIngestSessionMessage assistant: %v", err)
+	}
+	assistantID := assistant.ID
+
+	retryReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/ingest/sessions/"+createResp.Session.ID+"/messages/"+assistantID+"/retry?stream=1",
+		nil,
+	)
+	retryReq.Header.Set("Accept", "text/event-stream")
+	retryW := httptest.NewRecorder()
+	r.ServeHTTP(retryW, retryReq)
+	if retryW.Code != http.StatusOK {
+		t.Fatalf("retry: expected 200, got %d; body=%s", retryW.Code, retryW.Body.String())
+	}
+
+	msgs, err := api.db.ListIngestSessionMessages(createResp.Session.ID)
+	if err != nil {
+		t.Fatalf("ListIngestSessionMessages: %v", err)
+	}
+	userCount := 0
+	var retried *sqlite.IngestSessionMessage
+	for i := range msgs {
+		if msgs[i].Role == "user" {
+			userCount++
+		}
+		if msgs[i].ID == assistantID {
+			retried = &msgs[i]
+		}
+	}
+	if userCount != 1 {
+		t.Fatalf("user message count = %d, want 1 (no duplicate user on retry)", userCount)
+	}
+	if retried == nil {
+		t.Fatal("expected same assistant message id after retry")
+	}
+	if retried.StreamStatus != "complete" {
+		t.Fatalf("stream_status = %q, want complete", retried.StreamStatus)
+	}
+	if !strings.Contains(retried.Content, "retry success") {
+		t.Fatalf("content = %q, want retry success", retried.Content)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("message count = %d, want 2 (user + assistant only)", len(msgs))
+	}
+}
+
+func TestRetryIngestSessionMessageNotRetriable(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var createResp sessionResponse
+	_ = json.NewDecoder(w.Body).Decode(&createResp)
+
+	assistant := &sqlite.IngestSessionMessage{
+		SessionID:    createResp.Session.ID,
+		Role:         "assistant",
+		Content:      "done",
+		MessageType:  "text",
+		StreamStatus: "complete",
+	}
+	if err := api.db.CreateIngestSessionMessage(assistant); err != nil {
+		t.Fatalf("CreateIngestSessionMessage: %v", err)
+	}
+
+	retryReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/ingest/sessions/"+createResp.Session.ID+"/messages/"+assistant.ID+"/retry?stream=1",
+		nil,
+	)
+	retryReq.Header.Set("Accept", "text/event-stream")
+	retryW := httptest.NewRecorder()
+	r.ServeHTTP(retryW, retryReq)
+	if retryW.Code != http.StatusBadRequest {
+		t.Fatalf("retry complete assistant: expected 400, got %d; body=%s", retryW.Code, retryW.Body.String())
 	}
 }

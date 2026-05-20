@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, waitFor } from "@testing-library/react"
+import { render, waitFor, act } from "@testing-library/react"
 import { useEffect } from "react"
 import { AppProvider, useApp } from "@/context/AppContext"
 import type { IngestSessionMessage } from "@/types"
+import * as api from "@/lib/api"
 
 const mockListIngestSessionMessages = vi.fn()
 const mockGetIngestSession = vi.fn()
+const mockStreamRetry = vi.mocked(api.streamRetryIngestSessionMessage)
 
 vi.mock("@/lib/api", () => ({
   listDocuments: vi.fn().mockResolvedValue([]),
@@ -35,6 +37,7 @@ vi.mock("@/lib/api", () => ({
   listIngestSessionMessages: (...args: unknown[]) =>
     mockListIngestSessionMessages(...args),
   streamIngestSessionMessage: vi.fn(),
+  streamRetryIngestSessionMessage: vi.fn(),
   uploadIngestSessionAttachment: vi.fn(),
   archiveIngestSession: vi.fn(),
   createConversationIngestJob: vi.fn(),
@@ -146,4 +149,95 @@ describe("AppContext streaming recovery", () => {
     },
     10000,
   )
+})
+
+describe("AppContext retry session message", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    mockGetIngestSession.mockResolvedValue({
+      session: {
+        id: "sess-1",
+        title: "",
+        status: "active",
+        storage_path: "",
+        llm_instance_id: "inst-1",
+        llm_model: "gpt-4",
+        created_at: "",
+        updated_at: "",
+      },
+    })
+    mockListIngestSessionMessages.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "hello",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          id: "msg-assistant",
+          session_id: "sess-1",
+          role: "assistant",
+          content: "failed",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "failed",
+          created_at: "2026-01-01T00:00:01Z",
+        },
+      ],
+    })
+    mockStreamRetry.mockImplementation(async (_sid, _aid, onEvent) => {
+      onEvent("assistant_start", { id: "msg-assistant" })
+      onEvent("token", { content: "ok" })
+      onEvent("done", {
+        id: "msg-assistant",
+        session_id: "sess-1",
+        role: "assistant",
+        content: "ok",
+        message_type: "text",
+        attachment_id: "",
+        stream_status: "complete",
+        created_at: "2026-01-01T00:00:01Z",
+      })
+    })
+  })
+
+  it("retry does not add duplicate messages", async () => {
+    let retryFn: ((id: string) => Promise<void>) | null = null
+    const counts: number[] = []
+
+    render(
+      <AppProvider>
+        <SessionLoader />
+        <Probe
+          onUpdate={(app) => {
+            retryFn = app.retrySessionMessage
+            counts.push(app.sessionMessages.length)
+          }}
+        />
+      </AppProvider>,
+    )
+
+    await waitFor(() => {
+      expect(counts.some((c) => c === 2)).toBe(true)
+    })
+
+    await act(async () => {
+      await retryFn!("msg-assistant")
+    })
+
+    await waitFor(() => {
+      expect(mockStreamRetry).toHaveBeenCalledWith(
+        "sess-1",
+        "msg-assistant",
+        expect.any(Function),
+      )
+      expect(counts[counts.length - 1]).toBe(2)
+    })
+  })
 })

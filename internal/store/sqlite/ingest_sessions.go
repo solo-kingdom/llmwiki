@@ -157,14 +157,17 @@ func (d *DB) CreateIngestSessionMessage(msg *IngestSessionMessage) error {
 	if err != nil {
 		return err
 	}
-	defer created.Close()
 	if created.Next() {
 		if err := scanIngestSessionMessage(created, msg); err != nil {
+			_ = created.Close()
 			return err
 		}
 	}
+	if err := created.Close(); err != nil {
+		return err
+	}
 	_, _ = d.db.Exec(`UPDATE ingest_sessions SET updated_at = datetime('now') WHERE id = ?`, msg.SessionID)
-	return created.Err()
+	return nil
 }
 
 func (d *DB) GetIngestSessionMessage(id string) (*IngestSessionMessage, error) {

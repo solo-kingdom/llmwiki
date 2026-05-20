@@ -3,6 +3,7 @@ import { useApp } from "@/context/AppContext"
 import { SettingsPage } from "@/components/SettingsPage"
 import { IngestChat } from "@/components/IngestChat"
 import { JobsPage } from "@/components/JobsPage"
+import { LogsPage } from "@/components/LogsPage"
 import { TimelinePage } from "@/components/TimelinePage"
 import { WarningPopover } from "@/components/WarningPopover"
 import { AppHeaderBar } from "@/components/AppHeaderBar"
@@ -23,6 +24,7 @@ const NAV_ITEMS: { id: WorkbenchView; label: string }[] = [
   { id: "ingest", label: "Ingest" },
   { id: "jobs", label: "Jobs" },
   { id: "timeline", label: "Timeline" },
+  { id: "logs", label: "Logs" },
   { id: "settings", label: "Settings" },
 ]
 
@@ -30,6 +32,7 @@ const LEGACY_HASH_VIEWS = new Set<WorkbenchView>([
   "jobs",
   "settings",
   "timeline",
+  "logs",
 ])
 
 function NavButton({
@@ -149,6 +152,7 @@ export function WorkbenchLayout() {
           )}
           {view === "jobs" && <JobsPage />}
           {view === "timeline" && vcEnabled === true && <TimelinePage />}
+          {view === "logs" && <LogsPage />}
           {view === "settings" && <SettingsPage />}
         </main>
       </WorkbenchContentShell>

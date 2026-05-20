@@ -253,3 +253,22 @@ CREATE TABLE IF NOT EXISTS provider_models_cache (
 );
 
 CREATE INDEX IF NOT EXISTS idx_provider_models_provider ON provider_models_cache(provider_id);
+
+-- OPERATIONAL: activity_logs — system audit trail, NOT rebuildable from filesystem.
+-- reindex MUST NOT delete or rebuild this table.
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT (datetime('now')),
+    level TEXT NOT NULL DEFAULT 'info' CHECK (level IN ('debug', 'info', 'warn', 'error')),
+    category TEXT NOT NULL,
+    action TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    resource_type TEXT NOT NULL DEFAULT '',
+    resource_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT '',
+    details TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_category_created_at ON activity_logs(category, created_at DESC);

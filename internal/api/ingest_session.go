@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
@@ -183,6 +184,9 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		} else {
 			writeError(w, http.StatusBadRequest, "Provider 实例不存在或未配置 API Key")
 		}
+		activity.LogSession(a.db, "stream_error", session.ID,
+			"LLM 客户端初始化失败", "failure", "api",
+			map[string]interface{}{"instance_id": instanceID, "model": model})
 		return
 	}
 
@@ -245,6 +249,9 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		)
 		_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, err.Error(), "failed")
 		sendEvent("error", map[string]string{"message": err.Error()})
+		activity.LogSession(a.db, "stream_error", session.ID,
+			err.Error(), "failure", "api",
+			map[string]interface{}{"instance_id": instanceID, "model": model})
 		return
 	}
 
@@ -311,6 +318,13 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 	assistantMsg.Content = content
 	assistantMsg.StreamStatus = streamStatus
 	if streamStatus == "failed" || streamStatus == "incomplete" {
+		activity.LogSession(a.db, "stream_error", session.ID,
+			lastErr, "failure", "api",
+			map[string]interface{}{
+				"stream_status": streamStatus,
+				"instance_id":   instanceID,
+				"model":         model,
+			})
 		return
 	}
 	sendEvent("done", assistantMsg)
@@ -451,6 +465,9 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "session has no user messages to archive")
 		return
 	}
+
+	activity.LogSession(a.db, "archive_started", sessionID,
+		fmt.Sprintf("会话 %s 开始归档", sessionID), "pending", "api", nil)
 
 	var req archiveSessionRequest
 	if r.Body != nil {

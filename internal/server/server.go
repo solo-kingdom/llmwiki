@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/api"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
@@ -85,6 +86,18 @@ func (s *Server) SetFileIndexer(indexer *engine.WorkspaceFileIndexer) {
 
 // Start begins listening and serving. Blocks until Shutdown is called.
 func (s *Server) Start() error {
+	activity.Start()
+	if s.db != nil {
+		activity.RecordSync(s.db, activity.Entry{
+			Level:    "info",
+			Category: "system",
+			Action:   "server_started",
+			Message:  "LLM Wiki 服务已启动",
+			Source:   "processor",
+		})
+		go s.startActivityLogsTrimLoop()
+	}
+
 	// Start provider/model data sync from models.dev in background
 	s.startProviderSync()
 
@@ -151,6 +164,8 @@ func (s *Server) Start() error {
 		r.Get("/settings", s.api.GetSettings)
 		r.Put("/settings", s.api.UpdateSettings)
 		r.Put("/settings/last-model", s.api.UpdateLastModel)
+		r.Get("/logs", s.api.ListActivityLogsHandler)
+		r.Delete("/logs", s.api.DeleteAllActivityLogsHandler)
 		r.Get("/capabilities", s.api.GetCapabilities)
 
 		// Version Control
@@ -378,19 +393,67 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	beforeCount, _ := s.db.CountActivityLogs("", "")
+
+	activity.Record(s.db, activity.Entry{
+		Level:    "info",
+		Category: "system",
+		Action:   "reindex_started",
+		Message:  "开始重建索引",
+		Source:   "api",
+	})
+
 	adapter := storesvc.NewStoreAdapter(s.db)
 	reindexer := engine.NewReindexer(adapter, s.config.Workspace)
 	count, err := reindexer.Rebuild("default")
 	if err != nil {
+		activity.Record(s.db, activity.Entry{
+			Level:    "error",
+			Category: "system",
+			Action:   "reindex_completed",
+			Message:  fmt.Sprintf("索引重建失败：%v", err),
+			Status:   "failure",
+			Source:   "api",
+			Details: map[string]interface{}{
+				"error": err.Error(),
+			},
+		})
 		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
+
+	afterCount, _ := s.db.CountActivityLogs("", "")
+	activity.Record(s.db, activity.Entry{
+		Level:    "info",
+		Category: "system",
+		Action:   "reindex_completed",
+		Message:  fmt.Sprintf("索引重建完成，共索引 %d 个文件", count),
+		Status:   "success",
+		Source:   "api",
+		Details: map[string]interface{}{
+			"indexed_count":      count,
+			"activity_logs_kept": afterCount == beforeCount,
+		},
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"indexed": count,
 		"status":  "ok",
 	})
+}
+
+func (s *Server) startActivityLogsTrimLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		if s.db == nil {
+			continue
+		}
+		if _, err := s.api.TrimActivityLogsScheduled(); err != nil {
+			log.Printf("activity logs trim: %v", err)
+		}
+	}
 }
 
 // startProviderSync loads the built-in snapshot, then kicks off background
@@ -432,6 +495,17 @@ func (s *Server) startProviderSync() {
 		ctx := context.Background()
 		if err := llm.SyncModelsDev(ctx, s.db); err != nil {
 			log.Printf("models.dev sync failed (will retry later): %v", err)
+			activity.Record(s.db, activity.Entry{
+				Level:    "warn",
+				Category: "system",
+				Action:   "models_sync_failed",
+				Message:  "models.dev 同步失败",
+				Status:   "failure",
+				Source:   "processor",
+				Details: map[string]interface{}{
+					"error": err.Error(),
+				},
+			})
 		}
 
 		// Periodic sync every hour
@@ -440,6 +514,17 @@ func (s *Server) startProviderSync() {
 		for range ticker.C {
 			if err := llm.SyncModelsDev(ctx, s.db); err != nil {
 				log.Printf("models.dev periodic sync failed: %v", err)
+				activity.Record(s.db, activity.Entry{
+					Level:    "warn",
+					Category: "system",
+					Action:   "models_sync_failed",
+					Message:  "models.dev 定期同步失败",
+					Status:   "failure",
+					Source:   "processor",
+					Details: map[string]interface{}{
+						"error": err.Error(),
+					},
+				})
 			}
 		}
 	}()

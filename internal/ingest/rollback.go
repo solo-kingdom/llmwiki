@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/vcs"
@@ -114,6 +115,23 @@ func (p *JobProcessor) processRollbackJob(ctx context.Context, job *sqlite.Inges
 		WHERE id = ?`, summary, job.ID); updateErr != nil {
 		log.Printf("rollback: failed to mark job %s succeeded: %v", job.ID, updateErr)
 	}
+	if updated, _ := p.db.GetIngestJob(job.ID); updated != nil {
+		activity.LogIngestJob(p.db, updated, "succeeded", "processor")
+	}
+	activity.Record(p.db, activity.Entry{
+		Level:        "info",
+		Category:     "vcs",
+		Action:       "rollback_succeeded",
+		Message:      fmt.Sprintf("回滚成功：%s", commitSHA),
+		ResourceType: "commit",
+		ResourceID:   commitSHA,
+		Status:       "success",
+		Source:       "processor",
+		Details: map[string]interface{}{
+			"commit_sha": commitSHA,
+			"job_id":     job.ID,
+		},
+	})
 
 	return nil
 }

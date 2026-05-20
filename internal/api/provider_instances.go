@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"strings"
 
+	"fmt"
+
+	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
@@ -66,6 +69,21 @@ func (a *API) CreateProviderInstance(w http.ResponseWriter, r *http.Request) {
 	resp := *inst
 	resp.APIKeyMask = maskKey(resp.APIKey)
 	resp.APIKey = ""
+	activity.Record(a.db, activity.Entry{
+		Level:        "info",
+		Category:     "provider",
+		Action:       "instance_created",
+		Message:      fmt.Sprintf("已创建 Provider 实例：%s", resp.Name),
+		ResourceType: "provider_instance",
+		ResourceID:   resp.ID,
+		Status:       "success",
+		Source:       "api",
+		Details: map[string]interface{}{
+			"instance_id": resp.ID,
+			"name":        resp.Name,
+			"catalog_id":  resp.CatalogID,
+		},
+	})
 	writeJSON(w, http.StatusCreated, instanceResponse{Instance: &resp})
 }
 
@@ -152,11 +170,27 @@ func (a *API) UpdateProviderInstanceHandler(w http.ResponseWriter, r *http.Reque
 	updated, _ := a.db.GetProviderInstance(id)
 	updated.APIKeyMask = maskKey(updated.APIKey)
 	updated.APIKey = ""
+	activity.Record(a.db, activity.Entry{
+		Level:        "info",
+		Category:     "provider",
+		Action:       "instance_updated",
+		Message:      fmt.Sprintf("已更新 Provider 实例：%s", updated.Name),
+		ResourceType: "provider_instance",
+		ResourceID:   updated.ID,
+		Status:       "success",
+		Source:       "api",
+		Details: map[string]interface{}{
+			"instance_id": updated.ID,
+			"name":        updated.Name,
+			"catalog_id":  updated.CatalogID,
+		},
+	})
 	writeJSON(w, http.StatusOK, instanceResponse{Instance: updated})
 }
 
 func (a *API) DeleteProviderInstanceHandler(w http.ResponseWriter, r *http.Request) {
 	id := getID(r)
+	existing, _ := a.db.GetProviderInstance(id)
 	if err := a.db.DeleteProviderInstance(id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -165,5 +199,23 @@ func (a *API) DeleteProviderInstanceHandler(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	name := id
+	if existing != nil {
+		name = existing.Name
+	}
+	activity.Record(a.db, activity.Entry{
+		Level:        "info",
+		Category:     "provider",
+		Action:       "instance_deleted",
+		Message:      fmt.Sprintf("已删除 Provider 实例：%s", name),
+		ResourceType: "provider_instance",
+		ResourceID:   id,
+		Status:       "success",
+		Source:       "api",
+		Details: map[string]interface{}{
+			"instance_id": id,
+			"name":        name,
+		},
+	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

@@ -19,6 +19,7 @@ import type {
   SessionListItem,
   VCStatus,
   VCLogEntry,
+  ActivityLog,
 } from "@/types"
 
 const BASE = ""
@@ -91,6 +92,37 @@ export function updateSettings(
   return request<Settings>("/api/v1/settings", {
     method: "PUT",
     body: JSON.stringify(settings),
+  })
+}
+
+export type ActivityLogListResponse = {
+  logs: ActivityLog[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
+export function listActivityLogs(params?: {
+  limit?: number
+  offset?: number
+  category?: string
+  level?: string
+}): Promise<ActivityLogListResponse> {
+  const q = new URLSearchParams()
+  if (params?.limit != null) q.set("limit", String(params.limit))
+  if (params?.offset != null) q.set("offset", String(params.offset))
+  if (params?.category) q.set("category", params.category)
+  if (params?.level) q.set("level", params.level)
+  const qs = q.toString()
+  return request<ActivityLogListResponse>(
+    `/api/v1/logs${qs ? `?${qs}` : ""}`,
+  )
+}
+
+export function clearActivityLogs(): Promise<{ deleted_count: number }> {
+  return request<{ deleted_count: number }>("/api/v1/logs", {
+    method: "DELETE",
   })
 }
 

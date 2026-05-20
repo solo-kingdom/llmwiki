@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
@@ -21,7 +22,14 @@ func RunLocalMCP(workspace string, db *sqlite.DB) error {
 }
 
 func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *engine.WorkspaceFileIndexer) {
-	server.RegisterTool(Tool{
+	registerTool := func(tool Tool, handler ToolHandler) {
+		server.RegisterTool(tool, func(args map[string]interface{}) (string, error) {
+			activity.LogMCPTool(db, tool.Name)
+			return handler(args)
+		})
+	}
+
+	registerTool(Tool{
 		Name:        "guide",
 		Description: "Get started with LLM Wiki. Call this to understand how the knowledge vault works and see your available knowledge bases.",
 		InputSchema: map[string]interface{}{
@@ -75,7 +83,7 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *eng
 		return sb.String(), nil
 	})
 
-	server.RegisterTool(Tool{
+	registerTool(Tool{
 		Name:        "search",
 		Description: "Browse or search the knowledge vault. Modes: list (browse files), search (keyword search), references (citation graph queries).",
 		InputSchema: map[string]interface{}{
@@ -189,7 +197,7 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *eng
 		}
 	})
 
-	server.RegisterTool(Tool{
+	registerTool(Tool{
 		Name:        "read",
 		Description: "Read a document from the knowledge vault. Supports markdown, PDF (by page), images, and batch glob reads.",
 		InputSchema: map[string]interface{}{
@@ -238,7 +246,7 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *eng
 		return sb.String(), nil
 	})
 
-	server.RegisterTool(Tool{
+	registerTool(Tool{
 		Name:        "write",
 		Description: "Create or edit a wiki page. Use create for new pages, edit for str_replace modification, append to add content.",
 		InputSchema: map[string]interface{}{
@@ -306,6 +314,7 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *eng
 					_ = indexer.IndexDocumentContent(existing.ID, content)
 				}
 			}
+			activity.LogDocument(db, "updated", existing.ID, relPath, "mcp")
 			return fmt.Sprintf("Updated: %s (ID: %s, version incremented)", title, existing.ID), nil
 		}
 
@@ -338,10 +347,11 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *eng
 			}
 		}
 
+		activity.LogDocument(db, "created", doc.ID, relPath, "mcp")
 		return fmt.Sprintf("Created: %s (ID: %s, path: %s)", title, doc.ID, relPath), nil
 	})
 
-	server.RegisterTool(Tool{
+	registerTool(Tool{
 		Name:        "delete",
 		Description: "Delete a document from the knowledge vault. Supports path and glob patterns. Protected pages (overview.md, log.md) cannot be deleted.",
 		InputSchema: map[string]interface{}{
@@ -386,10 +396,11 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *eng
 			return "", fmt.Errorf("archive document: %w", err)
 		}
 
+		activity.LogDocument(db, "deleted", doc.ID, doc.RelativePath, "mcp")
 		return fmt.Sprintf("Deleted %d document(s): %s (ID: %s)", affected, doc.Title, doc.ID), nil
 	})
 
-	server.RegisterTool(Tool{
+	registerTool(Tool{
 		Name:        "ping",
 		Description: "Test connectivity",
 		InputSchema: map[string]interface{}{

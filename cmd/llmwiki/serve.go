@@ -6,11 +6,13 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 	_ "github.com/solo-kingdom/llmwiki" // embed web assets
+	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
@@ -113,11 +115,27 @@ func runServe(dir string, opts serveOptions) error {
 	}
 
 	if !opts.noWatch {
-		w, err := watcher.New(ws, nil)
+		w, err := watcher.New(ws, func(changes []watcher.Change) {
+			for _, ch := range changes {
+				rel, err := filepath.Rel(ws, ch.Path)
+				if err != nil {
+					continue
+				}
+				rel = filepath.ToSlash(rel)
+				switch ch.Type {
+				case watcher.ChangeCreated:
+					activity.RecordWatcherEvent(db, "file_created", rel)
+				case watcher.ChangeModified:
+					activity.RecordWatcherModify(db, rel)
+				case watcher.ChangeDeleted:
+					activity.RecordWatcherEvent(db, "file_deleted", rel)
+				}
+			}
+		})
 		if err != nil {
 			log.Printf("Warning: file watcher unavailable: %v", err)
 		} else {
-			w.SetIndexer(fileIndexer)
+			w.SetIndexer(&activity.Indexer{Inner: fileIndexer, DB: db})
 			srv.SetWatcher(w)
 		}
 	}

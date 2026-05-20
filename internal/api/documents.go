@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
@@ -127,6 +128,7 @@ func (a *API) CreateDocument(w http.ResponseWriter, r *http.Request) {
 	} else {
 		a.indexDocumentContent(doc.ID, doc.Content)
 	}
+	activity.LogDocument(a.db, "created", doc.ID, doc.RelativePath, "api")
 	writeJSON(w, http.StatusCreated, doc)
 }
 
@@ -185,6 +187,7 @@ func (a *API) UpdateDocumentContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	activity.LogDocument(a.db, "updated", id, doc.RelativePath, "api")
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -231,6 +234,7 @@ func (a *API) UpdateDocumentMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 
 	doc, _ := a.db.GetDocument(id)
+	activity.LogDocument(a.db, "updated", id, existing.RelativePath, "api")
 	writeJSON(w, http.StatusOK, doc)
 }
 
@@ -250,6 +254,7 @@ func (a *API) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "document not found")
 		return
 	}
+	activity.LogDocument(a.db, "deleted", id, "", "api")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -269,5 +274,16 @@ func (a *API) BulkDeleteDocuments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	activity.Record(a.db, activity.Entry{
+		Level:    "info",
+		Category: "document",
+		Action:   "bulk_deleted",
+		Message:  fmt.Sprintf("批量删除 %d 个文档", n),
+		Source:   "api",
+		Details: map[string]interface{}{
+			"deleted_count": n,
+			"ids":           req.IDs,
+		},
+	})
 	writeJSON(w, http.StatusOK, map[string]int64{"deleted": n})
 }

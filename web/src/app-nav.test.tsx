@@ -73,6 +73,14 @@ vi.mock("@/lib/api", () => ({
   listProviders: vi.fn().mockResolvedValue([]),
   getVCStatus: vi.fn().mockResolvedValue(mockVCStatus(false)),
   getVCLog: vi.fn().mockResolvedValue([]),
+  listActivityLogs: vi.fn().mockResolvedValue({
+    logs: [],
+    total: 0,
+    limit: 50,
+    offset: 0,
+    has_more: false,
+  }),
+  clearActivityLogs: vi.fn().mockResolvedValue({ deleted_count: 0 }),
 }))
 
 describe("App navigation", () => {
@@ -100,6 +108,10 @@ describe("App navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Jobs" }))
     expect(await screen.findByText("暂无摄入任务")).toBeInTheDocument()
     expect(window.location.pathname).toBe("/jobs")
+
+    fireEvent.click(screen.getByRole("button", { name: "Logs" }))
+    expect(await screen.findByText("暂无系统日志")).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/logs")
 
     const wikiLink = screen.getByRole("link", { name: "Wiki" })
     expect(wikiLink).toHaveAttribute("href", "/wiki")

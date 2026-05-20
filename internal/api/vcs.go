@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/vcs"
 )
@@ -89,6 +90,14 @@ func (a *API) VCSInit(w http.ResponseWriter, r *http.Request) {
 		response.CommitSHA = sha[0].SHA
 	}
 
+	activity.Record(a.db, activity.Entry{
+		Level:    "info",
+		Category: "vcs",
+		Action:   "init",
+		Message:  "已启用版本控制",
+		Status:   "success",
+		Source:   "api",
+	})
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -126,6 +135,14 @@ func (a *API) VCSDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	activity.Record(a.db, activity.Entry{
+		Level:    "info",
+		Category: "vcs",
+		Action:   "disable",
+		Message:  "已禁用版本控制",
+		Status:   "success",
+		Source:   "api",
+	})
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "disabled",
 		"message": "Version control disabled. Git history is preserved.",
@@ -239,6 +256,21 @@ func (a *API) VCSRollback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create rollback job: %v", err))
 		return
 	}
+	activity.Record(a.db, activity.Entry{
+		Level:        "info",
+		Category:     "vcs",
+		Action:       "rollback_started",
+		Message:      fmt.Sprintf("回滚任务已排队：%s", payload.CommitSHA),
+		ResourceType: "commit",
+		ResourceID:   payload.CommitSHA,
+		Status:       "pending",
+		Source:       "api",
+		Details: map[string]interface{}{
+			"commit_sha": payload.CommitSHA,
+			"job_id":     job.ID,
+		},
+	})
+	activity.LogIngestJob(a.db, job, "queued", "api")
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "rollback_queued",

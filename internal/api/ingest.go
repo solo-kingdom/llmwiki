@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
@@ -100,6 +101,7 @@ func (a *API) createQueuedIngestJob(inputType, sourcePath, sourceRef string) (*s
 	if err := a.db.CreateIngestJob(job); err != nil {
 		return nil, err
 	}
+	activity.LogIngestJob(a.db, job, "queued", "api")
 	return job, nil
 }
 
@@ -331,6 +333,7 @@ func (a *API) RetryIngestJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "job not found")
 		return
 	}
+	activity.LogIngestJob(a.db, retry, "retried", "api")
 
 	writeJSON(w, http.StatusOK, ingestJobResponse{Job: retry})
 }
@@ -358,6 +361,9 @@ func (a *API) CancelIngestJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ok {
+		if cancelled, _ := a.db.GetIngestJob(id); cancelled != nil {
+			activity.LogIngestJob(a.db, cancelled, "cancelled", "api")
+		}
 		writeJSON(w, http.StatusOK, cancelIngestResponse{Status: "cancelled"})
 		return
 	}

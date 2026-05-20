@@ -121,6 +121,21 @@ export interface Settings {
   chunk_overlap: number
   auto_reindex: boolean
   watch_sources: boolean
+  activity_logs_max_count?: number
+}
+
+export interface ActivityLog {
+  id: number
+  created_at: string
+  level: string
+  category: string
+  action: string
+  message: string
+  resource_type: string
+  resource_id: string
+  status: string
+  details: string
+  source: string
 }
 
 export interface ReferenceSummary {

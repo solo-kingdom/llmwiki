@@ -595,6 +595,36 @@ export function SettingsPage() {
 
         <Card>
           <CardHeader>
+            <CardTitle>Logs</CardTitle>
+            <CardDescription>
+              系统活动日志最大保留条数（100–100000，默认 10000）。超出后自动删除最旧记录。
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <label className="text-sm font-medium">最大保留条数</label>
+            <Input
+              type="number"
+              min={100}
+              max={100000}
+              value={
+                mergedForm.activity_logs_max_count ??
+                (typeof settings?.activity_logs_max_count === "number"
+                  ? settings.activity_logs_max_count
+                  : 10000)
+              }
+              onChange={(e) =>
+                set(
+                  "activity_logs_max_count",
+                  parseInt(e.target.value, 10) || 10000,
+                )
+              }
+              className="mt-1 max-w-xs"
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle>Processing</CardTitle>
             <CardDescription>
               Chunk size, overlap, and indexing behavior.

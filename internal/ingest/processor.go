@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
@@ -153,6 +154,10 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		WHERE id = ?`, summary, job.ID); updateErr != nil {
 		log.Printf("processor: failed to mark job %s succeeded: %v", job.ID, updateErr)
 	}
+	if updated, _ := p.db.GetIngestJob(job.ID); updated != nil {
+		activity.LogIngestJob(p.db, updated, "succeeded", "processor")
+		p.logSessionArchiveOutcome(updated, "archive_succeeded", "success")
+	}
 
 	return nil
 }
@@ -238,11 +243,55 @@ func (p *JobProcessor) claimNextJob() (*sqlite.IngestJob, error) {
 	}
 
 	job.Status = "running"
+	activity.LogIngestJob(p.db, &job, "running", "processor")
 	return &job, nil
 }
 
 func (p *JobProcessor) failJob(id, errorCode, message, missingDep, remediation string) error {
-	return p.db.UpdateIngestJobFailure(id, errorCode, message, missingDep, remediation)
+	err := p.db.UpdateIngestJobFailure(id, errorCode, message, missingDep, remediation)
+	if failed, _ := p.db.GetIngestJob(id); failed != nil {
+		activity.LogIngestJob(p.db, failed, "failed", "processor")
+		p.logSessionArchiveOutcome(failed, "archive_failed", "failure")
+		if failed.InputType == "rollback" {
+			sha := failed.SourceRef
+			activity.Record(p.db, activity.Entry{
+				Level:        "error",
+				Category:     "vcs",
+				Action:       "rollback_failed",
+				Message:      fmt.Sprintf("回滚失败：%s", sha),
+				ResourceType: "commit",
+				ResourceID:   sha,
+				Status:       "failure",
+				Source:       "processor",
+				Details: map[string]interface{}{
+					"commit_sha": sha,
+					"job_id":     failed.ID,
+					"error":      failed.ErrorMessage,
+				},
+			})
+		}
+	}
+	return err
+}
+
+func (p *JobProcessor) logSessionArchiveOutcome(job *sqlite.IngestJob, action, status string) {
+	if job == nil || job.InputType != string(InputKindSessionArchive) {
+		return
+	}
+	if !strings.HasPrefix(job.SourceRef, "session:") {
+		return
+	}
+	sessionID := strings.TrimPrefix(job.SourceRef, "session:")
+	msg := fmt.Sprintf("会话归档%s", action)
+	if action == "archive_succeeded" {
+		msg = fmt.Sprintf("会话 %s 归档成功", sessionID)
+	} else if action == "archive_failed" {
+		msg = fmt.Sprintf("会话 %s 归档失败", sessionID)
+	}
+	activity.LogSession(p.db, action, sessionID, msg, status, "processor", map[string]interface{}{
+		"job_id": job.ID,
+		"error":  job.ErrorMessage,
+	})
 }
 
 // scanJobRow scans a row into an IngestJob using the standard column order.
@@ -324,6 +373,7 @@ func (p *JobProcessor) indexGeneratedWikiFiles(files []string, jobID string) {
 	for _, rel := range files {
 		if err := p.indexer.IndexFile(rel); err != nil {
 			log.Printf("processor: index %s after job %s: %v", rel, jobID, err)
+			activity.RecordIndexFailed(p.db, rel, err)
 		}
 	}
 }

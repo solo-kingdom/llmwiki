@@ -1,0 +1,71 @@
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { SettingsPage } from "@/components/SettingsPage"
+
+const mockSaveSettings = vi.fn()
+const mockLoadSettings = vi.fn()
+
+vi.mock("@/context/AppContext", () => ({
+  useApp: () => ({
+    settings: {
+      mcp_servers_json:
+        '{\n  "version": 1,\n  "servers": [],\n  "defaults": {"readonly_only": true}\n}',
+    },
+    loadSettings: mockLoadSettings,
+    saveSettings: mockSaveSettings,
+    providers: [],
+    loadProviders: vi.fn(),
+    instances: [],
+    loadInstances: vi.fn(),
+    createInstance: vi.fn(),
+    updateInstance: vi.fn(),
+    deleteInstance: vi.fn(),
+    loadModels: vi.fn(),
+    currentModels: [],
+  }),
+}))
+
+vi.mock("@/lib/api", () => ({
+  getVCStatus: vi.fn().mockResolvedValue({ enabled: false, git_available: true }),
+  initVC: vi.fn(),
+  disableVC: vi.fn(),
+}))
+
+describe("SettingsPage MCP JSON", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockSaveSettings.mockResolvedValue({
+      mcp_servers_json: '{\n  "version": 1,\n  "servers": []\n}',
+    })
+  })
+
+  it("renders MCP JSON textarea with settings value", () => {
+    render(<SettingsPage />)
+    const area = screen.getByTestId("mcp-servers-json") as HTMLTextAreaElement
+    expect(area.value).toContain('"version": 1')
+  })
+
+  it("shows validation error for invalid JSON", () => {
+    render(<SettingsPage />)
+    const area = screen.getByTestId("mcp-servers-json")
+    fireEvent.change(area, { target: { value: "not-json" } })
+    expect(screen.getByTestId("mcp-json-error").textContent).toMatch(
+      /not valid JSON/i,
+    )
+  })
+
+  it("saves valid MCP JSON", async () => {
+    render(<SettingsPage />)
+    const area = screen.getByTestId("mcp-servers-json")
+    const valid = JSON.stringify(
+      { version: 1, servers: [], defaults: { readonly_only: true } },
+      null,
+      2,
+    )
+    fireEvent.change(area, { target: { value: valid } })
+    fireEvent.click(screen.getByRole("button", { name: /Save Settings/i }))
+    await waitFor(() => {
+      expect(mockSaveSettings).toHaveBeenCalled()
+    })
+  })
+})

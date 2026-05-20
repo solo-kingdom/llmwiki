@@ -14,6 +14,7 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
+	"github.com/solo-kingdom/llmwiki/internal/mcp"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/vcs"
 )
@@ -154,6 +155,7 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 	if err := p.preparePipelineForJob(job); err != nil {
 		return err
 	}
+	defer p.pipeline.SetMCPRouter(nil)
 
 	// Run through the two-step LLM pipeline
 	files, err := p.pipeline.IngestNormalized(ctx, normalized)
@@ -466,7 +468,19 @@ func (p *JobProcessor) preparePipelineForJob(job *sqlite.IngestJob) error {
 		return err
 	}
 	p.pipeline.SetLLMClient(client)
+	p.attachMCPRouter()
 	return nil
+}
+
+func (p *JobProcessor) attachMCPRouter() {
+	raw, _ := p.db.GetConfig("mcp_servers_json")
+	reg, err := mcp.NewRegistry(raw)
+	if err != nil {
+		p.pipeline.SetMCPRouter(nil)
+		return
+	}
+	router := mcp.NewRouter(reg, &mcpRecorderAdapter{jobRec: p.pipeline.Recorder(), db: p.db})
+	p.pipeline.SetMCPRouter(router)
 }
 
 func (p *JobProcessor) resolveLLMClientForJob(job *sqlite.IngestJob) (*llm.Client, error) {

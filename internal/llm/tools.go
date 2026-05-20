@@ -1,0 +1,116 @@
+package llm
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+)
+
+// ToolDefinition describes a callable tool for the chat API.
+type ToolDefinition struct {
+	Name        string
+	Description string
+	Parameters  map[string]interface{}
+}
+
+// ToolCall is a model-requested tool invocation.
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments string
+}
+
+// ChatResult is a non-streaming completion result.
+type ChatResult struct {
+	Content   string
+	ToolCalls []ToolCall
+}
+
+// ToolExecutor runs a tool by name and returns text for the model.
+type ToolExecutor interface {
+	Execute(ctx context.Context, name string, argsJSON string) (string, error)
+	ListTools(ctx context.Context) ([]ToolDefinition, error)
+}
+
+// ToolLoopConfig limits automatic tool-call rounds.
+type ToolLoopConfig struct {
+	MaxRounds              int
+	MaxToolCallsPerRound   int
+}
+
+// DefaultToolLoopConfig returns safe defaults from the design doc.
+func DefaultToolLoopConfig() ToolLoopConfig {
+	return ToolLoopConfig{
+		MaxRounds:            6,
+		MaxToolCallsPerRound: 4,
+	}
+}
+
+// RunToolLoop runs chat with optional tools until the model returns text or limits hit.
+func RunToolLoop(
+	ctx context.Context,
+	client *Client,
+	executor ToolExecutor,
+	messages []Message,
+	tools []ToolDefinition,
+	temperature float64,
+	maxTokens int,
+	cfg ToolLoopConfig,
+) (string, error) {
+	if client == nil {
+		return "", fmt.Errorf("LLM client is nil")
+	}
+	if cfg.MaxRounds <= 0 {
+		cfg.MaxRounds = DefaultToolLoopConfig().MaxRounds
+	}
+	if cfg.MaxToolCallsPerRound <= 0 {
+		cfg.MaxToolCallsPerRound = DefaultToolLoopConfig().MaxToolCallsPerRound
+	}
+
+	msgs := append([]Message(nil), messages...)
+	useTools := len(tools) > 0 && executor != nil
+
+	for round := 0; round < cfg.MaxRounds; round++ {
+		var result ChatResult
+		var err error
+		if useTools {
+			result, err = client.Chat(ctx, msgs, tools, temperature, maxTokens)
+		} else {
+			result, err = client.Chat(ctx, msgs, nil, temperature, maxTokens)
+		}
+		if err != nil {
+			return "", err
+		}
+		if len(result.ToolCalls) == 0 {
+			return result.Content, nil
+		}
+		if !useTools {
+			return result.Content, nil
+		}
+
+		// Append assistant message with tool calls (OpenAI-style)
+		msgs = append(msgs, Message{Role: "assistant", Content: result.Content})
+
+		calls := result.ToolCalls
+		if len(calls) > cfg.MaxToolCallsPerRound {
+			calls = calls[:cfg.MaxToolCallsPerRound]
+		}
+		for _, tc := range calls {
+			var args map[string]interface{}
+			if tc.Arguments != "" {
+				_ = json.Unmarshal([]byte(tc.Arguments), &args)
+			}
+			out, execErr := executor.Execute(ctx, tc.Name, tc.Arguments)
+			if execErr != nil {
+				out = fmt.Sprintf("tool error: %v", execErr)
+			}
+			msgs = append(msgs, Message{
+				Role:       "tool",
+				Content:    out,
+				ToolCallID: tc.ID,
+				Name:       tc.Name,
+			})
+		}
+	}
+	return "", fmt.Errorf("tool loop exceeded max rounds (%d)", cfg.MaxRounds)
+}

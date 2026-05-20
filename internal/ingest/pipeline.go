@@ -10,13 +10,16 @@ import (
 	"time"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
+	"github.com/solo-kingdom/llmwiki/internal/mcp"
 )
 
 type Pipeline struct {
-	workspace string
-	llmClient *llm.Client
-	lockMgr   *PageLockManager
-	recorder  JobRecorder
+	workspace   string
+	llmClient   *llm.Client
+	lockMgr     *PageLockManager
+	recorder    JobRecorder
+	mcpExecutor *pipelineMCPExecutor
+	toolLoopCfg llm.ToolLoopConfig
 }
 
 type CacheEntry struct {
@@ -45,6 +48,25 @@ func (p *Pipeline) SetLLMClient(client *llm.Client) {
 // SetJobRecorder sets the recorder for the current job execution.
 func (p *Pipeline) SetJobRecorder(rec JobRecorder) {
 	p.recorder = rec
+}
+
+// Recorder returns the active job recorder, if any.
+func (p *Pipeline) Recorder() JobRecorder {
+	return p.recorder
+}
+
+// SetMCPRouter attaches an MCP tool router for job tool-call loops.
+func (p *Pipeline) SetMCPRouter(router *mcp.Router) {
+	if router == nil || !router.HasJobServers() {
+		p.mcpExecutor = nil
+		return
+	}
+	p.mcpExecutor = newPipelineMCPExecutor(router)
+}
+
+// SetToolLoopConfig overrides default tool-loop limits.
+func (p *Pipeline) SetToolLoopConfig(cfg llm.ToolLoopConfig) {
+	p.toolLoopCfg = cfg
 }
 
 func (p *Pipeline) Ingest(ctx context.Context, sourcePath string) ([]string, error) {
@@ -129,27 +151,7 @@ func (p *Pipeline) analyze(ctx context.Context, name, content string) (string, e
 
 	const temp = 0.1
 	const maxTok = 4096
-	RecordLLMRequest(p.recorder, "analysis", p.llmClient.Model(), llmMessagesForRecord(messages), temp, maxTok)
-
-	start := time.Now()
-	ch, err := p.llmClient.StreamChat(ctx, messages, temp, maxTok)
-	if err != nil {
-		return "", err
-	}
-
-	var result string
-	for event := range ch {
-		if event.Type == "token" {
-			result += event.Content
-		} else if event.Type == "error" {
-			if p.recorder != nil {
-				p.recorder.Record("analysis", "error", event.Error.Error(), nil)
-			}
-			return "", event.Error
-		}
-	}
-	RecordLLMResponse(p.recorder, "analysis", result, time.Since(start))
-	return result, nil
+	return p.runLLMStep(ctx, "analysis", messages, temp, maxTok)
 }
 
 func (p *Pipeline) generate(ctx context.Context, name, content, analysis string) ([]string, error) {
@@ -170,26 +172,10 @@ Generate wiki pages in FILE block format.`, name, analysis, content)
 
 	const temp = 0.1
 	const maxTok = 8192
-	RecordLLMRequest(p.recorder, "generation", p.llmClient.Model(), llmMessagesForRecord(messages), temp, maxTok)
-
-	start := time.Now()
-	ch, err := p.llmClient.StreamChat(ctx, messages, temp, maxTok)
+	result, err := p.runLLMStep(ctx, "generation", messages, temp, maxTok)
 	if err != nil {
 		return nil, err
 	}
-
-	var result string
-	for event := range ch {
-		if event.Type == "token" {
-			result += event.Content
-		} else if event.Type == "error" {
-			if p.recorder != nil {
-				p.recorder.Record("generation", "error", event.Error.Error(), nil)
-			}
-			return nil, event.Error
-		}
-	}
-	RecordLLMResponse(p.recorder, "generation", result, time.Since(start))
 
 	blocks := parseFileBlocksWithContent(result)
 
@@ -275,6 +261,50 @@ func (p *Pipeline) saveCache(sourcePath string, files []string) {
 		return
 	}
 	os.WriteFile(p.cachePath(), out, 0o644)
+}
+
+func (p *Pipeline) runLLMStep(ctx context.Context, step string, messages []llm.Message, temp float64, maxTok int) (string, error) {
+	RecordLLMRequest(p.recorder, step, p.llmClient.Model(), llmMessagesForRecord(messages), temp, maxTok)
+	start := time.Now()
+
+	cfg := p.toolLoopCfg
+	if cfg.MaxRounds == 0 {
+		cfg = llm.DefaultToolLoopConfig()
+	}
+
+	if p.mcpExecutor != nil && !p.mcpExecutor.LocalOnly() {
+		tools, err := p.mcpExecutor.ListTools(ctx)
+		if err != nil {
+			p.mcpExecutor.localOnly.Store(true)
+		} else if len(tools) > 0 {
+			result, err := llm.RunToolLoop(ctx, p.llmClient, p.mcpExecutor, messages, tools, temp, maxTok, cfg)
+			if err == nil {
+				RecordLLMResponse(p.recorder, step, result, time.Since(start))
+				return result, nil
+			}
+			if p.recorder != nil {
+				p.recorder.Record(step, "warn", "tool loop failed, falling back to stream: "+err.Error(), nil)
+			}
+		}
+	}
+
+	ch, err := p.llmClient.StreamChat(ctx, messages, temp, maxTok)
+	if err != nil {
+		return "", err
+	}
+	var result string
+	for event := range ch {
+		if event.Type == "token" {
+			result += event.Content
+		} else if event.Type == "error" {
+			if p.recorder != nil {
+				p.recorder.Record(step, "error", event.Error.Error(), nil)
+			}
+			return "", event.Error
+		}
+	}
+	RecordLLMResponse(p.recorder, step, result, time.Since(start))
+	return result, nil
 }
 
 func llmMessagesForRecord(messages []llm.Message) []map[string]string {

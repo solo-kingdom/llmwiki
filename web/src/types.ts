@@ -123,6 +123,7 @@ export interface Settings {
   watch_sources: boolean
   activity_logs_max_count?: number
   ingest_job_events_max_count?: number
+  mcp_servers_json?: string
 }
 
 export interface ActivityLog {

@@ -14,8 +14,10 @@ import (
 )
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string `json:"role"`
+	Content    string `json:"content,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Name       string `json:"name,omitempty"`
 }
 
 type StreamEvent struct {
@@ -97,12 +99,39 @@ func (c *Client) validateRequest() error {
 	return nil
 }
 
+// Chat performs a non-streaming completion, optionally with tools (OpenAI-compatible).
+func (c *Client) Chat(ctx context.Context, messages []Message, tools []ToolDefinition, temperature float64, maxTokens int) (ChatResult, error) {
+	if err := c.validateRequest(); err != nil {
+		return ChatResult{}, err
+	}
+	url := c.buildURL()
+	body, err := c.buildChatBody(messages, tools, temperature, maxTokens, false)
+	if err != nil {
+		return ChatResult{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return ChatResult{}, fmt.Errorf("create request: %w", err)
+	}
+	c.setHeaders(httpReq)
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return ChatResult{}, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return ChatResult{}, classifyError(resp.StatusCode, string(data))
+	}
+	return parseChatResponse(data, c.config.Provider)
+}
+
 func (c *Client) StreamChat(ctx context.Context, messages []Message, temperature float64, maxTokens int) (<-chan StreamEvent, error) {
 	if err := c.validateRequest(); err != nil {
 		return nil, err
 	}
 	url := c.buildURL()
-	body, err := c.buildRequestBody(messages, temperature, maxTokens)
+	body, err := c.buildChatBody(messages, nil, temperature, maxTokens, true)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +182,7 @@ func (c *Client) setHeaders(req *http.Request) {
 	}
 }
 
-func (c *Client) buildRequestBody(messages []Message, temperature float64, maxTokens int) ([]byte, error) {
+func (c *Client) buildChatBody(messages []Message, tools []ToolDefinition, temperature float64, maxTokens int, stream bool) ([]byte, error) {
 	switch c.config.Provider {
 	case "anthropic":
 		type anthropicReq struct {
@@ -170,7 +199,7 @@ func (c *Client) buildRequestBody(messages []Message, temperature float64, maxTo
 			Model:     c.config.Model,
 			Messages:  messages,
 			MaxTokens: mt,
-			Stream:    true,
+			Stream:    stream,
 		})
 	case "ollama":
 		type ollamaReq struct {
@@ -181,23 +210,95 @@ func (c *Client) buildRequestBody(messages []Message, temperature float64, maxTo
 		return json.Marshal(ollamaReq{
 			Model:    c.config.Model,
 			Messages: messages,
-			Stream:   true,
+			Stream:   stream,
 		})
 	default:
-		type openaiReq struct {
-			Model       string    `json:"model"`
-			Messages    []Message `json:"messages"`
-			Temperature float64   `json:"temperature"`
-			MaxTokens   int       `json:"max_tokens,omitempty"`
-			Stream      bool      `json:"stream"`
+		type openaiTool struct {
+			Type     string `json:"type"`
+			Function struct {
+				Name        string                 `json:"name"`
+				Description string                 `json:"description"`
+				Parameters  map[string]interface{} `json:"parameters"`
+			} `json:"function"`
 		}
-		return json.Marshal(openaiReq{
+		type openaiReq struct {
+			Model       string       `json:"model"`
+			Messages    []Message    `json:"messages"`
+			Temperature float64      `json:"temperature"`
+			MaxTokens   int          `json:"max_tokens,omitempty"`
+			Stream      bool         `json:"stream"`
+			Tools       []openaiTool `json:"tools,omitempty"`
+		}
+		req := openaiReq{
 			Model:       c.config.Model,
 			Messages:    messages,
 			Temperature: temperature,
 			MaxTokens:   maxTokens,
-			Stream:      true,
-		})
+			Stream:      stream,
+		}
+		for _, t := range tools {
+			ot := openaiTool{Type: "function"}
+			ot.Function.Name = t.Name
+			ot.Function.Description = t.Description
+			ot.Function.Parameters = t.Parameters
+			if ot.Function.Parameters == nil {
+				ot.Function.Parameters = map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
+			}
+			req.Tools = append(req.Tools, ot)
+		}
+		return json.Marshal(req)
+	}
+}
+
+func parseChatResponse(data []byte, provider string) (ChatResult, error) {
+	switch provider {
+	case "anthropic", "ollama":
+		var generic struct {
+			Content string `json:"content"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(data, &generic); err != nil {
+			return ChatResult{}, err
+		}
+		text := generic.Content
+		if text == "" {
+			text = generic.Message.Content
+		}
+		return ChatResult{Content: text}, nil
+	default:
+		var resp struct {
+			Choices []struct {
+				Message struct {
+					Content   string `json:"content"`
+					ToolCalls []struct {
+						ID       string `json:"id"`
+						Type     string `json:"type"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal(data, &resp); err != nil {
+			return ChatResult{}, err
+		}
+		if len(resp.Choices) == 0 {
+			return ChatResult{}, fmt.Errorf("empty chat response")
+		}
+		msg := resp.Choices[0].Message
+		var calls []ToolCall
+		for _, tc := range msg.ToolCalls {
+			calls = append(calls, ToolCall{
+				ID:        tc.ID,
+				Name:      tc.Function.Name,
+				Arguments: tc.Function.Arguments,
+			})
+		}
+		return ChatResult{Content: msg.Content, ToolCalls: calls}, nil
 	}
 }
 

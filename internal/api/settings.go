@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
+	"github.com/solo-kingdom/llmwiki/internal/mcp"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
@@ -35,6 +36,7 @@ type settingsResponse struct {
 	WatchSources          string `json:"watch_sources"`
 	ActivityLogsMaxCount     string `json:"activity_logs_max_count"`
 	IngestJobEventsMaxCount string `json:"ingest_job_events_max_count"`
+	MCPServersJSON          string `json:"mcp_servers_json"`
 }
 
 func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +59,24 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		WatchSources:         all["watch_sources"],
 		ActivityLogsMaxCount:      activityLogsMaxCountForResponse(all["activity_logs_max_count"]),
 		IngestJobEventsMaxCount:   jobEventsMaxCountForResponse(all["ingest_job_events_max_count"]),
+		MCPServersJSON:            mcpServersJSONForResponse(all["mcp_servers_json"]),
 	})
+}
+
+func mcpServersJSONForResponse(stored string) string {
+	if strings.TrimSpace(stored) == "" {
+		canonical, _ := mcp.CanonicalJSON(mcp.DefaultConfig())
+		return canonical
+	}
+	cfg, err := mcp.ParseConfig(stored)
+	if err != nil {
+		return stored
+	}
+	canonical, err := mcp.CanonicalJSON(cfg)
+	if err != nil {
+		return stored
+	}
+	return canonical
 }
 
 func jobEventsMaxCountForResponse(stored string) string {
@@ -87,6 +106,7 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"job_instance_id": true, "job_model": true,
 		"activity_logs_max_count":      true,
 		"ingest_job_events_max_count": true,
+		"mcp_servers_json":            true,
 	}
 
 	for key, raw := range req {
@@ -109,6 +129,14 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
+		}
+		if key == "mcp_servers_json" {
+			canonical, err := validateAndCanonicalizeMCPJSON(value)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			value = canonical
 		}
 		if err := a.db.SetConfig(key, value); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -142,6 +170,17 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Return updated settings
 	a.GetSettings(w, r)
+}
+
+func validateAndCanonicalizeMCPJSON(value string) (string, error) {
+	cfg, err := mcp.ParseConfig(value)
+	if err != nil {
+		if ve, ok := err.(*mcp.ValidationError); ok {
+			return "", fmt.Errorf("%s", ve.Error())
+		}
+		return "", err
+	}
+	return mcp.CanonicalJSON(cfg)
 }
 
 // parseSettingsValue coerces JSON settings values to strings for app_config storage.

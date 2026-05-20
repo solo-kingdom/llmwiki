@@ -71,6 +71,7 @@ export function SettingsPage() {
   const [vcStatus, setVCStatus] = useState<VCStatus | null>(null)
   const [vcLoading, setVCLoading] = useState(false)
   const [vcDisableConfirm, setVCDisableConfirm] = useState(false)
+  const [mcpJsonError, setMcpJsonError] = useState<string | null>(null)
 
   useEffect(() => {
     void loadSettings()
@@ -132,8 +133,35 @@ export function SettingsPage() {
   )
   const usingConversationModel = !jobInstanceId && !jobModel
 
+  const validateMCPJson = (raw: string): string | null => {
+    const trimmed = raw.trim()
+    if (!trimmed) return null
+    try {
+      const parsed = JSON.parse(trimmed) as { version?: number; servers?: unknown[] }
+      if (parsed.version !== 1) {
+        return "version 必须为 1"
+      }
+      if (!Array.isArray(parsed.servers)) {
+        return "servers 必须是数组"
+      }
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : "JSON 格式无效"
+    }
+  }
+
+  const handleMCPJsonChange = (value: string) => {
+    set("mcp_servers_json", value)
+    setMcpJsonError(validateMCPJson(value))
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
+    const mcpErr = validateMCPJson(mergedForm.mcp_servers_json ?? "")
+    if (mcpErr) {
+      setMcpJsonError(mcpErr)
+      return
+    }
     setSaving(true)
     setSaved(false)
     try {
@@ -590,6 +618,33 @@ export function SettingsPage() {
                 )}
               </>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>MCP Servers</CardTitle>
+            <CardDescription>
+              全局 MCP 客户端配置（JSON 高级模式）。默认仅允许只读工具 search/read。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <label className="text-sm font-medium">mcp_servers_json</label>
+            <textarea
+              data-testid="mcp-servers-json"
+              className="mt-1 w-full min-h-[200px] rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"
+              value={mergedForm.mcp_servers_json ?? settings?.mcp_servers_json ?? ""}
+              onChange={(e) => handleMCPJsonChange(e.target.value)}
+              spellCheck={false}
+            />
+            {mcpJsonError && (
+              <p className="text-xs text-destructive" data-testid="mcp-json-error">
+                {mcpJsonError}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              保存后服务端会校验并返回格式化 JSON。
+            </p>
           </CardContent>
         </Card>
 

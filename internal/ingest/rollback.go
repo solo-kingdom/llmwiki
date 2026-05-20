@@ -84,6 +84,9 @@ func (p *JobProcessor) processRollbackJob(ctx context.Context, job *sqlite.Inges
 	}
 
 	// Execute rollback via LLM
+	if err := p.preparePipelineForJob(job); err != nil {
+		return err
+	}
 	if err := p.executeRollback(ctx, rbCtx, currentFiles); err != nil {
 		return p.failJob(job.ID, "rollback_failed",
 			fmt.Sprintf("LLM rollback failed: %v", err), "", "")

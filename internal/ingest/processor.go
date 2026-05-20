@@ -29,11 +29,11 @@ type JobProcessor struct {
 
 // NewJobProcessor creates a new processor. It needs the main DB (not the
 // legacy queue DB) so it can read/write the unified ingest_jobs table.
-func NewJobProcessor(db *sqlite.DB, workspace string, llmClient *llm.Client) *JobProcessor {
+func NewJobProcessor(db *sqlite.DB, workspace string) *JobProcessor {
 	return &JobProcessor{
 		db:        db,
 		workspace: workspace,
-		pipeline:  NewPipeline(workspace, llmClient),
+		pipeline:  NewPipeline(workspace, nil),
 		stop:      make(chan struct{}),
 	}
 }
@@ -111,6 +111,10 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 	if err != nil {
 		return p.failJob(job.ID, "normalize_failed",
 			fmt.Sprintf("normalization failed: %v", err), "", "")
+	}
+
+	if err := p.preparePipelineForJob(job); err != nil {
+		return err
 	}
 
 	// Run through the two-step LLM pipeline
@@ -280,6 +284,10 @@ func (p *JobProcessor) RunPipelineForJob(ctx context.Context, job *sqlite.Ingest
 		return err
 	}
 
+	if err := p.preparePipelineForJob(job); err != nil {
+		return err
+	}
+
 	files, err := p.pipeline.IngestNormalized(ctx, normalized)
 	if err != nil {
 		errCode := classifyPipelineError(err)
@@ -359,4 +367,44 @@ func remediationForCode(code string) string {
 	default:
 		return ""
 	}
+}
+
+func (p *JobProcessor) preparePipelineForJob(job *sqlite.IngestJob) error {
+	client, err := p.resolveLLMClientForJob(job)
+	if err != nil {
+		_ = p.failJob(job.ID, "llm_config_invalid", err.Error(), "", remediationForCode("llm_config_invalid"))
+		return err
+	}
+	p.pipeline.SetLLMClient(client)
+	return nil
+}
+
+func (p *JobProcessor) resolveLLMClientForJob(job *sqlite.IngestJob) (*llm.Client, error) {
+	instanceID := ""
+	model := ""
+
+	if job.InputType == string(InputKindSessionArchive) && strings.HasPrefix(job.SourceRef, "session:") {
+		sessionID := strings.TrimPrefix(job.SourceRef, "session:")
+		session, err := p.db.GetIngestSession(sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("load ingest session: %w", err)
+		}
+		if session != nil {
+			instanceID = session.LLMInstanceID
+			model = session.LLMModel
+		}
+	}
+
+	if instanceID == "" {
+		instanceID, _ = p.db.GetConfig("last_instance_id")
+	}
+	if model == "" {
+		model, _ = p.db.GetConfig("last_model")
+	}
+
+	if instanceID != "" && model != "" {
+		return llm.ClientFromInstance(p.db, instanceID, model)
+	}
+
+	return llm.ClientFromWorkspace(p.workspace)
 }

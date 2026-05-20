@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
@@ -154,7 +155,7 @@ func TestProcessorClaimNextJob(t *testing.T) {
 	defer db.Close()
 
 	ws := t.TempDir()
-	processor := NewJobProcessor(db, ws, nil)
+	processor := NewJobProcessor(db, ws)
 
 	// No jobs → nil
 	job, err := processor.ClaimNextQueuedJob(context.Background())
@@ -209,7 +210,7 @@ func TestProcessorFailJob(t *testing.T) {
 	defer db.Close()
 
 	ws := t.TempDir()
-	processor := NewJobProcessor(db, ws, nil)
+	processor := NewJobProcessor(db, ws)
 
 	// Create and claim a job
 	job := &sqlite.IngestJob{
@@ -263,7 +264,7 @@ func TestProcessorRunPipelineForJobMissingFile(t *testing.T) {
 	defer db.Close()
 
 	ws := t.TempDir()
-	processor := NewJobProcessor(db, ws, nil)
+	processor := NewJobProcessor(db, ws)
 
 	// Create a job that references a file that doesn't exist
 	job := &sqlite.IngestJob{
@@ -297,6 +298,8 @@ func TestProcessorRunPipelineForJobMissingFile(t *testing.T) {
 }
 
 func TestProcessorRunPipelineForJobSuccess(t *testing.T) {
+	clearLLMEnv(t)
+
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 	db, err := sqlite.Open(dbPath)
@@ -329,15 +332,12 @@ func TestProcessorRunPipelineForJobSuccess(t *testing.T) {
 		t.Fatalf("CreateIngestJob: %v", err)
 	}
 
-	// Pipeline requires an LLM client which we can't mock directly,
-	// so we test that the source file read and normalization work.
-	// The LLM call will fail, and the job should be marked as failed with a pipeline error.
-	processor := NewJobProcessor(db, ws, nil)
+	// Without provider instance or workspace LLM config, job should fail early.
+	processor := NewJobProcessor(db, ws)
 	err = processor.RunPipelineForJob(context.Background(), job)
 
-	// Should fail because LLM client is nil
 	if err == nil {
-		t.Fatal("expected error with nil LLM client")
+		t.Fatal("expected error without LLM configuration")
 	}
 
 	failed, err := db.GetIngestJob(job.ID)
@@ -346,6 +346,9 @@ func TestProcessorRunPipelineForJobSuccess(t *testing.T) {
 	}
 	if failed.Status != "failed" {
 		t.Fatalf("status = %q, want failed", failed.Status)
+	}
+	if failed.ErrorCode != "llm_config_invalid" {
+		t.Fatalf("error_code = %q, want llm_config_invalid", failed.ErrorCode)
 	}
 }
 
@@ -447,7 +450,7 @@ func TestProcessorProcessAllEmpty(t *testing.T) {
 	defer db.Close()
 
 	ws := t.TempDir()
-	processor := NewJobProcessor(db, ws, nil)
+	processor := NewJobProcessor(db, ws)
 
 	// No jobs → ProcessAll should return nil immediately
 	if err := processor.ProcessAll(context.Background()); err != nil {
@@ -553,7 +556,7 @@ func TestProcessorWithGitCommit(t *testing.T) {
 	sourceContent := []byte("# Test\nHello world")
 	os.WriteFile(filepath.Join(ws, "raw", "sources", "web-ingest", "test.md"), sourceContent, 0o644)
 
-	processor := NewJobProcessor(db, ws, nil)
+	processor := NewJobProcessor(db, ws)
 	processor.SetGitRepo(repo)
 
 	// Create a running job
@@ -591,7 +594,7 @@ func TestProcessorWithoutGitCommit(t *testing.T) {
 	defer db.Close()
 
 	ws := t.TempDir()
-	processor := NewJobProcessor(db, ws, nil)
+	processor := NewJobProcessor(db, ws)
 	// No git repo set - version control disabled
 
 	// Create a running job
@@ -623,7 +626,7 @@ func TestProcessorSetGitRepo(t *testing.T) {
 	defer db.Close()
 
 	ws := t.TempDir()
-	processor := NewJobProcessor(db, ws, nil)
+	processor := NewJobProcessor(db, ws)
 
 	// Should be nil initially
 	if processor.gitRepo != nil {
@@ -641,5 +644,133 @@ func TestProcessorSetGitRepo(t *testing.T) {
 	processor.SetGitRepo(nil)
 	if processor.gitRepo != nil {
 		t.Error("expected nil gitRepo after setting nil")
+	}
+}
+
+func clearLLMEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"LLMWIKI_BASE_URL",
+		"LLMWIKI_API_KEY",
+		"LLMWIKI_PROVIDER",
+		"LLMWIKI_MODEL",
+		"OPENAI_API_KEY",
+		"ANTHROPIC_API_KEY",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
+func seedProcessorOpenAIProvider(t *testing.T, db *sqlite.DB) *sqlite.ProviderInstance {
+	t.Helper()
+	if err := db.UpsertProviderInfo([]sqlite.ProviderInfo{
+		{
+			ID:        "openai",
+			Name:      "OpenAI",
+			APIBase:   "https://api.openai.com/v1",
+			APIFormat: "openai",
+		},
+	}); err != nil {
+		t.Fatalf("UpsertProviderInfo: %v", err)
+	}
+	inst := &sqlite.ProviderInstance{
+		Name:      "OpenAI Work",
+		CatalogID: "openai",
+		APIKey:    "sk-test-key",
+	}
+	if err := db.CreateProviderInstance(inst); err != nil {
+		t.Fatalf("CreateProviderInstance: %v", err)
+	}
+	return inst
+}
+
+func TestResolveLLMClientForSessionArchiveUsesSessionConfig(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	inst := seedProcessorOpenAIProvider(t, db)
+	session := &sqlite.IngestSession{
+		Title:         "Archive Session",
+		StoragePath:   "raw/sources/web-ingest/sessions/sess123",
+		LLMInstanceID: inst.ID,
+		LLMModel:      "gpt-4o",
+	}
+	if err := db.CreateIngestSession(session); err != nil {
+		t.Fatalf("CreateIngestSession: %v", err)
+	}
+
+	processor := NewJobProcessor(db, t.TempDir())
+	job := &sqlite.IngestJob{
+		InputType:  string(InputKindSessionArchive),
+		SourceRef:  "session:" + session.ID,
+		SourcePath: "raw/sources/web-ingest/sessions/sess123/archive.md",
+	}
+
+	client, err := processor.resolveLLMClientForJob(job)
+	if err != nil {
+		t.Fatalf("resolveLLMClientForJob: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client")
+	}
+}
+
+func TestResolveLLMClientForJobUsesGlobalDefaults(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	inst := seedProcessorOpenAIProvider(t, db)
+	if err := db.SetConfig("last_instance_id", inst.ID); err != nil {
+		t.Fatalf("SetConfig last_instance_id: %v", err)
+	}
+	if err := db.SetConfig("last_model", "gpt-4o"); err != nil {
+		t.Fatalf("SetConfig last_model: %v", err)
+	}
+
+	processor := NewJobProcessor(db, t.TempDir())
+	job := &sqlite.IngestJob{
+		InputType:  "text",
+		SourceRef:  "text",
+		SourcePath: "raw/sources/web-ingest/test.md",
+	}
+
+	client, err := processor.resolveLLMClientForJob(job)
+	if err != nil {
+		t.Fatalf("resolveLLMClientForJob: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client")
+	}
+}
+
+func TestResolveLLMClientForJobMissingConfig(t *testing.T) {
+	clearLLMEnv(t)
+
+	db, err := sqlite.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	processor := NewJobProcessor(db, t.TempDir())
+	job := &sqlite.IngestJob{
+		InputType:  "text",
+		SourceRef:  "text",
+		SourcePath: "raw/sources/web-ingest/test.md",
+	}
+
+	_, err = processor.resolveLLMClientForJob(job)
+	if err == nil {
+		t.Fatal("expected error without LLM configuration")
+	}
+	if !strings.Contains(err.Error(), "base URL is not configured") &&
+		!strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("error = %q, want configuration hint", err.Error())
 	}
 }

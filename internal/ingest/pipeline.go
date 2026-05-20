@@ -37,6 +37,11 @@ func NewPipeline(workspace string, llmClient *llm.Client) *Pipeline {
 	}
 }
 
+// SetLLMClient updates the LLM client used for subsequent pipeline runs.
+func (p *Pipeline) SetLLMClient(client *llm.Client) {
+	p.llmClient = client
+}
+
 func (p *Pipeline) Ingest(ctx context.Context, sourcePath string) ([]string, error) {
 	cached, err := p.checkCache(sourcePath)
 	if err == nil && cached != nil {

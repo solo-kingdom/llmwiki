@@ -295,7 +295,9 @@ export function SettingsPage() {
                           />
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-muted-foreground">Base URL (可选)</label>
+                          <label className="text-xs font-medium text-muted-foreground">
+                            Base URL{catalogInfo?.api_base ? " (可选)" : " (必填)"}
+                          </label>
                           <Input
                             value={editForm.base_url}
                             onChange={(e) => setEditForm((prev) =>
@@ -422,13 +424,20 @@ export function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">Base URL (可选)</label>
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Base URL{(() => {
+                      const catalogInfo = providers.find((p) => p.id === addForm.catalog_id)
+                      return catalogInfo?.api_base ? " (可选)" : " (必填)"
+                    })()}
+                  </label>
                   <Input
                     value={addForm.base_url}
                     onChange={(e) => setAddForm((prev) =>
                       prev.mode === "add" ? { ...prev, base_url: e.target.value } : prev,
                     )}
-                    placeholder="使用默认"
+                    placeholder={
+                      providers.find((p) => p.id === addForm.catalog_id)?.api_base || "https://..."
+                    }
                     className="h-7 text-sm mt-0.5"
                   />
                 </div>

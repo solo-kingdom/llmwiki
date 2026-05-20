@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
@@ -63,36 +62,11 @@ func (a *API) sessionLLMClient(session *sqlite.IngestSession) (*llm.Client, stri
 
 // instanceLLMClient creates an LLM client for a given provider instance and model.
 func (a *API) instanceLLMClient(instanceID, model string) (*llm.Client, string, string) {
-	inst, err := a.db.GetProviderInstance(instanceID)
-	if err != nil || inst == nil {
+	client, err := llm.ClientFromInstance(a.db, instanceID, model)
+	if err != nil || client == nil {
 		return nil, instanceID, model
 	}
-
-	apiKey := inst.APIKey
-	if apiKey == "" {
-		return nil, instanceID, model
-	}
-
-	// Determine API format and base URL from catalog
-	apiFormat := "openai"
-	baseURL := inst.BaseURL
-	pInfo, _ := a.db.GetProviderInfo(inst.CatalogID)
-	if pInfo != nil {
-		apiFormat = pInfo.APIFormat
-		if baseURL == "" {
-			baseURL = pInfo.APIBase
-		}
-	}
-
-	cfg := llm.Config{
-		Provider:          apiFormat,
-		BaseURL:           baseURL,
-		APIKey:            apiKey,
-		Model:             model,
-		Timeout:           30 * time.Minute,
-		StreamIdleTimeout: 2 * time.Minute,
-	}
-	return llm.NewClient(cfg), instanceID, model
+	return client, instanceID, model
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

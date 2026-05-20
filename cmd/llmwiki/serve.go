@@ -13,7 +13,6 @@ import (
 	_ "github.com/solo-kingdom/llmwiki" // embed web assets
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
-	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
 	"github.com/solo-kingdom/llmwiki/internal/server"
 	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
@@ -122,20 +121,7 @@ func runServe(dir string, opts serveOptions) error {
 		}
 	}
 
-	wsCfg, err := llm.LoadConfig(ws)
-	if err != nil {
-		log.Printf("Warning: load LLM config: %v", err)
-	}
-	llmClient := llm.NewClient(llm.Config{
-		Provider:          wsCfg.Provider,
-		BaseURL:           wsCfg.BaseURL,
-		APIKey:            wsCfg.APIKey,
-		Model:             wsCfg.Model,
-		Timeout:           time.Duration(wsCfg.RequestTimeout) * time.Second,
-		StreamIdleTimeout: time.Duration(wsCfg.StreamIdleTimeout) * time.Second,
-	})
-
-	processor := ingest.NewJobProcessor(db, ws, llmClient)
+	processor := ingest.NewJobProcessor(db, ws)
 	processor.SetFileIndexer(fileIndexer)
 	gitRepo := vcs.NewGitRepo(ws)
 	if gitRepo.IsInitialized() {

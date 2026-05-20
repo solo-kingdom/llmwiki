@@ -2,7 +2,6 @@ import { useEffect, useState } from "react"
 import { Dialog } from "@base-ui/react/dialog"
 import { useApp } from "@/context/AppContext"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import type { SessionListItem } from "@/types"
 import {
   Plus,
@@ -175,16 +174,10 @@ export function SessionControls() {
         新建
       </Button>
 
-      <Dialog.Root
-        open={switchOpen}
-        onOpenChange={(open) => {
-          setSwitchOpen(open)
-          if (!open) setDeleteTarget(null)
-        }}
-      >
+      <Dialog.Root open={switchOpen} onOpenChange={setSwitchOpen}>
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/40 data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 transition-opacity duration-200" />
-          <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-md -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border bg-background shadow-lg outline-none data-[starting-style]:scale-95 data-[starting-style]:opacity-0 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 transition-[opacity,scale] duration-200">
+          <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-md -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-background shadow-lg outline-none data-[starting-style]:scale-95 data-[starting-style]:opacity-0 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 transition-[opacity,scale] duration-200">
             <div className="flex items-center justify-between border-b px-4 py-3">
               <Dialog.Title className="text-base font-semibold">
                 切换会话
@@ -194,31 +187,7 @@ export function SessionControls() {
               </Dialog.Close>
             </div>
 
-            {deleteTarget && (
-              <div className="space-y-3 border-b bg-destructive/5 px-4 py-3">
-                <p className="text-sm">{deletePrompt}</p>
-                <div className="flex justify-end gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={deleting}
-                    onClick={() => setDeleteTarget(null)}
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    disabled={deleting}
-                    onClick={() => void handleDeleteConfirm()}
-                  >
-                    {deleting ? "删除中..." : "确认删除"}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <ScrollArea className="max-h-[60vh]">
+            <div className="min-h-0 flex-1 overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               <div className="space-y-1 p-2">
                 {activeSessions.length === 0 && (
                   <p className="py-6 text-center text-xs text-muted-foreground">
@@ -236,7 +205,42 @@ export function SessionControls() {
                   </>
                 )}
               </div>
-            </ScrollArea>
+            </div>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root
+        open={deleteTarget != null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null)
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-[60] bg-black/50 data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 transition-opacity duration-200" />
+          <Dialog.Popup className="fixed left-1/2 top-1/2 z-[60] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-background p-6 shadow-lg outline-none data-[starting-style]:scale-95 data-[starting-style]:opacity-0 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 transition-[opacity,scale] duration-200">
+            <Dialog.Title className="text-base font-semibold">
+              删除会话
+            </Dialog.Title>
+            <p className="mt-3 text-sm text-muted-foreground">{deletePrompt}</p>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={deleting}
+                onClick={() => setDeleteTarget(null)}
+              >
+                取消
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={deleting}
+                onClick={() => void handleDeleteConfirm()}
+              >
+                {deleting ? "删除中..." : "确认删除"}
+              </Button>
+            </div>
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>

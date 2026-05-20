@@ -1,6 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import App from "@/App"
+import * as api from "@/lib/api"
+import type { VCStatus } from "@/types"
+
+function mockVCStatus(enabled: boolean): VCStatus {
+  return {
+    enabled,
+    commit_count: enabled ? 1 : 0,
+    git_available: enabled,
+    git_version: enabled ? "2.43.0" : "",
+    tracked_dirs: enabled ? ["wiki"] : [],
+    excluded_dirs: [],
+  }
+}
 
 vi.mock("@/lib/api", () => ({
   getPublicWikiStatus: vi.fn().mockResolvedValue({ enabled: false }),
@@ -58,7 +71,8 @@ vi.mock("@/lib/api", () => ({
   createTextIngestJob: vi.fn(),
   uploadIngestJobs: vi.fn(),
   listProviders: vi.fn().mockResolvedValue([]),
-  getVCStatus: vi.fn().mockResolvedValue({ enabled: false }),
+  getVCStatus: vi.fn().mockResolvedValue(mockVCStatus(false)),
+  getVCLog: vi.fn().mockResolvedValue([]),
 }))
 
 describe("App navigation", () => {
@@ -117,5 +131,13 @@ describe("App navigation", () => {
     render(<App />)
     expect(await screen.findByText("暂无摄入任务")).toBeInTheDocument()
     expect(window.location.pathname).toBe("/jobs")
+  })
+
+  it("restores timeline view from URL on load when VC is enabled", async () => {
+    vi.mocked(api.getVCStatus).mockResolvedValue(mockVCStatus(true))
+    window.history.replaceState(null, "", "/timeline")
+    render(<App />)
+    expect(await screen.findByText("Loading timeline...")).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/timeline")
   })
 })

@@ -9,8 +9,8 @@ export function PageContainer({
   className?: string
 }) {
   return (
-    <div className={cn("flex-1 overflow-auto", className)}>
-      <div className="py-6">{children}</div>
+    <div className={cn("min-h-0 flex-1 overflow-y-auto", className)}>
+      <div className="px-1 py-6">{children}</div>
     </div>
   )
 }

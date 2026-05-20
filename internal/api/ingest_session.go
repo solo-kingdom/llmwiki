@@ -243,7 +243,7 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 			"[ingest-session] stream start failed session=%s instance=%s model=%s: %v",
 			session.ID, instanceID, model, err,
 		)
-		_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, "", "failed")
+		_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, err.Error(), "failed")
 		sendEvent("error", map[string]string{"message": err.Error()})
 		return
 	}
@@ -303,6 +303,10 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		sendEvent("error", map[string]string{"message": lastErr})
 	}
 	content := builder.String()
+	if content == "" && lastErr != "" &&
+		(streamStatus == "failed" || streamStatus == "incomplete") {
+		content = lastErr
+	}
 	_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, content, streamStatus)
 	assistantMsg.Content = content
 	assistantMsg.StreamStatus = streamStatus

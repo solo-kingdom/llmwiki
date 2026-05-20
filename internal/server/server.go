@@ -245,24 +245,42 @@ func (s *Server) spaHandler() http.HandlerFunc {
 		}
 	}
 
+	indexHTML, err := fs.ReadFile(WebAssets, "index.html")
+	if err != nil {
+		log.Printf("Warning: index.html missing in embedded web assets: %v", err)
+	}
+
 	fileServer := http.FileServer(http.FS(WebAssets))
+	serveIndex := func(w http.ResponseWriter, r *http.Request) {
+		if indexHTML == nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(indexHTML)
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)
 			return
 		}
-		// SPA fallback: try the file, if not found, serve index.html
+
 		path := strings.TrimPrefix(r.URL.Path, "/")
 		if path == "" {
-			path = "index.html"
+			serveIndex(w, r)
+			return
 		}
+
 		f, err := WebAssets.Open(path)
-		if err != nil {
-			r.URL.Path = "/index.html"
-		} else {
+		if err == nil {
 			f.Close()
+			fileServer.ServeHTTP(w, r)
+			return
 		}
-		fileServer.ServeHTTP(w, r)
+
+		// Client-side route (e.g. /jobs, /wiki): return index.html without FileServer redirects.
+		serveIndex(w, r)
 	}
 }
 

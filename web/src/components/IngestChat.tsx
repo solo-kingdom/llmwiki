@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useApp } from "@/context/AppContext"
+import { copyTextToClipboard } from "@/lib/clipboard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -35,6 +36,13 @@ function findRetryUserContent(
   return null
 }
 
+function assistantErrorText(msg: IngestSessionMessage): string | null {
+  if (msg.error_message?.trim()) return msg.error_message.trim()
+  if (msg.stream_status === "failed") return "回复失败"
+  if (msg.stream_status === "incomplete") return "回复未完成"
+  return null
+}
+
 function MessageBubble({
   msg,
   messages,
@@ -46,22 +54,38 @@ function MessageBubble({
   onRetry: (content: string) => void
   sessionBusy: boolean
 }) {
-  const isUser = msg.role === "user"
-  const failed = msg.stream_status === "failed"
-  const retryContent = failed ? findRetryUserContent(messages, msg.id) : null
+  const [copied, setCopied] = useState(false)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const handleCopy = async () => {
-    const text = msg.content?.trim()
-    if (!text) return
-    try {
-      await navigator.clipboard.writeText(text)
-    } catch {
-      // ignore clipboard failures
-    }
-  }
+  const isUser = msg.role === "user"
+  const isFailed =
+    msg.stream_status === "failed" || msg.stream_status === "incomplete"
+  const errorText = !isUser ? assistantErrorText(msg) : null
+  const retryContent =
+    msg.stream_status === "failed"
+      ? findRetryUserContent(messages, msg.id)
+      : null
 
   const isStreaming = msg.stream_status === "streaming"
   const hasContent = !!msg.content?.trim()
+  const copyText = msg.content?.trim() || errorText || ""
+
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+    },
+    [],
+  )
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!copyText) return
+    const ok = await copyTextToClipboard(copyText)
+    if (!ok) return
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+    setCopied(true)
+    copyTimerRef.current = setTimeout(() => setCopied(false), 2000)
+  }
 
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -74,14 +98,17 @@ function MessageBubble({
               : "bg-muted"
         }`}
       >
-        <button
-          type="button"
-          className="absolute right-2 top-2 rounded p-1 opacity-0 transition-opacity hover:bg-background/20 group-hover:opacity-100"
-          title="复制"
-          onClick={() => void handleCopy()}
-        >
-          <Copy className="size-3.5" />
-        </button>
+        {copyText && (
+          <button
+            type="button"
+            className="absolute right-2 top-2 z-10 rounded p-1 opacity-0 transition-opacity hover:bg-background/20 group-hover:opacity-100"
+            title={copied ? "已复制" : "复制"}
+            aria-label={copied ? "已复制" : "复制"}
+            onClick={(e) => void handleCopy(e)}
+          >
+            <Copy className={`size-3.5 ${copied ? "text-green-600" : ""}`} />
+          </button>
+        )}
         {isUser ? (
           <p className="whitespace-pre-wrap pr-6">{msg.content}</p>
         ) : isStreaming && !hasContent ? (
@@ -91,6 +118,8 @@ function MessageBubble({
           />
         ) : isStreaming ? (
           <p className="whitespace-pre-wrap pr-6">{msg.content}</p>
+        ) : !hasContent && isFailed && errorText ? (
+          <p className="whitespace-pre-wrap pr-6 text-destructive">{errorText}</p>
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none pr-6">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -98,11 +127,11 @@ function MessageBubble({
             </ReactMarkdown>
           </div>
         )}
-        {failed && (
+        {isFailed && (
           <div className="mt-2 space-y-1 border-t border-destructive/20 pt-2">
-            <p className="text-xs text-destructive">
-              {msg.error_message || "回复失败"}
-            </p>
+            {hasContent && errorText && (
+              <p className="text-xs text-destructive">{errorText}</p>
+            )}
             {retryContent && (
               <Button
                 size="sm"
@@ -222,6 +251,12 @@ export function IngestChat() {
   }, [currentModels, selectedModel])
 
   const isReady = !!sessionId && !!selectedInstanceId && !!selectedModel
+
+  const activeSession = sessions.find(
+    (s) => s.id === (activeSessionId ?? sessionId),
+  )
+  const sessionTitle =
+    activeSession?.title.trim() || "Untitled"
 
   const selectedInstance = instances.find((i) => i.id === selectedInstanceId)
   const selectedModelInfo = currentModels.find((m) => m.model_id === selectedModel)
@@ -379,19 +414,29 @@ export function IngestChat() {
           if (e.dataTransfer.files.length) void handleFiles(e.dataTransfer.files)
         }}
       >
-        {(selectedInstance || selectedModel) && (
-          <div className="mb-1 flex flex-wrap items-center gap-2 px-2 pt-1 text-xs text-muted-foreground">
-            {selectedInstance && (
-              <span className="inline-flex items-center gap-1">
-                <Bot className="size-3" />
-                {selectedInstance.name}
-              </span>
-            )}
-            {selectedModel && (
-              <span className="inline-flex items-center gap-1">
-                <Cpu className="size-3" />
-                {selectedModelInfo?.name ?? selectedModel}
-              </span>
+        {sessionId && (
+          <div className="mb-1 flex items-center justify-between gap-2 px-2 pt-1 text-xs">
+            <span
+              className="min-w-0 truncate font-medium text-foreground"
+              title={sessionTitle}
+            >
+              {sessionTitle}
+            </span>
+            {(selectedInstance || selectedModel) && (
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-muted-foreground">
+                {selectedInstance && (
+                  <span className="inline-flex items-center gap-1">
+                    <Bot className="size-3" />
+                    {selectedInstance.name}
+                  </span>
+                )}
+                {selectedModel && (
+                  <span className="inline-flex items-center gap-1">
+                    <Cpu className="size-3" />
+                    {selectedModelInfo?.name ?? selectedModel}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         )}

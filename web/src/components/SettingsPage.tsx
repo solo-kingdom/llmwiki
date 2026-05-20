@@ -246,9 +246,12 @@ export function SettingsPage() {
   }
 
   return (
-    <PageContainer>
+    <PageContainer className="[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <h1 className="mb-6 text-xl font-semibold">Settings</h1>
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-6 [&_[data-slot=card]]:overflow-visible"
+      >
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">

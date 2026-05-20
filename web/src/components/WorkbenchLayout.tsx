@@ -60,11 +60,13 @@ function NavButton({
 export function WorkbenchLayout() {
   const pathname = usePathname()
   const view = getWorkbenchViewFromPath(pathname)
-  const [vcEnabled, setVcEnabled] = useState(false)
+  const [vcEnabled, setVcEnabled] = useState<boolean | null>(null)
   const { capabilities } = useApp()
 
   useEffect(() => {
-    getVCStatus().then((s) => setVcEnabled(s.enabled)).catch(() => {})
+    getVCStatus()
+      .then((s) => setVcEnabled(s.enabled))
+      .catch(() => setVcEnabled(false))
   }, [])
 
   useEffect(() => {
@@ -75,6 +77,7 @@ export function WorkbenchLayout() {
   }, [])
 
   useEffect(() => {
+    if (vcEnabled === null) return
     if (view === "timeline" && !vcEnabled) {
       navigateTo(workbenchHref())
     }
@@ -101,7 +104,7 @@ export function WorkbenchLayout() {
             <>
               <nav className="flex items-center gap-1">
                 {NAV_ITEMS.filter(
-                  (item) => item.id !== "timeline" || vcEnabled,
+                  (item) => item.id !== "timeline" || vcEnabled === true,
                 ).map((item) =>
                   item.id === "ingest" ? (
                     <div key={item.id} className="flex items-center gap-1">
@@ -145,7 +148,7 @@ export function WorkbenchLayout() {
             </div>
           )}
           {view === "jobs" && <JobsPage />}
-          {view === "timeline" && vcEnabled && <TimelinePage />}
+          {view === "timeline" && vcEnabled === true && <TimelinePage />}
           {view === "settings" && <SettingsPage />}
         </main>
       </WorkbenchContentShell>

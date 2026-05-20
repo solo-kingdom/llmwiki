@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { AppProvider } from "@/context/AppContext"
 import { IngestChat } from "@/components/IngestChat"
 import { WorkbenchContentShell } from "@/components/WorkbenchContentShell"
+
+const mockWriteText = vi.fn().mockResolvedValue(undefined)
+
+vi.mock("@/lib/clipboard", () => ({
+  copyTextToClipboard: (...args: unknown[]) => mockWriteText(...args),
+}))
 
 vi.mock("@/lib/api", () => ({
   listDocuments: vi.fn().mockResolvedValue([]),
@@ -59,11 +65,13 @@ vi.mock("@/lib/api", () => ({
   createTextIngestJob: vi.fn(),
   uploadIngestJobs: vi.fn(),
   listProviders: vi.fn().mockResolvedValue([]),
+  listProviderModels: vi.fn().mockResolvedValue([]),
 }))
 
 describe("IngestChat", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockWriteText.mockResolvedValue(true)
     localStorage.clear()
   })
 
@@ -133,5 +141,219 @@ describe("IngestChat", () => {
     )
 
     expect(await screen.findByLabelText("正在回复")).toBeInTheDocument()
+  })
+
+  it("copies message content when copy button is clicked", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "hello copy",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    expect(await screen.findByText("hello copy")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "复制" }))
+    await waitFor(() => {
+      expect(mockWriteText).toHaveBeenCalledWith("hello copy")
+    })
+  })
+
+  it("shows session title on the left and provider/model on the right above input", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.getIngestSession).mockResolvedValue({
+      session: {
+        id: "sess-1",
+        title: "My Topic",
+        status: "active",
+        storage_path: "",
+        llm_instance_id: "inst-1",
+        llm_model: "gpt-4",
+        created_at: "",
+        updated_at: "",
+      },
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({ messages: [] })
+    vi.mocked(api.listIngestSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: "sess-1",
+          title: "My Topic",
+          status: "active",
+          llm_instance_id: "inst-1",
+          llm_model: "gpt-4",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.listProviderModels).mockResolvedValue([
+      {
+        provider_id: "cat-1",
+        model_id: "gpt-4",
+        name: "GPT-4",
+        family: "GPT-4",
+        context_limit: 128000,
+        output_limit: 16384,
+        cost_input: 2.5,
+        cost_output: 10,
+        reasoning: false,
+        tool_call: true,
+        attachment: true,
+      },
+    ])
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+    })
+
+    const { container } = render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    expect(await screen.findByText("My Topic")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText("OpenAI")).toBeInTheDocument()
+      expect(screen.getByText("GPT-4")).toBeInTheDocument()
+    })
+
+    const infoRow = container.querySelector(
+      ".mb-1.flex.items-center.justify-between",
+    )
+    expect(infoRow).toBeTruthy()
+    const children = infoRow!.children
+    expect(children[0]).toHaveTextContent("My Topic")
+    expect(children[1]).toHaveTextContent("OpenAI")
+    expect(children[1]).toHaveTextContent("GPT-4")
+  })
+
+  it("shows failed assistant error when content is empty", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "trigger fail",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          id: "msg-assistant",
+          session_id: "sess-1",
+          role: "assistant",
+          content: "",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "failed",
+          created_at: "2026-01-01T00:00:01Z",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    expect(await screen.findByText("回复失败")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "重新发送" })).toBeInTheDocument()
   })
 })

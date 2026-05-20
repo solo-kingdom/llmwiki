@@ -392,4 +392,82 @@ describe("IngestChat", () => {
     expect(await screen.findByText("回复失败")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "重新发送" })).toBeInTheDocument()
   })
+
+  it("shows archive success as toast that auto-dismisses after 3 seconds", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "archive me",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    })
+    vi.mocked(api.archiveIngestSession).mockResolvedValue({
+      job_id: "job-abc123",
+      source_path: "raw/sources/web-ingest/sessions/sess-1",
+      session_id: "sess-1",
+    })
+    vi.mocked(api.listIngestSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: "sess-1",
+          title: "",
+          status: "active",
+          llm_instance_id: "inst-1",
+          llm_model: "gpt-4",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    await screen.findByText("archive me")
+    fireEvent.click(screen.getByRole("button", { name: /归档/ }))
+    fireEvent.click(screen.getByRole("button", { name: /确认归档/ }))
+
+    expect(
+      await screen.findByText("已提交归档任务：job-abc123"),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("status")).toBeInTheDocument()
+  })
 })

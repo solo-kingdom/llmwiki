@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ModelSelectDialog } from "@/components/ModelSelectDialog"
 import { SessionControls } from "@/components/SessionControls"
+import { Toast } from "@/components/Toast"
 import type { IngestSessionMessage } from "@/types"
 import {
   Archive,
@@ -178,7 +179,7 @@ export function IngestChat() {
   const [input, setInput] = useState("")
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [archiveTitle, setArchiveTitle] = useState("")
-  const [archiveResult, setArchiveResult] = useState<string | null>(null)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [modelDialogOpen, setModelDialogOpen] = useState(false)
   const [selectedInstanceId, setSelectedInstanceId] = useState("")
@@ -313,9 +314,11 @@ export function IngestChat() {
     [uploadSessionAttachment],
   )
 
+  const dismissToast = useCallback(() => setToastMessage(null), [])
+
   const handleArchive = async () => {
     const jobId = await archiveSession(archiveTitle || undefined)
-    setArchiveResult(jobId)
+    setToastMessage(`已提交归档任务：${jobId}`)
     setArchiveOpen(false)
     await refreshIngestJobs()
   }
@@ -369,12 +372,6 @@ export function IngestChat() {
       {sessionError && (
         <p className="pb-2 text-sm text-destructive">{sessionError}</p>
       )}
-      {archiveResult && (
-        <p className="pb-2 text-sm text-green-600">
-          已提交归档任务：{archiveResult}
-        </p>
-      )}
-
       {archiveOpen && (
         <div className="mb-2 space-y-3 rounded-lg border bg-card p-4">
           <p className="text-sm font-medium">确认归档</p>
@@ -518,6 +515,8 @@ export function IngestChat() {
         onLoadModels={handleLoadModels}
         onConfirm={(instanceId, modelId) => void handleModelConfirm(instanceId, modelId)}
       />
+
+      <Toast message={toastMessage} onClose={dismissToast} />
     </div>
   )
 }

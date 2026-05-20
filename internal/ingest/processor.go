@@ -2,14 +2,15 @@ package ingest
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
@@ -26,6 +27,15 @@ type JobProcessor struct {
 	gitRepo   *vcs.GitRepo // nil if version control is not enabled
 	indexer   *engine.WorkspaceFileIndexer
 	stop      chan struct{}
+	runnerID  string
+}
+
+func newRunnerID() string {
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "local"
+	}
+	return fmt.Sprintf("%s-%d-%s", host, os.Getpid(), uuid.New().String()[:8])
 }
 
 // NewJobProcessor creates a new processor. It needs the main DB (not the
@@ -36,6 +46,7 @@ func NewJobProcessor(db *sqlite.DB, workspace string) *JobProcessor {
 		workspace: workspace,
 		pipeline:  NewPipeline(workspace, nil),
 		stop:      make(chan struct{}),
+		runnerID:  newRunnerID(),
 	}
 }
 
@@ -55,6 +66,7 @@ func (p *JobProcessor) Start(pollInterval time.Duration) {
 	if pollInterval <= 0 {
 		pollInterval = 3 * time.Second
 	}
+	p.recoverStaleJobs()
 	go func() {
 		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
@@ -98,6 +110,15 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		return fmt.Errorf("no queued jobs")
 	}
 
+	stopHeartbeat := p.startHeartbeat(job.ID)
+	defer stopHeartbeat()
+
+	rec := NewSQLiteJobRecorder(p.db, job.ID)
+	p.pipeline.SetJobRecorder(rec)
+	defer p.pipeline.SetJobRecorder(nil)
+
+	defer p.db.ClearIngestJobLease(job.ID)
+
 	// Check if this is a rollback job
 	if job.InputType == "rollback" {
 		return p.processRollbackJob(ctx, job)
@@ -135,9 +156,14 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		)
 		sha, err := p.gitRepo.AddCommit(commitMsg)
 		if err != nil {
+			rec.Record("git_commit", "error", err.Error(), map[string]any{"message": commitMsg})
 			return p.failJob(job.ID, "commit_failed",
 				fmt.Sprintf("git commit failed: %v", err), "", "")
 		}
+		rec.Record("git_commit", "complete", "git commit succeeded", map[string]any{
+			"sha":     sha,
+			"message": commitMsg,
+		})
 		// Store last commit SHA
 		if sha != "" {
 			_ = p.db.SetVCLastCommit(sha)
@@ -150,7 +176,8 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 	summary := fmt.Sprintf("generated %d wiki page(s)", len(files))
 	if _, updateErr := p.db.DB().Exec(`
 		UPDATE ingest_jobs
-		SET status = 'succeeded', result_summary = ?, updated_at = datetime('now')
+		SET status = 'succeeded', result_summary = ?,
+		    runner_id = '', heartbeat_at = '', updated_at = datetime('now')
 		WHERE id = ?`, summary, job.ID); updateErr != nil {
 		log.Printf("processor: failed to mark job %s succeeded: %v", job.ID, updateErr)
 	}
@@ -195,59 +222,59 @@ func (p *JobProcessor) retryCommitOnly(job *sqlite.IngestJob) error {
 	return updateErr
 }
 
-// Ensure JobProcessor uses sql.DB through the sqlite.DB accessor.
-var _ = (*sql.DB)(nil)
+func (p *JobProcessor) recoverStaleJobs() {
+	ids, err := p.db.RecoverStaleRunningJobs()
+	if err != nil {
+		log.Printf("ingest processor: recover stale: %v", err)
+		return
+	}
+	for _, id := range ids {
+		rec := NewSQLiteJobRecorder(p.db, id)
+		rec.Record("system", "stale_recovered", "job requeued after heartbeat timeout", map[string]any{
+			"threshold_seconds": sqlite.StaleHeartbeatSeconds,
+		})
+	}
+}
+
+func (p *JobProcessor) startHeartbeat(jobID string) func() {
+	done := make(chan struct{})
+	var once sync.Once
+	stop := func() { once.Do(func() { close(done) }) }
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-p.stop:
+				return
+			case <-ticker.C:
+				if err := p.db.TouchIngestJobHeartbeat(jobID, p.runnerID); err != nil {
+					log.Printf("ingest processor: heartbeat %s: %v", jobID, err)
+				}
+			}
+		}
+	}()
+	return stop
+}
 
 // claimNextJob atomically transitions the next queued job to "running".
 func (p *JobProcessor) claimNextJob() (*sqlite.IngestJob, error) {
-	rows, err := p.db.DB().Query(`
-		SELECT
-			COALESCE(id, ''), COALESCE(parent_job_id, ''), COALESCE(input_type, ''),
-			COALESCE(source_path, ''), COALESCE(source_ref, ''), COALESCE(status, ''),
-			COALESCE(retries, 0), COALESCE(max_retries, 3), COALESCE(error, ''),
-			COALESCE(error_code, ''), COALESCE(error_message, ''),
-			COALESCE(missing_dependency, ''), COALESCE(remediation, ''),
-			COALESCE(result_summary, ''), COALESCE(created_at, ''), COALESCE(updated_at, '')
-		FROM ingest_jobs
-		WHERE status = 'queued'
-		ORDER BY datetime(created_at) ASC
-		LIMIT 1`)
+	job, err := p.db.ClaimNextIngestJob(p.runnerID)
 	if err != nil {
-		return nil, fmt.Errorf("query queued jobs: %w", err)
-	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		return nil, nil
-	}
-
-	var job sqlite.IngestJob
-	if err := scanJobRow(rows, &job); err != nil {
-		return nil, fmt.Errorf("scan queued job: %w", err)
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-
-	// Transition to running
-	result, err := p.db.DB().Exec(`
-		UPDATE ingest_jobs
-		SET status = 'running', updated_at = datetime('now')
-		WHERE id = ? AND status = 'queued'`, job.ID)
-	if err != nil {
-		return nil, fmt.Errorf("claim job %s: %w", job.ID, err)
+	if job == nil {
+		return nil, nil
 	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
-		return nil, nil // someone else claimed it
-	}
-
-	job.Status = "running"
-	activity.LogIngestJob(p.db, &job, "running", "processor")
-	return &job, nil
+	activity.LogIngestJob(p.db, job, "running", "processor")
+	return job, nil
 }
 
 func (p *JobProcessor) failJob(id, errorCode, message, missingDep, remediation string) error {
+	p.db.ClearIngestJobLease(id)
 	err := p.db.UpdateIngestJobFailure(id, errorCode, message, missingDep, remediation)
 	if failed, _ := p.db.GetIngestJob(id); failed != nil {
 		activity.LogIngestJob(p.db, failed, "failed", "processor")
@@ -292,18 +319,6 @@ func (p *JobProcessor) logSessionArchiveOutcome(job *sqlite.IngestJob, action, s
 		"job_id": job.ID,
 		"error":  job.ErrorMessage,
 	})
-}
-
-// scanJobRow scans a row into an IngestJob using the standard column order.
-func scanJobRow(scanner interface{ Scan(...interface{}) error }, job *sqlite.IngestJob) error {
-	return scanner.Scan(
-		&job.ID, &job.ParentJobID, &job.InputType,
-		&job.SourcePath, &job.SourceRef, &job.Status,
-		&job.Retries, &job.MaxRetries, &job.Error,
-		&job.ErrorCode, &job.ErrorMessage,
-		&job.MissingDependency, &job.Remediation,
-		&job.ResultSummary, &job.CreatedAt, &job.UpdatedAt,
-	)
 }
 
 // ClaimNextQueuedJob is a convenience for tests to claim and return a job.
@@ -374,6 +389,8 @@ func (p *JobProcessor) indexGeneratedWikiFiles(files []string, jobID string) {
 		if err := p.indexer.IndexFile(rel); err != nil {
 			log.Printf("processor: index %s after job %s: %v", rel, jobID, err)
 			activity.RecordIndexFailed(p.db, rel, err)
+			rec := NewSQLiteJobRecorder(p.db, jobID)
+			rec.Record("index", "error", err.Error(), map[string]any{"path": rel})
 		}
 	}
 }

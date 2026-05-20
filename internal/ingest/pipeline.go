@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 )
@@ -15,6 +16,7 @@ type Pipeline struct {
 	workspace string
 	llmClient *llm.Client
 	lockMgr   *PageLockManager
+	recorder  JobRecorder
 }
 
 type CacheEntry struct {
@@ -38,6 +40,11 @@ func NewPipeline(workspace string, llmClient *llm.Client) *Pipeline {
 // SetLLMClient updates the LLM client used for subsequent pipeline runs.
 func (p *Pipeline) SetLLMClient(client *llm.Client) {
 	p.llmClient = client
+}
+
+// SetJobRecorder sets the recorder for the current job execution.
+func (p *Pipeline) SetJobRecorder(rec JobRecorder) {
+	p.recorder = rec
 }
 
 func (p *Pipeline) Ingest(ctx context.Context, sourcePath string) ([]string, error) {
@@ -77,15 +84,34 @@ func (p *Pipeline) IngestNormalized(ctx context.Context, source *NormalizedSourc
 	name := filepath.Base(source.CanonicalPath)
 	content := string(source.Content)
 
+	if p.recorder != nil {
+		p.recorder.Record("normalize", "complete", "source normalized", map[string]any{
+			"canonical_path": source.CanonicalPath,
+			"input_type":     string(source.Kind),
+		})
+	}
+
 	analysis, err := p.analyze(ctx, name, content)
 	if err != nil {
+		if p.recorder != nil {
+			p.recorder.Record("analysis", "error", err.Error(), nil)
+		}
 		return nil, fmt.Errorf("analysis: %w", err)
 	}
 	_ = analysis
 
 	files, err := p.generate(ctx, name, content, analysis)
 	if err != nil {
+		if p.recorder != nil {
+			p.recorder.Record("generation", "error", err.Error(), nil)
+		}
 		return nil, fmt.Errorf("generation: %w", err)
+	}
+
+	if p.recorder != nil {
+		p.recorder.Record("apply_files", "complete", "wiki files applied", map[string]any{
+			"paths_written": files,
+		})
 	}
 
 	return files, nil
@@ -101,7 +127,12 @@ func (p *Pipeline) analyze(ctx context.Context, name, content string) (string, e
 		{Role: "user", Content: fmt.Sprintf("Analyze this source: **%s**\n\n---\n\n%s", name, content)},
 	}
 
-	ch, err := p.llmClient.StreamChat(ctx, messages, 0.1, 4096)
+	const temp = 0.1
+	const maxTok = 4096
+	RecordLLMRequest(p.recorder, "analysis", p.llmClient.Model(), llmMessagesForRecord(messages), temp, maxTok)
+
+	start := time.Now()
+	ch, err := p.llmClient.StreamChat(ctx, messages, temp, maxTok)
 	if err != nil {
 		return "", err
 	}
@@ -111,9 +142,13 @@ func (p *Pipeline) analyze(ctx context.Context, name, content string) (string, e
 		if event.Type == "token" {
 			result += event.Content
 		} else if event.Type == "error" {
+			if p.recorder != nil {
+				p.recorder.Record("analysis", "error", event.Error.Error(), nil)
+			}
 			return "", event.Error
 		}
 	}
+	RecordLLMResponse(p.recorder, "analysis", result, time.Since(start))
 	return result, nil
 }
 
@@ -133,7 +168,12 @@ Generate wiki pages in FILE block format.`, name, analysis, content)
 		{Role: "user", Content: prompt},
 	}
 
-	ch, err := p.llmClient.StreamChat(ctx, messages, 0.1, 8192)
+	const temp = 0.1
+	const maxTok = 8192
+	RecordLLMRequest(p.recorder, "generation", p.llmClient.Model(), llmMessagesForRecord(messages), temp, maxTok)
+
+	start := time.Now()
+	ch, err := p.llmClient.StreamChat(ctx, messages, temp, maxTok)
 	if err != nil {
 		return nil, err
 	}
@@ -143,9 +183,13 @@ Generate wiki pages in FILE block format.`, name, analysis, content)
 		if event.Type == "token" {
 			result += event.Content
 		} else if event.Type == "error" {
+			if p.recorder != nil {
+				p.recorder.Record("generation", "error", event.Error.Error(), nil)
+			}
 			return nil, event.Error
 		}
 	}
+	RecordLLMResponse(p.recorder, "generation", result, time.Since(start))
 
 	blocks := parseFileBlocksWithContent(result)
 
@@ -231,6 +275,14 @@ func (p *Pipeline) saveCache(sourcePath string, files []string) {
 		return
 	}
 	os.WriteFile(p.cachePath(), out, 0o644)
+}
+
+func llmMessagesForRecord(messages []llm.Message) []map[string]string {
+	out := make([]map[string]string, len(messages))
+	for i, m := range messages {
+		out[i] = map[string]string{"role": m.Role, "content": m.Content}
+	}
+	return out
 }
 
 func computeSHA256(path string) (string, error) {

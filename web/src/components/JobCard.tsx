@@ -26,11 +26,13 @@ export function JobCard({
   onRetry,
   onCancel,
   onPreviewSource,
+  onViewLog,
 }: {
   job: IngestJob
   onRetry: (id: string) => void
   onCancel: (id: string) => void
   onPreviewSource?: (job: IngestJob) => void
+  onViewLog?: (job: IngestJob) => void
 }) {
   const canPreview = isPreviewable(job.source_path)
 
@@ -61,8 +63,13 @@ export function JobCard({
           </div>
         )}
       </div>
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
         <StatusBadge status={job.status} />
+        {job.status !== "queued" && onViewLog && (
+          <Button size="sm" variant="ghost" onClick={() => onViewLog(job)}>
+            日志
+          </Button>
+        )}
         {job.status === "failed" && (
           <Button size="sm" variant="outline" onClick={() => onRetry(job.id)}>
             Retry

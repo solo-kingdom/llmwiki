@@ -1,3 +1,5 @@
+## MODIFIED Requirements
+
 ### Requirement: Workspace management UI
 The system SHALL provide a web interface for browsing wiki pages, viewing document content, and managing source files. The global navigation SHALL consist of top-level entries: Ingest, Jobs, Timeline (when version control enabled), Logs, and Settings, plus Wiki reader link. The default selected entry on load SHALL be Ingest. The management workbench global header SHALL use the same card-style bar as the Wiki reader header (`rounded-xl`, `border-border/70`, `bg-card/70`, `backdrop-blur-sm`, `shadow-sm`, fixed height `h-12`). The workbench header width SHALL match the workbench content column (`max-w-5xl` with consistent horizontal padding). The global navigation visual treatment SHALL use semantic navigation buttons instead of a tab-group control. The Settings page SHALL provide a Provider instance management section for adding, editing, and deleting provider configurations.
 
@@ -46,22 +48,3 @@ The system SHALL provide a web interface for browsing wiki pages, viewing docume
 - **THEN** the Settings page SHALL include a numeric input for `ingest_job_events_max_count` (每个 Job 执行日志保留条数)
 - **AND** the input SHALL show allowed range hint (50–2000) and default 200 when unset
 - **AND** saving Settings SHALL persist the value via `PUT /api/v1/settings` and trim existing per-job events if needed
-
-### Requirement: Wiki tab document search
-The system SHALL provide document search functionality within the Wiki entry only. The search input SHALL be placed at the top of the sidebar, above the file tree. The search results SHALL appear as a dropdown below the search input, overlaying the file tree. When a search result is selected, the corresponding document SHALL be opened and the search results SHALL be dismissed.
-
-#### Scenario: Search bar placement
-- **WHEN** user opens the Wiki entry
-- **THEN** a search input SHALL be displayed at the top of the sidebar, with the file tree below it
-
-#### Scenario: Search results dropdown
-- **WHEN** user types a search query in the sidebar search input
-- **THEN** search results SHALL appear as a dropdown below the input, overlaying the file tree content
-
-#### Scenario: Search result selection
-- **WHEN** user clicks a search result
-- **THEN** the corresponding document SHALL be opened in the document viewer AND the search results dropdown SHALL close
-
-#### Scenario: Search visibility scope
-- **WHEN** user is on any entry other than Wiki
-- **THEN** the document search input SHALL NOT be visible

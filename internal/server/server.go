@@ -201,6 +201,7 @@ func (s *Server) Start() error {
 			})
 			r.Route("/jobs", func(r chi.Router) {
 				r.Get("/", s.api.ListIngestJobs)
+				r.Get("/{id}/events", s.api.GetIngestJobEvents)
 				r.Get("/{id}", s.api.GetIngestJob)
 				r.Get("/{id}/source", s.api.GetJobSource)
 				r.Post("/{id}/retry", s.api.RetryIngestJob)

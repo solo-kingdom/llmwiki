@@ -620,6 +620,30 @@ export function SettingsPage() {
               }
               className="mt-1 max-w-xs"
             />
+            <label className="text-sm font-medium mt-4 block">
+              每个 Job 执行日志保留条数
+            </label>
+            <p className="text-xs text-muted-foreground mb-1">
+              50–2000，默认 200。超出后按 job 删除最旧事件。
+            </p>
+            <Input
+              type="number"
+              min={50}
+              max={2000}
+              value={
+                mergedForm.ingest_job_events_max_count ??
+                (typeof settings?.ingest_job_events_max_count === "number"
+                  ? settings.ingest_job_events_max_count
+                  : 200)
+              }
+              onChange={(e) =>
+                set(
+                  "ingest_job_events_max_count",
+                  parseInt(e.target.value, 10) || 200,
+                )
+              }
+              className="mt-1 max-w-xs"
+            />
           </CardContent>
         </Card>
 

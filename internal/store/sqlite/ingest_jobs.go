@@ -21,9 +21,20 @@ type IngestJob struct {
 	MissingDependency string `json:"missing_dependency"`
 	Remediation       string `json:"remediation"`
 	ResultSummary     string `json:"result_summary"`
+	RunnerID          string `json:"runner_id,omitempty"`
+	HeartbeatAt       string `json:"heartbeat_at,omitempty"`
 	CreatedAt         string `json:"created_at"`
 	UpdatedAt         string `json:"updated_at"`
 }
+
+const ingestJobSelectColumns = `
+	COALESCE(id, ''), COALESCE(parent_job_id, ''), COALESCE(input_type, ''),
+	COALESCE(source_path, ''), COALESCE(source_ref, ''), COALESCE(status, ''),
+	COALESCE(retries, 0), COALESCE(max_retries, 3), COALESCE(error, ''),
+	COALESCE(error_code, ''), COALESCE(error_message, ''),
+	COALESCE(missing_dependency, ''), COALESCE(remediation, ''),
+	COALESCE(result_summary, ''), COALESCE(runner_id, ''), COALESCE(heartbeat_at, ''),
+	COALESCE(created_at, ''), COALESCE(updated_at, '')`
 
 var validJobStatus = map[string]bool{
 	"queued":    true,
@@ -71,6 +82,8 @@ func scanIngestJob(scanner interface{ Scan(...interface{}) error }, job *IngestJ
 		&job.MissingDependency,
 		&job.Remediation,
 		&job.ResultSummary,
+		&job.RunnerID,
+		&job.HeartbeatAt,
 		&job.CreatedAt,
 		&job.UpdatedAt,
 	)
@@ -131,13 +144,7 @@ func (d *DB) CreateIngestJob(job *IngestJob) error {
 	}
 
 	created, err := d.db.Query(`
-		SELECT
-			COALESCE(id, ''), COALESCE(parent_job_id, ''), COALESCE(input_type, ''),
-			COALESCE(source_path, ''), COALESCE(source_ref, ''), COALESCE(status, ''),
-			COALESCE(retries, 0), COALESCE(max_retries, 3), COALESCE(error, ''),
-			COALESCE(error_code, ''), COALESCE(error_message, ''),
-			COALESCE(missing_dependency, ''), COALESCE(remediation, ''),
-			COALESCE(result_summary, ''), COALESCE(created_at, ''), COALESCE(updated_at, '')
+		SELECT `+ingestJobSelectColumns+`
 		FROM ingest_jobs
 		WHERE rowid = last_insert_rowid()`)
 	if err != nil {
@@ -155,13 +162,7 @@ func (d *DB) CreateIngestJob(job *IngestJob) error {
 func (d *DB) GetIngestJob(id string) (*IngestJob, error) {
 	job := &IngestJob{}
 	err := scanIngestJob(d.db.QueryRow(`
-		SELECT
-			COALESCE(id, ''), COALESCE(parent_job_id, ''), COALESCE(input_type, ''),
-			COALESCE(source_path, ''), COALESCE(source_ref, ''), COALESCE(status, ''),
-			COALESCE(retries, 0), COALESCE(max_retries, 3), COALESCE(error, ''),
-			COALESCE(error_code, ''), COALESCE(error_message, ''),
-			COALESCE(missing_dependency, ''), COALESCE(remediation, ''),
-			COALESCE(result_summary, ''), COALESCE(created_at, ''), COALESCE(updated_at, '')
+		SELECT `+ingestJobSelectColumns+`
 		FROM ingest_jobs WHERE id = ?`, id), job)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -178,13 +179,7 @@ func (d *DB) ListIngestJobs(limit int) ([]IngestJob, error) {
 		limit = 50
 	}
 	rows, err := d.db.Query(`
-		SELECT
-			COALESCE(id, ''), COALESCE(parent_job_id, ''), COALESCE(input_type, ''),
-			COALESCE(source_path, ''), COALESCE(source_ref, ''), COALESCE(status, ''),
-			COALESCE(retries, 0), COALESCE(max_retries, 3), COALESCE(error, ''),
-			COALESCE(error_code, ''), COALESCE(error_message, ''),
-			COALESCE(missing_dependency, ''), COALESCE(remediation, ''),
-			COALESCE(result_summary, ''), COALESCE(created_at, ''), COALESCE(updated_at, '')
+		SELECT `+ingestJobSelectColumns+`
 		FROM ingest_jobs
 		ORDER BY datetime(created_at) DESC
 		LIMIT ?`, limit)
@@ -310,6 +305,8 @@ func (d *DB) RetryIngestJob(id string) (*IngestJob, error) {
 			missing_dependency = '',
 			remediation = '',
 			result_summary = '',
+			runner_id = '',
+			heartbeat_at = '',
 			retries = retries + 1,
 			updated_at = datetime('now')
 		WHERE id = ? AND status IN ('failed', 'cancelled')`, id)

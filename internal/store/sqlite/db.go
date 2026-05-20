@@ -66,8 +66,10 @@ func (d *DB) DB() *sql.DB {
 
 // Migrate runs the schema migration.
 func (d *DB) Migrate() error {
-	_, err := d.db.Exec(schemaSQL)
-	return err
+	if _, err := d.db.Exec(schemaSQL); err != nil {
+		return err
+	}
+	return d.migrateIngestQueue()
 }
 
 // Ensure embed is used

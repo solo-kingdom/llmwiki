@@ -122,6 +122,7 @@ export interface Settings {
   auto_reindex: boolean
   watch_sources: boolean
   activity_logs_max_count?: number
+  ingest_job_events_max_count?: number
 }
 
 export interface ActivityLog {
@@ -182,6 +183,20 @@ export interface IngestJob {
 
 export interface IngestJobResponse {
   job: IngestJob
+}
+
+export interface IngestJobEvent {
+  id: number
+  job_id: string
+  step: string
+  phase: string
+  message: string
+  payload: string
+  created_at: string
+}
+
+export interface IngestJobEventsResponse {
+  events: IngestJobEvent[]
 }
 
 export interface UploadAcceptedItem {

@@ -63,6 +63,14 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
+// Model returns the configured model name.
+func (c *Client) Model() string {
+	if c == nil {
+		return ""
+	}
+	return c.config.Model
+}
+
 func (c *Client) validateRequest() error {
 	if strings.TrimSpace(c.config.Model) == "" {
 		return fmt.Errorf("model is not configured")

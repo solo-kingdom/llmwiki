@@ -54,6 +54,7 @@ func setupTestAPI(t *testing.T) (*API, *chi.Mux) {
 	})
 	r.Route("/api/v1/ingest/jobs", func(r chi.Router) {
 		r.Get("/", api.ListIngestJobs)
+		r.Get("/{id}/events", api.GetIngestJobEvents)
 		r.Get("/{id}", api.GetIngestJob)
 		r.Get("/{id}/source", api.GetJobSource)
 		r.Post("/{id}/retry", api.RetryIngestJob)
@@ -347,6 +348,51 @@ func TestCreateTextIngestJobAndGet(t *testing.T) {
 	r.ServeHTTP(getW, getReq)
 	if getW.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", getW.Code)
+	}
+}
+
+func TestGetIngestJobEvents(t *testing.T) {
+	api, r := setupTestAPI(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"content": "events test",
+		"title":   "Events",
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/text", bytes.NewReader(body))
+	createReq.Header.Set("Content-Type", "application/json")
+	createW := httptest.NewRecorder()
+	r.ServeHTTP(createW, createReq)
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", createW.Code, createW.Body.String())
+	}
+	var created ingestJobResponse
+	if err := json.NewDecoder(createW.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := api.db.InsertIngestJobEvent(created.Job.ID, "analysis", "request", "test", map[string]any{"model": "gpt-4o"}, 200); err != nil {
+		t.Fatal(err)
+	}
+
+	eventsReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/"+created.Job.ID+"/events", nil)
+	eventsW := httptest.NewRecorder()
+	r.ServeHTTP(eventsW, eventsReq)
+	if eventsW.Code != http.StatusOK {
+		t.Fatalf("events: %d %s", eventsW.Code, eventsW.Body.String())
+	}
+	var resp ingestJobEventsResponse
+	if err := json.NewDecoder(eventsW.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Events) != 1 || resp.Events[0].Step != "analysis" {
+		t.Fatalf("unexpected events: %+v", resp.Events)
+	}
+
+	missReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/missing-id/events", nil)
+	missW := httptest.NewRecorder()
+	r.ServeHTTP(missW, missReq)
+	if missW.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", missW.Code)
 	}
 }
 

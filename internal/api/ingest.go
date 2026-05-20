@@ -304,6 +304,37 @@ func (a *API) GetIngestJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ingestJobResponse{Job: job})
 }
 
+type ingestJobEventsResponse struct {
+	Events []sqlite.IngestJobEvent `json:"events"`
+}
+
+func (a *API) GetIngestJobEvents(w http.ResponseWriter, r *http.Request) {
+	id := getID(r)
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing job id")
+		return
+	}
+	job, err := a.db.GetIngestJob(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if job == nil {
+		writeError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	limit := getIntQuery(r, "limit", 500)
+	events, err := a.db.ListIngestJobEvents(id, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if events == nil {
+		events = []sqlite.IngestJobEvent{}
+	}
+	writeJSON(w, http.StatusOK, ingestJobEventsResponse{Events: events})
+}
+
 func (a *API) ListIngestJobs(w http.ResponseWriter, r *http.Request) {
 	limit := getIntQuery(r, "limit", 50)
 	jobs, err := a.db.ListIngestJobs(limit)

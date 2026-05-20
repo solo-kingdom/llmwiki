@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
+	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
 func maskKey(key string) string {
@@ -32,7 +33,8 @@ type settingsResponse struct {
 	ChunkOverlap   string `json:"chunk_overlap"`
 	AutoReindex           string `json:"auto_reindex"`
 	WatchSources          string `json:"watch_sources"`
-	ActivityLogsMaxCount  string `json:"activity_logs_max_count"`
+	ActivityLogsMaxCount     string `json:"activity_logs_max_count"`
+	IngestJobEventsMaxCount string `json:"ingest_job_events_max_count"`
 }
 
 func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
@@ -53,8 +55,16 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		ChunkOverlap:   all["chunk_overlap"],
 		AutoReindex:          all["auto_reindex"],
 		WatchSources:         all["watch_sources"],
-		ActivityLogsMaxCount: activityLogsMaxCountForResponse(all["activity_logs_max_count"]),
+		ActivityLogsMaxCount:      activityLogsMaxCountForResponse(all["activity_logs_max_count"]),
+		IngestJobEventsMaxCount:   jobEventsMaxCountForResponse(all["ingest_job_events_max_count"]),
 	})
+}
+
+func jobEventsMaxCountForResponse(stored string) string {
+	if strings.TrimSpace(stored) == "" {
+		return strconv.Itoa(sqlite.DefaultJobEventsMaxCount)
+	}
+	return stored
 }
 
 func activityLogsMaxCountForResponse(stored string) string {
@@ -75,7 +85,8 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"temperature": true, "max_tokens": true, "chunk_size": true,
 		"chunk_overlap": true, "auto_reindex": true, "watch_sources": true,
 		"job_instance_id": true, "job_model": true,
-		"activity_logs_max_count": true,
+		"activity_logs_max_count":      true,
+		"ingest_job_events_max_count": true,
 	}
 
 	for key, raw := range req {
@@ -93,6 +104,12 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if key == "ingest_job_events_max_count" {
+			if _, err := sqlite.ParseJobEventsMaxCount(value); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		if err := a.db.SetConfig(key, value); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -101,6 +118,23 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	if _, ok := req["activity_logs_max_count"]; ok {
 		if _, err := a.trimActivityLogsNow(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	if raw, ok := req["ingest_job_events_max_count"]; ok {
+		value, err := parseSettingsValue(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		maxN, err := sqlite.ParseJobEventsMaxCount(value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := a.db.TrimAllIngestJobEvents(maxN); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

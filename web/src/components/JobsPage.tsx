@@ -4,12 +4,14 @@ import { JobCard } from "@/components/JobCard"
 import { PageContainer } from "@/components/PageContainer"
 import { StatusFilter, type StatusKey } from "@/components/StatusFilter"
 import { SourcePreviewDialog } from "@/components/SourcePreviewDialog"
+import { JobLogDialog } from "@/components/JobLogDialog"
 import type { IngestJob } from "@/types"
 
 export function JobsPage() {
   const { ingestJobs, refreshIngestJobs, retryIngest, cancelIngest } = useApp()
   const [statusFilter, setStatusFilter] = useState<StatusKey>("all")
   const [previewJob, setPreviewJob] = useState<IngestJob | null>(null)
+  const [logJob, setLogJob] = useState<IngestJob | null>(null)
 
   useEffect(() => {
     refreshIngestJobs()
@@ -46,6 +48,7 @@ export function JobsPage() {
               onRetry={retryIngest}
               onCancel={cancelIngest}
               onPreviewSource={setPreviewJob}
+              onViewLog={setLogJob}
             />
           ))}
         </div>
@@ -58,6 +61,14 @@ export function JobsPage() {
         }}
         jobId={previewJob?.id ?? null}
         sourcePath={previewJob?.source_path ?? ""}
+      />
+
+      <JobLogDialog
+        open={logJob !== null}
+        onOpenChange={(open) => {
+          if (!open) setLogJob(null)
+        }}
+        job={logJob}
       />
     </PageContainer>
   )

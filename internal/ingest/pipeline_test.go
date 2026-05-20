@@ -252,3 +252,20 @@ func TestParseFileBlocksEmpty(t *testing.T) {
 		t.Errorf("expected 0 files, got %d", len(files))
 	}
 }
+
+type mockJobRecorder struct {
+	events []struct{ step, phase string }
+}
+
+func (m *mockJobRecorder) Record(step, phase, message string, payload map[string]any) {
+	m.events = append(m.events, struct{ step, phase string }{step, phase})
+}
+
+func TestPipelineSetJobRecorder(t *testing.T) {
+	p := NewPipeline(t.TempDir(), nil)
+	rec := &mockJobRecorder{}
+	p.SetJobRecorder(rec)
+	if p.recorder != rec {
+		t.Fatal("recorder not set")
+	}
+}

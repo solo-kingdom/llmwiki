@@ -134,8 +134,20 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
     missing_dependency TEXT NOT NULL DEFAULT '',
     remediation TEXT NOT NULL DEFAULT '',
     result_summary TEXT NOT NULL DEFAULT '',
+    runner_id TEXT NOT NULL DEFAULT '',
+    heartbeat_at TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS ingest_job_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL REFERENCES ingest_jobs(id) ON DELETE CASCADE,
+    step TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
 );
 
 -- FTS5 full-text search over document chunks
@@ -171,6 +183,8 @@ CREATE INDEX IF NOT EXISTS idx_refs_source ON document_references(source_documen
 CREATE INDEX IF NOT EXISTS idx_refs_target ON document_references(target_document_id);
 CREATE INDEX IF NOT EXISTS idx_ingest_jobs_status ON ingest_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_ingest_jobs_created_at ON ingest_jobs(created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ingest_one_running ON ingest_jobs(status) WHERE status = 'running';
+CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON ingest_job_events(job_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS ingest_sessions (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

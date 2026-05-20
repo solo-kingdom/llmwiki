@@ -7,6 +7,7 @@ import type {
   StalePage,
   IngestJob,
   IngestJobResponse,
+  IngestJobEventsResponse,
   UploadIngestResponse,
   CapabilitiesResponse,
   IngestSession,
@@ -188,6 +189,15 @@ export function uploadIngestJobs(
 
 export function listIngestJobs(limit = 50): Promise<IngestJob[]> {
   return request<IngestJob[]>(`/api/v1/ingest/jobs/?limit=${limit}`)
+}
+
+export function getIngestJobEvents(
+  id: string,
+  limit = 500,
+): Promise<IngestJobEventsResponse> {
+  return request<IngestJobEventsResponse>(
+    `/api/v1/ingest/jobs/${encodeURIComponent(id)}/events?limit=${limit}`,
+  )
 }
 
 export function retryIngestJob(id: string): Promise<IngestJobResponse> {

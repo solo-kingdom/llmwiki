@@ -50,10 +50,26 @@ func NewJobProcessor(db *sqlite.DB, workspace string) *JobProcessor {
 	}
 }
 
-// SetGitRepo sets the git repo handle for version control.
-// Pass nil to disable version control commits.
+// SetGitRepo sets an optional git repo override (mainly for tests).
+// Production code resolves the repo at runtime via gitRepoIfEnabled.
 func (p *JobProcessor) SetGitRepo(repo *vcs.GitRepo) {
 	p.gitRepo = repo
+}
+
+// gitRepoIfEnabled returns a GitRepo when version control is enabled in config
+// and the workspace has an initialized .git directory.
+func (p *JobProcessor) gitRepoIfEnabled() *vcs.GitRepo {
+	if !p.db.GetVCConfig().Enabled {
+		return nil
+	}
+	if p.gitRepo != nil {
+		return p.gitRepo
+	}
+	repo := vcs.NewGitRepo(p.workspace)
+	if !repo.IsInitialized() {
+		return nil
+	}
+	return repo
 }
 
 // SetFileIndexer sets the workspace file indexer for post-ingest search indexing.
@@ -147,14 +163,14 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 	}
 
 	// Git commit (if version control is enabled)
-	if p.gitRepo != nil {
+	if repo := p.gitRepoIfEnabled(); repo != nil {
 		commitMsg := vcs.BuildCommitMessage(
 			filepath.Base(normalized.CanonicalPath),
 			job.ID,
 			job.InputType,
 			string(normalized.Content),
 		)
-		sha, err := p.gitRepo.AddCommit(commitMsg)
+		sha, err := repo.AddCommit(commitMsg)
 		if err != nil {
 			rec.Record("git_commit", "error", err.Error(), map[string]any{"message": commitMsg})
 			return p.failJob(job.ID, "commit_failed",
@@ -191,7 +207,8 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 
 // retryCommitOnly retries only the git commit for a job that previously failed at the commit stage.
 func (p *JobProcessor) retryCommitOnly(job *sqlite.IngestJob) error {
-	if p.gitRepo == nil {
+	repo := p.gitRepoIfEnabled()
+	if repo == nil {
 		// Version control was disabled, just mark as succeeded
 		_, err := p.db.DB().Exec(`
 			UPDATE ingest_jobs
@@ -206,7 +223,7 @@ func (p *JobProcessor) retryCommitOnly(job *sqlite.IngestJob) error {
 		"upload", // retry jobs may not preserve original input_type; use a default
 		"",
 	)
-	sha, err := p.gitRepo.AddCommit(commitMsg)
+	sha, err := repo.AddCommit(commitMsg)
 	if err != nil {
 		return p.failJob(job.ID, "commit_failed",
 			fmt.Sprintf("git commit retry failed: %v", err), "", "")
@@ -353,14 +370,14 @@ func (p *JobProcessor) RunPipelineForJob(ctx context.Context, job *sqlite.Ingest
 	}
 
 	// Git commit (if version control is enabled)
-	if p.gitRepo != nil {
+	if repo := p.gitRepoIfEnabled(); repo != nil {
 		commitMsg := vcs.BuildCommitMessage(
 			filepath.Base(normalized.CanonicalPath),
 			job.ID,
 			job.InputType,
 			string(normalized.Content),
 		)
-		sha, commitErr := p.gitRepo.AddCommit(commitMsg)
+		sha, commitErr := repo.AddCommit(commitMsg)
 		if commitErr != nil {
 			_ = p.failJob(job.ID, "commit_failed",
 				fmt.Sprintf("git commit failed: %v", commitErr), "", "")

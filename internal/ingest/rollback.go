@@ -27,7 +27,8 @@ type RollbackContext struct {
 // It reads the commit diff and normalized content, uses LLM to generate
 // rollback content, writes wiki files, and creates a rollback commit.
 func (p *JobProcessor) processRollbackJob(ctx context.Context, job *sqlite.IngestJob) error {
-	if p.gitRepo == nil {
+	repo := p.gitRepoIfEnabled()
+	if repo == nil {
 		return p.failJob(job.ID, "rollback_context_missing",
 			"version control is not enabled", "", "")
 	}
@@ -40,14 +41,14 @@ func (p *JobProcessor) processRollbackJob(ctx context.Context, job *sqlite.Inges
 	}
 
 	// Get commit diff
-	diff, err := p.gitRepo.Diff(commitSHA)
+	diff, err := repo.Diff(commitSHA)
 	if err != nil {
 		return p.failJob(job.ID, "rollback_context_missing",
 			fmt.Sprintf("failed to get diff for commit %s: %v", commitSHA, err), "", "")
 	}
 
 	// Get commit message (contains normalized content)
-	commitMsg, err := p.gitRepo.ShowMessage(commitSHA)
+	commitMsg, err := repo.ShowMessage(commitSHA)
 	if err != nil {
 		return p.failJob(job.ID, "rollback_context_missing",
 			fmt.Sprintf("failed to get commit message for %s: %v", commitSHA, err), "", "")
@@ -98,7 +99,7 @@ func (p *JobProcessor) processRollbackJob(ctx context.Context, job *sqlite.Inges
 
 	// Git commit the rollback
 	rollbackMsg := vcs.BuildRollbackCommitMessage(rbCtx.SourceFilename)
-	sha, err := p.gitRepo.AddCommit(rollbackMsg)
+	sha, err := repo.AddCommit(rollbackMsg)
 	if err != nil {
 		return p.failJob(job.ID, "commit_failed",
 			fmt.Sprintf("git commit after rollback failed: %v", err), "", "")

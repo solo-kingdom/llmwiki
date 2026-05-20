@@ -131,6 +131,37 @@ func TestVCSInitAlreadyInitialized(t *testing.T) {
 	}
 }
 
+func TestVCSStatusGitExistsButDisabled(t *testing.T) {
+	if !vcs.IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	api, ws := setupVCSTest(t)
+	if _, err := vcs.InitRepo(ws); err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+	// vc_enabled remains false (default)
+
+	req := httptest.NewRequest("GET", "/api/v1/vcs/status", nil)
+	w := httptest.NewRecorder()
+	api.VCSStatus(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var status VCStatus
+	if err := json.NewDecoder(w.Body).Decode(&status); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if status.Enabled {
+		t.Error("expected enabled=false when .git exists but vc_enabled is false")
+	}
+	if status.CommitCount != 0 {
+		t.Errorf("expected 0 commit count when disabled, got %d", status.CommitCount)
+	}
+}
+
 func TestVCSDisable(t *testing.T) {
 	api, _ := setupVCSTest(t)
 

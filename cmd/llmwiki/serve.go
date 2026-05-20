@@ -19,7 +19,6 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/server"
 	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
-	"github.com/solo-kingdom/llmwiki/internal/vcs"
 	"github.com/solo-kingdom/llmwiki/internal/watcher"
 )
 
@@ -142,10 +141,6 @@ func runServe(dir string, opts serveOptions) error {
 
 	processor := ingest.NewJobProcessor(db, ws)
 	processor.SetFileIndexer(fileIndexer)
-	gitRepo := vcs.NewGitRepo(ws)
-	if gitRepo.IsInitialized() {
-		processor.SetGitRepo(gitRepo)
-	}
 	processor.Start(2 * time.Second)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -556,6 +556,10 @@ func TestProcessorWithGitCommit(t *testing.T) {
 	sourceContent := []byte("# Test\nHello world")
 	os.WriteFile(filepath.Join(ws, "raw", "sources", "web-ingest", "test.md"), sourceContent, 0o644)
 
+	if err := db.SetVCEnabled(true); err != nil {
+		t.Fatalf("SetVCEnabled: %v", err)
+	}
+
 	processor := NewJobProcessor(db, ws)
 	processor.SetGitRepo(repo)
 
@@ -613,6 +617,46 @@ func TestProcessorWithoutGitCommit(t *testing.T) {
 	err = processor.RunPipelineForJob(context.Background(), job)
 	if err == nil {
 		t.Fatal("expected error with nil LLM client")
+	}
+}
+
+func TestGitRepoIfEnabled(t *testing.T) {
+	if !vcs.IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	ws := t.TempDir()
+	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
+	if _, err := vcs.InitRepo(ws); err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	processor := NewJobProcessor(db, ws)
+
+	if repo := processor.gitRepoIfEnabled(); repo != nil {
+		t.Error("expected nil when vc_enabled is false")
+	}
+
+	if err := db.SetVCEnabled(true); err != nil {
+		t.Fatalf("SetVCEnabled: %v", err)
+	}
+	if repo := processor.gitRepoIfEnabled(); repo == nil {
+		t.Error("expected non-nil when vc_enabled and .git exist")
+	}
+
+	if err := db.SetVCEnabled(false); err != nil {
+		t.Fatalf("SetVCEnabled(false): %v", err)
+	}
+	if repo := processor.gitRepoIfEnabled(); repo != nil {
+		t.Error("expected nil after disabling vc")
 	}
 }
 

@@ -114,10 +114,9 @@ func (a *API) VCSStatus(w http.ResponseWriter, r *http.Request) {
 		ExcludedDirs: []string{".llmwiki/", "raw/", "revert/"},
 	}
 
-	if a.workspace != "" {
+	if a.workspace != "" && vcConfig.Enabled {
 		repo := vcs.NewGitRepo(a.workspace)
 		if repo.IsInitialized() {
-			status.Enabled = true // If .git exists, VC is effectively enabled
 			count, err := repo.CommitCount()
 			if err == nil {
 				status.CommitCount = count

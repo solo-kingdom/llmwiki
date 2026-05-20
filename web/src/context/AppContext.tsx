@@ -23,6 +23,7 @@ import type {
   SessionListItem,
 } from "@/types"
 import * as api from "@/lib/api"
+import { Toast } from "@/components/Toast"
 
 const SESSION_STORAGE_KEY = "llmwiki.ingest.sessionId"
 
@@ -153,6 +154,10 @@ interface AppState {
     model: string,
   ) => Promise<void>
   updateLastModel: (instanceId: string, model: string) => Promise<void>
+
+  toastMessage: string | null
+  showToast: (message: string) => void
+  dismissToast: () => void
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -183,6 +188,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   >([])
   const [sessionBusy, setSessionBusy] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message)
+  }, [])
+  const dismissToast = useCallback(() => setToastMessage(null), [])
+
+  useEffect(() => {
+    if (!sessionError) return
+    setToastMessage(sessionError)
+    setSessionError(null)
+  }, [sessionError])
 
   const [sessions, setSessions] = useState<SessionListItem[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -842,9 +859,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         deleteSession,
         updateSessionLLM,
         updateLastModel: updateLastModelFn,
+        toastMessage,
+        showToast,
+        dismissToast,
       }}
     >
       {children}
+      <Toast message={toastMessage} onClose={dismissToast} />
     </AppContext.Provider>
   )
 }

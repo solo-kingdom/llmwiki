@@ -19,7 +19,7 @@ export function Toast({ message, onClose, duration = 3000 }: ToastProps) {
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed bottom-6 left-1/2 z-[70] max-w-[min(24rem,90vw)] -translate-x-1/2 rounded-lg border border-border/80 bg-card px-4 py-2.5 text-sm text-foreground shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200"
+      className="pointer-events-none fixed top-20 left-1/2 z-[70] max-w-[min(24rem,90vw)] -translate-x-1/2 rounded-lg border border-border/80 bg-card px-4 py-2.5 text-sm text-foreground shadow-lg animate-in fade-in slide-in-from-top-2 duration-200"
     >
       {message}
     </div>

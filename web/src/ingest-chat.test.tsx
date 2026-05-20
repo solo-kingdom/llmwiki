@@ -470,4 +470,82 @@ describe("IngestChat", () => {
     ).toBeInTheDocument()
     expect(screen.getByRole("status")).toBeInTheDocument()
   })
+
+  it("shows archive failure as top toast", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "archive me",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    })
+    vi.mocked(api.archiveIngestSession).mockRejectedValue(
+      new Error("create ingest job: database is locked (5) (SQLITE_BUSY)"),
+    )
+    vi.mocked(api.listIngestSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: "sess-1",
+          title: "",
+          status: "active",
+          llm_instance_id: "inst-1",
+          llm_model: "gpt-4",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    await screen.findByText("archive me")
+    fireEvent.click(screen.getByRole("button", { name: /归档/ }))
+    fireEvent.click(screen.getByRole("button", { name: /确认归档/ }))
+
+    expect(
+      await screen.findByText(
+        "create ingest job: database is locked (5) (SQLITE_BUSY)",
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("status")).toBeInTheDocument()
+  })
 })

@@ -36,3 +36,41 @@ export function clearSearchHistory(): void {
     // ignore
   }
 }
+
+export interface RecentModelEntry {
+  instanceId: string
+  modelId: string
+  instanceName?: string
+  modelName?: string
+}
+
+const RECENT_MODELS_KEY = "llmwiki.recentModels"
+const RECENT_MODELS_MAX = 5
+
+export function getRecentModels(): RecentModelEntry[] {
+  try {
+    const raw = localStorage.getItem(RECENT_MODELS_KEY)
+    return raw ? (JSON.parse(raw) as RecentModelEntry[]) : []
+  } catch {
+    return []
+  }
+}
+
+export function recordRecentModel(entry: RecentModelEntry): void {
+  if (!entry.instanceId || !entry.modelId) return
+  try {
+    let history = getRecentModels()
+    history = history.filter(
+      (item) =>
+        !(
+          item.instanceId === entry.instanceId &&
+          item.modelId === entry.modelId
+        ),
+    )
+    history.unshift(entry)
+    history = history.slice(0, RECENT_MODELS_MAX)
+    localStorage.setItem(RECENT_MODELS_KEY, JSON.stringify(history))
+  } catch {
+    // ignore
+  }
+}

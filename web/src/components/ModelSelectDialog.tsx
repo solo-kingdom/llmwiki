@@ -1,8 +1,14 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Dialog } from "@base-ui/react/dialog"
-import { X } from "lucide-react"
+import { Clock, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ModelInfo, ProviderInstance } from "@/types"
+import {
+  cn,
+  getRecentModels,
+  recordRecentModel,
+  type RecentModelEntry,
+} from "@/lib/utils"
 
 interface ModelSelectDialogProps {
   open: boolean
@@ -11,6 +17,8 @@ interface ModelSelectDialogProps {
   models: ModelInfo[]
   selectedInstanceId: string
   selectedModel: string
+  lastUsedInstanceId?: string
+  lastUsedModel?: string
   onLoadModels: (catalogId: string) => void
   onConfirm: (instanceId: string, modelId: string) => void
 }
@@ -22,6 +30,8 @@ export function ModelSelectDialog({
   models,
   selectedInstanceId,
   selectedModel,
+  lastUsedInstanceId,
+  lastUsedModel,
   onLoadModels,
   onConfirm,
 }: ModelSelectDialogProps) {
@@ -47,10 +57,64 @@ export function ModelSelectDialog({
     if (inst) onLoadModels(inst.catalog_id)
   }
 
+  const recentModels = useMemo(() => {
+    if (!open) return []
+    const stored = getRecentModels().filter((entry) =>
+      instances.some((inst) => inst.id === entry.instanceId),
+    )
+    if (stored.length > 0) return stored
+
+    if (
+      lastUsedInstanceId &&
+      lastUsedModel &&
+      instances.some((inst) => inst.id === lastUsedInstanceId)
+    ) {
+      const inst = instances.find((i) => i.id === lastUsedInstanceId)
+      return [
+        {
+          instanceId: lastUsedInstanceId,
+          modelId: lastUsedModel,
+          instanceName: inst?.name,
+          modelName: lastUsedModel,
+        },
+      ]
+    }
+
+    return []
+  }, [open, instances, lastUsedInstanceId, lastUsedModel])
+
+  const persistRecentModel = (instanceId: string, modelId: string) => {
+    const inst = instances.find((i) => i.id === instanceId)
+    const model = models.find((m) => m.model_id === modelId)
+    recordRecentModel({
+      instanceId,
+      modelId,
+      instanceName: inst?.name,
+      modelName: model?.name ?? modelId,
+    })
+  }
+
   const handleConfirm = () => {
     if (!draftInstanceId || !draftModel) return
+    persistRecentModel(draftInstanceId, draftModel)
     onConfirm(draftInstanceId, draftModel)
     onOpenChange(false)
+  }
+
+  const handleQuickSelect = (entry: RecentModelEntry) => {
+    setDraftInstanceId(entry.instanceId)
+    setDraftModel(entry.modelId)
+    const inst = instances.find((i) => i.id === entry.instanceId)
+    if (inst) onLoadModels(inst.catalog_id)
+  }
+
+  const formatRecentLabel = (entry: RecentModelEntry) => {
+    const inst =
+      instances.find((i) => i.id === entry.instanceId) ??
+      (entry.instanceName ? { name: entry.instanceName } : null)
+    const instanceLabel = inst?.name ?? entry.instanceId
+    const modelLabel = entry.modelName ?? entry.modelId
+    return `${instanceLabel} / ${modelLabel}`
   }
 
   return (
@@ -106,6 +170,33 @@ export function ModelSelectDialog({
                   ))}
                 </select>
               </div>
+
+              {recentModels.length > 0 && (
+                <div>
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Clock className="size-3" />
+                    最近常用
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {recentModels.map((entry) => (
+                      <button
+                        key={`${entry.instanceId}:${entry.modelId}`}
+                        type="button"
+                        title={formatRecentLabel(entry)}
+                        className={cn(
+                          "max-w-full truncate rounded-lg border border-input bg-muted/40 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted",
+                          draftInstanceId === entry.instanceId &&
+                            draftModel === entry.modelId &&
+                            "border-ring bg-muted",
+                        )}
+                        onClick={() => handleQuickSelect(entry)}
+                      >
+                        {formatRecentLabel(entry)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

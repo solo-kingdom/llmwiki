@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // helperDB creates a temporary database for testing.
@@ -52,6 +53,64 @@ func TestOpenCreatesParentDir(t *testing.T) {
 
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		t.Error("database file was not created in nested dir")
+	}
+}
+
+func TestOpenBusyTimeoutAndSingleConnection(t *testing.T) {
+	db := helperDB(t)
+
+	var busy int
+	if err := db.DB().QueryRow("PRAGMA busy_timeout").Scan(&busy); err != nil {
+		t.Fatalf("PRAGMA busy_timeout: %v", err)
+	}
+	if busy < 5000 {
+		t.Errorf("busy_timeout = %d, want >= 5000", busy)
+	}
+
+	stats := db.DB().Stats()
+	if stats.MaxOpenConnections != 1 {
+		t.Errorf("MaxOpenConnections = %d, want 1", stats.MaxOpenConnections)
+	}
+}
+
+func TestCreateIngestJobWaitsForOpenTransaction(t *testing.T) {
+	db := helperDB(t)
+
+	tx, err := db.DB().Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+
+	// Hold the sole connection in a write transaction (simulates claim).
+	if _, err := tx.Exec(`
+		INSERT INTO ingest_jobs (input_type, source_path, status, retries, max_retries)
+		VALUES ('text', 'raw/sources/hold.md', 'queued', 0, 3)`); err != nil {
+		t.Fatalf("insert hold job: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		job := &IngestJob{
+			InputType:  "session_archive",
+			SourcePath: "raw/sources/web-ingest/sessions/s1/archive.md",
+			SourceRef:  "session:s1",
+			Status:     "queued",
+		}
+		done <- db.CreateIngestJob(job)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit hold tx: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("CreateIngestJob after tx release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("CreateIngestJob timed out waiting for connection")
 	}
 }
 

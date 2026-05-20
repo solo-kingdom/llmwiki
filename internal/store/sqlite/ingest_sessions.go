@@ -43,6 +43,12 @@ func scanIngestSessionMessage(scanner interface{ Scan(...interface{}) error }, m
 	)
 }
 
+func (d *DB) CountIngestSessions() (int, error) {
+	var n int
+	err := d.db.QueryRow(`SELECT COUNT(*) FROM ingest_sessions`).Scan(&n)
+	return n, err
+}
+
 func (d *DB) CreateIngestSession(session *IngestSession) error {
 	if session == nil {
 		return fmt.Errorf("nil ingest session")

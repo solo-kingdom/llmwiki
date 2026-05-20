@@ -19,6 +19,15 @@ func TestNormalizeSessionArchivePath(t *testing.T) {
 	}
 }
 
+func TestDefaultIngestSessionTitle(t *testing.T) {
+	now := time.Date(2026, 5, 20, 15, 30, 0, 0, time.UTC)
+	got := DefaultIngestSessionTitle(3, now)
+	want := "#3 2026-05-20"
+	if got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+}
+
 func TestBuildSessionArchiveMarkdown(t *testing.T) {
 	md := BuildSessionArchiveMarkdown("s1", "T", []SessionArchiveMessage{
 		{Role: "user", Content: "hi"},

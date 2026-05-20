@@ -12,6 +12,11 @@ import (
 
 const SessionBaseDir = "raw/sources/web-ingest/sessions"
 
+// DefaultIngestSessionTitle returns the default session name: "#{no} {date}".
+func DefaultIngestSessionTitle(no int, now time.Time) string {
+	return fmt.Sprintf("#%d %s", no, now.Format("2006-01-02"))
+}
+
 // SessionDir returns the relative session root path.
 func SessionDir(sessionID string) string {
 	return filepath.ToSlash(filepath.Join(SessionBaseDir, sessionID))

@@ -196,6 +196,63 @@ func TestCreateSessionFallsBackToGlobalConfig(t *testing.T) {
 	}
 }
 
+func TestCreateSessionDefaultTitle(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+
+	var resp sessionResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Session == nil {
+		t.Fatal("expected session")
+	}
+	if !strings.HasPrefix(resp.Session.Title, "#1 ") {
+		t.Errorf("title = %q, want prefix #1 ", resp.Session.Title)
+	}
+	if len(resp.Session.Title) < len("#1 2006-01-02") {
+		t.Errorf("title = %q, expected date suffix", resp.Session.Title)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create second: %d %s", w.Code, w.Body.String())
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if !strings.HasPrefix(resp.Session.Title, "#2 ") {
+		t.Errorf("second title = %q, want prefix #2 ", resp.Session.Title)
+	}
+}
+
+func TestCreateSessionDefaultTitleRespectsExplicitTitle(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{"title": "My Topic"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+
+	var resp sessionResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Session.Title != "My Topic" {
+		t.Errorf("title = %q, want My Topic", resp.Session.Title)
+	}
+}
+
 func TestCreateSessionNoInstanceNoGlobal(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)

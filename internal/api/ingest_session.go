@@ -69,8 +69,18 @@ func (a *API) CreateIngestSession(w http.ResponseWriter, r *http.Request) {
 		model, _ = a.db.GetConfig("last_model")
 	}
 
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		count, err := a.db.CountIngestSessions()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		title = ingest.DefaultIngestSessionTitle(count+1, time.Now())
+	}
+
 	session := &sqlite.IngestSession{
-		Title:         strings.TrimSpace(req.Title),
+		Title:         title,
 		Status:        "active",
 		LLMInstanceID: instanceID,
 		LLMModel:      model,

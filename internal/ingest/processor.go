@@ -396,6 +396,13 @@ func (p *JobProcessor) resolveLLMClientForJob(job *sqlite.IngestJob) (*llm.Clien
 	}
 
 	if instanceID == "" {
+		instanceID, _ = p.db.GetConfig("job_instance_id")
+	}
+	if model == "" {
+		model, _ = p.db.GetConfig("job_model")
+	}
+
+	if instanceID == "" {
 		instanceID, _ = p.db.GetConfig("last_instance_id")
 	}
 	if model == "" {

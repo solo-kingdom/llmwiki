@@ -23,8 +23,8 @@ vi.mock("@/lib/api", () => ({
     chunk_overlap: 64,
     auto_reindex: true,
     watch_sources: false,
-    llm_provider: "",
-    llm_model: "",
+    job_instance_id: "",
+    job_model: "",
   }),
   createIngestSession: vi.fn().mockResolvedValue({
     session: {

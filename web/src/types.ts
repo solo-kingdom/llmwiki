@@ -112,6 +112,8 @@ export interface SessionListItem {
 export interface Settings {
   last_instance_id: string
   last_model: string
+  job_instance_id: string
+  job_model: string
   max_tokens: number
   api_key: string
   temperature: number
@@ -119,8 +121,6 @@ export interface Settings {
   chunk_overlap: number
   auto_reindex: boolean
   watch_sources: boolean
-  llm_provider: string
-  llm_model: string
 }
 
 export interface ReferenceSummary {

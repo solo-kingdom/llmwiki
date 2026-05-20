@@ -131,6 +131,70 @@ func TestUpdateLastModel(t *testing.T) {
 	}
 }
 
+func TestUpdateSettingsJobLLM(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"job_instance_id": "inst_job12345",
+		"job_model":       "claude-3-opus",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.JobInstanceID != "inst_job12345" {
+		t.Errorf("job_instance_id = %q, want inst_job12345", resp.JobInstanceID)
+	}
+	if resp.JobModel != "claude-3-opus" {
+		t.Errorf("job_model = %q, want claude-3-opus", resp.JobModel)
+	}
+
+	instID, _ := api.db.GetConfig("job_instance_id")
+	if instID != "inst_job12345" {
+		t.Errorf("persisted job_instance_id = %q, want inst_job12345", instID)
+	}
+}
+
+func TestUpdateSettingsClearJobLLM(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	api.db.SetConfig("job_instance_id", "inst_old12345")
+	api.db.SetConfig("job_model", "gpt-4o")
+
+	body, _ := json.Marshal(map[string]string{
+		"job_instance_id": "",
+		"job_model":       "",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.JobInstanceID != "" {
+		t.Errorf("job_instance_id = %q, want empty", resp.JobInstanceID)
+	}
+	if resp.JobModel != "" {
+		t.Errorf("job_model = %q, want empty", resp.JobModel)
+	}
+}
+
 func TestUpdateLastModelMissingFields(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSettingsRoutes(api, r)

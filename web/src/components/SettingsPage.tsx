@@ -57,6 +57,8 @@ export function SettingsPage() {
     createInstance,
     updateInstance,
     deleteInstance,
+    loadModels,
+    currentModels,
   } = useApp()
 
   const [form, setForm] = useState<Partial<Settings> | null>(null)
@@ -115,6 +117,20 @@ export function SettingsPage() {
     return settings ?? ({} as Partial<Settings>)
   }, [form, settings])
 
+  const jobInstanceId = mergedForm.job_instance_id ?? ""
+  const jobModel = mergedForm.job_model ?? ""
+
+  useEffect(() => {
+    if (!jobInstanceId) return
+    const inst = instances.find((i) => i.id === jobInstanceId)
+    if (inst) void loadModels(inst.catalog_id)
+  }, [jobInstanceId, instances, loadModels])
+
+  const fallbackInstance = instances.find(
+    (i) => i.id === (settings?.last_instance_id ?? ""),
+  )
+  const usingConversationModel = !jobInstanceId && !jobModel
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setSaving(true)
@@ -132,6 +148,22 @@ export function SettingsPage() {
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     setForm((prev) => ({ ...(prev ?? settings ?? {}), [key]: value }))
+
+  const handleJobInstanceChange = (instanceId: string) => {
+    setForm((prev) => ({
+      ...(prev ?? settings ?? {}),
+      job_instance_id: instanceId,
+      job_model: "",
+    }))
+  }
+
+  const handleClearJobLLM = () => {
+    setForm((prev) => ({
+      ...(prev ?? settings ?? {}),
+      job_instance_id: "",
+      job_model: "",
+    }))
+  }
 
   // --- Add form ---
   const handleStartAdd = () => {
@@ -480,6 +512,79 @@ export function SettingsPage() {
               <p className="text-sm text-muted-foreground">
                 Loading providers...
               </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Jobs</CardTitle>
+            <CardDescription>
+              摄入任务（文件上传、文本处理等）使用的 Provider 和 Model。
+              未设置时将使用对话中最近使用的 Provider 和 Model。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {instances.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                请先在上方添加 Provider 实例
+              </p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Provider 实例</label>
+                    <select
+                      value={jobInstanceId}
+                      onChange={(e) => handleJobInstanceChange(e.target.value)}
+                      className="mt-1 w-full h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                    >
+                      <option value="">使用对话模型</option>
+                      {instances.map((inst) => (
+                        <option key={inst.id} value={inst.id}>
+                          {inst.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Model</label>
+                    <select
+                      value={jobModel}
+                      onChange={(e) => set("job_model", e.target.value)}
+                      disabled={!jobInstanceId || currentModels.length === 0}
+                      className="mt-1 w-full h-9 rounded-md border border-input bg-transparent px-2 text-sm disabled:opacity-50"
+                    >
+                      <option value="">选择模型</option>
+                      {currentModels.map((m) => (
+                        <option key={m.model_id} value={m.model_id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                {jobInstanceId && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleClearJobLLM}
+                  >
+                    使用对话模型
+                  </Button>
+                )}
+                {usingConversationModel && (
+                  <p className="text-xs text-muted-foreground">
+                    当前回退：
+                    {fallbackInstance && settings?.last_model
+                      ? ` ${fallbackInstance.name} / ${settings.last_model}`
+                      : settings?.last_instance_id || settings?.last_model
+                        ? ` ${settings.last_instance_id}${settings.last_model ? ` / ${settings.last_model}` : ""}`
+                        : " 尚未在对话中选择 Provider 和 Model"}
+                  </p>
+                )}
+              </>
             )}
           </CardContent>
         </Card>

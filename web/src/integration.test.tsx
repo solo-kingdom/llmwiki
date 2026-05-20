@@ -82,8 +82,8 @@ function defaultSettings(): Settings {
     chunk_overlap: 64,
     auto_reindex: true,
     watch_sources: false,
-    llm_provider: "openai",
-    llm_model: "gpt-4o",
+    job_instance_id: "",
+    job_model: "",
   }
 }
 

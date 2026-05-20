@@ -718,6 +718,83 @@ func TestResolveLLMClientForSessionArchiveUsesSessionConfig(t *testing.T) {
 	}
 }
 
+func TestResolveLLMClientForJobUsesJobSettings(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	inst := seedProcessorOpenAIProvider(t, db)
+	if err := db.SetConfig("job_instance_id", inst.ID); err != nil {
+		t.Fatalf("SetConfig job_instance_id: %v", err)
+	}
+	if err := db.SetConfig("job_model", "gpt-4o"); err != nil {
+		t.Fatalf("SetConfig job_model: %v", err)
+	}
+	if err := db.SetConfig("last_instance_id", "inst_nonexistent"); err != nil {
+		t.Fatalf("SetConfig last_instance_id: %v", err)
+	}
+	if err := db.SetConfig("last_model", "gpt-4o"); err != nil {
+		t.Fatalf("SetConfig last_model: %v", err)
+	}
+
+	processor := NewJobProcessor(db, t.TempDir())
+	job := &sqlite.IngestJob{
+		InputType:  "text",
+		SourceRef:  "text",
+		SourcePath: "raw/sources/web-ingest/test.md",
+	}
+
+	client, err := processor.resolveLLMClientForJob(job)
+	if err != nil {
+		t.Fatalf("resolveLLMClientForJob: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client from job settings")
+	}
+}
+
+func TestResolveLLMClientForSessionArchiveIgnoresJobSettings(t *testing.T) {
+	db, err := sqlite.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	inst := seedProcessorOpenAIProvider(t, db)
+	session := &sqlite.IngestSession{
+		Title:         "Archive Session",
+		StoragePath:   "raw/sources/web-ingest/sessions/sess123",
+		LLMInstanceID: inst.ID,
+		LLMModel:      "gpt-4o",
+	}
+	if err := db.CreateIngestSession(session); err != nil {
+		t.Fatalf("CreateIngestSession: %v", err)
+	}
+	if err := db.SetConfig("job_instance_id", "inst_nonexistent"); err != nil {
+		t.Fatalf("SetConfig job_instance_id: %v", err)
+	}
+	if err := db.SetConfig("job_model", "gpt-4o"); err != nil {
+		t.Fatalf("SetConfig job_model: %v", err)
+	}
+
+	processor := NewJobProcessor(db, t.TempDir())
+	job := &sqlite.IngestJob{
+		InputType:  string(InputKindSessionArchive),
+		SourceRef:  "session:" + session.ID,
+		SourcePath: "raw/sources/web-ingest/sessions/sess123/archive.md",
+	}
+
+	client, err := processor.resolveLLMClientForJob(job)
+	if err != nil {
+		t.Fatalf("resolveLLMClientForJob: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client from session config")
+	}
+}
+
 func TestResolveLLMClientForJobUsesGlobalDefaults(t *testing.T) {
 	db, err := sqlite.Open(t.TempDir() + "/test.db")
 	if err != nil {

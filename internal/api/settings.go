@@ -20,6 +20,8 @@ func maskKey(key string) string {
 type settingsResponse struct {
 	LastInstanceID string `json:"last_instance_id"`
 	LastModel      string `json:"last_model"`
+	JobInstanceID  string `json:"job_instance_id"`
+	JobModel       string `json:"job_model"`
 	Temperature    string `json:"temperature"`
 	MaxTokens      string `json:"max_tokens"`
 	ChunkSize      string `json:"chunk_size"`
@@ -38,6 +40,8 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, settingsResponse{
 		LastInstanceID: all["last_instance_id"],
 		LastModel:      all["last_model"],
+		JobInstanceID:  all["job_instance_id"],
+		JobModel:       all["job_model"],
 		Temperature:    all["temperature"],
 		MaxTokens:      all["max_tokens"],
 		ChunkSize:      all["chunk_size"],
@@ -57,6 +61,7 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	allowedKeys := map[string]bool{
 		"temperature": true, "max_tokens": true, "chunk_size": true,
 		"chunk_overlap": true, "auto_reindex": true, "watch_sources": true,
+		"job_instance_id": true, "job_model": true,
 	}
 
 	for key, value := range req {

@@ -37,9 +37,9 @@ var (
 
 // Config is the root MCP servers document stored in app_config.
 type Config struct {
-	Version  int            `json:"version"`
-	Servers  []ServerConfig `json:"servers"`
-	Defaults Defaults       `json:"defaults"`
+	Version  int                       `json:"version"`
+	Servers  map[string]ServerConfig   `json:"servers"`
+	Defaults Defaults                  `json:"defaults"`
 }
 
 type ServerConfig struct {
@@ -99,16 +99,20 @@ func ParseConfig(raw string) (*Config, error) {
 		FallbackMode string `json:"fallback_mode"`
 	}
 	var envelope struct {
-		Version  int            `json:"version"`
-		Servers  []ServerConfig `json:"servers"`
-		Defaults defaultsRaw    `json:"defaults"`
+		Version  int             `json:"version"`
+		Servers  json.RawMessage `json:"servers"`
+		Defaults defaultsRaw     `json:"defaults"`
 	}
 	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
 		return nil, ve("", fmt.Sprintf("invalid JSON: %v", err))
 	}
+	servers, err := parseServersJSON(envelope.Servers)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		Version: envelope.Version,
-		Servers: envelope.Servers,
+		Servers: servers,
 		Defaults: Defaults{
 			FallbackMode: envelope.Defaults.FallbackMode,
 		},
@@ -165,8 +169,7 @@ func ApplyDefaultsAfterParse(cfg *Config, rawDefaultsReadonly *bool) {
 	if cfg.Defaults.FallbackMode == "" {
 		cfg.Defaults.FallbackMode = DefaultFallbackMode
 	}
-	for i := range cfg.Servers {
-		s := &cfg.Servers[i]
+	for id, s := range cfg.Servers {
 		if s.TimeoutMS <= 0 {
 			s.TimeoutMS = DefaultTimeoutMS
 		}
@@ -175,6 +178,7 @@ func ApplyDefaultsAfterParse(cfg *Config, rawDefaultsReadonly *bool) {
 				s.AllowedTools = []string{DefaultToolSearch, DefaultToolRead}
 			}
 		}
+		cfg.Servers[id] = s
 	}
 }
 
@@ -189,18 +193,83 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.Defaults.FallbackMode != "" && cfg.Defaults.FallbackMode != "local_only" {
 		return ve("defaults.fallback_mode", "must be local_only")
 	}
-	ids := make(map[string]bool)
-	for i, s := range cfg.Servers {
-		prefix := fmt.Sprintf("servers[%d]", i)
+	for key, s := range cfg.Servers {
+		prefix := fmt.Sprintf("servers.%s", key)
+		if strings.TrimSpace(key) == "" {
+			return ve("servers", "empty server key")
+		}
+		if strings.TrimSpace(s.ID) == "" {
+			s.ID = key
+		} else if s.ID != key {
+			return ve(prefix+".id", fmt.Sprintf("must match map key %q", key))
+		}
 		if err := validateServer(&s, prefix, cfg.Defaults.ReadonlyOnly); err != nil {
 			return err
 		}
-		if ids[s.ID] {
-			return ve(prefix+".id", fmt.Sprintf("duplicate id %q", s.ID))
-		}
-		ids[s.ID] = true
 	}
 	return nil
+}
+
+func parseServersJSON(raw json.RawMessage) (map[string]ServerConfig, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil, nil
+	}
+	switch trimmed[0] {
+	case '{':
+		var asMap map[string]ServerConfig
+		if err := json.Unmarshal(raw, &asMap); err != nil {
+			return nil, ve("servers", fmt.Sprintf("invalid object: %v", err))
+		}
+		return normalizeServersMap(asMap)
+	case '[':
+		var asArr []ServerConfig
+		if err := json.Unmarshal(raw, &asArr); err != nil {
+			return nil, ve("servers", fmt.Sprintf("invalid array: %v", err))
+		}
+		return serversArrayToMap(asArr)
+	default:
+		return nil, ve("servers", "must be an object keyed by server id")
+	}
+}
+
+func serversArrayToMap(arr []ServerConfig) (map[string]ServerConfig, error) {
+	if len(arr) == 0 {
+		return map[string]ServerConfig{}, nil
+	}
+	m := make(map[string]ServerConfig, len(arr))
+	for i, s := range arr {
+		id := strings.TrimSpace(s.ID)
+		if id == "" {
+			return nil, ve(fmt.Sprintf("servers[%d].id", i), "is required")
+		}
+		if _, dup := m[id]; dup {
+			return nil, ve(fmt.Sprintf("servers[%d].id", i), fmt.Sprintf("duplicate id %q", id))
+		}
+		s.ID = id
+		m[id] = s
+	}
+	return m, nil
+}
+
+func normalizeServersMap(m map[string]ServerConfig) (map[string]ServerConfig, error) {
+	if len(m) == 0 {
+		return map[string]ServerConfig{}, nil
+	}
+	out := make(map[string]ServerConfig, len(m))
+	for key, s := range m {
+		k := strings.TrimSpace(key)
+		if k == "" {
+			return nil, ve("servers", "empty server key")
+		}
+		if strings.TrimSpace(s.ID) == "" {
+			s.ID = k
+		} else if s.ID != k {
+			return nil, ve(fmt.Sprintf("servers.%s.id", k), fmt.Sprintf("must match map key %q", k))
+		}
+		out[k] = s
+	}
+	return out, nil
 }
 
 func validateServer(s *ServerConfig, prefix string, readonlyOnly bool) error {

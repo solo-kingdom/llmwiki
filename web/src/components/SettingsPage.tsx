@@ -9,10 +9,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import type { Settings, VCStatus } from "@/types"
+import type { Settings, VCStatus, ProviderCheckResult, MCPServerCheckResult } from "@/types"
 import { PageContainer } from "@/components/PageContainer"
-import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff } from "lucide-react"
-import { initVC, getVCStatus, disableVC } from "@/lib/api"
+import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff, CheckCircle2, XCircle, Loader2, CircleOff, RefreshCw } from "lucide-react"
+import { initVC, getVCStatus, disableVC, checkProviderInstance, checkAllProviderInstances, checkMCPStatus } from "@/lib/api"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 
 type AddFormState = {
@@ -72,6 +72,10 @@ export function SettingsPage() {
   const [vcLoading, setVCLoading] = useState(false)
   const [vcDisableConfirm, setVCDisableConfirm] = useState(false)
   const [mcpJsonError, setMcpJsonError] = useState<string | null>(null)
+  const [providerChecks, setProviderChecks] = useState<Record<string, ProviderCheckResult>>({})
+  const [providerChecking, setProviderChecking] = useState(false)
+  const [mcpChecks, setMcpChecks] = useState<MCPServerCheckResult[] | null>(null)
+  const [mcpChecking, setMcpChecking] = useState(false)
 
   useEffect(() => {
     void loadSettings()
@@ -80,6 +84,11 @@ export function SettingsPage() {
     void loadVCStatus()
   }, [loadSettings, loadProviders, loadInstances])
 
+  useEffect(() => {
+    if (instances.length === 0) return
+    void runProviderChecks()
+  }, [instances.length])
+
   const loadVCStatus = async () => {
     try {
       const status = await getVCStatus()
@@ -87,6 +96,102 @@ export function SettingsPage() {
     } catch {
       // ignore
     }
+  }
+
+  const runProviderChecks = async () => {
+    if (instances.length === 0) return
+    setProviderChecking(true)
+    try {
+      const resp = await checkAllProviderInstances()
+      const next: Record<string, ProviderCheckResult> = {}
+      for (const item of resp.instances) {
+        next[item.instance_id] = item.check
+      }
+      setProviderChecks(next)
+    } catch {
+      // ignore
+    } finally {
+      setProviderChecking(false)
+    }
+  }
+
+  const runSingleProviderCheck = async (instanceId: string) => {
+    setProviderChecking(true)
+    try {
+      const result = await checkProviderInstance(instanceId)
+      setProviderChecks((prev) => ({ ...prev, [instanceId]: result }))
+    } catch {
+      // ignore
+    } finally {
+      setProviderChecking(false)
+    }
+  }
+
+  const runMCPCheck = async () => {
+    const raw = mergedForm.mcp_servers_json ?? settings?.mcp_servers_json ?? ""
+    const err = validateMCPJson(raw)
+    if (err) {
+      setMcpJsonError(err)
+      return
+    }
+    setMcpChecking(true)
+    setMcpChecks(null)
+    try {
+      const resp = await checkMCPStatus(raw)
+      setMcpChecks(resp.servers)
+    } catch {
+      setMcpChecks([])
+    } finally {
+      setMcpChecking(false)
+    }
+  }
+
+  const renderProviderStatus = (instanceId: string) => {
+    const check = providerChecks[instanceId]
+    if (providerChecking && !check) {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" />
+          检查中
+        </span>
+      )
+    }
+    if (!check) return null
+    const ok = check.status === "ok"
+    return (
+      <span
+        className={`inline-flex items-center gap-1 text-xs ${ok ? "text-green-700" : "text-destructive"}`}
+        title={check.message}
+        data-testid={`provider-check-${instanceId}`}
+      >
+        {ok ? <CheckCircle2 className="size-3" /> : <XCircle className="size-3" />}
+        {ok ? "正常" : "异常"}
+      </span>
+    )
+  }
+
+  const renderMCPStatusBadge = (srv: MCPServerCheckResult) => {
+    const ok = srv.status === "ok"
+    const disabled = srv.status === "disabled"
+    return (
+      <div
+        key={srv.id}
+        className="flex items-start gap-2 rounded-md border px-3 py-2 text-sm"
+        data-testid={`mcp-check-${srv.id}`}
+      >
+        {ok ? (
+          <CheckCircle2 className="size-4 text-green-700 shrink-0 mt-0.5" />
+        ) : disabled ? (
+          <CircleOff className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+        ) : (
+          <XCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+        )}
+        <div className="min-w-0">
+          <div className="font-medium truncate">{srv.name || srv.id}</div>
+          <div className="text-xs text-muted-foreground">{srv.message}</div>
+        </div>
+      </div>
+    )
   }
 
   const handleVCInit = async () => {
@@ -137,12 +242,40 @@ export function SettingsPage() {
     const trimmed = raw.trim()
     if (!trimmed) return null
     try {
-      const parsed = JSON.parse(trimmed) as { version?: number; servers?: unknown[] }
+      const parsed = JSON.parse(trimmed) as {
+        version?: number
+        servers?: Record<string, Record<string, unknown>>
+      }
       if (parsed.version !== 1) {
         return "version 必须为 1"
       }
-      if (!Array.isArray(parsed.servers)) {
-        return "servers 必须是数组"
+      if (parsed.servers == null) {
+        return "servers 为必填对象，key 为 server id"
+      }
+      if (Array.isArray(parsed.servers)) {
+        return "servers 必须是对象（key 为 id），不能是数组"
+      }
+      if (typeof parsed.servers !== "object") {
+        return "servers 必须是对象，key 为 server id"
+      }
+      for (const [key, srv] of Object.entries(parsed.servers)) {
+        if (!key.trim()) {
+          return "servers 的 key 不能为空"
+        }
+        const id = typeof srv?.id === "string" ? srv.id.trim() : ""
+        if (id && id !== key) {
+          return `servers.${key}.id 必须与 key "${key}" 一致`
+        }
+        if (!srv?.name || String(srv.name).trim() === "") {
+          return `servers.${key}.name 为必填`
+        }
+        if (!srv?.transport || String(srv.transport).trim() === "") {
+          return `servers.${key}.transport 为必填`
+        }
+        const transport = String(srv.transport).trim()
+        if (transport !== "stdio" && (!srv?.url || String(srv.url).trim() === "")) {
+          return `servers.${key}.url 为必填（transport 为 ${transport}）`
+        }
       }
       return null
     } catch (err) {
@@ -289,14 +422,30 @@ export function SettingsPage() {
                   管理已添加的 Provider 实例
                 </CardDescription>
               </div>
-              <Button
-                size="sm"
-                onClick={handleStartAdd}
-                disabled={addForm.mode !== false || editForm.mode !== false}
-              >
-                <Plus className="size-3.5 mr-1" />
-                添加
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void runProviderChecks()}
+                  disabled={providerChecking || instances.length === 0}
+                  data-testid="check-all-providers"
+                >
+                  {providerChecking ? (
+                    <Loader2 className="size-3.5 mr-1 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-3.5 mr-1" />
+                  )}
+                  检查状态
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleStartAdd}
+                  disabled={addForm.mode !== false || editForm.mode !== false}
+                >
+                  <Plus className="size-3.5 mr-1" />
+                  添加
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -400,6 +549,7 @@ export function SettingsPage() {
                       <span className="text-xs text-muted-foreground">
                         ({catalogInfo?.name ?? inst.catalog_id})
                       </span>
+                      {renderProviderStatus(inst.id)}
                       {inst.api_key_masked && (
                         <span className="text-xs text-muted-foreground">
                           {inst.api_key_masked}
@@ -418,6 +568,16 @@ export function SettingsPage() {
                           Docs <ExternalLink className="size-3" />
                         </a>
                       )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="size-7 p-0 shrink-0"
+                        title="检查连接"
+                        onClick={() => void runSingleProviderCheck(inst.id)}
+                        disabled={providerChecking}
+                      >
+                        <RefreshCw className={`size-3.5 ${providerChecking ? "animate-spin" : ""}`} />
+                      </Button>
                       <Button
                         size="sm"
                         variant="ghost"
@@ -623,10 +783,28 @@ export function SettingsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>MCP Servers</CardTitle>
-            <CardDescription>
-              全局 MCP 客户端配置（JSON 高级模式）。默认仅允许只读工具 search/read。
-            </CardDescription>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <CardTitle>MCP Servers</CardTitle>
+                <CardDescription>
+                  全局 MCP 客户端配置（JSON 高级模式）。默认仅允许只读工具 search/read。
+                </CardDescription>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void runMCPCheck()}
+                disabled={mcpChecking || !!mcpJsonError}
+                data-testid="check-mcp"
+              >
+                {mcpChecking ? (
+                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3.5 mr-1" />
+                )}
+                检查连接
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-2">
             <label className="text-sm font-medium">mcp_servers_json</label>
@@ -641,6 +819,15 @@ export function SettingsPage() {
               <p className="text-xs text-destructive" data-testid="mcp-json-error">
                 {mcpJsonError}
               </p>
+            )}
+            {mcpChecks && (
+              <div className="space-y-2" data-testid="mcp-check-results">
+                {mcpChecks.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">未配置 MCP server</p>
+                ) : (
+                  mcpChecks.map(renderMCPStatusBadge)
+                )}
+              </div>
             )}
             <p className="text-xs text-muted-foreground">
               保存后服务端会校验并返回格式化 JSON。

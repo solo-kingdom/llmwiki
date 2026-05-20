@@ -181,10 +181,14 @@ func (s *Server) Start() error {
 		r.Route("/provider-instances", func(r chi.Router) {
 			r.Get("/", s.api.ListProviderInstances)
 			r.Post("/", s.api.CreateProviderInstance)
+			r.Post("/check", s.api.CheckAllProviderInstances)
 			r.Get("/{id}", s.api.GetProviderInstance)
 			r.Put("/{id}", s.api.UpdateProviderInstanceHandler)
 			r.Delete("/{id}", s.api.DeleteProviderInstanceHandler)
+			r.Post("/{id}/check", s.api.CheckProviderInstance)
 		})
+
+		r.Post("/settings/mcp/check", s.api.CheckMCPStatus)
 
 		r.Route("/ingest", func(r chi.Router) {
 			r.Post("/rollback", s.api.VCSRollback)

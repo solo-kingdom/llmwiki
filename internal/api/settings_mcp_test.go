@@ -14,7 +14,7 @@ func TestUpdateSettingsMCPServersJSONValid(t *testing.T) {
 	setupSettingsRoutes(api, r)
 
 	body, _ := json.Marshal(map[string]string{
-		"mcp_servers_json": `{"version":1,"servers":[],"defaults":{"readonly_only":true,"fallback_mode":"local_only"}}`,
+		"mcp_servers_json": `{"version":1,"servers":{},"defaults":{"readonly_only":true,"fallback_mode":"local_only"}}`,
 	})
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

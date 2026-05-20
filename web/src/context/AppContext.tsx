@@ -265,9 +265,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const saveSettings = useCallback(async (s: Partial<Settings>) => {
-    const updated = await api.updateSettings(s)
-    setSettings(updated)
-  }, [])
+    try {
+      const updated = await api.updateSettings(s)
+      setSettings(updated)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      showToast(msg)
+      throw e
+    }
+  }, [showToast])
 
   const refreshIngestJobs = useCallback(async () => {
     try {

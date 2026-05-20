@@ -286,6 +286,26 @@ export interface VCStatus {
   excluded_dirs: string[]
 }
 
+export interface ProviderCheckResult {
+  status: "ok" | "error"
+  message: string
+  details: {
+    has_api_key: boolean
+    has_base_url: boolean
+    reachable: boolean
+    catalog_id: string
+  }
+}
+
+export interface MCPServerCheckResult {
+  id: string
+  name: string
+  enabled: boolean
+  status: "ok" | "error" | "disabled"
+  message?: string
+  tool_count?: number
+}
+
 export interface VCLogEntry {
   sha: string
   subject: string

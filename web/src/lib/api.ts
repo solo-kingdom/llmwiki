@@ -20,6 +20,8 @@ import type {
   SessionListItem,
   VCStatus,
   VCLogEntry,
+  ProviderCheckResult,
+  MCPServerCheckResult,
   ActivityLog,
 } from "@/types"
 
@@ -433,6 +435,36 @@ export function deleteProviderInstance(
     `/api/v1/provider-instances/${encodeURIComponent(id)}`,
     { method: "DELETE" },
   )
+}
+
+export function checkProviderInstance(
+  id: string,
+): Promise<ProviderCheckResult> {
+  return request<ProviderCheckResult>(
+    `/api/v1/provider-instances/${encodeURIComponent(id)}/check`,
+    { method: "POST" },
+  )
+}
+
+export function checkAllProviderInstances(): Promise<{
+  instances: Array<{
+    instance_id: string
+    name: string
+    check: ProviderCheckResult
+  }>
+}> {
+  return request("/api/v1/provider-instances/check", { method: "POST" })
+}
+
+export function checkMCPStatus(mcpServersJson?: string): Promise<{
+  servers: MCPServerCheckResult[]
+}> {
+  return request("/api/v1/settings/mcp/check", {
+    method: "POST",
+    body: JSON.stringify(
+      mcpServersJson != null ? { mcp_servers_json: mcpServersJson } : {},
+    ),
+  })
 }
 
 export function listIngestSessions(): Promise<{ sessions: SessionListItem[] }> {

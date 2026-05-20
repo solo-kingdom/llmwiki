@@ -9,7 +9,7 @@ vi.mock("@/context/AppContext", () => ({
   useApp: () => ({
     settings: {
       mcp_servers_json:
-        '{\n  "version": 1,\n  "servers": [],\n  "defaults": {"readonly_only": true}\n}',
+        '{\n  "version": 1,\n  "servers": {},\n  "defaults": {"readonly_only": true}\n}',
     },
     loadSettings: mockLoadSettings,
     saveSettings: mockSaveSettings,
@@ -29,13 +29,16 @@ vi.mock("@/lib/api", () => ({
   getVCStatus: vi.fn().mockResolvedValue({ enabled: false, git_available: true }),
   initVC: vi.fn(),
   disableVC: vi.fn(),
+  checkAllProviderInstances: vi.fn().mockResolvedValue({ instances: [] }),
+  checkProviderInstance: vi.fn(),
+  checkMCPStatus: vi.fn().mockResolvedValue({ servers: [] }),
 }))
 
 describe("SettingsPage MCP JSON", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockSaveSettings.mockResolvedValue({
-      mcp_servers_json: '{\n  "version": 1,\n  "servers": []\n}',
+      mcp_servers_json: '{\n  "version": 1,\n  "servers": {}\n}',
     })
   })
 
@@ -54,11 +57,24 @@ describe("SettingsPage MCP JSON", () => {
     )
   })
 
+  it("rejects servers array format", () => {
+    render(<SettingsPage />)
+    const area = screen.getByTestId("mcp-servers-json")
+    fireEvent.change(area, {
+      target: {
+        value: JSON.stringify({ version: 1, servers: [] }),
+      },
+    })
+    expect(screen.getByTestId("mcp-json-error").textContent).toMatch(
+      /对象/,
+    )
+  })
+
   it("saves valid MCP JSON", async () => {
     render(<SettingsPage />)
     const area = screen.getByTestId("mcp-servers-json")
     const valid = JSON.stringify(
-      { version: 1, servers: [], defaults: { readonly_only: true } },
+      { version: 1, servers: {}, defaults: { readonly_only: true } },
       null,
       2,
     )
@@ -66,6 +82,28 @@ describe("SettingsPage MCP JSON", () => {
     fireEvent.click(screen.getByRole("button", { name: /Save Settings/i }))
     await waitFor(() => {
       expect(mockSaveSettings).toHaveBeenCalled()
+    })
+  })
+
+  it("runs MCP status check", async () => {
+    const { checkMCPStatus } = await import("@/lib/api")
+    vi.mocked(checkMCPStatus).mockResolvedValue({
+      servers: [
+        {
+          id: "s1",
+          name: "Test",
+          enabled: true,
+          status: "ok",
+          message: "连接正常，2 个可用工具",
+          tool_count: 2,
+        },
+      ],
+    })
+    render(<SettingsPage />)
+    fireEvent.click(screen.getByTestId("check-mcp"))
+    await waitFor(() => {
+      expect(checkMCPStatus).toHaveBeenCalled()
+      expect(screen.getByTestId("mcp-check-s1")).toBeInTheDocument()
     })
   })
 })

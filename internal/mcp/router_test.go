@@ -48,15 +48,17 @@ func TestRouterStreamableHTTPListAndCall(t *testing.T) {
 
 	raw := `{
 	  "version": 1,
-	  "servers": [{
-	    "id": "mock",
-	    "name": "Mock",
-	    "enabled": true,
-	    "transport": "streamable-http",
-	    "url": "` + srv.URL + `",
-	    "scope": {"job": true},
-	    "allowed_tools": ["search"]
-	  }],
+	  "servers": {
+	    "mock": {
+	      "id": "mock",
+	      "name": "Mock",
+	      "enabled": true,
+	      "transport": "streamable-http",
+	      "url": "` + srv.URL + `",
+	      "scope": {"job": true},
+	      "allowed_tools": ["search"]
+	    }
+	  },
 	  "defaults": {"readonly_only": true}
 	}`
 	reg, err := NewRegistry(raw)
@@ -86,15 +88,17 @@ func TestRouterFailoverToLocalOnly(t *testing.T) {
 
 	raw := `{
 	  "version": 1,
-	  "servers": [{
-	    "id": "bad",
-	    "name": "Bad",
-	    "enabled": true,
-	    "transport": "streamable-http",
-	    "url": "` + srv.URL + `",
-	    "scope": {"job": true},
-	    "allowed_tools": ["search"]
-	  }]
+	  "servers": {
+	    "bad": {
+	      "id": "bad",
+	      "name": "Bad",
+	      "enabled": true,
+	      "transport": "streamable-http",
+	      "url": "` + srv.URL + `",
+	      "scope": {"job": true},
+	      "allowed_tools": ["search"]
+	    }
+	  }
 	}`
 	reg, _ := NewRegistry(raw)
 	rec := &stubRecorder{}
@@ -115,7 +119,7 @@ func TestRouterFailoverToLocalOnly(t *testing.T) {
 }
 
 func TestRouterWriteToolDenied(t *testing.T) {
-	reg, _ := NewRegistry(`{"version":1,"servers":[{"id":"s","name":"S","enabled":true,"transport":"streamable-http","url":"http://127.0.0.1:1","scope":{"job":true},"allowed_tools":["search"]}]}`)
+	reg, _ := NewRegistry(`{"version":1,"servers":{"s":{"id":"s","name":"S","enabled":true,"transport":"streamable-http","url":"http://127.0.0.1:1","scope":{"job":true},"allowed_tools":["search"]}}}`)
 	router := NewRouter(reg, nil)
 	_, localOnly, err := router.CallTool(context.Background(), "create", nil)
 	if err == nil && !localOnly {

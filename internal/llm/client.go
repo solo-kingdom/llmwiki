@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -62,7 +63,36 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
+func (c *Client) validateRequest() error {
+	if strings.TrimSpace(c.config.Model) == "" {
+		return fmt.Errorf("model is not configured")
+	}
+	base := strings.TrimSpace(c.config.BaseURL)
+	if base == "" {
+		return fmt.Errorf(
+			"provider base URL is not configured; set it in Settings under Provider instances",
+		)
+	}
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf(
+			"provider base URL must be a valid http(s) URL (got %q); configure it in Settings",
+			c.config.BaseURL,
+		)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf(
+			"provider base URL must use http or https (got %q)",
+			parsed.Scheme,
+		)
+	}
+	return nil
+}
+
 func (c *Client) StreamChat(ctx context.Context, messages []Message, temperature float64, maxTokens int) (<-chan StreamEvent, error) {
+	if err := c.validateRequest(); err != nil {
+		return nil, err
+	}
 	url := c.buildURL()
 	body, err := c.buildRequestBody(messages, temperature, maxTokens)
 	if err != nil {

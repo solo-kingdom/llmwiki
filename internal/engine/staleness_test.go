@@ -63,6 +63,10 @@ func (m *mockStore) StoreChunks(docID string, chunks []ChunkData) error {
 	return nil
 }
 
+func (m *mockStore) DeleteChunks(docID string) error {
+	return nil
+}
+
 func (m *mockStore) ReplaceReferencesInTx(sourceDocID string, edges []RefEdge) error {
 	m.deletedRefs = append(m.deletedRefs, sourceDocID)
 	for _, e := range edges {

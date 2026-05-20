@@ -49,6 +49,7 @@ export interface PublicWikiDocument {
 }
 
 export interface SearchChunk {
+  document_id: string
   content: string
   page: number
   header_breadcrumb: string
@@ -228,6 +229,8 @@ export interface IngestSessionMessage {
   message_type: "text" | "attachment_summary"
   attachment_id: string
   stream_status: "streaming" | "complete" | "incomplete" | "failed"
+  /** Populated when stream_status is failed (from SSE error or client-side stream failure). */
+  error_message?: string
   created_at: string
 }
 

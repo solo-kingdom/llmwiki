@@ -129,7 +129,7 @@ describe("AppContext Ingest Actions", () => {
 
   it("retryIngestJob calls API", async () => {
     vi.mocked(api.retryIngestJob).mockResolvedValueOnce({
-      job: makeIngestJob({ id: "4", status: "queued", parent_job_id: "1" }),
+      job: makeIngestJob({ id: "1", status: "queued" }),
     })
 
     await api.retryIngestJob("1")
@@ -239,7 +239,7 @@ describe("Cancelled Job Restart", () => {
     })
 
     vi.mocked(api.retryIngestJob).mockResolvedValueOnce({
-      job: makeIngestJob({ id: "new-job-1", status: "queued", parent_job_id: "cancelled-1" }),
+      job: makeIngestJob({ id: "cancelled-1", status: "queued" }),
     })
 
     // A cancelled job calls retryIngestJob (same as Retry for failed)

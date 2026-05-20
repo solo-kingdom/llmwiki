@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	_ "github.com/solo-kingdom/llmwiki" // embed web assets
+	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
@@ -108,11 +109,15 @@ func runServe(dir string, opts serveOptions) error {
 		srv.SetMCPHandler(mcp.NewHTTPHandler(mcpServer))
 	}
 
+	adapter := storesvc.NewStoreAdapter(db)
+	fileIndexer := engine.NewWorkspaceFileIndexer(adapter, ws)
+
 	if !opts.noWatch {
 		w, err := watcher.New(ws, nil)
 		if err != nil {
 			log.Printf("Warning: file watcher unavailable: %v", err)
 		} else {
+			w.SetIndexer(fileIndexer)
 			srv.SetWatcher(w)
 		}
 	}
@@ -131,6 +136,7 @@ func runServe(dir string, opts serveOptions) error {
 	})
 
 	processor := ingest.NewJobProcessor(db, ws, llmClient)
+	processor.SetFileIndexer(fileIndexer)
 	gitRepo := vcs.NewGitRepo(ws)
 	if gitRepo.IsInitialized() {
 		processor.SetGitRepo(gitRepo)

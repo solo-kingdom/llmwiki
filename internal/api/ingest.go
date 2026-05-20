@@ -332,7 +332,7 @@ func (a *API) RetryIngestJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, ingestJobResponse{Job: retry})
+	writeJSON(w, http.StatusOK, ingestJobResponse{Job: retry})
 }
 
 func (a *API) CancelIngestJob(w http.ResponseWriter, r *http.Request) {

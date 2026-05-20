@@ -78,5 +78,18 @@ describe("IngestChat", () => {
     expect(screen.getByRole("button", { name: /模型/ })).toBeInTheDocument()
     const archiveBtn = screen.getByRole("button", { name: /归档/ })
     expect(archiveBtn).toBeDisabled()
+    expect(screen.getByRole("button", { name: /切换/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /新建/ })).toBeInTheDocument()
+  })
+
+  it("uses wide page container and places session controls in input action bar", async () => {
+    const { container } = render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+    await screen.findByRole("button", { name: /切换/ })
+    expect(container.querySelector(".max-w-5xl")).toBeTruthy()
+    expect(screen.getByRole("button", { name: /发送/ })).toBeInTheDocument()
   })
 })

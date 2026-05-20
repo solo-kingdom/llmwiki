@@ -7,7 +7,7 @@ import { TimelinePage } from "@/components/TimelinePage"
 import { WarningPopover } from "@/components/WarningPopover"
 import { cn } from "@/lib/utils"
 import { getVCStatus } from "@/lib/api"
-import { wikiReaderHref } from "@/lib/wiki-routes"
+import { navigateTo, wikiReaderHref } from "@/lib/wiki-routes"
 
 type View = "ingest" | "jobs" | "timeline" | "settings"
 
@@ -61,7 +61,14 @@ export function WorkbenchLayout() {
     <div className="flex h-screen flex-col">
       <header className="flex justify-center px-4 pt-3">
         <div className="inline-flex items-center gap-4 rounded-xl bg-header-bg px-5 py-2.5 shadow-sm">
-          <a href={wikiReaderHref()} className="text-base font-bold hover:opacity-80">
+          <a
+            href={wikiReaderHref()}
+            className="text-base font-bold hover:opacity-80"
+            onClick={(e) => {
+              e.preventDefault()
+              navigateTo(wikiReaderHref())
+            }}
+          >
             LLMWiki
           </a>
           <nav className="flex items-center gap-1">
@@ -91,6 +98,10 @@ export function WorkbenchLayout() {
             <a
               href={wikiReaderHref()}
               className="rounded-lg px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+              onClick={(e) => {
+                e.preventDefault()
+                navigateTo(wikiReaderHref())
+              }}
             >
               Wiki
             </a>

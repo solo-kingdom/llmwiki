@@ -125,6 +125,9 @@ func TestSearchChunks(t *testing.T) {
 	if r.Filename != "searchable.md" {
 		t.Errorf("expected Filename='searchable.md', got %q", r.Filename)
 	}
+	if r.DocumentID != doc.ID {
+		t.Errorf("expected DocumentID=%q, got %q", doc.ID, r.DocumentID)
+	}
 }
 
 func TestSearchChunksWithPathFilter(t *testing.T) {

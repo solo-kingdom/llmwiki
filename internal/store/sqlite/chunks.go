@@ -48,6 +48,7 @@ func (d *DB) DeleteChunks(docID string) error {
 
 // SearchChunk represents a search result from FTS5.
 type SearchChunk struct {
+	DocumentID       string  `json:"document_id"`
 	Content          string  `json:"content"`
 	Page             int     `json:"page"`
 	HeaderBreadcrumb string  `json:"header_breadcrumb"`
@@ -75,7 +76,7 @@ func (d *DB) SearchChunks(query string, limit int, pathFilter string) ([]SearchC
 
 func (d *DB) searchFTS5(query string, limit int, pathFilter string) ([]SearchChunk, error) {
 	sqlStr := `
-		SELECT dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
+		SELECT d.id, dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
 			d.filename, d.title, d.path, d.file_type,
 			rank as score
 		FROM document_chunks dc
@@ -106,7 +107,7 @@ func (d *DB) searchFTS5(query string, limit int, pathFilter string) ([]SearchChu
 		var r SearchChunk
 		var page, chunkIndex sql.NullInt64
 		var headerBreadcrumb sql.NullString
-		if err := rows.Scan(&r.Content, &page, &headerBreadcrumb, &chunkIndex,
+		if err := rows.Scan(&r.DocumentID, &r.Content, &page, &headerBreadcrumb, &chunkIndex,
 			&r.Filename, &r.Title, &r.Path, &r.FileType, &r.Score); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
@@ -126,7 +127,7 @@ func (d *DB) searchFTS5(query string, limit int, pathFilter string) ([]SearchChu
 
 func (d *DB) searchLIKE(query string, limit int, pathFilter string) ([]SearchChunk, error) {
 	sqlStr := `
-		SELECT dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
+		SELECT d.id, dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
 			d.filename, d.title, d.path, d.file_type,
 			0.0 as score
 		FROM document_chunks dc
@@ -156,7 +157,7 @@ func (d *DB) searchLIKE(query string, limit int, pathFilter string) ([]SearchChu
 		var r SearchChunk
 		var page, chunkIndex sql.NullInt64
 		var headerBreadcrumb sql.NullString
-		if err := rows.Scan(&r.Content, &page, &headerBreadcrumb, &chunkIndex,
+		if err := rows.Scan(&r.DocumentID, &r.Content, &page, &headerBreadcrumb, &chunkIndex,
 			&r.Filename, &r.Title, &r.Path, &r.FileType, &r.Score); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}

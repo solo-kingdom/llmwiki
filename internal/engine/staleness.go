@@ -31,6 +31,8 @@ type Store interface {
 	ListWikiDocuments() ([]DocEntry, error)
 	// StoreChunks replaces all chunks for a document.
 	StoreChunks(docID string, chunks []ChunkData) error
+	// DeleteChunks removes all chunks for a document.
+	DeleteChunks(docID string) error
 }
 
 // BacklinkInfo holds a backlink result.

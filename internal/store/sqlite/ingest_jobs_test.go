@@ -89,11 +89,15 @@ func TestUpdateIngestJobFailureAndRetry(t *testing.T) {
 	if retry == nil {
 		t.Fatal("expected retry job, got nil")
 	}
-	if retry.ParentJobID != job.ID {
-		t.Fatalf("parent_job_id = %q, want %q", retry.ParentJobID, job.ID)
+	if retry.ID != job.ID {
+		t.Fatalf("retry id = %q, want same job %q", retry.ID, job.ID)
 	}
 	if retry.Status != "queued" {
 		t.Fatalf("retry status = %q, want queued", retry.Status)
+	}
+	if retry.ErrorCode != "" || retry.ErrorMessage != "" || retry.Remediation != "" {
+		t.Fatalf("expected cleared error fields after requeue, got code=%q msg=%q remediation=%q",
+			retry.ErrorCode, retry.ErrorMessage, retry.Remediation)
 	}
 }
 

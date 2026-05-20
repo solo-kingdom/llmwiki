@@ -106,6 +106,8 @@ func TestClassifyPipelineError(t *testing.T) {
 		{errors.New("unsupported format: binary"), "unsupported_format"},
 		{errors.New("analysis: something went wrong"), "analysis_failed"},
 		{errors.New("generation: out of tokens"), "generation_failed"},
+		{errors.New("send request: Post \"/chat/completions\": unsupported protocol scheme \"\""), "llm_config_invalid"},
+		{errors.New("provider base URL is not configured"), "llm_config_invalid"},
 		{errors.New("unknown error"), "pipeline_error"},
 		{nil, ""},
 	}
@@ -125,10 +127,11 @@ func TestRemediationForCode(t *testing.T) {
 	}{
 		{"llm_auth_failed", "check your API key in Settings"},
 		{"llm_rate_limited", "wait a moment and retry, or reduce batch size"},
+		{"llm_config_invalid", "configure Provider and base URL in Settings (Provider instances)"},
 		{"llm_timeout", "the LLM request timed out; try again or use a smaller input"},
 		{"unsupported_format", "convert the file to a supported format before uploading"},
-		{"analysis_failed", "the LLM pipeline encountered an error; check logs for details"},
-		{"generation_failed", "the LLM pipeline encountered an error; check logs for details"},
+		{"analysis_failed", "the LLM pipeline encountered an error; check the job error message and server logs"},
+		{"generation_failed", "the LLM pipeline encountered an error; check the job error message and server logs"},
 		{"pipeline_error", ""},
 		{"unknown", ""},
 	}
@@ -367,48 +370,36 @@ func TestJobLineage(t *testing.T) {
 		t.Fatalf("CreateIngestJob original: %v", err)
 	}
 
-	// Retry → creates child with parent_job_id
-	retry1, err := db.RetryIngestJob(original.ID)
+	// Requeue same job twice — still one row
+	requeued, err := db.RetryIngestJob(original.ID)
 	if err != nil {
 		t.Fatalf("RetryIngestJob: %v", err)
 	}
+	if requeued.ID != original.ID {
+		t.Fatalf("requeue id = %q, want %q", requeued.ID, original.ID)
+	}
+	if requeued.Status != "queued" {
+		t.Fatalf("status = %q, want queued", requeued.Status)
+	}
 
-	// Simulate failure of retry1
-	if err := db.UpdateIngestJobStatus(retry1.ID, "failed"); err != nil {
+	if err := db.UpdateIngestJobStatus(original.ID, "failed"); err != nil {
 		t.Fatalf("UpdateIngestJobStatus: %v", err)
 	}
 
-	// Retry again
-	retry2, err := db.RetryIngestJob(retry1.ID)
+	requeued2, err := db.RetryIngestJob(original.ID)
 	if err != nil {
 		t.Fatalf("RetryIngestJob 2: %v", err)
 	}
+	if requeued2.ID != original.ID {
+		t.Fatalf("second requeue id = %q, want %q", requeued2.ID, original.ID)
+	}
 
-	// Get lineage for retry2
-	lineage, err := db.GetJobLineage(retry2.ID)
+	jobs, err := db.ListIngestJobs(100)
 	if err != nil {
-		t.Fatalf("GetJobLineage: %v", err)
+		t.Fatalf("ListIngestJobs: %v", err)
 	}
-
-	if len(lineage) != 3 {
-		t.Fatalf("lineage length = %d, want 3 (original + retry1 + retry2)", len(lineage))
-	}
-
-	// First should be original
-	if lineage[0].ID != original.ID {
-		t.Fatalf("lineage[0].ID = %q, want %q", lineage[0].ID, original.ID)
-	}
-	// Last should be retry2
-	if lineage[2].ID != retry2.ID {
-		t.Fatalf("lineage[2].ID = %q, want %q", lineage[2].ID, retry2.ID)
-	}
-
-	// Verify parent chain
-	if lineage[1].ParentJobID != original.ID {
-		t.Fatalf("retry1 parent = %q, want %q", lineage[1].ParentJobID, original.ID)
-	}
-	if lineage[2].ParentJobID != retry1.ID {
-		t.Fatalf("retry2 parent = %q, want %q", lineage[2].ParentJobID, retry1.ID)
+	if len(jobs) != 1 {
+		t.Fatalf("job count = %d, want 1 (no duplicate rows on requeue)", len(jobs))
 	}
 }
 
@@ -491,31 +482,20 @@ func TestRemediationFullChain(t *testing.T) {
 		t.Fatalf("UpdateIngestJobFailure: %v", err)
 	}
 
-	// Retry
+	// Requeue clears failure fields
 	retry, err := db.RetryIngestJob(job.ID)
 	if err != nil {
 		t.Fatalf("RetryIngestJob: %v", err)
 	}
-	if retry.ParentJobID != job.ID {
-		t.Fatalf("parent_job_id = %q, want %q", retry.ParentJobID, job.ID)
+	if retry.ID != job.ID {
+		t.Fatalf("id = %q, want %q", retry.ID, job.ID)
 	}
 	if retry.Status != "queued" {
 		t.Fatalf("retry status = %q, want queued", retry.Status)
 	}
-
-	// Verify original job retains failure info
-	orig, err := db.GetIngestJob(job.ID)
-	if err != nil {
-		t.Fatalf("GetIngestJob: %v", err)
-	}
-	if orig.ErrorCode != "llm_auth_failed" {
-		t.Fatalf("error_code = %q, want llm_auth_failed", orig.ErrorCode)
-	}
-	if orig.MissingDependency != "OpenAI API key" {
-		t.Fatalf("missing_dependency = %q", orig.MissingDependency)
-	}
-	if orig.Remediation != "check your API key in Settings" {
-		t.Fatalf("remediation = %q", orig.Remediation)
+	if retry.ErrorCode != "" || retry.ErrorMessage != "" || retry.Remediation != "" {
+		t.Fatalf("expected cleared errors after requeue, got code=%q msg=%q remediation=%q",
+			retry.ErrorCode, retry.ErrorMessage, retry.Remediation)
 	}
 }
 

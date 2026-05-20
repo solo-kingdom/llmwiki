@@ -383,17 +383,20 @@ func TestRetryAndCancelIngestJob(t *testing.T) {
 	retryReq := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/"+created.Job.ID+"/retry", nil)
 	retryW := httptest.NewRecorder()
 	r.ServeHTTP(retryW, retryReq)
-	if retryW.Code != http.StatusCreated {
+	if retryW.Code != http.StatusOK {
 		t.Fatalf("retry status = %d, body=%s", retryW.Code, retryW.Body.String())
 	}
 
 	var retryResp ingestJobResponse
 	_ = json.NewDecoder(retryW.Body).Decode(&retryResp)
-	if retryResp.Job == nil || retryResp.Job.ParentJobID != created.Job.ID {
-		t.Fatalf("expected retry job with parent %s", created.Job.ID)
+	if retryResp.Job == nil || retryResp.Job.ID != created.Job.ID {
+		t.Fatalf("expected requeued same job id %s, got %+v", created.Job.ID, retryResp.Job)
+	}
+	if retryResp.Job.Status != "queued" {
+		t.Fatalf("retry status = %q, want queued", retryResp.Job.Status)
 	}
 
-	cancelReq := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/"+retryResp.Job.ID+"/cancel", nil)
+	cancelReq := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/"+created.Job.ID+"/cancel", nil)
 	cancelW := httptest.NewRecorder()
 	r.ServeHTTP(cancelW, cancelReq)
 	if cancelW.Code != http.StatusOK {
@@ -544,17 +547,17 @@ func TestIngestRetryCancelledJob(t *testing.T) {
 	retryW := httptest.NewRecorder()
 	r.ServeHTTP(retryW, retryReq)
 
-	if retryW.Code != http.StatusCreated {
-		t.Fatalf("retry cancelled job: expected 201, got %d; body=%s", retryW.Code, retryW.Body.String())
+	if retryW.Code != http.StatusOK {
+		t.Fatalf("retry cancelled job: expected 200, got %d; body=%s", retryW.Code, retryW.Body.String())
 	}
 
 	var retryResp ingestJobResponse
 	json.NewDecoder(retryW.Body).Decode(&retryResp)
 	if retryResp.Job == nil {
-		t.Fatal("expected retry job to be created")
+		t.Fatal("expected requeued job in response")
 	}
-	if retryResp.Job.ParentJobID != jobID {
-		t.Fatalf("parent_job_id = %q, want %q", retryResp.Job.ParentJobID, jobID)
+	if retryResp.Job.ID != jobID {
+		t.Fatalf("job id = %q, want same %q", retryResp.Job.ID, jobID)
 	}
 	if retryResp.Job.Status != "queued" {
 		t.Fatalf("retry status = %q, want queued", retryResp.Job.Status)
@@ -745,17 +748,21 @@ func TestE2ETextIngestFullFlow(t *testing.T) {
 	retryW := httptest.NewRecorder()
 	r.ServeHTTP(retryW, retryReq)
 
-	if retryW.Code != http.StatusCreated {
-		t.Fatalf("retry: expected 201, got %d; body=%s", retryW.Code, retryW.Body.String())
+	if retryW.Code != http.StatusOK {
+		t.Fatalf("retry: expected 200, got %d; body=%s", retryW.Code, retryW.Body.String())
 	}
 
 	var retryResp ingestJobResponse
 	json.NewDecoder(retryW.Body).Decode(&retryResp)
-	if retryResp.Job.ParentJobID != createResp.Job.ID {
-		t.Fatalf("parent_job_id = %q, want %q", retryResp.Job.ParentJobID, createResp.Job.ID)
+	if retryResp.Job.ID != createResp.Job.ID {
+		t.Fatalf("job id = %q, want same %q", retryResp.Job.ID, createResp.Job.ID)
 	}
 	if retryResp.Job.Status != "queued" {
 		t.Fatalf("retry status = %q, want queued", retryResp.Job.Status)
+	}
+	if retryResp.Job.ErrorCode != "" || retryResp.Job.ErrorMessage != "" {
+		t.Fatalf("expected cleared errors after requeue, got code=%q msg=%q",
+			retryResp.Job.ErrorCode, retryResp.Job.ErrorMessage)
 	}
 }
 

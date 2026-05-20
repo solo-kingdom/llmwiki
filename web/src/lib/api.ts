@@ -230,6 +230,22 @@ export type SessionStreamHandler = (
   data: unknown,
 ) => void
 
+function parseSSEPart(part: string, onEvent: SessionStreamHandler) {
+  const lines = part.split("\n")
+  let event = "message"
+  let data = ""
+  for (const line of lines) {
+    if (line.startsWith("event:")) event = line.slice(6).trim()
+    if (line.startsWith("data:")) data = line.slice(5).trim()
+  }
+  if (!data) return
+  try {
+    onEvent(event, JSON.parse(data))
+  } catch {
+    onEvent(event, data)
+  }
+}
+
 export async function streamIngestSessionMessage(
   sessionId: string,
   content: string,
@@ -254,28 +270,26 @@ export async function streamIngestSessionMessage(
   if (!reader) throw new Error("no response body")
   const decoder = new TextDecoder()
   let buffer = ""
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split("\n\n")
-    buffer = parts.pop() ?? ""
-    for (const part of parts) {
-      const lines = part.split("\n")
-      let event = "message"
-      let data = ""
-      for (const line of lines) {
-        if (line.startsWith("event:")) event = line.slice(6).trim()
-        if (line.startsWith("data:")) data = line.slice(5).trim()
-      }
-      if (data) {
-        try {
-          onEvent(event, JSON.parse(data))
-        } catch {
-          onEvent(event, data)
-        }
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split("\n\n")
+      buffer = parts.pop() ?? ""
+      for (const part of parts) {
+        parseSSEPart(part, onEvent)
       }
     }
+    if (buffer.trim()) {
+      parseSSEPart(buffer, onEvent)
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (msg.includes("input stream") || msg.includes("network")) {
+      throw new Error(`连接中断：${msg}`)
+    }
+    throw e instanceof Error ? e : new Error(msg)
   }
 }
 

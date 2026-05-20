@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -228,6 +229,10 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 	ctx := r.Context()
 	ch, err := client.StreamChat(ctx, msgs, 0.7, 2048)
 	if err != nil {
+		log.Printf(
+			"[ingest-session] stream start failed session=%s instance=%s model=%s: %v",
+			session.ID, instanceID, model, err,
+		)
 		_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, "", "failed")
 		sendEvent("error", map[string]string{"message": err.Error()})
 		return
@@ -235,6 +240,7 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 
 	var builder strings.Builder
 	streamStatus := "complete"
+	var lastErr string
 	for ev := range ch {
 		switch ev.Type {
 		case "token":
@@ -243,17 +249,34 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		case "error":
 			streamStatus = "failed"
 			if ev.Error != nil {
-				sendEvent("error", map[string]string{"message": ev.Error.Error()})
+				lastErr = ev.Error.Error()
+				log.Printf(
+					"[ingest-session] stream error session=%s instance=%s model=%s: %v",
+					session.ID, instanceID, model, ev.Error,
+				)
+				sendEvent("error", map[string]string{"message": lastErr})
+			} else {
+				lastErr = "LLM stream failed"
+				sendEvent("error", map[string]string{"message": lastErr})
 			}
 		}
 	}
 	if streamStatus == "complete" && builder.Len() == 0 {
-		streamStatus = "incomplete"
+		streamStatus = "failed"
+		lastErr = "LLM returned an empty response"
+		log.Printf(
+			"[ingest-session] empty stream session=%s instance=%s model=%s",
+			session.ID, instanceID, model,
+		)
+		sendEvent("error", map[string]string{"message": lastErr})
 	}
 	content := builder.String()
 	_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, content, streamStatus)
 	assistantMsg.Content = content
 	assistantMsg.StreamStatus = streamStatus
+	if streamStatus == "failed" {
+		return
+	}
 	sendEvent("done", assistantMsg)
 }
 

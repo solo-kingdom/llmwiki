@@ -87,4 +87,15 @@ describe("App navigation", () => {
     const wikiLink = screen.getByRole("link", { name: "Wiki" })
     expect(wikiLink).toHaveAttribute("href", "/wiki")
   })
+
+  it("navigates to wiki reader shell when Wiki link is clicked", async () => {
+    window.history.replaceState(null, "", "/")
+    render(<App />)
+    await screen.findByRole("button", { name: "Ingest" })
+
+    fireEvent.click(screen.getByRole("link", { name: "Wiki" }))
+    expect(window.location.pathname).toBe("/wiki")
+    expect(await screen.findByText("管理工作台")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "模型" })).not.toBeInTheDocument()
+  })
 })

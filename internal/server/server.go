@@ -88,7 +88,7 @@ func (s *Server) Start() error {
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
-	r.Use(chimw.Timeout(60 * time.Second))
+	r.Use(timeoutUnlessStream(60 * time.Second))
 
 	// CORS
 	r.Use(cors.Handler(cors.Options{
@@ -204,7 +204,7 @@ func (s *Server) Start() error {
 		Addr:         addr,
 		Handler:      r,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 0, // allow long-lived SSE streams; per-request limits use LLM client timeouts
 		IdleTimeout:  60 * time.Second,
 	}
 
@@ -263,6 +263,34 @@ func (s *Server) spaHandler() http.HandlerFunc {
 		}
 		fileServer.ServeHTTP(w, r)
 	}
+}
+
+// timeoutUnlessStream applies chi timeout to normal requests but skips ingest SSE streams.
+func timeoutUnlessStream(d time.Duration) func(http.Handler) http.Handler {
+	short := chimw.Timeout(d)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isIngestSessionStream(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			short(next).ServeHTTP(w, r)
+		})
+	}
+}
+
+func isIngestSessionStream(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	if !strings.Contains(r.URL.Path, "/ingest/sessions/") {
+		return false
+	}
+	if !strings.HasSuffix(r.URL.Path, "/messages") {
+		return false
+	}
+	return r.URL.Query().Get("stream") == "1" ||
+		strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 }
 
 // authMiddleware provides optional token-based authentication.

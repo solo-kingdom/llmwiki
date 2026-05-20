@@ -25,6 +25,47 @@ import * as api from "@/lib/api"
 
 const SESSION_STORAGE_KEY = "llmwiki.ingest.sessionId"
 
+function streamErrorMessage(data: unknown): string {
+  if (data && typeof data === "object" && "message" in data) {
+    const msg = (data as { message?: string }).message
+    if (msg) return msg
+  }
+  if (typeof data === "string" && data.trim()) return data
+  return "回复失败"
+}
+
+function mergeLoadedSessionMessages(
+  prev: IngestSessionMessage[],
+  loaded: IngestSessionMessage[],
+): IngestSessionMessage[] {
+  const failedLocal = [...prev]
+    .reverse()
+    .find((m) => m.stream_status === "failed" && m.error_message)
+  if (!failedLocal?.error_message) return loaded
+
+  let lastFailedIdx = -1
+  for (let i = loaded.length - 1; i >= 0; i--) {
+    if (
+      loaded[i].role === "assistant" &&
+      loaded[i].stream_status === "failed"
+    ) {
+      lastFailedIdx = i
+      break
+    }
+  }
+  if (lastFailedIdx < 0) return loaded
+
+  return loaded.map((m, i) =>
+    i === lastFailedIdx
+      ? {
+          ...m,
+          error_message: failedLocal.error_message,
+          content: m.content || failedLocal.error_message || m.content,
+        }
+      : m,
+  )
+}
+
 interface AppState {
   documents: DocumentListItem[]
   currentDoc: Document | null
@@ -356,23 +397,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (event === "done" && data && typeof data === "object") {
             const am = data as IngestSessionMessage
             setSessionMessages((prev) =>
-              prev.map((m) => (m.id === tempAssistant.id ? am : m)),
+              prev.map((m) => {
+                if (m.id !== tempAssistant.id) return m
+                if (m.stream_status === "failed") return m
+                return am
+              }),
             )
           }
           if (event === "error") {
+            const reason = streamErrorMessage(data)
             setSessionMessages((prev) =>
               prev.map((m) =>
                 m.id === tempAssistant.id
-                  ? { ...m, stream_status: "failed", content: "回复失败" }
+                  ? {
+                      ...m,
+                      stream_status: "failed",
+                      error_message: reason,
+                      content: m.content || reason,
+                    }
                   : m,
               ),
             )
           }
         })
-        await loadSessionMessages(sessionId)
+        const { messages: loaded } = await api.listIngestSessionMessages(sessionId)
+        setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
       } catch (e) {
-        setSessionError((e as Error).message)
-        await loadSessionMessages(sessionId)
+        const reason = (e as Error).message
+        setSessionError(reason)
+        setSessionMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempAssistant.id
+              ? {
+                  ...m,
+                  stream_status: "failed",
+                  error_message: reason,
+                  content: m.content || reason,
+                }
+              : m,
+          ),
+        )
+        try {
+          const { messages: loaded } =
+            await api.listIngestSessionMessages(sessionId)
+          setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
+        } catch {
+          // keep optimistic failed message
+        }
       } finally {
         setSessionBusy(false)
       }

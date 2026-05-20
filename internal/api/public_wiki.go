@@ -32,6 +32,7 @@ type PublicWikiDocument struct {
 
 // PublicWikiSearchResult is a safe search hit for public read-only routes.
 type PublicWikiSearchResult struct {
+	DocumentID       string  `json:"document_id"`
 	Content          string  `json:"content"`
 	Page             int     `json:"page"`
 	HeaderBreadcrumb string  `json:"header_breadcrumb"`
@@ -75,6 +76,7 @@ func toPublicDocument(doc *sqlite.Document) PublicWikiDocument {
 
 func toPublicSearchResult(chunk sqlite.SearchChunk) PublicWikiSearchResult {
 	return PublicWikiSearchResult{
+		DocumentID:       chunk.DocumentID,
 		Content:          chunk.Content,
 		Page:             chunk.Page,
 		HeaderBreadcrumb: chunk.HeaderBreadcrumb,

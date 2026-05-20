@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/vcs"
@@ -22,6 +23,7 @@ type JobProcessor struct {
 	workspace string
 	pipeline  *Pipeline
 	gitRepo   *vcs.GitRepo // nil if version control is not enabled
+	indexer   *engine.WorkspaceFileIndexer
 	stop      chan struct{}
 }
 
@@ -40,6 +42,11 @@ func NewJobProcessor(db *sqlite.DB, workspace string, llmClient *llm.Client) *Jo
 // Pass nil to disable version control commits.
 func (p *JobProcessor) SetGitRepo(repo *vcs.GitRepo) {
 	p.gitRepo = repo
+}
+
+// SetFileIndexer sets the workspace file indexer for post-ingest search indexing.
+func (p *JobProcessor) SetFileIndexer(indexer *engine.WorkspaceFileIndexer) {
+	p.indexer = indexer
 }
 
 // Start begins the background processing loop. It polls every pollInterval.
@@ -129,6 +136,15 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		// Store last commit SHA
 		if sha != "" {
 			_ = p.db.SetVCLastCommit(sha)
+		}
+	}
+
+	// Index generated wiki files for search (best-effort)
+	if p.indexer != nil {
+		for _, rel := range files {
+			if err := p.indexer.IndexFile(rel); err != nil {
+				log.Printf("processor: index %s after job %s: %v", rel, job.ID, err)
+			}
 		}
 	}
 
@@ -305,6 +321,10 @@ func classifyPipelineError(err error) string {
 	}
 	msg := err.Error()
 	switch {
+	case strings.Contains(msg, "unsupported protocol scheme") ||
+		strings.Contains(msg, "base URL is not configured") ||
+		strings.Contains(msg, "provider base URL"):
+		return "llm_config_invalid"
 	case strings.Contains(msg, "API key") || strings.Contains(msg, "unauthorized") || strings.Contains(msg, "401"):
 		return "llm_auth_failed"
 	case strings.Contains(msg, "quota") || strings.Contains(msg, "429") || strings.Contains(msg, "rate limit"):
@@ -324,6 +344,8 @@ func classifyPipelineError(err error) string {
 
 func remediationForCode(code string) string {
 	switch code {
+	case "llm_config_invalid":
+		return "configure Provider and base URL in Settings (Provider instances)"
 	case "llm_auth_failed":
 		return "check your API key in Settings"
 	case "llm_rate_limited":
@@ -333,7 +355,7 @@ func remediationForCode(code string) string {
 	case "unsupported_format":
 		return "convert the file to a supported format before uploading"
 	case "analysis_failed", "generation_failed":
-		return "the LLM pipeline encountered an error; check logs for details"
+		return "the LLM pipeline encountered an error; check the job error message and server logs"
 	default:
 		return ""
 	}

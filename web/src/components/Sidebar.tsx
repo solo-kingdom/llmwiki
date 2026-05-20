@@ -2,7 +2,6 @@ import { useState, useMemo } from "react"
 import { useWikiReader } from "@/context/WikiReaderContext"
 import { buildTree } from "@/lib/tree"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { SearchBar } from "@/components/SearchBar"
 import type { TreeNode } from "@/types"
 
 function FolderIcon({ open }: { open: boolean }) {
@@ -160,8 +159,7 @@ export function Sidebar({ variant = "classic", onSelect }: SidebarProps) {
           : "flex h-full w-64 flex-col border-r bg-card"
       }
     >
-      <div className="border-b px-3 py-2 space-y-1">
-        <SearchBar />
+      <div className="border-b px-3 py-2">
         <p className="text-xs text-muted-foreground">{documents.length} files</p>
       </div>
       <ScrollArea className="flex-1">

@@ -14,7 +14,7 @@ import type {
   SearchResponse,
 } from "@/types"
 import * as api from "@/lib/api"
-import { getDocIdFromLocation } from "@/lib/wiki-routes"
+import { getDocIdFromLocation, notifyPathChange } from "@/lib/wiki-routes"
 
 function publicToDocument(pub: PublicWikiDocument): Document {
   return {
@@ -106,7 +106,12 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
       const url = new URL(window.location.href)
       url.pathname = "/wiki"
       url.searchParams.set("doc", id)
-      window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}`)
+      window.history.replaceState(
+        null,
+        "",
+        `${url.pathname}?${url.searchParams.toString()}`,
+      )
+      notifyPathChange()
 
       const loadDoc = usePublicApi
         ? api.getPublicDocument(id).then(publicToDocument)

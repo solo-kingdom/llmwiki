@@ -119,6 +119,10 @@ func (a *StoreAdapter) GetBacklinks(docID string) ([]engine.BacklinkInfo, error)
 	return result, nil
 }
 
+func (a *StoreAdapter) DeleteChunks(docID string) error {
+	return a.db.DeleteChunks(docID)
+}
+
 func (a *StoreAdapter) StoreChunks(docID string, chunks []engine.ChunkData) error {
 	sqliteChunks := make([]sqlite.Chunk, len(chunks))
 	for i, c := range chunks {

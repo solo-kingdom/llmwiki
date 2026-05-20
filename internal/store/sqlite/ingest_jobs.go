@@ -301,19 +301,27 @@ func (d *DB) RetryIngestJob(id string) (*IngestJob, error) {
 		return nil, fmt.Errorf("only failed and cancelled jobs can be retried")
 	}
 
-	retry := &IngestJob{
-		ParentJobID: original.ID,
-		InputType:   original.InputType,
-		SourcePath:  original.SourcePath,
-		SourceRef:   original.SourceRef,
-		Status:      "queued",
-		MaxRetries:  original.MaxRetries,
+	result, err := d.db.Exec(`
+		UPDATE ingest_jobs SET
+			status = 'queued',
+			error = '',
+			error_code = '',
+			error_message = '',
+			missing_dependency = '',
+			remediation = '',
+			result_summary = '',
+			retries = retries + 1,
+			updated_at = datetime('now')
+		WHERE id = ? AND status IN ('failed', 'cancelled')`, id)
+	if err != nil {
+		return nil, fmt.Errorf("requeue ingest job: %w", err)
 	}
-	if retry.MaxRetries <= 0 {
-		retry.MaxRetries = 3
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("requeue ingest job rows: %w", err)
 	}
-	if err := d.CreateIngestJob(retry); err != nil {
-		return nil, err
+	if affected == 0 {
+		return nil, fmt.Errorf("only failed and cancelled jobs can be retried")
 	}
-	return retry, nil
+	return d.GetIngestJob(id)
 }

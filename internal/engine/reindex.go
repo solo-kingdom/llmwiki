@@ -168,11 +168,49 @@ func (r *Reindexer) indexFile(userID, relPath, fullPath string) error {
 		ContentHash: contentHash,
 	}
 
-	if err := r.store.CreateDocument(doc); err != nil {
-		return fmt.Errorf("create document: %w", err)
+	existing, err := r.store.GetDocumentByPath(filename, dir)
+	if err != nil {
+		return fmt.Errorf("lookup document: %w", err)
+	}
+	if existing != nil {
+		doc.ID = existing.ID
+		if err := r.store.UpdateDocument(existing.ID, content, title, tags, date, metadata); err != nil {
+			return fmt.Errorf("update document: %w", err)
+		}
+	} else {
+		if err := r.store.CreateDocument(doc); err != nil {
+			return fmt.Errorf("create document: %w", err)
+		}
 	}
 
-	return nil
+	return storeSearchChunks(r.store, doc.ID, content)
+}
+
+// IndexRelPath indexes or re-indexes a single workspace-relative file path.
+func (r *Reindexer) IndexRelPath(relPath string) error {
+	fullPath := filepath.Join(r.workspace, relPath)
+	return r.indexFile("default", relPath, fullPath)
+}
+
+func storeSearchChunks(store Store, docID, content string) error {
+	if strings.TrimSpace(content) == "" {
+		return store.StoreChunks(docID, nil)
+	}
+	cfg := DefaultChunkConfig()
+	chunks := ChunkText(content, 1, cfg)
+	data := make([]ChunkData, len(chunks))
+	for i, c := range chunks {
+		data[i] = ChunkData{
+			DocumentID:       docID,
+			ChunkIndex:       c.Index,
+			Content:          c.Content,
+			Page:             c.Page,
+			StartChar:        c.StartChar,
+			TokenCount:       c.TokenCount,
+			HeaderBreadcrumb: c.HeaderBreadcrumb,
+		}
+	}
+	return store.StoreChunks(docID, data)
 }
 
 // verifyRecovery checks that key file-truth data was properly recovered after reindex.

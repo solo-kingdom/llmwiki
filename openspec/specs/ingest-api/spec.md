@@ -37,11 +37,18 @@ The system SHALL provide operational controls for retrying failed and cancelled 
 
 #### Scenario: Retry failed job
 - **WHEN** client issues retry for a failed job
-- **THEN** system SHALL create a new job attempt linked to the original job lineage
+- **THEN** system SHALL transition the **same** job to `queued`
+- **AND** system SHALL clear failure and result fields (`error`, `error_code`, `error_message`, `missing_dependency`, `remediation`, `result_summary`) so the job presents as a clean retry
+- **AND** system SHALL NOT create a new ingest job row or set `parent_job_id` for the retry
 
 #### Scenario: Retry cancelled job (Restart)
 - **WHEN** client issues retry for a cancelled job
-- **THEN** system SHALL create a new job attempt linked to the original job lineage, preserving the cancellation history
+- **THEN** system SHALL transition the **same** job to `queued` with failure and result fields cleared, matching the failed-job retry behavior
+- **AND** system SHALL NOT create a new ingest job row
+
+#### Scenario: Retry response returns same job
+- **WHEN** retry succeeds for a failed or cancelled job with id `J`
+- **THEN** HTTP response SHALL return job id `J` with status `queued`
 
 #### Scenario: Retry unsupported status
 - **WHEN** client issues retry for a job in queued, running, or succeeded status

@@ -1,23 +1,26 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
-import { ChevronLeft, ChevronRight, List, Menu } from "lucide-react"
+import { useRef, type ReactNode } from "react"
+import { useEffect, useState } from "react"
+import { ChevronLeft, ChevronRight, List, Menu, Search } from "lucide-react"
 import { Sidebar } from "@/components/Sidebar"
 import { DocumentViewer } from "@/components/DocumentViewer"
 import { DocumentOutline } from "@/components/DocumentOutline"
 import { WikiDocumentInfoBar } from "@/components/WikiDocumentInfo"
+import { SearchModal } from "@/components/SearchModal"
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@base-ui/react/dialog"
 import { useWikiReader } from "@/context/WikiReaderContext"
-import { workbenchHref } from "@/lib/wiki-routes"
+import { navigateTo, workbenchHref } from "@/lib/wiki-routes"
 import type { OutlineItem } from "@/types"
 import { cn } from "@/lib/utils"
 
 export function WikiReaderLayout() {
-  const { currentDoc, loading, publicWikiEnabled } = useWikiReader()
+  const { currentDoc, loading, publicWikiEnabled, error } = useWikiReader()
   const [outline, setOutline] = useState<OutlineItem[]>([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [outlineCollapsed, setOutlineCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [mobileOutlineOpen, setMobileOutlineOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const scrollbarTimerRef = useRef<number | null>(null)
 
@@ -48,6 +51,17 @@ export function WikiReaderLayout() {
 
   const hasOutline = outline.length > 0
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [])
+
   return (
     <div className="flex h-screen flex-col bg-background">
       <header className="relative z-40 mx-4 mt-2 mb-2 flex h-12 shrink-0 items-center justify-between rounded-xl border border-border/70 bg-card/70 px-3 shadow-sm backdrop-blur-sm">
@@ -70,6 +84,14 @@ export function WikiReaderLayout() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setSearchOpen(true)}
+            title="搜索 (Ctrl+K)"
+          >
+            <Search className="h-4 w-4" />
+          </Button>
           {hasOutline && (
             <Button
               variant="ghost"
@@ -83,11 +105,21 @@ export function WikiReaderLayout() {
           <a
             href={workbenchHref()}
             className="inline-flex h-7 items-center rounded-lg border border-border bg-background px-2.5 text-sm font-medium hover:bg-muted"
+            onClick={(e) => {
+              e.preventDefault()
+              navigateTo(workbenchHref())
+            }}
           >
             管理工作台
           </a>
         </div>
       </header>
+
+      {error && (
+        <div className="mx-4 mb-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       <main className="relative flex min-h-0 flex-1 gap-4 overflow-hidden px-4 pb-4">
         <aside
@@ -184,6 +216,8 @@ export function WikiReaderLayout() {
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
+
+      <SearchModal open={searchOpen} onOpenChange={setSearchOpen} />
 
       <Dialog.Root open={mobileOutlineOpen} onOpenChange={setMobileOutlineOpen}>
         <Dialog.Portal>

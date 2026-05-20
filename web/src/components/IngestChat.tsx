@@ -11,19 +11,59 @@ import type { IngestSessionMessage } from "@/types"
 import {
   Archive,
   Bot,
+  Copy,
   Cpu,
   Loader2,
   Paperclip,
+  RotateCcw,
   Send,
   SlidersHorizontal,
 } from "lucide-react"
 
-function MessageBubble({ msg }: { msg: IngestSessionMessage }) {
+function findRetryUserContent(
+  messages: IngestSessionMessage[],
+  failedMsgId: string,
+): string | null {
+  const idx = messages.findIndex((m) => m.id === failedMsgId)
+  if (idx <= 0) return null
+  for (let i = idx - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m.role === "user" && m.content.trim()) {
+      return m.content
+    }
+  }
+  return null
+}
+
+function MessageBubble({
+  msg,
+  messages,
+  onRetry,
+  sessionBusy,
+}: {
+  msg: IngestSessionMessage
+  messages: IngestSessionMessage[]
+  onRetry: (content: string) => void
+  sessionBusy: boolean
+}) {
   const isUser = msg.role === "user"
+  const failed = msg.stream_status === "failed"
+  const retryContent = failed ? findRetryUserContent(messages, msg.id) : null
+
+  const handleCopy = async () => {
+    const text = msg.content?.trim()
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // ignore clipboard failures
+    }
+  }
+
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
+        className={`relative max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
           isUser
             ? "bg-primary text-primary-foreground"
             : msg.message_type === "attachment_summary"
@@ -31,17 +71,41 @@ function MessageBubble({ msg }: { msg: IngestSessionMessage }) {
               : "bg-muted"
         }`}
       >
+        <button
+          type="button"
+          className="absolute right-2 top-2 rounded p-1 opacity-0 transition-opacity hover:bg-background/20 group-hover:opacity-100"
+          title="复制"
+          onClick={() => void handleCopy()}
+        >
+          <Copy className="size-3.5" />
+        </button>
         {isUser ? (
-          <p className="whitespace-pre-wrap">{msg.content}</p>
+          <p className="whitespace-pre-wrap pr-6">{msg.content}</p>
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none">
+          <div className="prose prose-sm dark:prose-invert max-w-none pr-6">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {msg.content || (msg.stream_status === "streaming" ? "…" : "")}
             </ReactMarkdown>
           </div>
         )}
-        {msg.stream_status === "failed" && (
-          <p className="mt-1 text-xs text-destructive">回复失败</p>
+        {failed && (
+          <div className="mt-2 space-y-1 border-t border-destructive/20 pt-2">
+            <p className="text-xs text-destructive">
+              {msg.error_message || "回复失败"}
+            </p>
+            {retryContent && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={sessionBusy}
+                onClick={() => onRetry(retryContent)}
+              >
+                <RotateCcw className="size-3" />
+                重新发送
+              </Button>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -173,6 +237,14 @@ export function IngestChat() {
     await sendSessionMessage(text)
   }
 
+  const handleRetry = useCallback(
+    (content: string) => {
+      if (!content.trim() || sessionBusy || !isReady) return
+      void sendSessionMessage(content)
+    },
+    [sessionBusy, isReady, sendSessionMessage],
+  )
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
@@ -199,13 +271,9 @@ export function IngestChat() {
   const inputDisabled = sessionBusy || !sessionId || !isReady
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b bg-card px-4 py-2">
-        <SessionControls />
-      </div>
-
-      <ScrollArea className="flex-1 px-4 py-4">
-        <div className="space-y-4 pb-4">
+    <div className="mx-auto flex w-full min-h-0 max-w-5xl flex-1 flex-col px-6">
+      <ScrollArea className="flex-1 py-4">
+        <div className="mx-auto max-w-3xl space-y-4 pb-4">
           {!isReady && (
             <div className="rounded-lg bg-amber-50 py-8 text-center text-amber-600 dark:bg-amber-950/20">
               <p className="text-sm">
@@ -226,23 +294,29 @@ export function IngestChat() {
             </div>
           )}
           {sessionMessages.map((m) => (
-            <MessageBubble key={m.id} msg={m} />
+            <MessageBubble
+              key={m.id}
+              msg={m}
+              messages={sessionMessages}
+              onRetry={handleRetry}
+              sessionBusy={sessionBusy}
+            />
           ))}
           <div ref={bottomRef} />
         </div>
       </ScrollArea>
 
       {sessionError && (
-        <p className="px-4 text-sm text-destructive">{sessionError}</p>
+        <p className="pb-2 text-sm text-destructive">{sessionError}</p>
       )}
       {archiveResult && (
-        <p className="px-4 text-sm text-green-600">
+        <p className="pb-2 text-sm text-green-600">
           已提交归档任务：{archiveResult}
         </p>
       )}
 
       {archiveOpen && (
-        <div className="mx-4 mb-2 space-y-3 rounded-lg border bg-card p-4">
+        <div className="mb-2 space-y-3 rounded-lg border bg-card p-4">
           <p className="text-sm font-medium">确认归档</p>
           <Input
             placeholder="会话标题（可选）"
@@ -269,7 +343,7 @@ export function IngestChat() {
       )}
 
       <div
-        className={`mx-4 mb-4 rounded-xl border p-2 ${
+        className={`mb-6 rounded-xl border p-2 ${
           isDragging ? "border-blue-400 border-dashed bg-blue-50/50" : ""
         }`}
         onDragOver={(e) => {
@@ -312,11 +386,32 @@ export function IngestChat() {
           disabled={inputDisabled}
         />
         <div className="flex items-center gap-2 pt-1">
+          <SessionControls />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setModelDialogOpen(true)}
+            title="选择模型"
+          >
+            <SlidersHorizontal className="size-3.5" />
+            模型
+          </Button>
+          <Button
+            size="sm"
+            disabled={sessionBusy || !hasUserMessage || !sessionId}
+            onClick={() => setArchiveOpen(true)}
+            title={!hasUserMessage ? "至少需要一条用户消息" : undefined}
+          >
+            <Archive className="size-3.5" />
+            归档
+          </Button>
+          <div className="flex-1" />
           <Button
             size="sm"
             variant="outline"
             disabled={inputDisabled}
             onClick={() => fileRef.current?.click()}
+            title="附件"
           >
             <Paperclip className="size-3.5" />
           </Button>
@@ -332,15 +427,6 @@ export function IngestChat() {
           />
           <Button
             size="sm"
-            variant="outline"
-            onClick={() => setModelDialogOpen(true)}
-            title="选择模型"
-          >
-            <SlidersHorizontal className="size-3.5" />
-            模型
-          </Button>
-          <Button
-            size="sm"
             variant="secondary"
             disabled={inputDisabled || !input.trim()}
             onClick={() => void handleSend()}
@@ -351,16 +437,6 @@ export function IngestChat() {
               <Send className="size-3.5" />
             )}
             发送
-          </Button>
-          <div className="flex-1" />
-          <Button
-            size="sm"
-            disabled={sessionBusy || !hasUserMessage || !sessionId}
-            onClick={() => setArchiveOpen(true)}
-            title={!hasUserMessage ? "至少需要一条用户消息" : undefined}
-          >
-            <Archive className="size-3.5" />
-            归档
           </Button>
         </div>
       </div>

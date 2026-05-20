@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useApp } from "@/context/AppContext"
 import { SettingsPage } from "@/components/SettingsPage"
 import { IngestChat } from "@/components/IngestChat"
+import { IngestRaw } from "@/components/IngestRaw"
 import { JobsPage } from "@/components/JobsPage"
 import { LogsPage } from "@/components/LogsPage"
 import { TimelinePage } from "@/components/TimelinePage"
@@ -21,6 +22,7 @@ import {
 } from "@/lib/wiki-routes"
 
 const NAV_ITEMS: { id: WorkbenchView; label: string }[] = [
+  { id: "chat", label: "Chat" },
   { id: "ingest", label: "Ingest" },
   { id: "jobs", label: "Jobs" },
   { id: "timeline", label: "Timeline" },
@@ -28,11 +30,12 @@ const NAV_ITEMS: { id: WorkbenchView; label: string }[] = [
   { id: "settings", label: "Settings" },
 ]
 
-const LEGACY_HASH_VIEWS = new Set<WorkbenchView>([
+const LEGACY_HASH_VIEWS = new Set<string>([
   "jobs",
   "settings",
   "timeline",
   "logs",
+  "ingest",
 ])
 
 function NavButton({
@@ -74,7 +77,12 @@ export function WorkbenchLayout() {
 
   useEffect(() => {
     const raw = window.location.hash.replace(/^#/, "")
-    if (LEGACY_HASH_VIEWS.has(raw as WorkbenchView)) {
+    if (!raw) return
+    if (raw === "ingest") {
+      navigateTo(workbenchViewHref("chat"))
+      return
+    }
+    if (LEGACY_HASH_VIEWS.has(raw)) {
       navigateTo(workbenchViewHref(raw as WorkbenchView))
     }
   }, [])
@@ -109,7 +117,7 @@ export function WorkbenchLayout() {
                 {NAV_ITEMS.filter(
                   (item) => item.id !== "timeline" || vcEnabled === true,
                 ).map((item) =>
-                  item.id === "ingest" ? (
+                  item.id === "chat" ? (
                     <div key={item.id} className="flex items-center gap-1">
                       <NavButton
                         active={view === item.id}
@@ -147,14 +155,15 @@ export function WorkbenchLayout() {
         <main
           className={cn(
             "flex min-h-0 flex-1 flex-col",
-            view === "ingest" ? "pb-2" : "pb-4",
+            view === "chat" ? "pb-2" : "pb-4",
           )}
         >
-          {view === "ingest" && (
+          {view === "chat" && (
             <div className="flex min-h-0 flex-1">
               <IngestChat />
             </div>
           )}
+          {view === "ingest" && <IngestRaw />}
           {view === "jobs" && <JobsPage />}
           {view === "timeline" && vcEnabled === true && <TimelinePage />}
           {view === "logs" && <LogsPage />}

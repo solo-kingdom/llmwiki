@@ -90,10 +90,16 @@ describe("App navigation", () => {
     window.history.replaceState(null, "", "/")
   })
 
-  it("defaults to ingest and uses button navigation", async () => {
+  it("defaults to chat and uses button navigation", async () => {
     render(<App />)
+    expect(await screen.findByRole("button", { name: "Chat" })).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "Ingest" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "模型" })).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/")
+
+    fireEvent.click(screen.getByRole("button", { name: "Ingest" }))
+    expect(await screen.findByTestId("ingest-raw-page")).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/ingest")
 
     fireEvent.click(
       within(screen.getByRole("navigation")).getByRole("button", {
@@ -120,7 +126,7 @@ describe("App navigation", () => {
   it("navigates to wiki reader shell when Wiki link is clicked", async () => {
     window.history.replaceState(null, "", "/")
     render(<App />)
-    await screen.findByRole("button", { name: "Ingest" })
+    await screen.findByRole("button", { name: "Chat" })
 
     fireEvent.click(screen.getByRole("link", { name: "Wiki" }))
     expect(window.location.pathname).toBe("/wiki")
@@ -143,6 +149,21 @@ describe("App navigation", () => {
     render(<App />)
     expect(await screen.findByText("暂无摄入任务")).toBeInTheDocument()
     expect(window.location.pathname).toBe("/jobs")
+  })
+
+  it("restores ingest view from URL on load", async () => {
+    window.history.replaceState(null, "", "/ingest")
+    render(<App />)
+    expect(await screen.findByTestId("ingest-raw-page")).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/ingest")
+  })
+
+  it("restores chat view from root URL on load", async () => {
+    window.history.replaceState(null, "", "/")
+    render(<App />)
+    expect(await screen.findByRole("button", { name: "模型" })).toBeInTheDocument()
+    expect(await screen.findByTestId("ingest-message-panel")).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/")
   })
 
   it("restores timeline view from URL on load when VC is enabled", async () => {

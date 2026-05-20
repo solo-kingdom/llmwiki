@@ -104,11 +104,15 @@ After `llmwiki init ~/research`:
 
 ### Web-first Ingest Workflow
 
-The Web UI now provides an ingest-first workflow as the default entry point:
+The Web UI separates two ingestion entry points:
 
-- **Conversational ingest**: submit conversation drafts as ingest jobs
-- **Text ingest**: paste markdown/plain text and enqueue processing
-- **File upload ingest**: upload one or multiple files with accepted/rejected feedback
+- **Chat** (`/`): explore a topic with the assistant across multiple turns, then archive the session into the wiki when ready
+- **Ingest** (`/ingest`): submit raw materials directly — upload multiple files and/or paste multiple text blocks, then click **直接归档** without a chat session
+
+Both paths enqueue standard ingest jobs observable from **Jobs**:
+
+- **Text ingest**: pasted or composed markdown/plain text
+- **File upload ingest**: one or multiple files with accepted/rejected feedback
 - **Ingest job observability**: lifecycle states (`queued`, `running`, `succeeded`, `failed`, `cancelled`), retry and cancel controls
 
 All Web-submitted sources are persisted to workspace files under `raw/sources/web-ingest/` before enqueueing.

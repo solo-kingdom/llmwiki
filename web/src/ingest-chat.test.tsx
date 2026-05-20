@@ -145,6 +145,9 @@ describe("IngestChat", () => {
       job_instance_id: "",
       job_model: "",
     })
+    vi.mocked(api.listProviderModels).mockResolvedValue([
+      { model_id: "gpt-4", display_name: "GPT-4" },
+    ])
     vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
       messages: [
         {
@@ -168,7 +171,7 @@ describe("IngestChat", () => {
 
     expect(await screen.findByLabelText("正在回复")).toBeInTheDocument()
 
-    const textarea = screen.getByPlaceholderText(/输入消息/)
+    const textarea = await screen.findByPlaceholderText(/输入消息/)
     expect(textarea).not.toBeDisabled()
     fireEvent.change(textarea, { target: { value: "draft while streaming" } })
     expect(textarea).toHaveValue("draft while streaming")

@@ -14,6 +14,7 @@ import type {
   SearchResponse,
   Settings,
   IngestJob,
+  IngestJobResponse,
   UploadIngestResponse,
   CapabilitiesResponse,
   IngestSessionMessage,
@@ -114,8 +115,11 @@ interface AppState {
     title?: string
     filename?: string
     source_ref?: string
-  }) => Promise<void>
-  submitUpload: (files: File[]) => Promise<UploadIngestResponse>
+  }) => Promise<IngestJobResponse>
+  submitUpload: (
+    files: File[],
+    sourceRef?: string,
+  ) => Promise<UploadIngestResponse>
   retryIngest: (id: string) => Promise<void>
   cancelIngest: (id: string) => Promise<void>
   loadCapabilities: () => Promise<void>
@@ -299,15 +303,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       filename?: string
       source_ref?: string
     }) => {
-      await api.createTextIngestJob(payload)
+      const result = await api.createTextIngestJob(payload)
       await refreshIngestJobs()
+      return result
     },
     [refreshIngestJobs],
   )
 
   const submitUpload = useCallback(
-    async (files: File[]) => {
-      const result = await api.uploadIngestJobs(files)
+    async (files: File[], sourceRef?: string) => {
+      const result = await api.uploadIngestJobs(files, sourceRef)
       await refreshIngestJobs()
       return result
     },

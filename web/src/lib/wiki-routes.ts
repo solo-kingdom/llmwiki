@@ -2,7 +2,13 @@ import { useSyncExternalStore } from "react"
 
 export const PATH_CHANGE_EVENT = "llmwiki:pathchange"
 
-export type WorkbenchView = "ingest" | "jobs" | "timeline" | "logs" | "settings"
+export type WorkbenchView =
+  | "chat"
+  | "ingest"
+  | "jobs"
+  | "timeline"
+  | "logs"
+  | "settings"
 
 export function isWikiReaderPath(pathname: string): boolean {
   return pathname === "/wiki" || pathname.startsWith("/wiki/")
@@ -19,6 +25,8 @@ export function workbenchHref(): string {
 
 export function getWorkbenchViewFromPath(pathname: string): WorkbenchView {
   switch (pathname) {
+    case "/ingest":
+      return "ingest"
     case "/jobs":
       return "jobs"
     case "/settings":
@@ -28,12 +36,14 @@ export function getWorkbenchViewFromPath(pathname: string): WorkbenchView {
     case "/logs":
       return "logs"
     default:
-      return "ingest"
+      return "chat"
   }
 }
 
 export function workbenchViewHref(view: WorkbenchView): string {
   switch (view) {
+    case "ingest":
+      return "/ingest"
     case "jobs":
       return "/jobs"
     case "settings":

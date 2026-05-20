@@ -35,6 +35,12 @@ function streamErrorMessage(data: unknown): string {
   return "回复失败"
 }
 
+function hasStreamingAssistant(messages: IngestSessionMessage[]): boolean {
+  return messages.some(
+    (m) => m.role === "assistant" && m.stream_status === "streaming",
+  )
+}
+
 function mergeLoadedSessionMessages(
   prev: IngestSessionMessage[],
   loaded: IngestSessionMessage[],
@@ -183,6 +189,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [instances, setInstances] = useState<ProviderInstance[]>([])
   const [currentModels, setCurrentModels] = useState<ModelInfo[]>([])
   const loadedModelsProviderRef = useRef<string | null>(null)
+  const activeStreamRef = useRef(false)
+  const pollGenerationRef = useRef(0)
 
   const refreshDocuments = useCallback(() => {
     api
@@ -309,15 +317,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loadSessionMessages = useCallback(async (id: string) => {
     const { messages } = await api.listIngestSessionMessages(id)
-    setSessionMessages(messages)
+    setSessionMessages((prev) => mergeLoadedSessionMessages(prev, messages))
+    return messages
   }, [])
+
+  const watchStreamingMessages = useCallback(async (id: string) => {
+    if (activeStreamRef.current) return
+
+    const generation = ++pollGenerationRef.current
+    setSessionBusy(true)
+    const startedAt = Date.now()
+    const timeoutMs = 5 * 60 * 1000
+
+    try {
+      while (!activeStreamRef.current && generation === pollGenerationRef.current) {
+        if (Date.now() - startedAt > timeoutMs) {
+          setSessionError("等待回复超时，请刷新重试")
+          break
+        }
+
+        let messages: IngestSessionMessage[]
+        try {
+          const res = await api.listIngestSessionMessages(id)
+          messages = res.messages
+        } catch {
+          break
+        }
+
+        setSessionMessages((prev) => mergeLoadedSessionMessages(prev, messages))
+        if (!hasStreamingAssistant(messages)) break
+
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
+    } finally {
+      if (!activeStreamRef.current && generation === pollGenerationRef.current) {
+        setSessionBusy(false)
+      }
+    }
+  }, [])
+
+  const loadSessionMessagesAndWatch = useCallback(
+    async (id: string) => {
+      const messages = await loadSessionMessages(id)
+      if (!activeStreamRef.current && hasStreamingAssistant(messages)) {
+        void watchStreamingMessages(id)
+      }
+    },
+    [loadSessionMessages, watchStreamingMessages],
+  )
 
   const ensureIngestSession = useCallback(async () => {
     if (sessionId) {
       try {
         const { session } = await api.getIngestSession(sessionId)
         if (session.status === "active") {
-          await loadSessionMessages(sessionId)
+          await loadSessionMessagesAndWatch(sessionId)
           return
         }
       } catch {
@@ -350,11 +404,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem(SESSION_STORAGE_KEY)
       setSessionError((e as Error).message)
     }
-  }, [sessionId, loadSessionMessages, settings])
+  }, [sessionId, loadSessionMessagesAndWatch, settings])
 
   const sendSessionMessage = useCallback(
     async (content: string) => {
       if (!sessionId) return
+      pollGenerationRef.current += 1
+      activeStreamRef.current = true
       setSessionBusy(true)
       setSessionError(null)
       const tempUser: IngestSessionMessage = {
@@ -377,6 +433,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         stream_status: "streaming",
         created_at: new Date().toISOString(),
       }
+      const assistantIdRef = { current: tempAssistant.id }
+      const isStreamingAssistant = (id: string) =>
+        id === assistantIdRef.current || id === tempAssistant.id
+
       setSessionMessages((prev) => [...prev, tempUser, tempAssistant])
       try {
         await api.streamIngestSessionMessage(sessionId, content, (event, data) => {
@@ -386,11 +446,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
               prev.map((m) => (m.id === tempUser.id ? um : m)),
             )
           }
+          if (
+            event === "assistant_start" &&
+            data &&
+            typeof data === "object"
+          ) {
+            const serverId = (data as { id?: string }).id
+            if (serverId) {
+              assistantIdRef.current = serverId
+              setSessionMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempAssistant.id ? { ...m, id: serverId } : m,
+                ),
+              )
+            }
+          }
           if (event === "token" && data && typeof data === "object") {
             const tok = (data as { content?: string }).content ?? ""
             setSessionMessages((prev) =>
               prev.map((m) =>
-                m.id === tempAssistant.id
+                isStreamingAssistant(m.id)
                   ? { ...m, content: m.content + tok }
                   : m,
               ),
@@ -400,7 +475,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             const am = data as IngestSessionMessage
             setSessionMessages((prev) =>
               prev.map((m) => {
-                if (m.id !== tempAssistant.id) return m
+                if (!isStreamingAssistant(m.id)) return m
                 if (m.stream_status === "failed") return m
                 return am
               }),
@@ -410,7 +485,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             const reason = streamErrorMessage(data)
             setSessionMessages((prev) =>
               prev.map((m) =>
-                m.id === tempAssistant.id
+                isStreamingAssistant(m.id)
                   ? {
                       ...m,
                       stream_status: "failed",
@@ -429,7 +504,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSessionError(reason)
         setSessionMessages((prev) =>
           prev.map((m) =>
-            m.id === tempAssistant.id
+            isStreamingAssistant(m.id)
               ? {
                   ...m,
                   stream_status: "failed",
@@ -447,10 +522,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // keep optimistic failed message
         }
       } finally {
+        activeStreamRef.current = false
         setSessionBusy(false)
       }
     },
-    [sessionId, loadSessionMessages],
+    [sessionId],
   )
 
   const uploadSessionAttachment = useCallback(
@@ -614,10 +690,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const switchSession = useCallback(
     async (id: string) => {
+      pollGenerationRef.current += 1
       setSessionId(id)
       setActiveSessionId(id)
       localStorage.setItem(SESSION_STORAGE_KEY, id)
-      await loadSessionMessages(id)
+      await loadSessionMessagesAndWatch(id)
       try {
         const { session } = await api.getIngestSession(id)
         if (session.llm_instance_id) {
@@ -631,7 +708,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // non-critical
       }
     },
-    [loadSessionMessages, loadModels, instances],
+    [loadSessionMessagesAndWatch, loadModels, instances],
   )
 
   const updateSessionLLM = useCallback(

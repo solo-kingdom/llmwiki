@@ -2,13 +2,18 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
 func setupSessionRoutes(api *API, r chi.Router) {
@@ -441,5 +446,241 @@ func TestStreamSessionReplyNoAPIKey(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 (no api key), got %d; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func seedOpenAIProviderForStream(t *testing.T, api *API) {
+	t.Helper()
+	if err := api.db.UpsertProviderInfo([]sqlite.ProviderInfo{
+		{
+			ID:        "openai",
+			Name:      "OpenAI",
+			APIBase:   "https://api.openai.com/v1",
+			APIFormat: "openai",
+			EnvKey:    "OPENAI_API_KEY",
+		},
+	}); err != nil {
+		t.Fatalf("UpsertProviderInfo: %v", err)
+	}
+}
+
+func openAIStreamChunk(content string) string {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{"delta": map[string]string{"content": content}},
+		},
+	})
+	return "data: " + string(payload) + "\n\n"
+}
+
+func TestStreamSessionReplyIncrementalPersist(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+	seedOpenAIProviderForStream(t, api)
+
+	streamDone := make(chan struct{})
+	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/chat/completions") {
+			http.NotFound(w, req)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		for _, tok := range []string{
+			"hello ", "from ", "incremental ", "stream ",
+			"with ", "enough ", "content ", "to ", "flush ",
+		} {
+			fmt.Fprint(w, openAIStreamChunk(tok))
+			flusher.Flush()
+			time.Sleep(20 * time.Millisecond)
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
+		close(streamDone)
+	}))
+	t.Cleanup(llmSrv.Close)
+
+	inst := &sqlite.ProviderInstance{
+		Name:      "Mock OpenAI",
+		CatalogID: "openai",
+		APIKey:    "sk-test",
+		BaseURL:   llmSrv.URL + "/v1",
+	}
+	if err := api.db.CreateProviderInstance(inst); err != nil {
+		t.Fatalf("CreateProviderInstance: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"title":       "Stream Test",
+		"instance_id": inst.ID,
+		"model":       "gpt-4o",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var createResp sessionResponse
+	if err := json.NewDecoder(w.Body).Decode(&createResp); err != nil {
+		t.Fatal(err)
+	}
+
+	msgBody, _ := json.Marshal(map[string]string{"content": "hello"})
+	streamReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/ingest/sessions/"+createResp.Session.ID+"/messages?stream=1",
+		bytes.NewReader(msgBody),
+	)
+	streamReq.Header.Set("Content-Type", "application/json")
+	streamReq.Header.Set("Accept", "text/event-stream")
+
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		streamW := httptest.NewRecorder()
+		r.ServeHTTP(streamW, streamReq)
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	var sawPartial bool
+	for time.Now().Before(deadline) {
+		msgs, err := api.db.ListIngestSessionMessages(createResp.Session.ID)
+		if err != nil {
+			t.Fatalf("ListIngestSessionMessages: %v", err)
+		}
+		for _, m := range msgs {
+			if m.Role == "assistant" && m.StreamStatus == "streaming" && strings.Contains(m.Content, "incremental") {
+				sawPartial = true
+				break
+			}
+		}
+		if sawPartial {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !sawPartial {
+		t.Fatal("expected partial assistant content persisted while streaming")
+	}
+
+	select {
+	case <-streamDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not finish")
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream handler did not finish")
+	}
+
+	msgs, err := api.db.ListIngestSessionMessages(createResp.Session.ID)
+	if err != nil {
+		t.Fatalf("ListIngestSessionMessages: %v", err)
+	}
+	var assistant *sqlite.IngestSessionMessage
+	for i := range msgs {
+		if msgs[i].Role == "assistant" {
+			assistant = &msgs[i]
+			break
+		}
+	}
+	if assistant == nil {
+		t.Fatal("expected assistant message")
+	}
+	if assistant.StreamStatus != "complete" {
+		t.Fatalf("stream_status = %q, want complete", assistant.StreamStatus)
+	}
+	if !strings.Contains(assistant.Content, "incremental stream") {
+		t.Fatalf("content = %q, want full streamed text", assistant.Content)
+	}
+}
+
+func TestStreamSessionReplyClientDisconnectMarksIncomplete(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+	seedOpenAIProviderForStream(t, api)
+
+	release := make(chan struct{})
+	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		fmt.Fprint(w, openAIStreamChunk("partial "))
+		flusher.Flush()
+		<-release
+		fmt.Fprint(w, openAIStreamChunk("rest"))
+		flusher.Flush()
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	t.Cleanup(llmSrv.Close)
+
+	inst := &sqlite.ProviderInstance{
+		Name:      "Mock OpenAI",
+		CatalogID: "openai",
+		APIKey:    "sk-test",
+		BaseURL:   llmSrv.URL + "/v1",
+	}
+	if err := api.db.CreateProviderInstance(inst); err != nil {
+		t.Fatalf("CreateProviderInstance: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"title":       "Disconnect Test",
+		"instance_id": inst.ID,
+		"model":       "gpt-4o",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var createResp sessionResponse
+	_ = json.NewDecoder(w.Body).Decode(&createResp)
+
+	msgBody, _ := json.Marshal(map[string]string{"content": "hello"})
+	streamReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/ingest/sessions/"+createResp.Session.ID+"/messages?stream=1",
+		bytes.NewReader(msgBody),
+	)
+	streamReq.Header.Set("Content-Type", "application/json")
+	streamReq.Header.Set("Accept", "text/event-stream")
+	ctx, cancel := context.WithCancel(streamReq.Context())
+	defer cancel()
+	streamReq = streamReq.WithContext(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		streamW := httptest.NewRecorder()
+		r.ServeHTTP(streamW, streamReq)
+		close(done)
+	}()
+
+	time.Sleep(80 * time.Millisecond)
+	cancel()
+	close(release)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream handler did not return after client disconnect")
+	}
+
+	msgs, err := api.db.ListIngestSessionMessages(createResp.Session.ID)
+	if err != nil {
+		t.Fatalf("ListIngestSessionMessages: %v", err)
+	}
+	var assistant *sqlite.IngestSessionMessage
+	for i := range msgs {
+		if msgs[i].Role == "assistant" {
+			assistant = &msgs[i]
+			break
+		}
+	}
+	if assistant == nil {
+		t.Fatal("expected assistant message")
+	}
+	if assistant.StreamStatus != "incomplete" {
+		t.Fatalf("stream_status = %q, want incomplete", assistant.StreamStatus)
+	}
+	if !strings.Contains(assistant.Content, "partial") {
+		t.Fatalf("content = %q, want partial persisted text", assistant.Content)
 	}
 }

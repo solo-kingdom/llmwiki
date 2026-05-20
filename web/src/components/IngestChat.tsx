@@ -60,10 +60,13 @@ function MessageBubble({
     }
   }
 
+  const isStreaming = msg.stream_status === "streaming"
+  const hasContent = !!msg.content?.trim()
+
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`relative max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
+        className={`relative max-w-[92%] rounded-2xl px-4 py-2 text-sm ${
           isUser
             ? "bg-primary text-primary-foreground"
             : msg.message_type === "attachment_summary"
@@ -81,10 +84,17 @@ function MessageBubble({
         </button>
         {isUser ? (
           <p className="whitespace-pre-wrap pr-6">{msg.content}</p>
+        ) : isStreaming && !hasContent ? (
+          <Loader2
+            className="size-4 animate-spin text-muted-foreground"
+            aria-label="正在回复"
+          />
+        ) : isStreaming ? (
+          <p className="whitespace-pre-wrap pr-6">{msg.content}</p>
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none pr-6">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {msg.content || (msg.stream_status === "streaming" ? "…" : "")}
+              {msg.content}
             </ReactMarkdown>
           </div>
         )}
@@ -278,40 +288,45 @@ export function IngestChat() {
   const inputDisabled = sessionBusy || !sessionId || !isReady
 
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col">
-      <ScrollArea className="flex-1 py-4">
-        <div className="mx-auto max-w-3xl space-y-4 pb-4">
-          {!isReady && (
-            <div className="rounded-lg bg-amber-50 py-8 text-center text-amber-600 dark:bg-amber-950/20">
-              <p className="text-sm">
-                {instances.length === 0
-                  ? "请先在 Settings 添加 Provider"
-                  : !selectedInstanceId || !selectedModel
-                    ? "请点击下方「模型」选择 Provider 和 Model"
-                    : "正在设置会话..."}
-              </p>
-            </div>
-          )}
-          {sessionMessages.length === 0 && isReady && (
-            <div className="py-16 text-center text-muted-foreground">
-              <p className="mb-2 text-lg">开始一个话题</p>
-              <p className="text-sm">
-                与助手多轮对话探索清楚后，点击「归档」写入 wiki
-              </p>
-            </div>
-          )}
-          {sessionMessages.map((m) => (
-            <MessageBubble
-              key={m.id}
-              msg={m}
-              messages={sessionMessages}
-              onRetry={handleRetry}
-              sessionBusy={sessionBusy}
-            />
-          ))}
-          <div ref={bottomRef} />
-        </div>
-      </ScrollArea>
+    <div className="flex min-h-0 w-full flex-1 flex-col gap-2">
+      <div
+        className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/70 bg-card/70"
+        data-testid="ingest-message-panel"
+      >
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="w-full space-y-4 px-2 py-4 sm:px-3">
+            {!isReady && (
+              <div className="rounded-lg bg-amber-50 py-8 text-center text-amber-600 dark:bg-amber-950/20">
+                <p className="text-sm">
+                  {instances.length === 0
+                    ? "请先在 Settings 添加 Provider"
+                    : !selectedInstanceId || !selectedModel
+                      ? "请点击下方「模型」选择 Provider 和 Model"
+                      : "正在设置会话..."}
+                </p>
+              </div>
+            )}
+            {sessionMessages.length === 0 && isReady && (
+              <div className="py-16 text-center text-muted-foreground">
+                <p className="mb-2 text-lg">开始一个话题</p>
+                <p className="text-sm">
+                  与助手多轮对话探索清楚后，点击「归档」写入 wiki
+                </p>
+              </div>
+            )}
+            {sessionMessages.map((m) => (
+              <MessageBubble
+                key={m.id}
+                msg={m}
+                messages={sessionMessages}
+                onRetry={handleRetry}
+                sessionBusy={sessionBusy}
+              />
+            ))}
+            <div ref={bottomRef} />
+          </div>
+        </ScrollArea>
+      </div>
 
       {sessionError && (
         <p className="pb-2 text-sm text-destructive">{sessionError}</p>

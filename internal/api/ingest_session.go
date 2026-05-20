@@ -241,11 +241,30 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 	var builder strings.Builder
 	streamStatus := "complete"
 	var lastErr string
+	lastFlush := time.Now()
+	lastFlushLen := 0
+	flushStreaming := func(force bool) {
+		curLen := builder.Len()
+		if !force && curLen == lastFlushLen {
+			return
+		}
+		if !force && curLen-lastFlushLen < 32 && time.Since(lastFlush) < 300*time.Millisecond {
+			return
+		}
+		_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, builder.String(), "streaming")
+		lastFlush = time.Now()
+		lastFlushLen = curLen
+	}
 	for ev := range ch {
+		if ctx.Err() != nil {
+			streamStatus = "incomplete"
+			break
+		}
 		switch ev.Type {
 		case "token":
 			builder.WriteString(ev.Content)
 			sendEvent("token", map[string]string{"content": ev.Content})
+			flushStreaming(false)
 		case "error":
 			streamStatus = "failed"
 			if ev.Error != nil {
@@ -261,6 +280,9 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 			}
 		}
 	}
+	if ctx.Err() != nil && streamStatus == "complete" {
+		streamStatus = "incomplete"
+	}
 	if streamStatus == "complete" && builder.Len() == 0 {
 		streamStatus = "failed"
 		lastErr = "LLM returned an empty response"
@@ -274,7 +296,7 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 	_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, content, streamStatus)
 	assistantMsg.Content = content
 	assistantMsg.StreamStatus = streamStatus
-	if streamStatus == "failed" {
+	if streamStatus == "failed" || streamStatus == "incomplete" {
 		return
 	}
 	sendEvent("done", assistantMsg)

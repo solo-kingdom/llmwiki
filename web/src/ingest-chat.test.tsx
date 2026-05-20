@@ -95,4 +95,43 @@ describe("IngestChat", () => {
     expect(container.querySelector(".max-w-5xl")).toBeTruthy()
     expect(screen.getByRole("button", { name: /发送/ })).toBeInTheDocument()
   })
+
+  it("renders message panel with border and scroll container", async () => {
+    const { container } = render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+    const panel = await screen.findByTestId("ingest-message-panel")
+    expect(panel).toHaveClass("rounded-xl", "border", "overflow-hidden")
+    expect(container.querySelector('[data-slot="scroll-area"]')).toBeTruthy()
+    expect(container.querySelector(".max-w-3xl")).toBeNull()
+  })
+
+  it("shows spinner while assistant is streaming with empty content", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-assistant",
+          session_id: "sess-1",
+          role: "assistant",
+          content: "",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "streaming",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    expect(await screen.findByLabelText("正在回复")).toBeInTheDocument()
+  })
 })

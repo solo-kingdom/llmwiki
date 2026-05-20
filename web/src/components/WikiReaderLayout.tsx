@@ -6,6 +6,7 @@ import { DocumentViewer } from "@/components/DocumentViewer"
 import { DocumentOutline } from "@/components/DocumentOutline"
 import { WikiDocumentInfoBar } from "@/components/WikiDocumentInfo"
 import { SearchModal } from "@/components/SearchModal"
+import { AppHeaderBar } from "@/components/AppHeaderBar"
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@base-ui/react/dialog"
 import { useWikiReader } from "@/context/WikiReaderContext"
@@ -64,56 +65,61 @@ export function WikiReaderLayout() {
 
   return (
     <div className="flex h-screen flex-col bg-background">
-      <header className="relative z-40 mx-4 mt-2 mb-2 flex h-12 shrink-0 items-center justify-between rounded-xl border border-border/70 bg-card/70 px-3 shadow-sm backdrop-blur-sm">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="lg:hidden"
-            onClick={() => setMobileMenuOpen(true)}
-          >
-            <Menu className="h-4 w-4" />
-          </Button>
-          <a href={workbenchHref()} className="text-lg font-bold text-point">
-            LLMWiki
-          </a>
-          {publicWikiEnabled && (
-            <span className="hidden rounded-md border border-point-border bg-point-soft px-2 py-0.5 text-xs text-point-foreground sm:inline">
-              公开阅读
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setSearchOpen(true)}
-            title="搜索 (Ctrl+K)"
-          >
-            <Search className="h-4 w-4" />
-          </Button>
-          {hasOutline && (
+      <AppHeaderBar
+        className="mx-4 mt-2 mb-2"
+        left={
+          <>
             <Button
               variant="ghost"
               size="icon"
               className="lg:hidden"
-              onClick={() => setMobileOutlineOpen(true)}
+              onClick={() => setMobileMenuOpen(true)}
             >
-              <List className="h-4 w-4" />
+              <Menu className="h-4 w-4" />
             </Button>
-          )}
-          <a
-            href={workbenchHref()}
-            className="inline-flex h-7 items-center rounded-lg border border-border bg-background px-2.5 text-sm font-medium hover:bg-muted"
-            onClick={(e) => {
-              e.preventDefault()
-              navigateTo(workbenchHref())
-            }}
-          >
-            管理工作台
-          </a>
-        </div>
-      </header>
+            <a href={workbenchHref()} className="text-lg font-bold text-point">
+              LLMWiki
+            </a>
+            {publicWikiEnabled && (
+              <span className="hidden rounded-md border border-point-border bg-point-soft px-2 py-0.5 text-xs text-point-foreground sm:inline">
+                公开阅读
+              </span>
+            )}
+          </>
+        }
+        right={
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSearchOpen(true)}
+              title="搜索 (Ctrl+K)"
+            >
+              <Search className="h-4 w-4" />
+            </Button>
+            {hasOutline && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="lg:hidden"
+                onClick={() => setMobileOutlineOpen(true)}
+              >
+                <List className="h-4 w-4" />
+              </Button>
+            )}
+            <a
+              href={workbenchHref()}
+              className="inline-flex h-7 items-center rounded-lg border border-border bg-background px-2.5 text-sm font-medium hover:bg-muted"
+              onClick={(e) => {
+                e.preventDefault()
+                navigateTo(workbenchHref())
+              }}
+            >
+              管理工作台
+            </a>
+          </>
+        }
+      />
 
       {error && (
         <div className="mx-4 mb-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">

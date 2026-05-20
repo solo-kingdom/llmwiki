@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { AppProvider } from "@/context/AppContext"
 import { IngestChat } from "@/components/IngestChat"
+import { WorkbenchContentShell } from "@/components/WorkbenchContentShell"
 
 vi.mock("@/lib/api", () => ({
   listDocuments: vi.fn().mockResolvedValue([]),
@@ -85,7 +86,9 @@ describe("IngestChat", () => {
   it("uses wide page container and places session controls in input action bar", async () => {
     const { container } = render(
       <AppProvider>
-        <IngestChat />
+        <WorkbenchContentShell>
+          <IngestChat />
+        </WorkbenchContentShell>
       </AppProvider>,
     )
     await screen.findByRole("button", { name: /切换/ })

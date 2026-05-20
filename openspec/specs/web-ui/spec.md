@@ -1,5 +1,5 @@
 ### Requirement: Workspace management UI
-The system SHALL provide a web interface for browsing wiki pages, viewing document content, and managing source files. The global navigation SHALL consist of four top-level entries: Ingest, Jobs, Wiki, and Settings. The default selected entry on load SHALL be Ingest. The global header SHALL use a centered floating style with rounded corners (`rounded-xl`), subtle shadow (`shadow-sm`), warm-toned background, and no heavy border. The global navigation visual treatment SHALL use semantic navigation buttons instead of a tab-group control. The Settings page SHALL provide a Provider instance management section for adding, editing, and deleting provider configurations.
+The system SHALL provide a web interface for browsing wiki pages, viewing document content, and managing source files. The global navigation SHALL consist of four top-level entries: Ingest, Jobs, Wiki, and Settings. The default selected entry on load SHALL be Ingest. The management workbench global header SHALL use the same card-style bar as the Wiki reader header (`rounded-xl`, `border-border/70`, `bg-card/70`, `backdrop-blur-sm`, `shadow-sm`, fixed height `h-12`). The workbench header width SHALL match the workbench content column (`max-w-5xl` with consistent horizontal padding). The global navigation visual treatment SHALL use semantic navigation buttons instead of a tab-group control. The Settings page SHALL provide a Provider instance management section for adding, editing, and deleting provider configurations.
 
 #### Scenario: File tree navigation
 - **WHEN** user opens the Wiki entry in the Web UI
@@ -21,9 +21,10 @@ The system SHALL provide a web interface for browsing wiki pages, viewing docume
 - **WHEN** user views the global header navigation
 - **THEN** each navigation item SHALL be rendered as a navigation button-style control, not as a tab-group trigger
 
-#### Scenario: Centered floating header
-- **WHEN** user loads the Web UI
-- **THEN** the global header SHALL be centered horizontally, have rounded corners, a warm-toned background, a subtle shadow, and no heavy border
+#### Scenario: Workbench header matches reader shell
+- **WHEN** user loads the management workbench
+- **THEN** the global header SHALL use the same card-style bar treatment as the Wiki reader header
+- **AND** the header width SHALL align with the workbench content column (`max-w-5xl`)
 
 #### Scenario: Settings provider section replaced with instance management
 - **WHEN** user opens the Settings entry

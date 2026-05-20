@@ -278,7 +278,7 @@ export function IngestChat() {
   const inputDisabled = sessionBusy || !sessionId || !isReady
 
   return (
-    <div className="mx-auto flex w-full min-h-0 max-w-5xl flex-1 flex-col px-6">
+    <div className="flex min-h-0 w-full flex-1 flex-col">
       <ScrollArea className="flex-1 py-4">
         <div className="mx-auto max-w-3xl space-y-4 pb-4">
           {!isReady && (

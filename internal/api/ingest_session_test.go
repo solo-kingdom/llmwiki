@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,6 +23,7 @@ func setupSessionRoutes(api *API, r chi.Router) {
 		r.Get("/", api.ListIngestSessionsHandler)
 		r.Get("/{id}", api.GetIngestSession)
 		r.Patch("/{id}", api.UpdateIngestSessionHandler)
+		r.Delete("/{id}", api.DeleteIngestSessionHandler)
 		r.Get("/{id}/messages", api.ListIngestSessionMessages)
 		r.Post("/{id}/messages", api.AppendIngestSessionMessage)
 		r.Post("/{id}/archive", api.ArchiveIngestSession)
@@ -450,6 +452,91 @@ func TestUpdateSessionNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestDeleteIngestSession(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{"title": "To Delete"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var createResp sessionResponse
+	if err := json.NewDecoder(w.Body).Decode(&createResp); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := createResp.Session.ID
+
+	msgBody, _ := json.Marshal(map[string]string{"content": "hello"})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+sessionID+"/messages", bytes.NewReader(msgBody))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("append message: %d %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/ingest/sessions/"+sessionID, nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/ingest/sessions/"+sessionID, nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 after delete, got %d", w.Code)
+	}
+
+	sessionDir := filepath.Join(api.workspace, "raw/sources/web-ingest/sessions", sessionID)
+	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
+		t.Fatalf("expected session dir removed, stat err=%v", err)
+	}
+}
+
+func TestDeleteIngestSessionArchived(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader([]byte(`{"title":"Archived Chat"}`)))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var createResp sessionResponse
+	_ = json.NewDecoder(w.Body).Decode(&createResp)
+	sessionID := createResp.Session.ID
+
+	msgBody, _ := json.Marshal(map[string]string{"content": "archive me"})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+sessionID+"/messages", bytes.NewReader(msgBody))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+sessionID+"/archive", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("archive: %d %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/ingest/sessions/"+sessionID, nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete archived: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeleteIngestSessionNotFound(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/ingest/sessions/nonexistent-id", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
 	}

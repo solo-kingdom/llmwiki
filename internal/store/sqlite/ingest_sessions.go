@@ -250,3 +250,18 @@ func (d *DB) UpdateIngestSessionLLM(id, instanceID, model string) error {
 		WHERE id = ?`, instanceID, model, id)
 	return err
 }
+
+func (d *DB) DeleteIngestSession(id string) error {
+	res, err := d.db.Exec(`DELETE FROM ingest_sessions WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete ingest session: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("session not found")
+	}
+	return nil
+}

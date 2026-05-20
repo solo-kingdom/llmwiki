@@ -26,6 +26,18 @@ func SessionAttachmentsDir(sessionID string) string {
 	return filepath.ToSlash(filepath.Join(SessionDir(sessionID), "attachments"))
 }
 
+// RemoveSessionDir deletes the session directory tree under workspace.
+func RemoveSessionDir(workspace, sessionID string) error {
+	if strings.TrimSpace(workspace) == "" || strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	abs := filepath.Join(workspace, filepath.FromSlash(SessionDir(sessionID)))
+	if err := os.RemoveAll(abs); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 // EnsureSessionDirs creates session and attachments directories under workspace.
 func EnsureSessionDirs(workspace, sessionID string) (string, error) {
 	if strings.TrimSpace(workspace) == "" {

@@ -13,6 +13,7 @@ const mockListProviders = vi.fn()
 const mockListProviderModels = vi.fn()
 const mockListIngestSessions = vi.fn()
 const mockCreateIngestSession = vi.fn()
+const mockDeleteIngestSession = vi.fn()
 const mockUpdateIngestSession = vi.fn()
 const mockUpdateLastModel = vi.fn()
 const mockGetSettings = vi.fn()
@@ -29,6 +30,7 @@ vi.mock("@/lib/api", () => ({
   listProviderModels: (...args: unknown[]) => mockListProviderModels(...args),
   listIngestSessions: (...args: unknown[]) => mockListIngestSessions(...args),
   createIngestSession: (...args: unknown[]) => mockCreateIngestSession(...args),
+  deleteIngestSession: (...args: unknown[]) => mockDeleteIngestSession(...args),
   updateIngestSession: (...args: unknown[]) => mockUpdateIngestSession(...args),
   updateLastModel: (...args: unknown[]) => mockUpdateLastModel(...args),
   getSettings: (...args: unknown[]) => mockGetSettings(...args),
@@ -109,6 +111,7 @@ function setupDefaultMocks() {
     { provider_id: "openai", model_id: "gpt-4o-mini", name: "GPT-4o Mini", family: "GPT-4", context_limit: 128000, output_limit: 16384, cost_input: 0.15, cost_output: 0.6, reasoning: false, tool_call: false, attachment: false },
   ])
   mockListIngestSessions.mockResolvedValue({ sessions: [] })
+  mockDeleteIngestSession.mockResolvedValue({ status: "deleted" })
   mockCreateIngestSession.mockResolvedValue({
     session: {
       id: "sess-new",
@@ -240,6 +243,37 @@ describe("SessionControls Integration", () => {
     // Clicking a session should trigger getIngestSession
     await waitFor(() => {
       expect(mockGetIngestSession).toHaveBeenCalled()
+    })
+  })
+
+  it("shows delete confirmation before removing a session", async () => {
+    mockListIngestSessions.mockResolvedValue({
+      sessions: [
+        makeSession({ id: "s-1", title: "Chat 1" }),
+        makeSession({ id: "s-2", title: "Old Chat", status: "archived" }),
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <SessionControls />
+      </AppProvider>,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /切换/ }))
+    await screen.findByText("Chat 1")
+
+    const deleteButtons = screen.getAllByTitle("删除会话")
+    fireEvent.click(deleteButtons[0])
+
+    expect(
+      screen.getByText(/确认删除会话「Chat 1」？聊天记录将被永久删除/),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /确认删除/ }))
+
+    await waitFor(() => {
+      expect(mockDeleteIngestSession).toHaveBeenCalledWith("s-1")
     })
   })
 })

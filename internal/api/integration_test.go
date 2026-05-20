@@ -34,6 +34,7 @@ func setupIntegrationRoutes(api *API, r chi.Router) {
 	r.Get("/api/v1/ingest/sessions", api.ListIngestSessionsHandler)
 	r.Get("/api/v1/ingest/sessions/{id}", api.GetIngestSession)
 	r.Patch("/api/v1/ingest/sessions/{id}", api.UpdateIngestSessionHandler)
+	r.Delete("/api/v1/ingest/sessions/{id}", api.DeleteIngestSessionHandler)
 	r.Post("/api/v1/ingest/sessions/{id}/messages", api.AppendIngestSessionMessage)
 }
 

@@ -410,6 +410,15 @@ export function updateIngestSession(
   )
 }
 
+export function deleteIngestSession(
+  id: string,
+): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/api/v1/ingest/sessions/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  )
+}
+
 // Version Control API
 
 export function initVC(): Promise<{

@@ -3,28 +3,38 @@ import { Dialog } from "@base-ui/react/dialog"
 import { useApp } from "@/context/AppContext"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import type { SessionListItem } from "@/types"
 import {
   Plus,
   MessageSquare,
   Archive,
   List,
+  Trash2,
   X,
 } from "lucide-react"
+
+function sessionLabel(title: string) {
+  return title.trim() || "Untitled"
+}
 
 export function SessionControls() {
   const {
     sessions,
     activeSessionId,
+    sessionBusy,
     instances,
     settings,
     createSession,
     switchSession,
+    deleteSession,
     listSessions,
     loadInstances,
     loadSettings,
   } = useApp()
 
   const [switchOpen, setSwitchOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<SessionListItem | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     void listSessions()
@@ -51,6 +61,99 @@ export function SessionControls() {
     setSwitchOpen(false)
   }
 
+  const handleDeleteClick = (
+    e: React.MouseEvent,
+    session: SessionListItem,
+  ) => {
+    e.stopPropagation()
+    setDeleteTarget(session)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget || deleting) return
+    setDeleting(true)
+    try {
+      await deleteSession(deleteTarget.id)
+      setDeleteTarget(null)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const deletePrompt = deleteTarget
+    ? deleteTarget.status === "archived"
+      ? `确认删除已归档会话「${sessionLabel(deleteTarget.title)}」？相关聊天记录将被永久删除，此操作不可撤销。`
+      : `确认删除会话「${sessionLabel(deleteTarget.title)}」？聊天记录将被永久删除，此操作不可撤销。`
+    : ""
+
+  const renderSessionRow = (s: SessionListItem, archived = false) => {
+    const isActive = s.id === activeSessionId
+    const content = (
+      <>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <MessageSquare className="size-3.5 shrink-0" />
+          <span className="truncate">{sessionLabel(s.title)}</span>
+        </div>
+        {(s.llm_instance_id || s.llm_model) && (
+          <p className="mt-1 truncate pl-5.5 text-xs text-muted-foreground">
+            {getInstanceName(s.llm_instance_id)}
+            {s.llm_model ? ` / ${s.llm_model}` : ""}
+          </p>
+        )}
+      </>
+    )
+
+    if (archived) {
+      return (
+        <div
+          key={s.id}
+          className="flex items-start gap-1 rounded-lg px-1 py-1 text-sm opacity-60"
+        >
+          <div className="min-w-0 flex-1 px-2 py-1">{content}</div>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+            title="删除会话"
+            disabled={sessionBusy || deleting}
+            onClick={(e) => handleDeleteClick(e, s)}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
+      )
+    }
+
+    return (
+      <div
+        key={s.id}
+        className={`flex items-start gap-1 rounded-lg transition-colors ${
+          isActive ? "bg-primary/10" : "hover:bg-muted"
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => void handleSwitch(s.id)}
+          className={`min-w-0 flex-1 px-3 py-2 text-left text-sm ${
+            isActive ? "font-medium text-primary" : ""
+          }`}
+        >
+          {content}
+        </button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-1 size-8 shrink-0 text-muted-foreground hover:text-destructive"
+          title="删除会话"
+          disabled={sessionBusy || deleting}
+          onClick={(e) => handleDeleteClick(e, s)}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      </div>
+    )
+  }
+
   return (
     <>
       <Button
@@ -72,7 +175,13 @@ export function SessionControls() {
         新建
       </Button>
 
-      <Dialog.Root open={switchOpen} onOpenChange={setSwitchOpen}>
+      <Dialog.Root
+        open={switchOpen}
+        onOpenChange={(open) => {
+          setSwitchOpen(open)
+          if (!open) setDeleteTarget(null)
+        }}
+      >
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/40 data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 transition-opacity duration-200" />
           <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-md -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border bg-background shadow-lg outline-none data-[starting-style]:scale-95 data-[starting-style]:opacity-0 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 transition-[opacity,scale] duration-200">
@@ -84,6 +193,31 @@ export function SessionControls() {
                 <X className="size-4" />
               </Dialog.Close>
             </div>
+
+            {deleteTarget && (
+              <div className="space-y-3 border-b bg-destructive/5 px-4 py-3">
+                <p className="text-sm">{deletePrompt}</p>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={deleting}
+                    onClick={() => setDeleteTarget(null)}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={deleting}
+                    onClick={() => void handleDeleteConfirm()}
+                  >
+                    {deleting ? "删除中..." : "确认删除"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <ScrollArea className="max-h-[60vh]">
               <div className="space-y-1 p-2">
                 {activeSessions.length === 0 && (
@@ -91,46 +225,14 @@ export function SessionControls() {
                     暂无活跃会话
                   </p>
                 )}
-                {activeSessions.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => void handleSwitch(s.id)}
-                    className={`w-full rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                      s.id === activeSessionId
-                        ? "bg-primary/10 font-medium text-primary"
-                        : "hover:bg-muted"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <MessageSquare className="size-3.5 shrink-0" />
-                      <span className="truncate">{s.title || "Untitled"}</span>
-                    </div>
-                    {(s.llm_instance_id || s.llm_model) && (
-                      <p className="mt-1 truncate pl-5.5 text-xs text-muted-foreground">
-                        {getInstanceName(s.llm_instance_id)}
-                        {s.llm_model ? ` / ${s.llm_model}` : ""}
-                      </p>
-                    )}
-                  </button>
-                ))}
+                {activeSessions.map((s) => renderSessionRow(s))}
                 {archivedSessions.length > 0 && (
                   <>
                     <p className="flex items-center gap-1 px-3 py-2 text-xs font-medium text-muted-foreground">
                       <Archive className="size-3" />
                       已归档 ({archivedSessions.length})
                     </p>
-                    {archivedSessions.slice(0, 10).map((s) => (
-                      <div
-                        key={s.id}
-                        className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm opacity-60"
-                      >
-                        <MessageSquare className="size-3 shrink-0 text-muted-foreground" />
-                        <span className="truncate text-muted-foreground">
-                          {s.title || "Untitled"}
-                        </span>
-                      </div>
-                    ))}
+                    {archivedSessions.map((s) => renderSessionRow(s, true))}
                   </>
                 )}
               </div>

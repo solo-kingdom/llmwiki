@@ -241,6 +241,21 @@ describe("updateIngestSession", () => {
   })
 })
 
+describe("deleteIngestSession", () => {
+  it("calls DELETE /api/v1/ingest/sessions/{id}", async () => {
+    const { deleteIngestSession } = await import("@/lib/api")
+    mockFetch.mockReturnValue(mockResponse({ status: "deleted" }))
+
+    const result = await deleteIngestSession("s-1")
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/v1/ingest/sessions/s-1",
+      expect.objectContaining({ method: "DELETE" }),
+    )
+    expect(result.status).toBe("deleted")
+  })
+})
+
 // --- Error handling tests ---
 
 describe("API error handling", () => {

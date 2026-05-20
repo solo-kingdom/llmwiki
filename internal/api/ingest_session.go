@@ -578,3 +578,26 @@ func (a *API) UpdateIngestSessionHandler(w http.ResponseWriter, r *http.Request)
 	session, _ = a.db.GetIngestSession(sessionID)
 	writeJSON(w, http.StatusOK, sessionResponse{Session: session})
 }
+
+func (a *API) DeleteIngestSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := getID(r)
+	session, err := a.loadSession(sessionID, w)
+	if err != nil || session == nil {
+		return
+	}
+	if err := a.db.DeleteIngestSession(sessionID); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, "session not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if a.workspace != "" {
+		if err := ingest.RemoveSessionDir(a.workspace, sessionID); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("remove session files: %v", err))
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}

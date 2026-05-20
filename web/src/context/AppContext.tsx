@@ -146,6 +146,7 @@ interface AppState {
   listSessions: () => Promise<void>
   createSession: (instanceId?: string, model?: string) => Promise<void>
   switchSession: (id: string) => Promise<void>
+  deleteSession: (id: string) => Promise<void>
   updateSessionLLM: (
     id: string,
     instanceId: string,
@@ -711,6 +712,63 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [loadSessionMessagesAndWatch, loadModels, instances],
   )
 
+  const deleteSession = useCallback(
+    async (id: string) => {
+      const wasActive = sessionId === id || activeSessionId === id
+      await api.deleteIngestSession(id)
+
+      if (wasActive) {
+        pollGenerationRef.current += 1
+        activeStreamRef.current = false
+        setSessionBusy(false)
+        setSessionMessages([])
+        setSessionError(null)
+        setSessionId(null)
+        setActiveSessionId(null)
+        localStorage.removeItem(SESSION_STORAGE_KEY)
+      }
+
+      const { sessions: remaining } = await api.listIngestSessions()
+      setSessions(remaining)
+
+      if (wasActive) {
+        const next = remaining.find((s) => s.status === "active")
+        if (next) {
+          setSessionId(next.id)
+          setActiveSessionId(next.id)
+          localStorage.setItem(SESSION_STORAGE_KEY, next.id)
+          await loadSessionMessagesAndWatch(next.id)
+        } else {
+          const instanceId = settings?.last_instance_id
+          const model = settings?.last_model
+          const { session } = await api.createIngestSession()
+          setSessionId(session.id)
+          setActiveSessionId(session.id)
+          localStorage.setItem(SESSION_STORAGE_KEY, session.id)
+          setSessionMessages([])
+          if (instanceId && model) {
+            try {
+              await api.updateIngestSession(session.id, {
+                instance_id: instanceId,
+                model,
+              })
+            } catch {
+              // non-critical
+            }
+          }
+          const { sessions: updated } = await api.listIngestSessions()
+          setSessions(updated)
+        }
+      }
+    },
+    [
+      sessionId,
+      activeSessionId,
+      loadSessionMessagesAndWatch,
+      settings,
+    ],
+  )
+
   const updateSessionLLM = useCallback(
     async (id: string, instanceId: string, model: string) => {
       await api.updateIngestSession(id, { instance_id: instanceId, model })
@@ -781,6 +839,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         listSessions,
         createSession,
         switchSession,
+        deleteSession,
         updateSessionLLM,
         updateLastModel: updateLastModelFn,
       }}

@@ -35,10 +35,10 @@ export function ModelSelectDialog({
   }, [open, selectedInstanceId, selectedModel])
 
   useEffect(() => {
-    if (!draftInstanceId) return
+    if (!open || !draftInstanceId) return
     const inst = instances.find((i) => i.id === draftInstanceId)
     if (inst) onLoadModels(inst.catalog_id)
-  }, [draftInstanceId, instances, onLoadModels])
+  }, [open, draftInstanceId, instances, onLoadModels])
 
   const handleInstanceChange = (instanceId: string) => {
     setDraftInstanceId(instanceId)

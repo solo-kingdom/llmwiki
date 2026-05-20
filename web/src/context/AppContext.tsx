@@ -5,6 +5,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from "react"
 import type {
@@ -181,6 +182,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [providers, setProviders] = useState<Provider[]>([])
   const [instances, setInstances] = useState<ProviderInstance[]>([])
   const [currentModels, setCurrentModels] = useState<ModelInfo[]>([])
+  const loadedModelsProviderRef = useRef<string | null>(null)
 
   const refreshDocuments = useCallback(() => {
     api
@@ -523,10 +525,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const loadModels = useCallback(async (providerId: string) => {
+    if (loadedModelsProviderRef.current === providerId) return
+    loadedModelsProviderRef.current = providerId
     try {
       const m = await api.listProviderModels(providerId)
       setCurrentModels(m)
     } catch (e) {
+      loadedModelsProviderRef.current = null
       setError((e as Error).message)
       setCurrentModels([])
     }

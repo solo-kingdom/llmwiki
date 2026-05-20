@@ -216,6 +216,13 @@ export function IngestChat() {
   const selectedInstance = instances.find((i) => i.id === selectedInstanceId)
   const selectedModelInfo = currentModels.find((m) => m.model_id === selectedModel)
 
+  const handleLoadModels = useCallback(
+    (catalogId: string) => {
+      void loadModels(catalogId)
+    },
+    [loadModels],
+  )
+
   const handleModelConfirm = async (instanceId: string, modelId: string) => {
     setSelectedInstanceId(instanceId)
     setSelectedModel(modelId)
@@ -448,7 +455,7 @@ export function IngestChat() {
         models={currentModels}
         selectedInstanceId={selectedInstanceId}
         selectedModel={selectedModel}
-        onLoadModels={(catalogId) => void loadModels(catalogId)}
+        onLoadModels={handleLoadModels}
         onConfirm={(instanceId, modelId) => void handleModelConfirm(instanceId, modelId)}
       />
     </div>

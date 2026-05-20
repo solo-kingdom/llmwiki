@@ -35,6 +35,19 @@ export interface DocumentListItem {
   updated_at: string
 }
 
+/** Public read-only document payload from /api/public/wiki/documents/{id} */
+export interface PublicWikiDocument {
+  id: string
+  filename: string
+  title: string
+  path: string
+  file_type: string
+  page_count: number
+  updated_at: string
+  content: string
+  tags: string[]
+}
+
 export interface SearchChunk {
   content: string
   page: number
@@ -228,4 +241,21 @@ export interface OutlineItem {
   level: number
   text: string
   slug: string
+}
+
+export interface VCStatus {
+  enabled: boolean
+  commit_count: number
+  git_available: boolean
+  git_version: string
+  tracked_dirs: string[]
+  excluded_dirs: string[]
+}
+
+export interface VCLogEntry {
+  sha: string
+  subject: string
+  timestamp: string
+  files_changed: number
+  is_rollback: boolean
 }

@@ -43,6 +43,7 @@ make dev
 | `--bind` | `127.0.0.1` | Bind address |
 | `--port` | `8868` | HTTP port |
 | `--token` | | API token for authentication (optional) |
+| `--public-wiki` | `false` | Enable public read-only Wiki at `/wiki` and `/api/public/wiki/*` |
 | `--no-mcp` | `false` | Disable MCP server |
 | `--no-watch` | `false` | Disable file watcher |
 

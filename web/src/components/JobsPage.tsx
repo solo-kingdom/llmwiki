@@ -3,10 +3,13 @@ import { useApp } from "@/context/AppContext"
 import { JobCard } from "@/components/JobCard"
 import { PageContainer } from "@/components/PageContainer"
 import { StatusFilter, type StatusKey } from "@/components/StatusFilter"
+import { SourcePreviewDialog } from "@/components/SourcePreviewDialog"
+import type { IngestJob } from "@/types"
 
 export function JobsPage() {
   const { ingestJobs, refreshIngestJobs, retryIngest, cancelIngest } = useApp()
   const [statusFilter, setStatusFilter] = useState<StatusKey>("all")
+  const [previewJob, setPreviewJob] = useState<IngestJob | null>(null)
 
   useEffect(() => {
     refreshIngestJobs()
@@ -42,10 +45,20 @@ export function JobsPage() {
               job={job}
               onRetry={retryIngest}
               onCancel={cancelIngest}
+              onPreviewSource={setPreviewJob}
             />
           ))}
         </div>
       </div>
+
+      <SourcePreviewDialog
+        open={previewJob !== null}
+        onOpenChange={(open) => {
+          if (!open) setPreviewJob(null)
+        }}
+        jobId={previewJob?.id ?? null}
+        sourcePath={previewJob?.source_path ?? ""}
+      />
     </PageContainer>
   )
 }

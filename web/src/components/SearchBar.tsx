@@ -1,10 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from "react"
-import { useApp } from "@/context/AppContext"
+import { useWikiReader } from "@/context/WikiReaderContext"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 export function SearchBar() {
-  const { search, searchResults, searchQuery, clearSearch } = useApp()
+  const { search, searchResults, searchQuery, clearSearch, documents, selectDocument } =
+    useWikiReader()
   const [input, setInput] = useState("")
   const [showResults, setShowResults] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -32,15 +33,12 @@ export function SearchBar() {
       setShowResults(false)
       setInput("")
       clearSearch()
-      const docs = document.querySelectorAll('[data-doc-name]')
-      for (const el of docs) {
-        if ((el as HTMLElement).dataset.docName === filename) {
-          ;(el as HTMLElement).click()
-          return
-        }
+      const match = documents.find((d) => d.filename === filename)
+      if (match) {
+        selectDocument(match.id)
       }
     },
-    [clearSearch],
+    [clearSearch, documents, selectDocument],
   )
 
   useEffect(() => {

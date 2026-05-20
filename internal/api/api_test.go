@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -54,6 +55,7 @@ func setupTestAPI(t *testing.T) (*API, *chi.Mux) {
 	r.Route("/api/v1/ingest/jobs", func(r chi.Router) {
 		r.Get("/", api.ListIngestJobs)
 		r.Get("/{id}", api.GetIngestJob)
+		r.Get("/{id}/source", api.GetJobSource)
 		r.Post("/{id}/retry", api.RetryIngestJob)
 		r.Post("/{id}/cancel", api.CancelIngestJob)
 		r.Post("/{id}/fail", api.MarkIngestJobFailed)
@@ -508,7 +510,7 @@ func TestIngestUploadNoFiles(t *testing.T) {
 	}
 }
 
-func TestIngestRetryNonFailedJob(t *testing.T) {
+func TestIngestRetryCancelledJob(t *testing.T) {
 	_, r := setupTestAPI(t)
 
 	// Create a text ingest job (status=queued)
@@ -529,13 +531,75 @@ func TestIngestRetryNonFailedJob(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&createResp)
 	jobID := createResp.Job.ID
 
-	// Try to retry a queued job — should fail
+	// Cancel the queued job
+	cancelReq := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/"+jobID+"/cancel", nil)
+	cancelW := httptest.NewRecorder()
+	r.ServeHTTP(cancelW, cancelReq)
+	if cancelW.Code != http.StatusOK {
+		t.Fatalf("cancel: expected 200, got %d; body=%s", cancelW.Code, cancelW.Body.String())
+	}
+
+	// Retry the cancelled job — should succeed (Restart flow)
+	retryReq := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/"+jobID+"/retry", nil)
+	retryW := httptest.NewRecorder()
+	r.ServeHTTP(retryW, retryReq)
+
+	if retryW.Code != http.StatusCreated {
+		t.Fatalf("retry cancelled job: expected 201, got %d; body=%s", retryW.Code, retryW.Body.String())
+	}
+
+	var retryResp ingestJobResponse
+	json.NewDecoder(retryW.Body).Decode(&retryResp)
+	if retryResp.Job == nil {
+		t.Fatal("expected retry job to be created")
+	}
+	if retryResp.Job.ParentJobID != jobID {
+		t.Fatalf("parent_job_id = %q, want %q", retryResp.Job.ParentJobID, jobID)
+	}
+	if retryResp.Job.Status != "queued" {
+		t.Fatalf("retry status = %q, want queued", retryResp.Job.Status)
+	}
+}
+
+func TestIngestRetryNonFailedJob(t *testing.T) {
+	api, r := setupTestAPI(t)
+
+	// Create a text ingest job (status=queued)
+	body, _ := json.Marshal(map[string]interface{}{
+		"content":  "test content",
+		"filename": "test.md",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/text", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d", w.Code)
+	}
+
+	var createResp ingestJobResponse
+	json.NewDecoder(w.Body).Decode(&createResp)
+	jobID := createResp.Job.ID
+
+	// Try to retry a queued job — should fail with 400
 	retryReq := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/"+jobID+"/retry", nil)
 	retryW := httptest.NewRecorder()
 	r.ServeHTTP(retryW, retryReq)
 
 	if retryW.Code != http.StatusBadRequest {
 		t.Fatalf("retry queued job: expected 400, got %d; body=%s", retryW.Code, retryW.Body.String())
+	}
+
+	// Mark the job as succeeded (via direct DB update) and verify retry still returns 400
+	if err := api.db.UpdateIngestJobStatus(jobID, "succeeded"); err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+	retryReq2 := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/"+jobID+"/retry", nil)
+	retryW2 := httptest.NewRecorder()
+	r.ServeHTTP(retryW2, retryReq2)
+	if retryW2.Code != http.StatusBadRequest {
+		t.Fatalf("retry succeeded job: expected 400, got %d; body=%s", retryW2.Code, retryW2.Body.String())
 	}
 }
 
@@ -745,6 +809,172 @@ func TestE2EUploadIngestPartialSuccess(t *testing.T) {
 		if a.Status != "queued" {
 			t.Errorf("accepted file %q status = %q, want queued", a.Filename, a.Status)
 		}
+	}
+}
+
+func TestGetJobSourceTextFile(t *testing.T) {
+	api, r := setupTestAPI(t)
+
+	// Create a text ingest job first
+	body, _ := json.Marshal(map[string]interface{}{
+		"content":  "initial content",
+		"filename": "original.md",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/text", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d", w.Code)
+	}
+
+	var createResp ingestJobResponse
+	json.NewDecoder(w.Body).Decode(&createResp)
+	jobID := createResp.Job.ID
+
+	// Now create our test file and update the job's source_path to point to it
+	sourceDir := filepath.Join(api.workspace, "raw", "sources", "preview")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	sourceContent := "# Test Document\n\nHello world from source."
+	if err := os.WriteFile(filepath.Join(sourceDir, "test.md"), []byte(sourceContent), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	// Manually set source_path to point to our test file
+	api.db.DB().Exec(`UPDATE ingest_jobs SET source_path = ? WHERE id = ?`, "raw/sources/preview/test.md", jobID)
+
+	// Get source content
+	srcReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/"+jobID+"/source", nil)
+	srcW := httptest.NewRecorder()
+	r.ServeHTTP(srcW, srcReq)
+
+	if srcW.Code != http.StatusOK {
+		t.Fatalf("get source: expected 200, got %d; body=%s", srcW.Code, srcW.Body.String())
+	}
+
+	var srcResp map[string]string
+	json.NewDecoder(srcW.Body).Decode(&srcResp)
+	if srcResp["content"] != sourceContent {
+		t.Fatalf("content = %q, want %q", srcResp["content"], sourceContent)
+	}
+	if srcResp["filename"] != "test.md" {
+		t.Fatalf("filename = %q, want test.md", srcResp["filename"])
+	}
+}
+
+func TestGetJobSourceImageFile(t *testing.T) {
+	api, r := setupTestAPI(t)
+
+	// Create workspace source directory and a fake image file
+	sourceDir := filepath.Join(api.workspace, "raw", "sources")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	imageData := []byte{0x89, 0x50, 0x4E, 0x47} // PNG magic bytes
+	if err := os.WriteFile(filepath.Join(sourceDir, "test.png"), imageData, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	// Create a text ingest job to get a valid job ID
+	body, _ := json.Marshal(map[string]interface{}{
+		"content":  "hello",
+		"filename": "test.md",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/text", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var createResp ingestJobResponse
+	json.NewDecoder(w.Body).Decode(&createResp)
+	jobID := createResp.Job.ID
+
+	// Set source_path to the image
+	api.db.DB().Exec(`UPDATE ingest_jobs SET source_path = ? WHERE id = ?`, "raw/sources/test.png", jobID)
+
+	srcReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/"+jobID+"/source", nil)
+	srcW := httptest.NewRecorder()
+	r.ServeHTTP(srcW, srcReq)
+
+	if srcW.Code != http.StatusOK {
+		t.Fatalf("get source: expected 200, got %d; body=%s", srcW.Code, srcW.Body.String())
+	}
+	ct := srcW.Header().Get("Content-Type")
+	if ct != "image/png" {
+		t.Fatalf("content-type = %q, want image/png", ct)
+	}
+}
+
+func TestGetJobSourceNotFound(t *testing.T) {
+	_, r := setupTestAPI(t)
+
+	// Request source for non-existent job
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/nonexistent-id/source", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestGetJobSourceFileNotFoundOnDisk(t *testing.T) {
+	api, r := setupTestAPI(t)
+
+	// Create a text ingest job
+	body, _ := json.Marshal(map[string]interface{}{
+		"content":  "hello",
+		"filename": "test.md",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/text", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var createResp ingestJobResponse
+	json.NewDecoder(w.Body).Decode(&createResp)
+	jobID := createResp.Job.ID
+
+	// Set source_path to a file that doesn't exist
+	api.db.DB().Exec(`UPDATE ingest_jobs SET source_path = ? WHERE id = ?`, "raw/sources/nonexistent.md", jobID)
+
+	srcReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/"+jobID+"/source", nil)
+	srcW := httptest.NewRecorder()
+	r.ServeHTTP(srcW, srcReq)
+
+	if srcW.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d; body=%s", srcW.Code, srcW.Body.String())
+	}
+}
+
+func TestGetJobSourcePathTraversal(t *testing.T) {
+	api, r := setupTestAPI(t)
+
+	// Create a text ingest job
+	body, _ := json.Marshal(map[string]interface{}{
+		"content":  "hello",
+		"filename": "test.md",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/text", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var createResp ingestJobResponse
+	json.NewDecoder(w.Body).Decode(&createResp)
+	jobID := createResp.Job.ID
+
+	// Set source_path with path traversal
+	api.db.DB().Exec(`UPDATE ingest_jobs SET source_path = ? WHERE id = ?`, "../../../etc/passwd", jobID)
+
+	srcReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/"+jobID+"/source", nil)
+	srcW := httptest.NewRecorder()
+	r.ServeHTTP(srcW, srcReq)
+
+	if srcW.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for path traversal, got %d; body=%s", srcW.Code, srcW.Body.String())
 	}
 }
 

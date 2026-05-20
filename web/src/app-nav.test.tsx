@@ -3,6 +3,7 @@ import { render, screen, fireEvent, within } from "@testing-library/react"
 import App from "@/App"
 
 vi.mock("@/lib/api", () => ({
+  getPublicWikiStatus: vi.fn().mockResolvedValue({ enabled: false }),
   listDocuments: vi.fn().mockResolvedValue([]),
   listIngestJobs: vi.fn().mockResolvedValue([]),
   listIngestSessions: vi.fn().mockResolvedValue({ sessions: [] }),
@@ -57,6 +58,7 @@ vi.mock("@/lib/api", () => ({
   createTextIngestJob: vi.fn(),
   uploadIngestJobs: vi.fn(),
   listProviders: vi.fn().mockResolvedValue([]),
+  getVCStatus: vi.fn().mockResolvedValue({ enabled: false }),
 }))
 
 describe("App navigation", () => {
@@ -81,5 +83,8 @@ describe("App navigation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Jobs" }))
     expect(await screen.findByText("暂无摄入任务")).toBeInTheDocument()
+
+    const wikiLink = screen.getByRole("link", { name: "Wiki" })
+    expect(wikiLink).toHaveAttribute("href", "/wiki")
   })
 })

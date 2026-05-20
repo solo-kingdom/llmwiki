@@ -15,7 +15,10 @@ import type {
   Provider,
   ProviderInstance,
   ModelInfo,
+  PublicWikiDocument,
   SessionListItem,
+  VCStatus,
+  VCLogEntry,
 } from "@/types"
 
 const BASE = ""
@@ -52,6 +55,29 @@ export function searchDocuments(
 ): Promise<SearchResponse> {
   return request<SearchResponse>(
     `/api/v1/search/?q=${encodeURIComponent(q)}&limit=${limit}`,
+  )
+}
+
+export function getPublicWikiStatus(): Promise<{ enabled: boolean }> {
+  return request<{ enabled: boolean }>("/api/public/wiki/status")
+}
+
+export function listPublicDocuments(): Promise<DocumentListItem[]> {
+  return request<DocumentListItem[]>("/api/public/wiki/documents")
+}
+
+export function getPublicDocument(id: string): Promise<PublicWikiDocument> {
+  return request<PublicWikiDocument>(
+    `/api/public/wiki/documents/${encodeURIComponent(id)}`,
+  )
+}
+
+export function searchPublicWiki(
+  q: string,
+  limit = 10,
+): Promise<SearchResponse> {
+  return request<SearchResponse>(
+    `/api/public/wiki/search?q=${encodeURIComponent(q)}&limit=${limit}`,
   )
 }
 
@@ -144,6 +170,21 @@ export function cancelIngestJob(id: string): Promise<{ status: string; message?:
     `/api/v1/ingest/jobs/${encodeURIComponent(id)}/cancel`,
     { method: "POST" },
   )
+}
+
+export interface SourceContentResponse {
+  content: string
+  filename: string
+}
+
+export function getSourceContent(id: string): Promise<SourceContentResponse> {
+  return request<SourceContentResponse>(
+    `/api/v1/ingest/jobs/${encodeURIComponent(id)}/source`,
+  )
+}
+
+export function getSourceUrl(id: string): string {
+  return `/api/v1/ingest/jobs/${encodeURIComponent(id)}/source`
 }
 
 export function getCapabilities(): Promise<CapabilitiesResponse> {
@@ -351,6 +392,48 @@ export function updateIngestSession(
     {
       method: "PATCH",
       body: JSON.stringify(patch),
+    },
+  )
+}
+
+// Version Control API
+
+export function initVC(): Promise<{
+  status: string
+  commit_sha?: string
+  commit_count: number
+}> {
+  return request("/api/v1/vcs/init", { method: "POST" })
+}
+
+export function getVCStatus(): Promise<VCStatus> {
+  return request<VCStatus>("/api/v1/vcs/status")
+}
+
+export function disableVC(): Promise<{ status: string; message: string }> {
+  return request<{ status: string; message: string }>("/api/v1/vcs/disable", {
+    method: "POST",
+  })
+}
+
+export function getVCLog(limit = 50): Promise<VCLogEntry[]> {
+  return request<VCLogEntry[]>(`/api/v1/vcs/log?limit=${limit}`)
+}
+
+export function getVCDiff(sha: string): Promise<{ sha: string; diff: string }> {
+  return request<{ sha: string; diff: string }>(
+    `/api/v1/vcs/diff/${encodeURIComponent(sha)}`,
+  )
+}
+
+export function createRollback(
+  commitSHA: string,
+): Promise<{ status: string; job: IngestJob }> {
+  return request<{ status: string; job: IngestJob }>(
+    "/api/v1/ingest/rollback",
+    {
+      method: "POST",
+      body: JSON.stringify({ commit_sha: commitSHA }),
     },
   )
 }

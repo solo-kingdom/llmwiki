@@ -9,6 +9,7 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/vcs"
 )
 
 // mockLLMClient is a test double for the LLM client that returns canned responses.
@@ -542,5 +543,123 @@ func TestRetryOnlyFailedJobs(t *testing.T) {
 	_, err = db.RetryIngestJob(job.ID)
 	if err == nil {
 		t.Fatal("expected error when retrying non-failed job")
+	}
+}
+
+func TestProcessorWithGitCommit(t *testing.T) {
+	if !vcs.IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Set up workspace with git repo
+	ws := t.TempDir()
+	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
+	os.MkdirAll(filepath.Join(ws, "raw", "sources", "web-ingest"), 0o755)
+
+	repo, err := vcs.InitRepo(ws)
+	if err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	// Create a source file
+	sourceContent := []byte("# Test\nHello world")
+	os.WriteFile(filepath.Join(ws, "raw", "sources", "web-ingest", "test.md"), sourceContent, 0o644)
+
+	processor := NewJobProcessor(db, ws, nil)
+	processor.SetGitRepo(repo)
+
+	// Create a running job
+	job := &sqlite.IngestJob{
+		InputType:  "text",
+		SourcePath: "raw/sources/web-ingest/test.md",
+		SourceRef:  "text",
+		Status:     "running",
+		MaxRetries: 3,
+	}
+	if err := db.CreateIngestJob(job); err != nil {
+		t.Fatalf("CreateIngestJob: %v", err)
+	}
+
+	// Run pipeline - will fail because LLM client is nil, but the job should be
+	// marked as failed with pipeline_error, not commit_failed
+	err = processor.RunPipelineForJob(context.Background(), job)
+	if err == nil {
+		t.Fatal("expected error with nil LLM client")
+	}
+
+	failed, _ := db.GetIngestJob(job.ID)
+	if failed.ErrorCode == "commit_failed" {
+		t.Error("should not be commit_failed since pipeline failed first")
+	}
+}
+
+func TestProcessorWithoutGitCommit(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	ws := t.TempDir()
+	processor := NewJobProcessor(db, ws, nil)
+	// No git repo set - version control disabled
+
+	// Create a running job
+	job := &sqlite.IngestJob{
+		InputType:  "text",
+		SourcePath: "raw/sources/web-ingest/test.md",
+		SourceRef:  "text",
+		Status:     "running",
+		MaxRetries: 3,
+	}
+	if err := db.CreateIngestJob(job); err != nil {
+		t.Fatalf("CreateIngestJob: %v", err)
+	}
+
+	// Run pipeline should fail at LLM call (nil client), not at git
+	err = processor.RunPipelineForJob(context.Background(), job)
+	if err == nil {
+		t.Fatal("expected error with nil LLM client")
+	}
+}
+
+func TestProcessorSetGitRepo(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	ws := t.TempDir()
+	processor := NewJobProcessor(db, ws, nil)
+
+	// Should be nil initially
+	if processor.gitRepo != nil {
+		t.Error("expected nil gitRepo initially")
+	}
+
+	// Set to non-nil
+	repo := vcs.NewGitRepo(ws)
+	processor.SetGitRepo(repo)
+	if processor.gitRepo == nil {
+		t.Error("expected non-nil gitRepo after SetGitRepo")
+	}
+
+	// Set back to nil
+	processor.SetGitRepo(nil)
+	if processor.gitRepo != nil {
+		t.Error("expected nil gitRepo after setting nil")
 	}
 }

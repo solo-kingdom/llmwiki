@@ -12,6 +12,7 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/vcs"
 )
 
 // JobProcessor polls the database for queued ingest jobs and runs them
@@ -20,6 +21,7 @@ type JobProcessor struct {
 	db        *sqlite.DB
 	workspace string
 	pipeline  *Pipeline
+	gitRepo   *vcs.GitRepo // nil if version control is not enabled
 	stop      chan struct{}
 }
 
@@ -32,6 +34,12 @@ func NewJobProcessor(db *sqlite.DB, workspace string, llmClient *llm.Client) *Jo
 		pipeline:  NewPipeline(workspace, llmClient),
 		stop:      make(chan struct{}),
 	}
+}
+
+// SetGitRepo sets the git repo handle for version control.
+// Pass nil to disable version control commits.
+func (p *JobProcessor) SetGitRepo(repo *vcs.GitRepo) {
+	p.gitRepo = repo
 }
 
 // Start begins the background processing loop. It polls every pollInterval.
@@ -82,6 +90,16 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		return fmt.Errorf("no queued jobs")
 	}
 
+	// Check if this is a rollback job
+	if job.InputType == "rollback" {
+		return p.processRollbackJob(ctx, job)
+	}
+
+	// Check if this is a commit_failed retry — skip pipeline, just redo git commit
+	if job.ErrorCode == "commit_failed" {
+		return p.retryCommitOnly(job)
+	}
+
 	normalized, err := NormalizeJobSource(p.workspace, job.InputType, job.SourcePath, job.SourceRef)
 	if err != nil {
 		return p.failJob(job.ID, "normalize_failed",
@@ -95,6 +113,25 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		return p.failJob(job.ID, errCode, err.Error(), "", remediationForCode(errCode))
 	}
 
+	// Git commit (if version control is enabled)
+	if p.gitRepo != nil {
+		commitMsg := vcs.BuildCommitMessage(
+			filepath.Base(normalized.CanonicalPath),
+			job.ID,
+			job.InputType,
+			string(normalized.Content),
+		)
+		sha, err := p.gitRepo.AddCommit(commitMsg)
+		if err != nil {
+			return p.failJob(job.ID, "commit_failed",
+				fmt.Sprintf("git commit failed: %v", err), "", "")
+		}
+		// Store last commit SHA
+		if sha != "" {
+			_ = p.db.SetVCLastCommit(sha)
+		}
+	}
+
 	// Mark job succeeded with result summary
 	summary := fmt.Sprintf("generated %d wiki page(s)", len(files))
 	if _, updateErr := p.db.DB().Exec(`
@@ -106,6 +143,42 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 
 	return nil
 }
+
+// retryCommitOnly retries only the git commit for a job that previously failed at the commit stage.
+func (p *JobProcessor) retryCommitOnly(job *sqlite.IngestJob) error {
+	if p.gitRepo == nil {
+		// Version control was disabled, just mark as succeeded
+		_, err := p.db.DB().Exec(`
+			UPDATE ingest_jobs
+			SET status = 'succeeded', updated_at = datetime('now')
+			WHERE id = ?`, job.ID)
+		return err
+	}
+
+	commitMsg := vcs.BuildCommitMessage(
+		filepath.Base(job.SourcePath),
+		job.ID,
+		"upload", // retry jobs may not preserve original input_type; use a default
+		"",
+	)
+	sha, err := p.gitRepo.AddCommit(commitMsg)
+	if err != nil {
+		return p.failJob(job.ID, "commit_failed",
+			fmt.Sprintf("git commit retry failed: %v", err), "", "")
+	}
+	if sha != "" {
+		_ = p.db.SetVCLastCommit(sha)
+	}
+
+	_, updateErr := p.db.DB().Exec(`
+		UPDATE ingest_jobs
+		SET status = 'succeeded', result_summary = 'commit retry succeeded', updated_at = datetime('now')
+		WHERE id = ?`, job.ID)
+	return updateErr
+}
+
+// Ensure JobProcessor uses sql.DB through the sqlite.DB accessor.
+var _ = (*sql.DB)(nil)
 
 // claimNextJob atomically transitions the next queued job to "running".
 func (p *JobProcessor) claimNextJob() (*sqlite.IngestJob, error) {
@@ -198,6 +271,25 @@ func (p *JobProcessor) RunPipelineForJob(ctx context.Context, job *sqlite.Ingest
 		return err
 	}
 
+	// Git commit (if version control is enabled)
+	if p.gitRepo != nil {
+		commitMsg := vcs.BuildCommitMessage(
+			filepath.Base(normalized.CanonicalPath),
+			job.ID,
+			job.InputType,
+			string(normalized.Content),
+		)
+		sha, commitErr := p.gitRepo.AddCommit(commitMsg)
+		if commitErr != nil {
+			_ = p.failJob(job.ID, "commit_failed",
+				fmt.Sprintf("git commit failed: %v", commitErr), "", "")
+			return commitErr
+		}
+		if sha != "" {
+			_ = p.db.SetVCLastCommit(sha)
+		}
+	}
+
 	summary := fmt.Sprintf("generated %d wiki page(s)", len(files))
 	_, updateErr := p.db.DB().Exec(`
 		UPDATE ingest_jobs
@@ -246,6 +338,3 @@ func remediationForCode(code string) string {
 		return ""
 	}
 }
-
-// Ensure JobProcessor uses sql.DB through the sqlite.DB accessor.
-var _ = (*sql.DB)(nil)

@@ -33,11 +33,19 @@ The system SHALL expose APIs to query ingest job status and results using a stab
 - **THEN** system SHALL return structured failure details including error code, message, and remediation hint when applicable
 
 ### Requirement: Retry and cancellation controls
-The system SHALL provide operational controls for retrying failed jobs and cancelling pending/running jobs within supported boundaries.
+The system SHALL provide operational controls for retrying failed and cancelled jobs and cancelling pending/running jobs within supported boundaries.
 
 #### Scenario: Retry failed job
 - **WHEN** client issues retry for a failed job
 - **THEN** system SHALL create a new job attempt linked to the original job lineage
+
+#### Scenario: Retry cancelled job (Restart)
+- **WHEN** client issues retry for a cancelled job
+- **THEN** system SHALL create a new job attempt linked to the original job lineage, preserving the cancellation history
+
+#### Scenario: Retry unsupported status
+- **WHEN** client issues retry for a job in queued, running, or succeeded status
+- **THEN** system SHALL return a 400 error with message indicating only failed and cancelled jobs can be retried
 
 #### Scenario: Cancel queued job
 - **WHEN** client cancels a job in `queued` state
@@ -46,3 +54,49 @@ The system SHALL provide operational controls for retrying failed jobs and cance
 #### Scenario: Cancel unsupported running stage
 - **WHEN** client cancels a running job stage that does not support interruption
 - **THEN** system SHALL return a deterministic response indicating cancellation is deferred or unsupported for the current stage
+
+### Requirement: Job source file API
+The system SHALL provide an API endpoint to read the source file associated with an ingest job.
+
+#### Scenario: Read text source file
+- **WHEN** client requests `GET /api/v1/ingest/jobs/{id}/source` for a job whose `source_path` has `.md` or `.txt` extension
+- **THEN** system SHALL return JSON `{ content: string, filename: string }` with the file's text content
+
+#### Scenario: Read image source file
+- **WHEN** client requests `GET /api/v1/ingest/jobs/{id}/source` for a job whose `source_path` has an image extension
+- **THEN** system SHALL return the binary file content with the appropriate `Content-Type` header
+
+#### Scenario: Job not found
+- **WHEN** client requests source for a non-existent job ID
+- **THEN** system SHALL return HTTP 404
+
+#### Scenario: Source file not found on disk
+- **WHEN** client requests source for a job whose `source_path` file has been deleted from disk
+- **THEN** system SHALL return HTTP 404 with a descriptive error message
+
+#### Scenario: Path traversal prevention
+- **WHEN** a job's `source_path` contains `..` components or resolves outside the workspace directory
+- **THEN** system SHALL return HTTP 400 with a security error message
+
+## ADDED Requirements
+
+### Requirement: Rollback job 创建端点
+系统 SHALL 提供 HTTP API 用于创建 rollback job。
+
+#### Scenario: 创建 rollback job
+- **WHEN** 客户端发送 `POST /api/v1/ingest/rollback` 请求，body 包含 `commit_sha`
+- **THEN** 系统 SHALL 验证 commit SHA 有效且为 ingest 类型 commit
+- **AND** 创建 `input_type = 'rollback'` 的 job，`source_ref` 存储 commit SHA
+- **AND** 返回创建的 job 信息
+
+#### Scenario: 无效 commit SHA
+- **WHEN** 请求的 commit SHA 不存在
+- **THEN** 系统 SHALL 返回 404 错误
+
+#### Scenario: Rollback commit 不可回滚
+- **WHEN** 目标 commit 是 rollback 类型（非 ingest 产生）
+- **THEN** 系统 SHALL 返回 400 错误，提示该 commit 不支持回滚
+
+#### Scenario: 版本控制未启用
+- **WHEN** workspace 未启用版本控制
+- **THEN** 系统 SHALL 返回 400 错误，提示需先启用版本控制

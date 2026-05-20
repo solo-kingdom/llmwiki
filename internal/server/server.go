@@ -27,14 +27,15 @@ var WebAssets fs.FS
 
 // Config holds the server configuration.
 type Config struct {
-	BindAddr  string
-	Port      int
-	Token     string
-	NoMCP     bool
-	NoWatch   bool
-	Workspace string
-	DB        *sqlite.DB
-	LockMgr   *ingest.PageLockManager
+	BindAddr    string
+	Port        int
+	Token       string
+	PublicWiki  bool
+	NoMCP       bool
+	NoWatch     bool
+	Workspace   string
+	DB          *sqlite.DB
+	LockMgr     *ingest.PageLockManager
 }
 
 // Server is the LLM Wiki HTTP server.
@@ -61,6 +62,7 @@ func New(cfg Config) *Server {
 	if cfg.LockMgr != nil {
 		srv.api.SetLockManager(cfg.LockMgr)
 	}
+	srv.api.SetPublicWikiEnabled(cfg.PublicWiki)
 	return srv
 }
 
@@ -98,9 +100,17 @@ func (s *Server) Start() error {
 		MaxAge:           300,
 	}))
 
-	// Optional token auth
+	// Public wiki read-only API (no management token required when enabled)
+	r.Route("/api/public/wiki", func(r chi.Router) {
+		r.Get("/status", s.api.PublicWikiStatus)
+		r.Get("/documents", s.api.ListPublicWikiDocuments)
+		r.Get("/documents/{id}", s.api.GetPublicWikiDocument)
+		r.Get("/search", s.api.SearchPublicWiki)
+	})
+
+	// Optional token auth for management APIs
 	if s.config.Token != "" {
-		r.Use(authMiddleware(s.config.Token))
+		r.Use(authMiddleware(s.config.Token, s.config.PublicWiki))
 	}
 
 	// API routes
@@ -136,6 +146,13 @@ func (s *Server) Start() error {
 		r.Put("/settings/last-model", s.api.UpdateLastModel)
 		r.Get("/capabilities", s.api.GetCapabilities)
 
+		// Version Control
+		r.Post("/vcs/init", s.api.VCSInit)
+		r.Get("/vcs/status", s.api.VCSStatus)
+		r.Post("/vcs/disable", s.api.VCSDisable)
+		r.Get("/vcs/log", s.api.VCSLog)
+		r.Get("/vcs/diff/{sha}", s.api.VCSDiff)
+
 		r.Get("/providers", s.api.ListProviders)
 		r.Get("/providers/{id}/models", s.api.ListProviderModels)
 
@@ -148,6 +165,7 @@ func (s *Server) Start() error {
 		})
 
 		r.Route("/ingest", func(r chi.Router) {
+			r.Post("/rollback", s.api.VCSRollback)
 			r.Route("/sessions", func(r chi.Router) {
 				r.Get("/", s.api.ListIngestSessionsHandler)
 				r.Post("/", s.api.CreateIngestSession)
@@ -161,6 +179,7 @@ func (s *Server) Start() error {
 			r.Route("/jobs", func(r chi.Router) {
 				r.Get("/", s.api.ListIngestJobs)
 				r.Get("/{id}", s.api.GetIngestJob)
+				r.Get("/{id}/source", s.api.GetJobSource)
 				r.Post("/{id}/retry", s.api.RetryIngestJob)
 				r.Post("/{id}/cancel", s.api.CancelIngestJob)
 				r.Post("/{id}/fail", s.api.MarkIngestJobFailed)
@@ -247,10 +266,14 @@ func (s *Server) spaHandler() http.HandlerFunc {
 }
 
 // authMiddleware provides optional token-based authentication.
-func authMiddleware(token string) func(http.Handler) http.Handler {
+func authMiddleware(token string, publicWiki bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/api/v1/health" {
+			if r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/public/wiki/status" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if publicWiki && strings.HasPrefix(r.URL.Path, "/api/public/wiki/") {
 				next.ServeHTTP(w, r)
 				return
 			}

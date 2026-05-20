@@ -67,6 +67,7 @@ func New(workspace string, handler ChangeHandler) (*Watcher, error) {
 			"__pycache__":  true,
 			".venv":       true,
 			"venv":        true,
+			"revert":      true,
 		},
 		done: make(chan struct{}),
 	}, nil

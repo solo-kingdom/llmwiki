@@ -23,6 +23,37 @@ func (d *DB) SetConfig(key, value string) error {
 	return err
 }
 
+// VCConfig holds version control configuration.
+type VCConfig struct {
+	Enabled    bool   `json:"enabled"`
+	LastCommit string `json:"last_commit"`
+}
+
+// GetVCConfig reads version control configuration from app_config.
+func (d *DB) GetVCConfig() VCConfig {
+	val, _ := d.GetConfig("vc_enabled")
+	enabled := val == "true" || val == "1"
+	lastCommit, _ := d.GetConfig("vc_last_commit")
+	return VCConfig{
+		Enabled:    enabled,
+		LastCommit: lastCommit,
+	}
+}
+
+// SetVCEnabled updates the version control enabled flag.
+func (d *DB) SetVCEnabled(enabled bool) error {
+	val := "false"
+	if enabled {
+		val = "true"
+	}
+	return d.SetConfig("vc_enabled", val)
+}
+
+// SetVCLastCommit updates the last commit SHA.
+func (d *DB) SetVCLastCommit(sha string) error {
+	return d.SetConfig("vc_last_commit", sha)
+}
+
 // GetAllConfig reads all config values from app_config table.
 func (d *DB) GetAllConfig() (map[string]string, error) {
 	rows, err := d.db.Query(`SELECT key, value FROM app_config`)

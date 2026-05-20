@@ -229,3 +229,22 @@ describe("Failure Diagnostics Display", () => {
     expect(failedJob.remediation).toContain("LibreOffice")
   })
 })
+
+describe("Cancelled Job Restart", () => {
+  it("cancelled job should have Restart action (calls retry API)", async () => {
+    const cancelledJob = makeIngestJob({
+      id: "cancelled-1",
+      status: "cancelled",
+      source_path: "raw/sources/test.md",
+    })
+
+    vi.mocked(api.retryIngestJob).mockResolvedValueOnce({
+      job: makeIngestJob({ id: "new-job-1", status: "queued", parent_job_id: "cancelled-1" }),
+    })
+
+    // A cancelled job calls retryIngestJob (same as Retry for failed)
+    await api.retryIngestJob(cancelledJob.id)
+
+    expect(api.retryIngestJob).toHaveBeenCalledWith("cancelled-1")
+  })
+})

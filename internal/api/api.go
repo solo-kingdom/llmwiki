@@ -14,9 +14,10 @@ import (
 )
 
 type API struct {
-	db        *sqlite.DB
-	workspace string // workspace root directory for file-first writes
-	lockMgr   *ingest.PageLockManager
+	db                 *sqlite.DB
+	workspace          string // workspace root directory for file-first writes
+	lockMgr            *ingest.PageLockManager
+	publicWikiEnabled  bool
 }
 
 func New(db *sqlite.DB) *API {
@@ -33,6 +34,11 @@ func (a *API) SetWorkspace(ws string) {
 // SetLockManager sets the page-level lock manager for same-page serialization.
 func (a *API) SetLockManager(lm *ingest.PageLockManager) {
 	a.lockMgr = lm
+}
+
+// SetPublicWikiEnabled enables or disables public read-only wiki API routes.
+func (a *API) SetPublicWikiEnabled(enabled bool) {
+	a.publicWikiEnabled = enabled
 }
 
 // sessionLLMClient creates an LLM client for the given session.

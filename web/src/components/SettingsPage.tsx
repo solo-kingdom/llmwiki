@@ -9,9 +9,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import type { Settings } from "@/types"
+import type { Settings, VCStatus } from "@/types"
 import { PageContainer } from "@/components/PageContainer"
-import { Key, Plus, Pencil, Trash2, X, ExternalLink } from "lucide-react"
+import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff } from "lucide-react"
+import { initVC, getVCStatus, disableVC } from "@/lib/api"
 
 type AddFormState = {
   mode: false
@@ -64,12 +65,50 @@ export function SettingsPage() {
   const [addForm, setAddForm] = useState<AddFormState>({ mode: false })
   const [editForm, setEditForm] = useState<EditFormState>({ mode: false })
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>(null)
+  const [vcStatus, setVCStatus] = useState<VCStatus | null>(null)
+  const [vcLoading, setVCLoading] = useState(false)
+  const [vcDisableConfirm, setVCDisableConfirm] = useState(false)
 
   useEffect(() => {
     void loadSettings()
     void loadProviders()
     void loadInstances()
+    void loadVCStatus()
   }, [loadSettings, loadProviders, loadInstances])
+
+  const loadVCStatus = async () => {
+    try {
+      const status = await getVCStatus()
+      setVCStatus(status)
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleVCInit = async () => {
+    setVCLoading(true)
+    try {
+      await initVC()
+      await loadVCStatus()
+    } catch (err) {
+      console.error("VC init failed:", err)
+    } finally {
+      setVCLoading(false)
+    }
+  }
+
+  const handleVCDisable = async () => {
+    setVCLoading(true)
+    try {
+      await disableVC()
+      setVCDisableConfirm(false)
+      await loadVCStatus()
+    } catch (err) {
+      console.error("VC disable failed:", err)
+    } finally {
+      setVCLoading(false)
+    }
+  }
 
   const mergedForm = useMemo(() => {
     if (form) return form
@@ -513,6 +552,91 @@ export function SettingsPage() {
                 Watch Sources
               </label>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <GitBranch className="size-4" />
+              Version Control
+            </CardTitle>
+            <CardDescription>
+              管理 wiki 版本历史、查看变更差异和回滚操作
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!vcStatus?.enabled ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <ShieldOff className="size-4" />
+                  <span>Not Enabled</span>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={handleVCInit}
+                  disabled={vcLoading || !vcStatus?.git_available}
+                >
+                  {vcLoading ? "Initializing..." : "Enable Version Control"}
+                </Button>
+                {vcStatus && !vcStatus.git_available && (
+                  <p className="text-xs text-amber-600">
+                    Git is not installed. Please install git to enable version control.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
+                    Active
+                  </span>
+                  <span className="text-muted-foreground">
+                    {vcStatus.commit_count} commit{vcStatus.commit_count !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <div>Tracked: <code className="bg-muted px-1 rounded">{vcStatus.tracked_dirs.join(", ")}</code></div>
+                  <div>Excluded: <code className="bg-muted px-1 rounded">{vcStatus.excluded_dirs.join(", ")}</code></div>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      window.location.hash = "#timeline"
+                      // Navigate to timeline tab
+                      const event = new CustomEvent("navigate", { detail: "timeline" })
+                      window.dispatchEvent(event)
+                    }}
+                  >
+                    <History className="size-3.5 mr-1" />
+                    View History
+                  </Button>
+                  {!vcDisableConfirm ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setVCDisableConfirm(true)}
+                    >
+                      Disable
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-muted-foreground">
+                        禁用将保留 .git 目录但停止自动提交
+                      </span>
+                      <Button size="sm" variant="destructive" onClick={handleVCDisable} disabled={vcLoading}>
+                        {vcLoading ? "Disabling..." : "Confirm Disable"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setVCDisableConfirm(false)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 

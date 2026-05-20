@@ -297,8 +297,8 @@ func (d *DB) RetryIngestJob(id string) (*IngestJob, error) {
 	if original == nil {
 		return nil, nil
 	}
-	if original.Status != "failed" {
-		return nil, fmt.Errorf("only failed jobs can be retried")
+	if original.Status != "failed" && original.Status != "cancelled" {
+		return nil, fmt.Errorf("only failed and cancelled jobs can be retried")
 	}
 
 	retry := &IngestJob{

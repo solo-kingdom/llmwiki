@@ -5,12 +5,24 @@ import { cn } from "@/lib/utils"
 interface DocumentOutlineProps {
   items: OutlineItem[]
   className?: string
+  variant?: "classic" | "reader"
 }
 
-export function DocumentOutline({ items, className }: DocumentOutlineProps) {
+export function DocumentOutline({
+  items,
+  className,
+  variant = "classic",
+}: DocumentOutlineProps) {
+  const isReader = variant === "reader"
   if (items.length === 0) {
     return (
-      <div className={cn("flex h-full flex-col bg-card", className)}>
+      <div
+        className={cn(
+          "flex h-full flex-col",
+          isReader ? "" : "bg-card",
+          className,
+        )}
+      >
         <div className="border-b px-3 py-2 text-sm font-medium text-muted-foreground">
           大纲
         </div>
@@ -27,7 +39,13 @@ export function DocumentOutline({ items, className }: DocumentOutlineProps) {
   }
 
   return (
-    <div className={cn("flex h-full flex-col border-l bg-card", className)}>
+    <div
+      className={cn(
+        "flex h-full flex-col",
+        isReader ? "" : "border-l bg-card",
+        className,
+      )}
+    >
       <div className="shrink-0 border-b px-3 py-2 text-sm font-medium text-muted-foreground">
         大纲
       </div>

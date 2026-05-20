@@ -40,6 +40,10 @@
     --color-foreground: var(--foreground);
     --color-background: var(--background);
     --color-header-bg: var(--header-bg);
+    --color-point: var(--point);
+    --color-point-foreground: var(--point-foreground);
+    --color-point-soft: var(--point-soft);
+    --color-point-border: var(--point-border);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -51,6 +55,10 @@
 
 :root {
     --header-bg: oklch(0.98 0.012 80);
+    --point: oklch(0.72 0.10 158);
+    --point-foreground: oklch(0.16 0.02 160);
+    --point-soft: oklch(0.76 0.10 158 / 0.18);
+    --point-border: oklch(0.76 0.10 158 / 0.35);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -87,6 +95,10 @@
 
 .dark {
     --header-bg: oklch(0.22 0.012 80);
+    --point: oklch(0.78 0.12 160);
+    --point-foreground: oklch(0.12 0.02 160);
+    --point-soft: oklch(0.78 0.12 160 / 0.22);
+    --point-border: oklch(0.78 0.12 160 / 0.40);
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -130,4 +142,92 @@
   html {
     @apply font-sans;
     }
+}
+
+.wiki-scrollbar-hidden {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.wiki-scrollbar-hidden::-webkit-scrollbar {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+
+.wiki-scrollbar-hidden::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+.wiki-prose :where(:not(pre) > code):not(:where([class~="not-prose"] *)) {
+  padding: 0.2em 0.4em;
+  font-size: 85%;
+  border-radius: 6px;
+  background-color: oklch(0.95 0 0);
+  color: #d73a49;
+}
+
+.dark .wiki-prose :where(:not(pre) > code):not(:where([class~="not-prose"] *)) {
+  background-color: oklch(0.25 0 0);
+  color: #ff7b72;
+}
+
+.wiki-prose :where(:not(pre) > code):not(:where([class~="not-prose"] *))::before,
+.wiki-prose :where(:not(pre) > code):not(:where([class~="not-prose"] *))::after {
+  content: none;
+}
+
+.wiki-prose {
+  line-height: 1.75;
+  color: var(--foreground);
+}
+
+.wiki-prose h1,
+.wiki-prose h2,
+.wiki-prose h3,
+.wiki-prose h4 {
+  font-weight: 600;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  scroll-margin-top: 5rem;
+}
+
+.wiki-prose h1 { font-size: 1.875rem; }
+.wiki-prose h2 { font-size: 1.5rem; }
+.wiki-prose h3 { font-size: 1.25rem; }
+
+.wiki-prose p {
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+
+.wiki-prose a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.wiki-prose pre {
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  background: color-mix(in oklch, var(--muted) 50%, transparent);
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.wiki-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.wiki-prose th,
+.wiki-prose td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+}
+
+.wiki-prose blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 1rem;
+  color: var(--muted-foreground);
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,6 +13,20 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
+
+var imageSourceExtensions = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".svg":  "image/svg+xml",
+}
+
+var textSourceExtensions = map[string]bool{
+	".md":  true,
+	".txt": true,
+}
 
 type createConversationIngestRequest struct {
 	Content   string `json:"content"`
@@ -404,4 +419,88 @@ func (a *API) MarkIngestJobFailed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, ingestJobResponse{Job: job})
+}
+
+func (a *API) GetJobSource(w http.ResponseWriter, r *http.Request) {
+	if !a.requireWorkspaceForIngest(w) {
+		return
+	}
+
+	id := getID(r)
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "missing job id")
+		return
+	}
+
+	job, err := a.db.GetIngestJob(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if job == nil {
+		writeError(w, http.StatusNotFound, "job not found")
+		return
+	}
+
+	sourcePath := strings.TrimSpace(job.SourcePath)
+	if sourcePath == "" {
+		writeError(w, http.StatusBadRequest, "job has no source path")
+		return
+	}
+
+	// Path traversal prevention
+	if strings.Contains(sourcePath, "..") {
+		writeError(w, http.StatusBadRequest, "source path contains invalid traversal components")
+		return
+	}
+
+	absPath := filepath.Join(a.workspace, sourcePath)
+	absPath = filepath.Clean(absPath)
+	if !strings.HasPrefix(absPath, filepath.Clean(a.workspace)+string(filepath.Separator)) && absPath != filepath.Clean(a.workspace) {
+		writeError(w, http.StatusBadRequest, "source path resolves outside workspace")
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(sourcePath))
+
+	// Image file: return binary stream
+	if contentType, ok := imageSourceExtensions[ext]; ok {
+		data, err := readFileBytes(absPath)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "source file not found")
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+		return
+	}
+
+	// Text file: return JSON { content, filename }
+	if textSourceExtensions[ext] {
+		data, err := readFileBytes(absPath)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "source file not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"content":  string(data),
+			"filename": filepath.Base(sourcePath),
+		})
+		return
+	}
+
+	writeError(w, http.StatusBadRequest, "unsupported source file type for preview")
+}
+
+func readFileBytes(path string) ([]byte, error) {
+	f, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(f)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }

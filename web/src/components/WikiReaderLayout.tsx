@@ -1,0 +1,254 @@
+import { useEffect, useRef, useState, type ReactNode } from "react"
+import { ChevronLeft, ChevronRight, List, Menu } from "lucide-react"
+import { Sidebar } from "@/components/Sidebar"
+import { DocumentViewer } from "@/components/DocumentViewer"
+import { DocumentOutline } from "@/components/DocumentOutline"
+import { WikiDocumentInfoBar } from "@/components/WikiDocumentInfo"
+import { Button } from "@/components/ui/button"
+import { Dialog } from "@base-ui/react/dialog"
+import { useWikiReader } from "@/context/WikiReaderContext"
+import { workbenchHref } from "@/lib/wiki-routes"
+import type { OutlineItem } from "@/types"
+import { cn } from "@/lib/utils"
+
+export function WikiReaderLayout() {
+  const { currentDoc, loading, publicWikiEnabled } = useWikiReader()
+  const [outline, setOutline] = useState<OutlineItem[]>([])
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [outlineCollapsed, setOutlineCollapsed] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [mobileOutlineOpen, setMobileOutlineOpen] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const scrollbarTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const hide = () => el.classList.add("wiki-scrollbar-hidden")
+    const show = () => el.classList.remove("wiki-scrollbar-hidden")
+    hide()
+
+    const onScroll = () => {
+      show()
+      if (scrollbarTimerRef.current) {
+        window.clearTimeout(scrollbarTimerRef.current)
+      }
+      scrollbarTimerRef.current = window.setTimeout(hide, 700)
+    }
+
+    el.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      el.removeEventListener("scroll", onScroll)
+      if (scrollbarTimerRef.current) {
+        window.clearTimeout(scrollbarTimerRef.current)
+      }
+    }
+  }, [currentDoc?.id, loading])
+
+  const hasOutline = outline.length > 0
+
+  return (
+    <div className="flex h-screen flex-col bg-background">
+      <header className="relative z-40 mx-4 mt-2 mb-2 flex h-12 shrink-0 items-center justify-between rounded-xl border border-border/70 bg-card/70 px-3 shadow-sm backdrop-blur-sm">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            onClick={() => setMobileMenuOpen(true)}
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+          <a href={workbenchHref()} className="text-lg font-bold text-point">
+            LLMWiki
+          </a>
+          {publicWikiEnabled && (
+            <span className="hidden rounded-md border border-point-border bg-point-soft px-2 py-0.5 text-xs text-point-foreground sm:inline">
+              公开阅读
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {hasOutline && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="lg:hidden"
+              onClick={() => setMobileOutlineOpen(true)}
+            >
+              <List className="h-4 w-4" />
+            </Button>
+          )}
+          <a
+            href={workbenchHref()}
+            className="inline-flex h-7 items-center rounded-lg border border-border bg-background px-2.5 text-sm font-medium hover:bg-muted"
+          >
+            管理工作台
+          </a>
+        </div>
+      </header>
+
+      <main className="relative flex min-h-0 flex-1 gap-4 overflow-hidden px-4 pb-4">
+        <aside
+          className={cn(
+            "hidden lg:flex h-full relative shrink-0 overflow-hidden transition-all duration-200 ease-out",
+            sidebarCollapsed ? "w-0 min-w-0" : "w-72 min-w-72",
+          )}
+        >
+          <div className="relative z-30 flex h-full w-full flex-col rounded-xl border border-border/70 bg-card/70 shadow-sm backdrop-blur-sm">
+            <Sidebar variant="reader" onSelect={() => setMobileMenuOpen(false)} />
+            <CollapseEdge
+              side="left"
+              onClick={() => setSidebarCollapsed(true)}
+              title="收起文件列表"
+              icon={<ChevronLeft className="h-3.5 w-3.5 text-muted-foreground" />}
+            />
+          </div>
+        </aside>
+
+        {sidebarCollapsed && (
+          <CollapseEdgeFloating
+            side="left"
+            onClick={() => setSidebarCollapsed(false)}
+            title="展开文件列表"
+            icon={<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+          />
+        )}
+
+        <div
+          className={cn(
+            "flex min-h-0 min-w-0 flex-1 flex-col",
+            sidebarCollapsed && "-ml-4",
+            outlineCollapsed && "-mr-4",
+          )}
+        >
+          {loading && !currentDoc ? (
+            <div className="flex flex-1 items-center justify-center rounded-xl border border-border/70 bg-card/70 text-muted-foreground shadow-sm backdrop-blur-sm">
+              加载中...
+            </div>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-point-border bg-card/70 shadow-sm backdrop-blur-sm">
+              {currentDoc && (
+                <div className="shrink-0 border-b border-border/70 bg-point-soft px-4 py-2">
+                  <WikiDocumentInfoBar doc={currentDoc} />
+                </div>
+              )}
+              <div
+                ref={scrollRef}
+                className="wiki-scrollbar wiki-scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-4"
+              >
+                <DocumentViewer
+                  variant="reader"
+                  onOutlineChange={setOutline}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {hasOutline && (
+          <aside
+            className={cn(
+              "hidden lg:flex h-full relative shrink-0 overflow-hidden transition-all duration-200 ease-out",
+              outlineCollapsed ? "w-0 min-w-0" : "w-72 min-w-72",
+            )}
+          >
+            <div className="relative z-30 flex h-full w-full flex-col rounded-xl border border-border/70 bg-card/70 shadow-sm backdrop-blur-sm">
+              <DocumentOutline items={outline} variant="reader" />
+              <CollapseEdge
+                side="right"
+                onClick={() => setOutlineCollapsed(true)}
+                title="收起目录"
+                icon={<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+              />
+            </div>
+          </aside>
+        )}
+
+        {hasOutline && outlineCollapsed && (
+          <CollapseEdgeFloating
+            side="right"
+            onClick={() => setOutlineCollapsed(false)}
+            title="展开目录"
+            icon={<ChevronLeft className="h-3.5 w-3.5 text-muted-foreground" />}
+          />
+        )}
+      </main>
+
+      <Dialog.Root open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/40 lg:hidden" />
+          <Dialog.Popup className="fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r bg-card shadow-lg lg:hidden">
+            <Sidebar variant="reader" onSelect={() => setMobileMenuOpen(false)} />
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={mobileOutlineOpen} onOpenChange={setMobileOutlineOpen}>
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/40 lg:hidden" />
+          <Dialog.Popup className="fixed inset-y-0 right-0 z-50 flex w-72 flex-col border-l bg-card shadow-lg lg:hidden">
+            <DocumentOutline items={outline} variant="reader" className="border-l-0" />
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </div>
+  )
+}
+
+function CollapseEdge({
+  side,
+  onClick,
+  title,
+  icon,
+}: {
+  side: "left" | "right"
+  onClick: () => void
+  title: string
+  icon: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "absolute top-1/2 z-50 flex h-11 w-4 -translate-y-1/2 items-center justify-center",
+        "cursor-pointer border border-border bg-card shadow-sm opacity-40 transition-all hover:w-5 hover:bg-accent hover:opacity-100",
+        side === "left" && "right-0 rounded-l-md",
+        side === "right" && "left-0 rounded-r-md",
+      )}
+      onClick={onClick}
+      title={title}
+    >
+      {icon}
+    </button>
+  )
+}
+
+function CollapseEdgeFloating({
+  side,
+  onClick,
+  title,
+  icon,
+}: {
+  side: "left" | "right"
+  onClick: () => void
+  title: string
+  icon: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "absolute top-1/2 z-50 hidden h-11 w-4 -translate-y-1/2 items-center justify-center lg:flex",
+        "cursor-pointer border border-border bg-card shadow-sm opacity-40 transition-all hover:w-5 hover:bg-accent hover:opacity-100",
+        side === "left" && "left-0 rounded-r-md",
+        side === "right" && "right-0 rounded-l-md",
+      )}
+      onClick={onClick}
+      title={title}
+    >
+      {icon}
+    </button>
+  )
+}

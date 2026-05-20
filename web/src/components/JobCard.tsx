@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button"
 import type { IngestJob } from "@/types"
+import { isPreviewable } from "@/components/SourcePreviewDialog"
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
@@ -24,15 +25,30 @@ export function JobCard({
   job,
   onRetry,
   onCancel,
+  onPreviewSource,
 }: {
   job: IngestJob
   onRetry: (id: string) => void
   onCancel: (id: string) => void
+  onPreviewSource?: (job: IngestJob) => void
 }) {
+  const canPreview = isPreviewable(job.source_path)
+
   return (
     <div className="border rounded-lg px-4 py-3 flex items-start justify-between gap-3">
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium truncate">{job.source_path}</p>
+        {canPreview && onPreviewSource ? (
+          <button
+            type="button"
+            onClick={() => onPreviewSource(job)}
+            className="text-sm font-medium truncate text-left cursor-pointer text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:underline"
+            title={job.source_path}
+          >
+            {job.source_path}
+          </button>
+        ) : (
+          <p className="text-sm font-medium truncate">{job.source_path}</p>
+        )}
         <p className="text-xs text-muted-foreground mt-0.5">
           {job.input_type} · {new Date(job.created_at).toLocaleString()}
         </p>
@@ -50,6 +66,11 @@ export function JobCard({
         {job.status === "failed" && (
           <Button size="sm" variant="outline" onClick={() => onRetry(job.id)}>
             Retry
+          </Button>
+        )}
+        {job.status === "cancelled" && (
+          <Button size="sm" variant="outline" onClick={() => onRetry(job.id)}>
+            Restart
           </Button>
         )}
         {(job.status === "queued" || job.status === "running") && (

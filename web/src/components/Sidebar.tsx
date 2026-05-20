@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react"
-import { useApp } from "@/context/AppContext"
+import { useWikiReader } from "@/context/WikiReaderContext"
 import { buildTree } from "@/lib/tree"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { SearchBar } from "@/components/SearchBar"
@@ -137,12 +137,29 @@ function ChevronIcon({ open }: { open: boolean }) {
   )
 }
 
-export function Sidebar() {
-  const { documents, currentDocId, selectDocument } = useApp()
+interface SidebarProps {
+  variant?: "classic" | "reader"
+  onSelect?: () => void
+}
+
+export function Sidebar({ variant = "classic", onSelect }: SidebarProps) {
+  const { documents, currentDocId, selectDocument } = useWikiReader()
   const tree = useMemo(() => buildTree(documents), [documents])
+  const isReader = variant === "reader"
+
+  const handleSelect = (id: string) => {
+    selectDocument(id)
+    onSelect?.()
+  }
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-card">
+    <div
+      className={
+        isReader
+          ? "flex h-full w-full flex-col"
+          : "flex h-full w-64 flex-col border-r bg-card"
+      }
+    >
       <div className="border-b px-3 py-2 space-y-1">
         <SearchBar />
         <p className="text-xs text-muted-foreground">{documents.length} files</p>
@@ -155,7 +172,7 @@ export function Sidebar() {
               node={node}
               depth={0}
               activeId={currentDocId}
-              onSelect={selectDocument}
+              onSelect={handleSelect}
             />
           ))}
           {tree.length === 0 && (

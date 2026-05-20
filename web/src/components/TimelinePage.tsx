@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { getVCStatus, getVCLog, getVCDiff, createRollback } from "@/lib/api"
 import type { VCStatus, VCLogEntry } from "@/types"
 import { GitBranch, Clock, FileText, RotateCcw, Eye, ChevronDown, Settings, AlertTriangle } from "lucide-react"
+import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 
 export function TimelinePage() {
   const [status, setStatus] = useState<VCStatus | null>(null)
@@ -80,11 +81,11 @@ export function TimelinePage() {
         <div className="flex flex-col items-center justify-center py-12 space-y-4">
           <GitBranch className="size-12 text-muted-foreground" />
           <p className="text-muted-foreground">Version control is not enabled.</p>
-          <Button variant="outline" size="sm" onClick={() => {
-            window.location.hash = "#settings"
-            const event = new CustomEvent("navigate", { detail: "settings" })
-            window.dispatchEvent(event)
-          }}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigateTo(workbenchViewHref("settings"))}
+          >
             <Settings className="size-3.5 mr-1" />
             Go to Settings
           </Button>

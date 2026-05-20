@@ -1,4 +1,4 @@
-import { useState, useMemo, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useApp } from "@/context/AppContext"
 import { SettingsPage } from "@/components/SettingsPage"
 import { IngestChat } from "@/components/IngestChat"
@@ -9,16 +9,28 @@ import { AppHeaderBar } from "@/components/AppHeaderBar"
 import { WorkbenchContentShell } from "@/components/WorkbenchContentShell"
 import { cn } from "@/lib/utils"
 import { getVCStatus } from "@/lib/api"
-import { navigateTo, wikiReaderHref } from "@/lib/wiki-routes"
+import {
+  getWorkbenchViewFromPath,
+  navigateTo,
+  usePathname,
+  wikiReaderHref,
+  workbenchHref,
+  workbenchViewHref,
+  type WorkbenchView,
+} from "@/lib/wiki-routes"
 
-type View = "ingest" | "jobs" | "timeline" | "settings"
-
-const NAV_ITEMS: { id: View; label: string }[] = [
+const NAV_ITEMS: { id: WorkbenchView; label: string }[] = [
   { id: "ingest", label: "Ingest" },
   { id: "jobs", label: "Jobs" },
   { id: "timeline", label: "Timeline" },
   { id: "settings", label: "Settings" },
 ]
+
+const LEGACY_HASH_VIEWS = new Set<WorkbenchView>([
+  "jobs",
+  "settings",
+  "timeline",
+])
 
 function NavButton({
   active,
@@ -46,18 +58,36 @@ function NavButton({
 }
 
 export function WorkbenchLayout() {
-  const [view, setView] = useState<View>("ingest")
+  const pathname = usePathname()
+  const view = getWorkbenchViewFromPath(pathname)
   const [vcEnabled, setVcEnabled] = useState(false)
   const { capabilities } = useApp()
 
-  useMemo(() => {
+  useEffect(() => {
     getVCStatus().then((s) => setVcEnabled(s.enabled)).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const raw = window.location.hash.replace(/^#/, "")
+    if (LEGACY_HASH_VIEWS.has(raw as WorkbenchView)) {
+      navigateTo(workbenchViewHref(raw as WorkbenchView))
+    }
+  }, [])
+
+  useEffect(() => {
+    if (view === "timeline" && !vcEnabled) {
+      navigateTo(workbenchHref())
+    }
+  }, [view, vcEnabled])
 
   const missingDeps = useMemo(() => {
     if (!capabilities) return []
     return capabilities.runtime_dependencies.filter((d) => !d.found)
   }, [capabilities])
+
+  const navigateView = (id: WorkbenchView) => {
+    navigateTo(workbenchViewHref(id))
+  }
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -77,7 +107,7 @@ export function WorkbenchLayout() {
                     <div key={item.id} className="flex items-center gap-1">
                       <NavButton
                         active={view === item.id}
-                        onClick={() => setView(item.id)}
+                        onClick={() => navigateView(item.id)}
                       >
                         {item.label}
                       </NavButton>
@@ -87,7 +117,7 @@ export function WorkbenchLayout() {
                     <NavButton
                       key={item.id}
                       active={view === item.id}
-                      onClick={() => setView(item.id)}
+                      onClick={() => navigateView(item.id)}
                     >
                       {item.label}
                     </NavButton>
@@ -115,7 +145,7 @@ export function WorkbenchLayout() {
             </div>
           )}
           {view === "jobs" && <JobsPage />}
-          {view === "timeline" && <TimelinePage />}
+          {view === "timeline" && vcEnabled && <TimelinePage />}
           {view === "settings" && <SettingsPage />}
         </main>
       </WorkbenchContentShell>

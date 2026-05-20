@@ -13,6 +13,7 @@ import type { Settings, VCStatus } from "@/types"
 import { PageContainer } from "@/components/PageContainer"
 import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff } from "lucide-react"
 import { initVC, getVCStatus, disableVC } from "@/lib/api"
+import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 
 type AddFormState = {
   mode: false
@@ -717,12 +718,7 @@ export function SettingsPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => {
-                      window.location.hash = "#timeline"
-                      // Navigate to timeline tab
-                      const event = new CustomEvent("navigate", { detail: "timeline" })
-                      window.dispatchEvent(event)
-                    }}
+                    onClick={() => navigateTo(workbenchViewHref("timeline"))}
                   >
                     <History className="size-3.5 mr-1" />
                     View History

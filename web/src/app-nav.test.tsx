@@ -65,6 +65,7 @@ describe("App navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    window.history.replaceState(null, "", "/")
   })
 
   it("defaults to ingest and uses button navigation", async () => {
@@ -80,9 +81,11 @@ describe("App navigation", () => {
     expect(
       await screen.findByRole("heading", { name: "Settings" }),
     ).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/settings")
 
     fireEvent.click(screen.getByRole("button", { name: "Jobs" }))
     expect(await screen.findByText("暂无摄入任务")).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/jobs")
 
     const wikiLink = screen.getByRole("link", { name: "Wiki" })
     expect(wikiLink).toHaveAttribute("href", "/wiki")
@@ -97,5 +100,22 @@ describe("App navigation", () => {
     expect(window.location.pathname).toBe("/wiki")
     expect(await screen.findByText("管理工作台")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "模型" })).not.toBeInTheDocument()
+  })
+
+  it("restores settings view from URL on load", async () => {
+    window.history.replaceState(null, "", "/settings")
+    render(<App />)
+    expect(
+      await screen.findByRole("heading", { name: "Settings" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "模型" })).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe("/settings")
+  })
+
+  it("restores jobs view from URL on load", async () => {
+    window.history.replaceState(null, "", "/jobs")
+    render(<App />)
+    expect(await screen.findByText("暂无摄入任务")).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/jobs")
   })
 })

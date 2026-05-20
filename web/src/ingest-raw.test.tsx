@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { AppProvider } from "@/context/AppContext"
 import { IngestRaw } from "@/components/IngestRaw"
 import * as api from "@/lib/api"
+import type { IngestJob } from "@/types"
 
 vi.mock("@/lib/api", () => ({
   listDocuments: vi.fn().mockResolvedValue([]),
@@ -16,7 +17,7 @@ vi.mock("@/lib/api", () => ({
   }),
 }))
 
-function makeJob(id: string) {
+function makeJob(id: string): IngestJob {
   return {
     id,
     parent_job_id: "",

@@ -146,7 +146,19 @@ describe("IngestChat", () => {
       job_model: "",
     })
     vi.mocked(api.listProviderModels).mockResolvedValue([
-      { model_id: "gpt-4", display_name: "GPT-4" },
+      {
+        provider_id: "cat-1",
+        model_id: "gpt-4",
+        name: "GPT-4",
+        family: "GPT-4",
+        context_limit: 128000,
+        output_limit: 16384,
+        cost_input: 2.5,
+        cost_output: 10,
+        reasoning: false,
+        tool_call: true,
+        attachment: true,
+      },
     ])
     vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
       messages: [

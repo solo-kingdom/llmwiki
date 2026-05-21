@@ -3,7 +3,7 @@
 ### Requirement: Workspace initialization
 The system SHALL initialize a workspace directory with the required structure upon `llmwiki init <dir>`. The structure SHALL include:
 
-- Wiki subdirectories: `wiki/entities/`, `wiki/concepts/`, `wiki/sources/`, `wiki/synthesis/`, `wiki/comparisons/`, `wiki/queries/`
+- Wiki subdirectories: `wiki/templates/`, `wiki/entities/`, `wiki/concepts/`, `wiki/sources/`, `wiki/synthesis/`, `wiki/comparisons/`, `wiki/queries/`
 - Raw directories: `raw/sources/`, `raw/assets/`
 - Application data: `.llmwiki/`, `.llmwiki/cache/`
 - Version control helper: `revert/`
@@ -15,6 +15,7 @@ Scaffold files (created only if missing):
 - `wiki/overview.md` — Chinese global overview placeholder
 - `wiki/log.md` — Chinese header with first append-only entry `## [YYYY-MM-DD] init | 工作区初始化`
 - `wiki/index.md` — Chinese grouped empty table framework for content catalog
+- `wiki/templates/` — Chinese page-type templates (entity, concept, source, synthesis, comparison, query) with required section headings
 - `rules.md` — Chinese guidance scaffold (see rules.md scaffold requirement)
 
 #### Scenario: Fresh workspace creation

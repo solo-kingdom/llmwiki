@@ -23,6 +23,11 @@ The system SHALL orchestrate a two-step LLM pipeline for ingestion jobs: first a
 #### Scenario: Generation step
 - **WHEN** the analysis step completes
 - **THEN** the system SHALL send the original normalized content and analysis results to the LLM with a composed system prompt requesting FILE block output (temperature=0.1, max_tokens=8192), starting with `---FILE:` immediately with no preamble, with fidelity constraints prohibiting content not supported by the source
+- **AND** the generation system prompt SHALL list required sections per page type (entity, concept, source, synthesis, comparison, query) referencing `wiki/templates/`
+
+#### Scenario: Template-aware generation prompt
+- **WHEN** the pipeline runs the generation LLM step
+- **THEN** the system message SHALL list required sections per page type (entity, concept, source, synthesis, comparison, query)
 
 #### Scenario: Conversational draft as ingest input
 - **WHEN** a user-confirmed conversational draft is submitted via legacy conversation API

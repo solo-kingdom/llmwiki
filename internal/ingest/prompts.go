@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"gopkg.in/yaml.v3"
 )
 
@@ -92,6 +93,10 @@ func ComposeSystemPrompt(step PromptStep, ctx PromptContext) string {
 	b.WriteString(FidelityInstruction(ctx.DocLang))
 	b.WriteString("\n\n")
 	b.WriteString(defaultTaskInstruction(step, ctx.DocLang))
+	if step == StepGeneration {
+		b.WriteString("\n\n")
+		b.WriteString(engine.TemplateGuidanceForGeneration(ctx.DocLang))
+	}
 	if extra := readTruncatedWorkspaceFile(ctx.Workspace, "purpose.md", maxWorkspaceRuleFileLen); extra != "" {
 		b.WriteString("\n\n## 工作区研究目标 (purpose.md)\n\n")
 		b.WriteString(extra)

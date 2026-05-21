@@ -106,6 +106,9 @@ func TestInitRepairModePreservesDatabase(t *testing.T) {
 	if err := os.Remove(filepath.Join(ws, ".obsidian", "app.json")); err != nil {
 		t.Fatalf("Remove app.json: %v", err)
 	}
+	if err := os.RemoveAll(filepath.Join(ws, "wiki", "templates")); err != nil {
+		t.Fatalf("RemoveAll templates: %v", err)
+	}
 
 	if err := runInit(ws); err != nil {
 		t.Fatalf("second runInit (repair): %v", err)
@@ -117,6 +120,9 @@ func TestInitRepairModePreservesDatabase(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(ws, ".obsidian", "app.json")); err != nil {
 		t.Errorf("repair should recreate Obsidian config: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(ws, "wiki", "templates", "entity.md")); err != nil {
+		t.Errorf("repair should recreate wiki/templates: %v", err)
+	}
 
 	after, err := os.ReadFile(dbPath)
 	if err != nil {
@@ -124,6 +130,33 @@ func TestInitRepairModePreservesDatabase(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Error("repair mode should not reset database")
+	}
+}
+
+func TestInitCreatesWikiPageTemplates(t *testing.T) {
+	ws := t.TempDir()
+	if err := runInit(ws); err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+
+	templatesDir := filepath.Join(ws, "wiki", "templates")
+	info, err := os.Stat(templatesDir)
+	if err != nil {
+		t.Fatalf("missing wiki/templates: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("wiki/templates is not a directory")
+	}
+
+	for _, name := range []string{"entity.md", "concept.md", "source.md", "synthesis.md", "comparison.md", "query.md"} {
+		path := filepath.Join(templatesDir, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("missing template %s: %v", name, err)
+		}
+		if !strings.Contains(string(data), "Required Sections") {
+			t.Errorf("%s missing Required Sections comment", name)
+		}
 	}
 }
 

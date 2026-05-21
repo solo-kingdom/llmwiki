@@ -11,6 +11,7 @@ import (
 // WorkspaceDirs lists all directories created during workspace initialization.
 var WorkspaceDirs = []string{
 	"wiki",
+	"wiki/templates",
 	"wiki/entities",
 	"wiki/concepts",
 	"wiki/sources",
@@ -149,6 +150,11 @@ func WriteWorkspaceScaffoldsIfMissing(workspace, initDate string) error {
 		"wiki/index.md":   IndexScaffoldMD(initDate),
 	}
 	for rel, content := range scaffolds {
+		if err := WriteIfNotExists(filepath.Join(workspace, rel), content); err != nil {
+			return err
+		}
+	}
+	for rel, content := range WikiPageTemplateFiles() {
 		if err := WriteIfNotExists(filepath.Join(workspace, rel), content); err != nil {
 			return err
 		}

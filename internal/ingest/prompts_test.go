@@ -7,6 +7,21 @@ import (
 	"testing"
 )
 
+func TestComposeSystemPromptGenerationTemplateGuidance(t *testing.T) {
+	ctx := PromptContext{Workspace: t.TempDir(), DocLang: "zh"}
+	out := ComposeSystemPrompt(StepGeneration, ctx)
+	for _, want := range []string{
+		"页面类型与必需章节",
+		"概述、关键事实、相关概念、来源",
+		"定义、核心要点、相关实体、来源",
+		"wiki/templates/",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("generation prompt missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestComposeSystemPromptLockedAndFidelity(t *testing.T) {
 	ctx := PromptContext{Workspace: t.TempDir(), DocLang: "zh"}
 	out := ComposeSystemPrompt(StepGeneration, ctx)

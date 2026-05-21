@@ -1,0 +1,103 @@
+import type { MessageKey } from "./zh"
+
+const en: Record<MessageKey, string> = {
+  // Navigation
+  "nav.chat": "Chat",
+  "nav.ingest": "Ingest",
+  "nav.jobs": "Jobs",
+  "nav.timeline": "Timeline",
+  "nav.logs": "Logs",
+  "nav.settings": "Settings",
+  "nav.wiki": "Wiki",
+
+  // WorkbenchLayout
+  "app.title": "LLMWiki",
+
+  // Settings Page
+  "settings.language.title": "Language Settings",
+  "settings.language.ui_language": "UI Language",
+  "settings.language.ui_language_desc": "Controls the display language of the interface",
+  "settings.language.doc_language": "Document Language",
+  "settings.language.doc_language_desc": "Controls the target language for generated wiki documents",
+  "settings.language.zh": "中文",
+  "settings.language.en": "English",
+
+  "settings.providers.title": "Provider Instances",
+  "settings.providers.desc": "Manage configured Provider instances",
+  "settings.providers.add": "Add",
+  "settings.providers.cancel": "Cancel",
+  "settings.providers.save": "Save",
+  "settings.providers.delete": "Delete",
+  "settings.providers.add_failed": "Add failed",
+  "settings.providers.save_failed": "Save failed",
+  "settings.providers.confirm_delete": "Confirm delete",
+  "settings.providers.no_instances": "Please add a Provider instance above first",
+  "settings.providers.select_provider": "Select Provider",
+  "settings.providers.custom_name": "Custom name",
+  "settings.providers.no_key": "No key set",
+  "settings.providers.check_connection": "Check connection",
+  "settings.providers.checking": "Checking",
+  "settings.providers.status_ok": "OK",
+  "settings.providers.status_error": "Error",
+
+  "settings.jobs.title": "Ingest Job Model",
+  "settings.jobs.desc": "Provider and Model used for ingest jobs",
+  "settings.jobs.use_chat_model": "Use chat model",
+  "settings.jobs.fallback_current": "Current fallback",
+  "settings.jobs.no_model_selected": "No Provider and Model selected in chat yet",
+
+  "settings.mcp.title": "MCP Servers",
+  "settings.mcp.desc": "Global MCP client configuration (JSON format)",
+  "settings.mcp.check_connection": "Check connection",
+  "settings.mcp.save_note": "Format and connectivity will be validated on save",
+
+  "settings.logs.title": "Logs",
+  "settings.logs.activity_max": "Max activity log entries",
+  "settings.logs.activity_max_desc": "Set to 0 to disable logging; excess entries are auto-cleaned",
+  "settings.logs.job_events_max": "Max events per ingest job",
+  "settings.logs.job_events_max_desc": "Set to 0 to disable events; excess entries are auto-cleaned",
+
+  "settings.processing.title": "Processing",
+  "settings.processing.max_tokens": "Max Output Tokens",
+  "settings.processing.temperature": "Temperature",
+  "settings.processing.chunk_size": "Chunk Size",
+  "settings.processing.chunk_overlap": "Chunk Overlap",
+  "settings.processing.auto_reindex": "Auto Reindex",
+  "settings.processing.watch_sources": "Watch Sources",
+  "settings.processing.auto_reindex_desc": "Automatically trigger index rebuild on file changes",
+  "settings.processing.watch_sources_desc": "Automatically watch data source directory for file changes",
+
+  "settings.vc.title": "Version Control",
+  "settings.vc.enabled": "Version control enabled",
+  "settings.vc.enable": "Enable version control",
+  "settings.vc.disable": "Disable version control",
+  "settings.vc.disable_note": "Disabling keeps the .git directory but stops auto-commits",
+  "settings.vc.view_history": "View history",
+
+  // IngestChat
+  "chat.copied": "Copied",
+  "chat.copy": "Copy",
+  "chat.replying": "Replying",
+  "chat.reply_failed": "Reply failed",
+  "chat.reply_incomplete": "Reply incomplete",
+  "chat.retry": "Retry",
+  "chat.no_provider": "Please add a Provider in Settings first",
+  "chat.select_model_hint": 'Click "Model" below to select a Provider and Model',
+  "chat.start_topic": "Start a topic",
+  "chat.archive_desc": 'Have a multi-turn conversation to clarify, then click "Archive" to save to wiki',
+  "chat.select_model_start": "Select a Provider and Model to start...",
+  "chat.input_placeholder": "Type a message… (Shift+Enter for new line)",
+  "chat.model": "Model",
+  "chat.archive": "Archive",
+  "chat.confirm_archive": "Confirm Archive",
+  "chat.session_title_optional": "Session title (optional)",
+  "chat.confirm": "Confirm Archive",
+  "chat.cancel": "Cancel",
+  "chat.attachment": "Attachment",
+  "chat.send": "Send",
+  "chat.archive_submitted": "Archive job submitted",
+  "chat.delete_session": "Delete session",
+  "chat.new_session": "New session",
+}
+
+export default en

@@ -138,7 +138,7 @@ func (p *JobProcessor) processRollbackJob(ctx context.Context, job *sqlite.Inges
 }
 
 // buildRollbackPrompt constructs the LLM prompt for rollback.
-func buildRollbackPrompt(ctx *RollbackContext, currentFiles map[string]string) string {
+func buildRollbackPrompt(ctx *RollbackContext, currentFiles map[string]string, docLang string) string {
 	var sb strings.Builder
 
 	sb.WriteString("You are performing a rollback of a wiki ingestion. ")
@@ -178,10 +178,16 @@ func (p *JobProcessor) executeRollback(ctx context.Context, rbCtx *RollbackConte
 		return fmt.Errorf("LLM client not configured")
 	}
 
-	prompt := buildRollbackPrompt(rbCtx, currentFiles)
+	prompt := buildRollbackPrompt(rbCtx, currentFiles, resolveDocLang(p.db))
+
+	langInstruction := languageInstructionForPipeline(resolveDocLang(p.db))
+	systemMsg := "You are a wiki rollback assistant. Output FILE blocks to restore wiki content."
+	if langInstruction != "" {
+		systemMsg += "\n\n" + langInstruction
+	}
 
 	messages := []llm.Message{
-		{Role: "system", Content: "You are a wiki rollback assistant. Output FILE blocks to restore wiki content."},
+		{Role: "system", Content: systemMsg},
 		{Role: "user", Content: prompt},
 	}
 

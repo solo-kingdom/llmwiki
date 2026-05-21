@@ -37,6 +37,8 @@ type settingsResponse struct {
 	ActivityLogsMaxCount     string `json:"activity_logs_max_count"`
 	IngestJobEventsMaxCount string `json:"ingest_job_events_max_count"`
 	MCPServersJSON          string `json:"mcp_servers_json"`
+	UILanguage  string `json:"ui_language"`
+	DocLanguage string `json:"doc_language"`
 }
 
 func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +62,8 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		ActivityLogsMaxCount:      activityLogsMaxCountForResponse(all["activity_logs_max_count"]),
 		IngestJobEventsMaxCount:   jobEventsMaxCountForResponse(all["ingest_job_events_max_count"]),
 		MCPServersJSON:            mcpServersJSONForResponse(all["mcp_servers_json"]),
+		UILanguage:  languageForResponse(all["ui_language"]),
+		DocLanguage: languageForResponse(all["doc_language"]),
 	})
 }
 
@@ -107,6 +111,8 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"activity_logs_max_count":      true,
 		"ingest_job_events_max_count": true,
 		"mcp_servers_json":            true,
+		"ui_language":  true,
+		"doc_language": true,
 	}
 
 	for key, raw := range req {
@@ -137,6 +143,12 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			value = canonical
+		}
+		if key == "ui_language" || key == "doc_language" {
+			if !isValidLanguage(value) {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("%s must be 'zh' or 'en", key))
+				return
+			}
 		}
 		if err := a.db.SetConfig(key, value); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -225,4 +237,38 @@ func (a *API) UpdateLastModel(w http.ResponseWriter, r *http.Request) {
 		"last_instance_id": req.InstanceID,
 		"last_model":       req.Model,
 	})
+}
+
+// isValidLanguage checks if a language code is supported (zh or en).
+func isValidLanguage(lang string) bool {
+	return lang == "zh" || lang == "en"
+}
+
+// languageForResponse returns the language code or the default "zh" if empty/invalid.
+func languageForResponse(stored string) string {
+	if isValidLanguage(stored) {
+		return stored
+	}
+	return "zh"
+}
+
+// ResolveDocLanguage reads the doc_language setting from the database, falling back to "zh".
+func ResolveDocLanguage(db interface{ GetConfig(string) (string, error) }) string {
+	val, err := db.GetConfig("doc_language")
+	if err != nil || !isValidLanguage(val) {
+		return "zh"
+	}
+	return val
+}
+
+// LanguageInstruction builds a prompt fragment that constrains LLM output language.
+func LanguageInstruction(docLang string) string {
+	switch docLang {
+	case "zh":
+		return "重要：你必须使用中文撰写所有文档正文。英文术语可以用括号注释，但不允许英文大段正文主导。文档标题、段落、说明文字必须使用中文。"
+	case "en":
+		return "Important: You must write all document content in English. Technical terms may include brief annotations, but no large blocks of non-English text in the main body. Titles, paragraphs, and descriptions must be in English."
+	default:
+		return ""
+	}
 }

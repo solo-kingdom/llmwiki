@@ -32,6 +32,8 @@ vi.mock("@/lib/api", () => ({
     watch_sources: false,
     job_instance_id: "",
     job_model: "",
+    ui_language: "zh",
+    doc_language: "zh",
   }),
   createIngestSession: vi.fn().mockResolvedValue({
     session: {
@@ -145,6 +147,8 @@ describe("IngestChat", () => {
       watch_sources: false,
       job_instance_id: "",
       job_model: "",
+    ui_language: "zh",
+    doc_language: "zh",
     })
     vi.mocked(api.listProviderModels).mockResolvedValue([
       {
@@ -223,6 +227,8 @@ describe("IngestChat", () => {
       watch_sources: false,
       job_instance_id: "",
       job_model: "",
+    ui_language: "zh",
+    doc_language: "zh",
     })
     vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
       messages: [
@@ -321,6 +327,8 @@ describe("IngestChat", () => {
       watch_sources: false,
       job_instance_id: "",
       job_model: "",
+    ui_language: "zh",
+    doc_language: "zh",
     })
 
     const { container } = render(
@@ -373,6 +381,8 @@ describe("IngestChat", () => {
       watch_sources: false,
       job_instance_id: "",
       job_model: "",
+    ui_language: "zh",
+    doc_language: "zh",
     })
     vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
       messages: [
@@ -437,6 +447,8 @@ describe("IngestChat", () => {
       watch_sources: false,
       job_instance_id: "",
       job_model: "",
+    ui_language: "zh",
+    doc_language: "zh",
     })
     vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
       messages: [
@@ -501,6 +513,8 @@ describe("IngestChat", () => {
       watch_sources: false,
       job_instance_id: "",
       job_model: "",
+    ui_language: "zh",
+    doc_language: "zh",
     })
     vi.mocked(api.listProviderModels).mockResolvedValue([
       {
@@ -594,6 +608,8 @@ describe("IngestChat", () => {
       watch_sources: false,
       job_instance_id: "",
       job_model: "",
+    ui_language: "zh",
+    doc_language: "zh",
     })
     vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
       messages: [
@@ -672,6 +688,8 @@ describe("IngestChat", () => {
       watch_sources: false,
       job_instance_id: "",
       job_model: "",
+    ui_language: "zh",
+    doc_language: "zh",
     })
     vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
       messages: [

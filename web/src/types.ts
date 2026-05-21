@@ -124,6 +124,8 @@ export interface Settings {
   activity_logs_max_count?: number
   ingest_job_events_max_count?: number
   mcp_servers_json?: string
+  ui_language: string
+  doc_language: string
 }
 
 export interface ActivityLog {

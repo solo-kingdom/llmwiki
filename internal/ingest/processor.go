@@ -469,7 +469,27 @@ func (p *JobProcessor) preparePipelineForJob(job *sqlite.IngestJob) error {
 	}
 	p.pipeline.SetLLMClient(client)
 	p.attachMCPRouter()
+
+	// Resolve doc_language setting for generation prompts.
+	// NOTE: Language is resolved at execution time from the current app_config.
+	// If the user changes doc_language while a job is queued, the new value
+	// will be used. Future improvement: snapshot doc_language into job metadata
+	// at job creation time to ensure consistency.
+	docLang := resolveDocLang(p.db)
+	p.pipeline.SetDocLanguage(docLang)
+
 	return nil
+}
+
+// resolveDocLang reads the doc_language setting from the database, defaulting to "zh".
+func resolveDocLang(db interface {
+	GetConfig(string) (string, error)
+}) string {
+	val, err := db.GetConfig("doc_language")
+	if err != nil || (val != "zh" && val != "en") {
+		return "zh"
+	}
+	return val
 }
 
 func (p *JobProcessor) attachMCPRouter() {

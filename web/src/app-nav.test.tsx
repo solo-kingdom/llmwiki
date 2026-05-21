@@ -38,6 +38,8 @@ vi.mock("@/lib/api", () => ({
     watch_sources: false,
     job_instance_id: "",
     job_model: "",
+    ui_language: "zh",
+    doc_language: "zh",
   }),
   createIngestSession: vi.fn().mockResolvedValue({
     session: {

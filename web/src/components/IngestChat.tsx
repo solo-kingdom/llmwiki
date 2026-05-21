@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useApp } from "@/context/AppContext"
+import { useT } from "@/i18n"
 import { copyTextToClipboard } from "@/lib/clipboard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -89,8 +90,8 @@ function MessageBubble({
           <button
             type="button"
             className="absolute right-2 top-2 z-10 rounded p-1 opacity-0 transition-opacity hover:bg-background/20 group-hover:opacity-100"
-            title={copied ? "已复制" : "复制"}
-            aria-label={copied ? "已复制" : "复制"}
+            title={copied ? "Copied" : "Copy"}
+            aria-label={copied ? "Copied" : "Copy"}
             onClick={(e) => void handleCopy(e)}
           >
             <Copy className={`size-3.5 ${copied ? "text-green-600" : ""}`} />
@@ -101,7 +102,7 @@ function MessageBubble({
         ) : isStreaming && !hasContent ? (
           <Loader2
             className="size-4 animate-spin text-muted-foreground"
-            aria-label="正在回复"
+            aria-label="Replying"
           />
         ) : isStreaming ? (
           <p className="whitespace-pre-wrap pr-6">{msg.content}</p>
@@ -128,7 +129,7 @@ function MessageBubble({
                 onClick={() => onRetry(msg.id)}
               >
                 <RotateCcw className="size-3" />
-                重试
+                Retry
               </Button>
             )}
           </div>
@@ -162,6 +163,8 @@ export function IngestChat() {
     loadSettings,
     listSessions,
   } = useApp()
+
+  const t = useT()
 
   const [input, setInput] = useState("")
   const [archiveOpen, setArchiveOpen] = useState(false)
@@ -328,7 +331,7 @@ export function IngestChat() {
   const handleArchive = async () => {
     try {
       const jobId = await archiveSession(archiveTitle || undefined)
-      showToast(`已提交归档任务：${jobId}`)
+      showToast(`${t("chat.archive_submitted")}：${jobId}`)
       setArchiveOpen(false)
       await refreshIngestJobs()
     } catch {
@@ -353,18 +356,18 @@ export function IngestChat() {
               <div className="rounded-lg bg-amber-50 py-8 text-center text-amber-600 dark:bg-amber-950/20">
                 <p className="text-sm">
                   {instances.length === 0
-                    ? "请先在 Settings 添加 Provider"
+                    ? t("chat.no_provider")
                     : !effectiveInstanceId || !effectiveModel
-                      ? "请点击下方「模型」选择 Provider 和 Model"
-                      : "正在设置会话..."}
+                      ? t("chat.select_model_hint")
+                      : "..."}
                 </p>
               </div>
             )}
             {sessionMessages.length === 0 && isReady && (
               <div className="py-16 text-center text-muted-foreground">
-                <p className="mb-2 text-lg">开始一个话题</p>
+                <p className="mb-2 text-lg">{t("chat.start_topic")}</p>
                 <p className="text-sm">
-                  与助手多轮对话探索清楚后，点击「归档」写入 wiki
+                  {t("chat.archive_desc")}
                 </p>
               </div>
             )}
@@ -383,9 +386,9 @@ export function IngestChat() {
 
       {archiveOpen && (
         <div className="mb-2 space-y-3 rounded-lg border bg-card p-4">
-          <p className="text-sm font-medium">确认归档</p>
+          <p className="text-sm font-medium">{t("chat.confirm_archive")}</p>
           <Input
-            placeholder="会话标题（可选）"
+            placeholder={t("chat.session_title_optional")}
             value={archiveTitle}
             onChange={(e) => setArchiveTitle(e.target.value)}
           />
@@ -395,14 +398,14 @@ export function IngestChat() {
               size="sm"
               onClick={() => setArchiveOpen(false)}
             >
-              取消
+              {t("chat.cancel")}
             </Button>
             <Button
               size="sm"
               disabled={sessionBusy}
               onClick={() => void handleArchive()}
             >
-              确认归档
+              {t("chat.confirm")}
             </Button>
           </div>
         </div>
@@ -450,8 +453,8 @@ export function IngestChat() {
           className="max-h-40 min-h-[72px] w-full resize-y bg-transparent px-2 py-2 text-sm outline-none"
           placeholder={
             !isReady
-              ? "选择 Provider 和 Model 后开始..."
-              : "输入消息…（Shift+Enter 换行）"
+              ? t("chat.select_model_start")
+              : t("chat.input_placeholder")
           }
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -464,10 +467,10 @@ export function IngestChat() {
             size="sm"
             variant="outline"
             onClick={() => setModelDialogOpen(true)}
-            title="选择模型"
+            title={t("chat.model")}
           >
             <SlidersHorizontal className="size-3.5" />
-            模型
+            {t("chat.model")}
           </Button>
           <Button
             size="sm"
@@ -476,7 +479,7 @@ export function IngestChat() {
             title={!hasUserMessage ? "至少需要一条用户消息" : undefined}
           >
             <Archive className="size-3.5" />
-            归档
+            {t("chat.archive")}
           </Button>
           <div className="flex-1" />
           <Button
@@ -484,7 +487,7 @@ export function IngestChat() {
             variant="outline"
             disabled={attachDisabled}
             onClick={() => fileRef.current?.click()}
-            title="附件"
+            title={t("chat.attachment")}
           >
             <Paperclip className="size-3.5" />
           </Button>
@@ -509,7 +512,7 @@ export function IngestChat() {
             ) : (
               <Send className="size-3.5" />
             )}
-            发送
+            {t("chat.send")}
           </Button>
         </div>
       </div>

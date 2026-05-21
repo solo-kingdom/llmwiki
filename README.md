@@ -195,3 +195,21 @@ Version info is injected via ldflags: `main.Version`, `main.Commit`, `main.Build
 ## License
 
 MIT
+
+## Language Settings
+
+LLM Wiki supports bilingual UI and document generation (Chinese / English).
+
+| Setting | Values | Description |
+|---------|--------|-------------|
+| `ui_language` | `zh` (default), `en` | Controls the display language of the web interface |
+| `doc_language` | `zh` (default), `en` | Controls the output language for all wiki document generation |
+
+Both settings are configured via the **Settings** page in the web UI or via `PUT /api/v1/settings`.
+
+**Note:** `doc_language` affects all generation paths: file upload, text ingest, conversation ingest, session archive, and rollback regeneration.
+
+**Known limitations (first release):**
+- Only Chinese (`zh`) and English (`en`) are supported.
+- Not all UI pages have been migrated to the translation system — core pages (navigation, settings, chat) are covered first.
+- `doc_language` is resolved at job execution time; if the setting changes while a job is queued, the new value will be used.

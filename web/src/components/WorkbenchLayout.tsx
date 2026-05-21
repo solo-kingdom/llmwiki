@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useApp } from "@/context/AppContext"
+import { useT } from "@/i18n"
 import { SettingsPage } from "@/components/SettingsPage"
 import { IngestChat } from "@/components/IngestChat"
 import { IngestRaw } from "@/components/IngestRaw"
@@ -20,14 +21,15 @@ import {
   workbenchViewHref,
   type WorkbenchView,
 } from "@/lib/wiki-routes"
+import type { MessageKey } from "@/i18n"
 
-const NAV_ITEMS: { id: WorkbenchView; label: string }[] = [
-  { id: "chat", label: "Chat" },
-  { id: "ingest", label: "Ingest" },
-  { id: "jobs", label: "Jobs" },
-  { id: "timeline", label: "Timeline" },
-  { id: "logs", label: "Logs" },
-  { id: "settings", label: "Settings" },
+const NAV_ITEMS: { id: WorkbenchView; labelKey: MessageKey }[] = [
+  { id: "chat", labelKey: "nav.chat" },
+  { id: "ingest", labelKey: "nav.ingest" },
+  { id: "jobs", labelKey: "nav.jobs" },
+  { id: "timeline", labelKey: "nav.timeline" },
+  { id: "logs", labelKey: "nav.logs" },
+  { id: "settings", labelKey: "nav.settings" },
 ]
 
 const LEGACY_HASH_VIEWS = new Set<string>([
@@ -68,6 +70,7 @@ export function WorkbenchLayout() {
   const view = getWorkbenchViewFromPath(pathname)
   const [vcEnabled, setVcEnabled] = useState<boolean | null>(null)
   const { capabilities } = useApp()
+  const t = useT()
 
   useEffect(() => {
     getVCStatus()
@@ -109,7 +112,7 @@ export function WorkbenchLayout() {
         <AppHeaderBar
           className="mt-2 mb-2"
           left={
-            <span className="text-lg font-bold text-point">LLMWiki</span>
+             <span className="text-lg font-bold text-point">{t("app.title")}</span>
           }
           right={
             <>
@@ -123,7 +126,7 @@ export function WorkbenchLayout() {
                         active={view === item.id}
                         onClick={() => navigateView(item.id)}
                       >
-                        {item.label}
+                        {t(item.labelKey)}
                       </NavButton>
                       <WarningPopover missingDeps={missingDeps} />
                     </div>
@@ -133,7 +136,7 @@ export function WorkbenchLayout() {
                       active={view === item.id}
                       onClick={() => navigateView(item.id)}
                     >
-                      {item.label}
+                      {t(item.labelKey)}
                     </NavButton>
                   ),
                 )}
@@ -146,7 +149,7 @@ export function WorkbenchLayout() {
                   navigateTo(wikiReaderHref())
                 }}
               >
-                Wiki
+                {t("nav.wiki")}
               </a>
             </>
           }

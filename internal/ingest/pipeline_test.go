@@ -269,3 +269,48 @@ func TestPipelineSetJobRecorder(t *testing.T) {
 		t.Fatal("recorder not set")
 	}
 }
+
+func TestLanguageInstructionForPipeline(t *testing.T) {
+	tests := []struct {
+		lang       string
+		wantContains string
+	}{
+		{"zh", "中文"},
+		{"en", "English"},
+		{"", ""},
+		{"fr", ""},
+	}
+	for _, tt := range tests {
+		got := languageInstructionForPipeline(tt.lang)
+		if tt.wantContains != "" && got == "" {
+			t.Errorf("languageInstructionForPipeline(%q) returned empty, want to contain %q", tt.lang, tt.wantContains)
+		}
+		if tt.wantContains != "" && !containsString(got, tt.wantContains) {
+			t.Errorf("languageInstructionForPipeline(%q) = %q, want to contain %q", tt.lang, got, tt.wantContains)
+		}
+		if tt.wantContains == "" && got != "" {
+			t.Errorf("languageInstructionForPipeline(%q) = %q, want empty", tt.lang, got)
+		}
+	}
+}
+
+func TestPipelineSetDocLanguage(t *testing.T) {
+	p := NewPipeline(t.TempDir(), nil)
+	p.SetDocLanguage("en")
+	if p.docLang != "en" {
+		t.Errorf("expected docLang 'en', got %q", p.docLang)
+	}
+}
+
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStringHelper(s, substr))
+}
+
+func containsStringHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

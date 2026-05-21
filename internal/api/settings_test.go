@@ -239,3 +239,122 @@ func TestMaskKey(t *testing.T) {
 		}
 	}
 }
+
+func TestGetSettingsDefaultLanguage(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.UILanguage != "zh" {
+		t.Errorf("expected default ui_language 'zh', got %q", resp.UILanguage)
+	}
+	if resp.DocLanguage != "zh" {
+		t.Errorf("expected default doc_language 'zh', got %q", resp.DocLanguage)
+	}
+}
+
+func TestUpdateSettingsLanguageValid(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"ui_language":  "en",
+		"doc_language": "en",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.UILanguage != "en" {
+		t.Errorf("ui_language = %q, want 'en'", resp.UILanguage)
+	}
+	if resp.DocLanguage != "en" {
+		t.Errorf("doc_language = %q, want 'en'", resp.DocLanguage)
+	}
+
+	// Verify persisted
+	uiLang, _ := api.db.GetConfig("ui_language")
+	if uiLang != "en" {
+		t.Errorf("persisted ui_language = %q, want 'en'", uiLang)
+	}
+	docLang, _ := api.db.GetConfig("doc_language")
+	if docLang != "en" {
+		t.Errorf("persisted doc_language = %q, want 'en'", docLang)
+	}
+}
+
+func TestUpdateSettingsLanguageInvalid(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"ui_language": "fr",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid language, got %d; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestIsValidLanguage(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"zh", true},
+		{"en", true},
+		{"", false},
+		{"fr", false},
+		{"ZH", false},
+		{"EN", false},
+	}
+	for _, tt := range tests {
+		got := isValidLanguage(tt.input)
+		if got != tt.want {
+			t.Errorf("isValidLanguage(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestLanguageForResponse(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"zh", "zh"},
+		{"en", "en"},
+		{"", "zh"},
+		{"fr", "zh"},
+		{"invalid", "zh"},
+	}
+	for _, tt := range tests {
+		got := languageForResponse(tt.input)
+		if got != tt.want {
+			t.Errorf("languageForResponse(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, type FormEvent } from "react"
 import { useApp } from "@/context/AppContext"
+import { useT } from "@/i18n"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import {
@@ -14,6 +15,7 @@ import { PageContainer } from "@/components/PageContainer"
 import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff, CheckCircle2, XCircle, Loader2, CircleOff, RefreshCw } from "lucide-react"
 import { initVC, getVCStatus, disableVC, checkProviderInstance, checkAllProviderInstances, checkMCPStatus } from "@/lib/api"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
+import { useI18n } from "@/i18n"
 
 type AddFormState = {
   mode: false
@@ -61,6 +63,9 @@ export function SettingsPage() {
     loadModels,
     currentModels,
   } = useApp()
+
+  const t = useT()
+  const { setLang } = useI18n()
 
   const [form, setForm] = useState<Partial<Settings> | null>(null)
   const [saving, setSaving] = useState(false)
@@ -152,7 +157,7 @@ export function SettingsPage() {
       return (
         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
           <Loader2 className="size-3 animate-spin" />
-          检查中
+          {t("settings.providers.checking")}
         </span>
       )
     }
@@ -165,7 +170,7 @@ export function SettingsPage() {
         data-testid={`provider-check-${instanceId}`}
       >
         {ok ? <CheckCircle2 className="size-3" /> : <XCircle className="size-3" />}
-        {ok ? "正常" : "异常"}
+        {ok ? t("settings.providers.status_ok") : t("settings.providers.status_error")}
       </span>
     )
   }
@@ -363,7 +368,7 @@ export function SettingsPage() {
     if (result) {
       setAddForm({ mode: false })
     } else {
-      setAddForm((prev) => (prev.mode === "add" ? { ...prev, saving: false, error: "添加失败" } : prev))
+      setAddForm((prev) => (prev.mode === "add" ? { ...prev, saving: false, error: t("settings.providers.add_failed") } : prev))
     }
   }
 
@@ -395,7 +400,7 @@ export function SettingsPage() {
     if (result) {
       setEditForm({ mode: false })
     } else {
-      setEditForm((prev) => (prev.mode === "edit" ? { ...prev, saving: false, error: "保存失败" } : prev))
+      setEditForm((prev) => (prev.mode === "edit" ? { ...prev, saving: false, error: t("settings.providers.save_failed") } : prev))
     }
   }
 
@@ -408,18 +413,55 @@ export function SettingsPage() {
 
   return (
     <PageContainer className="[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <h1 className="mb-6 text-xl font-semibold">Settings</h1>
+      <h1 className="mb-6 text-xl font-semibold">{t("nav.settings")}</h1>
       <form
         onSubmit={handleSubmit}
         className="space-y-6 [&_[data-slot=card]]:overflow-visible"
       >
+        {/* Language Settings */}
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("settings.language.title")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">{t("settings.language.ui_language")}</label>
+              <p className="text-xs text-muted-foreground mb-1">{t("settings.language.ui_language_desc")}</p>
+              <select
+                value={mergedForm.ui_language ?? "zh"}
+                onChange={(e) => {
+                  const lang = e.target.value as "zh" | "en"
+                  set("ui_language", lang)
+                  setLang(lang)
+                }}
+                className="w-full max-w-xs h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                <option value="zh">{t("settings.language.zh")}</option>
+                <option value="en">{t("settings.language.en")}</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">{t("settings.language.doc_language")}</label>
+              <p className="text-xs text-muted-foreground mb-1">{t("settings.language.doc_language_desc")}</p>
+              <select
+                value={mergedForm.doc_language ?? "zh"}
+                onChange={(e) => set("doc_language", e.target.value as "zh" | "en")}
+                className="w-full max-w-xs h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                <option value="zh">{t("settings.language.zh")}</option>
+                <option value="en">{t("settings.language.en")}</option>
+              </select>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Providers</CardTitle>
                 <CardDescription>
-                  管理已添加的 Provider 实例
+                  {t("settings.providers.desc")}
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
@@ -435,7 +477,7 @@ export function SettingsPage() {
                   ) : (
                     <RefreshCw className="size-3.5 mr-1" />
                   )}
-                  检查状态
+                  检查连接
                 </Button>
                 <Button
                   size="sm"
@@ -443,7 +485,7 @@ export function SettingsPage() {
                   disabled={addForm.mode !== false || editForm.mode !== false}
                 >
                   <Plus className="size-3.5 mr-1" />
-                  添加
+                  {t("settings.providers.add")}
                 </Button>
               </div>
             </div>
@@ -452,7 +494,7 @@ export function SettingsPage() {
             {/* Instance list */}
             {instances.length === 0 && addForm.mode === false && editForm.mode === false && (
               <p className="text-sm text-muted-foreground text-center py-4">
-                还没有添加任何 Provider，点击上方「添加」开始
+                {t("settings.providers.no_instances")}
               </p>
             )}
             {instances.map((inst) => {
@@ -529,14 +571,14 @@ export function SettingsPage() {
                             variant="outline"
                             onClick={() => setEditForm({ mode: false })}
                           >
-                            取消
+                            {t("settings.providers.cancel")}
                           </Button>
                           <Button
                             size="sm"
                             disabled={editForm.saving || !editForm.name.trim()}
                             onClick={handleEditSubmit}
                           >
-                            {editForm.saving ? "保存中..." : "保存"}
+                            {editForm.saving ? "..." : t("settings.providers.save")}
                           </Button>
                         </div>
                       </div>
@@ -555,9 +597,9 @@ export function SettingsPage() {
                           {inst.api_key_masked}
                         </span>
                       )}
-                      {!inst.api_key_masked && (
-                        <span className="text-xs text-amber-600">未设置 Key</span>
-                      )}
+                       {!inst.api_key_masked && (
+                         <span className="text-xs text-amber-600">{t("settings.providers.no_key")}</span>
+                       )}
                       {catalogInfo?.doc_url && (
                         <a
                           href={catalogInfo.doc_url}
@@ -572,7 +614,7 @@ export function SettingsPage() {
                         size="sm"
                         variant="ghost"
                         className="size-7 p-0 shrink-0"
-                        title="检查连接"
+                        title={t("settings.providers.check_connection")}
                         onClick={() => void runSingleProviderCheck(inst.id)}
                         disabled={providerChecking}
                       >
@@ -606,7 +648,7 @@ export function SettingsPage() {
             {addForm.mode === "add" && (
               <div className="border rounded-lg p-3 space-y-2 bg-muted/30">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">添加 Provider</span>
+                  <span className="text-sm font-medium">{t("settings.providers.add")} Provider</span>
                   <Button size="sm" variant="ghost" className="size-6 p-0" onClick={() => setAddForm({ mode: false })}>
                     <X className="size-3.5" />
                   </Button>
@@ -618,7 +660,7 @@ export function SettingsPage() {
                     onChange={(e) => handleAddCatalogChange(e.target.value)}
                     className="mt-0.5 w-full h-7 rounded-md border border-input bg-transparent px-2 text-sm"
                   >
-                    <option value="">选择 Provider</option>
+                    <option value="">{t("settings.providers.select_provider")}</option>
                     {providers.map((p) => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
@@ -631,7 +673,7 @@ export function SettingsPage() {
                     onChange={(e) => setAddForm((prev) =>
                       prev.mode === "add" ? { ...prev, name: e.target.value } : prev,
                     )}
-                    placeholder="自定义名称"
+                    placeholder={t("settings.providers.custom_name")}
                     className="h-7 text-sm mt-0.5"
                   />
                 </div>
@@ -670,14 +712,14 @@ export function SettingsPage() {
                 )}
                 <div className="flex gap-2 justify-end">
                   <Button size="sm" variant="outline" onClick={() => setAddForm({ mode: false })}>
-                    取消
+                    {t("settings.providers.cancel")}
                   </Button>
                   <Button
                     size="sm"
                     disabled={addForm.saving || !addForm.catalog_id || !addForm.name.trim()}
                     onClick={handleAddSubmit}
                   >
-                    {addForm.saving ? "添加中..." : "添加"}
+                    {addForm.saving ? "..." : t("settings.providers.add")}
                   </Button>
                 </div>
               </div>
@@ -687,14 +729,14 @@ export function SettingsPage() {
             {deleteConfirm && (
               <div className="border rounded-lg p-3 space-y-2 bg-destructive/5">
                 <p className="text-sm">
-                  确认删除「{deleteConfirm.name}」？此操作不可撤销。
+                  {t("settings.providers.confirm_delete")}「{deleteConfirm.name}」？
                 </p>
                 <div className="flex gap-2 justify-end">
                   <Button size="sm" variant="outline" onClick={() => setDeleteConfirm(null)}>
-                    取消
+                    {t("settings.providers.cancel")}
                   </Button>
                   <Button size="sm" variant="destructive" onClick={handleDelete}>
-                    删除
+                    {t("settings.providers.delete")}
                   </Button>
                 </div>
               </div>
@@ -710,28 +752,27 @@ export function SettingsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Jobs</CardTitle>
+            <CardTitle>{t("settings.jobs.title")}</CardTitle>
             <CardDescription>
-              摄入任务（文件上传、文本处理等）使用的 Provider 和 Model。
-              未设置时将使用对话中最近使用的 Provider 和 Model。
+              {t("settings.jobs.desc")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {instances.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                请先在上方添加 Provider 实例
+                {t("settings.providers.no_instances")}
               </p>
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-medium">Provider 实例</label>
+                    <label className="text-sm font-medium">{t("settings.providers.title")}</label>
                     <select
                       value={jobInstanceId}
                       onChange={(e) => handleJobInstanceChange(e.target.value)}
                       className="mt-1 w-full h-9 rounded-md border border-input bg-transparent px-2 text-sm"
                     >
-                      <option value="">使用对话模型</option>
+                      <option value="">{t("settings.jobs.use_chat_model")}</option>
                       {instances.map((inst) => (
                         <option key={inst.id} value={inst.id}>
                           {inst.name}
@@ -763,17 +804,17 @@ export function SettingsPage() {
                     variant="outline"
                     onClick={handleClearJobLLM}
                   >
-                    使用对话模型
+                    {t("settings.jobs.use_chat_model")}
                   </Button>
                 )}
                 {usingConversationModel && (
                   <p className="text-xs text-muted-foreground">
-                    当前回退：
+                    {t("settings.jobs.fallback_current")}：
                     {fallbackInstance && settings?.last_model
                       ? ` ${fallbackInstance.name} / ${settings.last_model}`
                       : settings?.last_instance_id || settings?.last_model
                         ? ` ${settings.last_instance_id}${settings.last_model ? ` / ${settings.last_model}` : ""}`
-                        : " 尚未在对话中选择 Provider 和 Model"}
+                        : ` ${t("settings.jobs.no_model_selected")}`}
                   </p>
                 )}
               </>
@@ -787,7 +828,7 @@ export function SettingsPage() {
               <div>
                 <CardTitle>MCP Servers</CardTitle>
                 <CardDescription>
-                  全局 MCP 客户端配置（JSON 高级模式）。默认仅允许只读工具 search/read。
+                  {t("settings.mcp.desc")}
                 </CardDescription>
               </div>
               <Button
@@ -802,7 +843,7 @@ export function SettingsPage() {
                 ) : (
                   <RefreshCw className="size-3.5 mr-1" />
                 )}
-                检查连接
+                {t("settings.mcp.check_connection")}
               </Button>
             </div>
           </CardHeader>
@@ -830,20 +871,20 @@ export function SettingsPage() {
               </div>
             )}
             <p className="text-xs text-muted-foreground">
-              保存后服务端会校验并返回格式化 JSON。
+              {t("settings.mcp.save_note")}
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Logs</CardTitle>
+            <CardTitle>{t("settings.logs.title")}</CardTitle>
             <CardDescription>
-              系统活动日志最大保留条数（100–100000，默认 10000）。超出后自动删除最旧记录。
+              {t("settings.logs.activity_max_desc")}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <label className="text-sm font-medium">最大保留条数</label>
+            <label className="text-sm font-medium">{t("settings.logs.activity_max")}</label>
             <Input
               type="number"
               min={100}
@@ -863,10 +904,10 @@ export function SettingsPage() {
               className="mt-1 max-w-xs"
             />
             <label className="text-sm font-medium mt-4 block">
-              每个 Job 执行日志保留条数
+              {t("settings.logs.job_events_max")}
             </label>
             <p className="text-xs text-muted-foreground mb-1">
-              50–2000，默认 200。超出后按 job 删除最旧事件。
+              {t("settings.logs.job_events_max_desc")}
             </p>
             <Input
               type="number"
@@ -1033,7 +1074,7 @@ export function SettingsPage() {
                   ) : (
                     <div className="flex items-center gap-2 text-xs">
                       <span className="text-muted-foreground">
-                        禁用将保留 .git 目录但停止自动提交
+                        {t("settings.vc.disable_note")}
                       </span>
                       <Button size="sm" variant="destructive" onClick={handleVCDisable} disabled={vcLoading}>
                         {vcLoading ? "Disabling..." : "Confirm Disable"}

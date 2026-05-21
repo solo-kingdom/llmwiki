@@ -86,6 +86,8 @@ function defaultSettings(): Settings {
     watch_sources: false,
     job_instance_id: "",
     job_model: "",
+    ui_language: "zh",
+    doc_language: "zh",
   }
 }
 

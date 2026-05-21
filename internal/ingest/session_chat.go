@@ -20,9 +20,13 @@ The user may upload attachments; their summaries appear in the conversation.
 When the user is satisfied, they will click Archive to persist this thread into the wiki.`
 
 // AssembleIngestChatMessages builds LLM messages from session history.
-func AssembleIngestChatMessages(history []sqlite.IngestSessionMessage, userContent string) []llm.Message {
+func AssembleIngestChatMessages(history []sqlite.IngestSessionMessage, userContent string, docLang string) []llm.Message {
 	out := make([]llm.Message, 0, len(history)+2)
-	out = append(out, llm.Message{Role: "system", Content: ingestSessionSystemPrompt})
+	systemPrompt := ingestSessionSystemPrompt
+	if langInstruction := languageInstructionForPipeline(docLang); langInstruction != "" {
+		systemPrompt += "\n\n" + langInstruction
+	}
+	out = append(out, llm.Message{Role: "system", Content: systemPrompt})
 	for _, m := range history {
 		if m.StreamStatus == "streaming" {
 			continue
@@ -63,18 +67,22 @@ func truncateMessages(msgs []llm.Message, maxMessages int) []llm.Message {
 }
 
 // AttachmentSummaryPrompt builds a user prompt for attachment understanding.
-func AttachmentSummaryPrompt(filename, extracted string) string {
+func AttachmentSummaryPrompt(filename, extracted, docLang string) string {
+	langName := "Chinese"
+	if docLang == "en" {
+		langName = "English"
+	}
 	if strings.TrimSpace(extracted) == "" {
 		return fmt.Sprintf(
-			"The user uploaded file %q. No text could be extracted. Write a brief assistant message in Chinese acknowledging the upload and suggesting what the user might want to discuss about this file. Keep under 120 words.",
-			filename,
+			"The user uploaded file %q. No text could be extracted. Write a brief assistant message in %s acknowledging the upload and suggesting what the user might want to discuss about this file. Keep under 120 words.",
+			filename, langName,
 		)
 	}
 	if len(extracted) > 6000 {
 		extracted = extracted[:6000] + "\n...(truncated)"
 	}
 	return fmt.Sprintf(
-		"The user uploaded file %q. Extracted content:\n\n%s\n\nSummarize the key points in Chinese for the user (under 200 words). Mention filename.",
-		filename, extracted,
+		"The user uploaded file %q. Extracted content:\n\n%s\n\nSummarize the key points in %s for the user (under 200 words). Mention filename.",
+		filename, extracted, langName,
 	)
 }

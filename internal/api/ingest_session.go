@@ -333,7 +333,7 @@ func (a *API) streamAssistantReply(
 	}
 	sendEvent("assistant_start", map[string]string{"id": assistantMsg.ID})
 
-	msgs := ingest.AssembleIngestChatMessages(history, userContent)
+	msgs := ingest.AssembleIngestChatMessages(history, userContent, ResolveDocLanguage(a.db))
 	ctx := r.Context()
 	ch, err := client.StreamChat(ctx, msgs, 0.7, 2048)
 	if err != nil {
@@ -539,9 +539,14 @@ func (a *API) summarizeAttachment(ctx context.Context, filename, relPath string,
 		}
 		return fmt.Sprintf("已上传附件 **%s**（路径：`%s`）。请在对话中说明你想如何从该文件沉淀知识。", filename, relPath)
 	}
-	prompt := ingest.AttachmentSummaryPrompt(filename, extracted)
+	docLang := ResolveDocLanguage(a.db)
+	prompt := ingest.AttachmentSummaryPrompt(filename, extracted, docLang)
+	langName := "Chinese"
+	if docLang == "en" {
+		langName = "English"
+	}
 	ch, err := client.StreamChat(ctx, []llm.Message{
-		{Role: "system", Content: "You help summarize uploaded files for a personal wiki ingest session. Reply in Chinese."},
+		{Role: "system", Content: fmt.Sprintf("You help summarize uploaded files for a personal wiki ingest session. Reply in %s.", langName)},
 		{Role: "user", Content: prompt},
 	}, 0.3, 512)
 	if err != nil {

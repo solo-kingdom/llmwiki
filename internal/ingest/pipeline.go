@@ -20,6 +20,7 @@ type Pipeline struct {
 	recorder    JobRecorder
 	mcpExecutor *pipelineMCPExecutor
 	toolLoopCfg llm.ToolLoopConfig
+	docLang     string // "zh" or "en", controls generation language
 }
 
 type CacheEntry struct {
@@ -67,6 +68,11 @@ func (p *Pipeline) SetMCPRouter(router *mcp.Router) {
 // SetToolLoopConfig overrides default tool-loop limits.
 func (p *Pipeline) SetToolLoopConfig(cfg llm.ToolLoopConfig) {
 	p.toolLoopCfg = cfg
+}
+
+// SetDocLanguage sets the document output language for generation prompts.
+func (p *Pipeline) SetDocLanguage(lang string) {
+	p.docLang = lang
 }
 
 func (p *Pipeline) Ingest(ctx context.Context, sourcePath string) ([]string, error) {
@@ -144,8 +150,13 @@ func (p *Pipeline) LockManager() *PageLockManager {
 }
 
 func (p *Pipeline) analyze(ctx context.Context, name, content string) (string, error) {
+	langInstruction := languageInstructionForPipeline(p.docLang)
+	systemMsg := "You are a knowledge analyst. Analyze the provided source document. Identify key entities, concepts, arguments, and connections."
+	if langInstruction != "" {
+		systemMsg += "\n\n" + langInstruction
+	}
 	messages := []llm.Message{
-		{Role: "system", Content: "You are a knowledge analyst. Analyze the provided source document. Identify key entities, concepts, arguments, and connections."},
+		{Role: "system", Content: systemMsg},
 		{Role: "user", Content: fmt.Sprintf("Analyze this source: **%s**\n\n---\n\n%s", name, content)},
 	}
 
@@ -155,6 +166,7 @@ func (p *Pipeline) analyze(ctx context.Context, name, content string) (string, e
 }
 
 func (p *Pipeline) generate(ctx context.Context, name, content, analysis string) ([]string, error) {
+	langInstruction := languageInstructionForPipeline(p.docLang)
 	prompt := fmt.Sprintf(`Source: **%s**
 
 Analysis (context only):
@@ -165,8 +177,13 @@ Original Content:
 
 Generate wiki pages in FILE block format.`, name, analysis, content)
 
+	systemMsg := "You are a wiki generator. Output FILE blocks: ---FILE: path\ncontent\n---END FILE---"
+	if langInstruction != "" {
+		systemMsg += "\n\n" + langInstruction
+	}
+
 	messages := []llm.Message{
-		{Role: "system", Content: "You are a wiki generator. Output FILE blocks: ---FILE: path\ncontent\n---END FILE---"},
+		{Role: "system", Content: systemMsg},
 		{Role: "user", Content: prompt},
 	}
 
@@ -322,4 +339,16 @@ func computeSHA256(path string) (string, error) {
 	}
 	h := sha256.Sum256(data)
 	return fmt.Sprintf("%x", h), nil
+}
+
+// languageInstructionForPipeline builds a language constraint prompt fragment.
+func languageInstructionForPipeline(lang string) string {
+	switch lang {
+	case "zh":
+		return "重要：你必须使用中文撰写所有文档正文。英文术语可以用括号注释，但不允许英文大段正文主导。文档标题、段落、说明文字必须使用中文。"
+	case "en":
+		return "Important: You must write all document content in English. Technical terms may include brief annotations, but no large blocks of non-English text in the main body. Titles, paragraphs, and descriptions must be in English."
+	default:
+		return ""
+	}
 }

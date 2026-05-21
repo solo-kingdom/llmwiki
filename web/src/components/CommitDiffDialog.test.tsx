@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { screen } from "@testing-library/react"
 import { CommitDiffDialog } from "@/components/CommitDiffDialog"
+import { renderWithI18n } from "@/test/i18n"
 
 const sampleDiff = `diff --git a/wiki/intro.md b/wiki/intro.md
 --- /dev/null
@@ -12,7 +13,7 @@ const sampleDiff = `diff --git a/wiki/intro.md b/wiki/intro.md
 
 describe("CommitDiffDialog", () => {
   it("renders file list and diff table when parsed", () => {
-    const { container } = render(
+    const { container } = renderWithI18n(
       <CommitDiffDialog
         open
         sha="abc1234"
@@ -20,15 +21,16 @@ describe("CommitDiffDialog", () => {
         loading={false}
         onClose={() => {}}
       />,
+      { lang: "en" },
     )
 
-    expect(screen.getByText("1 file")).toBeInTheDocument()
+    expect(screen.getByText("1 file(s)")).toBeInTheDocument()
     expect(screen.getByText("wiki/intro.md")).toBeInTheDocument()
     expect(container.querySelector(".diff")).toBeInTheDocument()
   })
 
   it("shows raw diff fallback when parse has no hunks", () => {
-    render(
+    renderWithI18n(
       <CommitDiffDialog
         open
         sha="abc1234"
@@ -36,6 +38,7 @@ describe("CommitDiffDialog", () => {
         loading={false}
         onClose={() => {}}
       />,
+      { lang: "en" },
     )
 
     expect(
@@ -45,7 +48,7 @@ describe("CommitDiffDialog", () => {
   })
 
   it("shows empty diff message when diff text is blank", () => {
-    render(
+    renderWithI18n(
       <CommitDiffDialog
         open
         sha="empty01"
@@ -53,14 +56,15 @@ describe("CommitDiffDialog", () => {
         loading={false}
         onClose={() => {}}
       />,
+      { lang: "en" },
     )
 
     expect(screen.getByText("(empty diff)")).toBeInTheDocument()
-    expect(screen.queryByText("1 file")).not.toBeInTheDocument()
+    expect(screen.queryByText("1 file(s)")).not.toBeInTheDocument()
   })
 
   it("shows loading state", () => {
-    render(
+    renderWithI18n(
       <CommitDiffDialog
         open
         sha="abc1234"
@@ -68,6 +72,7 @@ describe("CommitDiffDialog", () => {
         loading
         onClose={() => {}}
       />,
+      { lang: "en" },
     )
 
     expect(screen.getByText("Loading diff...")).toBeInTheDocument()

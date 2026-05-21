@@ -319,7 +319,7 @@ async function consumeSessionSSE(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (msg.includes("input stream") || msg.includes("network")) {
-      throw new Error(`连接中断：${msg}`)
+      throw new Error(`__i18n:error.connection_interrupted:${msg}`)
     }
     throw e instanceof Error ? e : new Error(msg)
   }

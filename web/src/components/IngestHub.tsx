@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { useApp } from "@/context/AppContext"
+import { useT } from "@/i18n"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PastePreview, analyzePaste } from "@/components/PastePreview"
@@ -14,6 +15,7 @@ interface UploadResult {
 }
 
 export function IngestHub() {
+  const t = useT()
   const { submitConversation, submitText, submitUpload, refreshIngestJobs, loadCapabilities } =
     useApp()
 
@@ -176,10 +178,10 @@ export function IngestHub() {
           {isEmpty && !isDragging && (
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-8 text-center">
               <p className="text-lg text-muted-foreground/60 mb-1">
-                粘贴对话内容开始摄入...
+                {t("ingest.paste_hint")}
               </p>
               <p className="text-xs text-muted-foreground/40">
-                支持 Ctrl+V 粘贴、拖放文件，或直接输入
+                {t("ingest.paste_subhint")}
               </p>
             </div>
           )}
@@ -188,7 +190,7 @@ export function IngestHub() {
           {isDragging && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
               <p className="text-blue-600 font-medium">
-                释放文件以上传
+                {t("ingest.drop_to_upload")}
               </p>
             </div>
           )}
@@ -196,7 +198,7 @@ export function IngestHub() {
           <textarea
             ref={textareaRef}
             className="w-full min-h-40 max-h-[60vh] rounded-xl bg-transparent px-4 py-3 text-sm outline-none resize-y placeholder-transparent"
-            placeholder="输入对话内容..."
+            placeholder={t("ingest.input_placeholder")}
             value={convContent}
             onChange={(e) => handleContentChange(e.target.value)}
             onPaste={handlePaste}
@@ -215,17 +217,17 @@ export function IngestHub() {
             ) : (
               <ChevronRight className="size-3" />
             )}
-            高级选项
+            {t("ingest.advanced")}
           </button>
           {advancedOpen && (
             <div className="grid grid-cols-2 gap-3 mt-2">
               <Input
-                placeholder="会话标题（可选）"
+                placeholder={t("ingest.session_title_optional")}
                 value={convTitle}
                 onChange={(e) => setConvTitle(e.target.value)}
               />
               <Input
-                placeholder="来源（可选）"
+                placeholder={t("ingest.source_optional")}
                 value={convSource}
                 onChange={(e) => setConvSource(e.target.value)}
               />
@@ -242,16 +244,16 @@ export function IngestHub() {
             {submitBusy ? (
               <>
                 <Loader2 className="size-3.5 animate-spin" />
-                提交中...
+                {t("common.submitting")}
               </>
             ) : (
-              "提交摄入"
+              t("ingest.submit")
             )}
           </Button>
 
           {showSuccess && (
             <span className="text-xs text-green-600 font-medium animate-in fade-in duration-300">
-              ✓ 已提交
+              {t("ingest.submitted")}
             </span>
           )}
 
@@ -268,7 +270,7 @@ export function IngestHub() {
             ) : (
               <Upload className="size-3.5" />
             )}
-            上传文件
+            {t("ingest.upload_files")}
           </Button>
           <input
             ref={fileInputRef}
@@ -289,7 +291,7 @@ export function IngestHub() {
             onClick={() => setTextDialogOpen(true)}
           >
             <FileText className="size-3.5" />
-            文本
+            {t("ingest.text")}
           </Button>
         </div>
 
@@ -297,13 +299,16 @@ export function IngestHub() {
         {uploadResult && (
           <div className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
             <span className="text-green-600">
-              ✓ {uploadResult.accepted} accepted
+              {t("ingest.upload_accepted", { count: uploadResult.accepted })}
             </span>
             {uploadResult.rejected > 0 && (
               <>
                 {" · "}
                 <span className="text-red-600">
-                  {uploadResult.rejected} rejected: {uploadResult.details}
+                  {t("ingest.upload_rejected", {
+                    count: uploadResult.rejected,
+                    details: uploadResult.details,
+                  })}
                 </span>
               </>
             )}

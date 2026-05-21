@@ -4,7 +4,7 @@ import { I18nProvider, useI18n } from "@/i18n"
 import { WorkbenchLayout } from "@/components/WorkbenchLayout"
 import { WikiReaderLayout } from "@/components/WikiReaderLayout"
 import { isWikiReaderPath, usePathname } from "@/lib/wiki-routes"
-import { useEffect, useCallback } from "react"
+import { useEffect } from "react"
 import "./App.css"
 
 function I18nSync() {
@@ -24,23 +24,6 @@ function I18nSync() {
   return null
 }
 
-function WorkbenchShell() {
-  const { settings } = useApp()
-  const handleLangChange = useCallback((_lang: "zh" | "en") => {
-    // The save is handled by the settings page; this callback is for future direct lang changes
-  }, [])
-
-  return (
-    <I18nProvider
-      initialLang={(settings?.ui_language as "zh" | "en") || "zh"}
-      onLangChange={handleLangChange}
-    >
-      <I18nSync />
-      <WorkbenchLayout />
-    </I18nProvider>
-  )
-}
-
 function AppRouter() {
   const pathname = usePathname()
 
@@ -54,11 +37,16 @@ function AppRouter() {
 
   return (
     <AppProvider>
-      <WorkbenchShell />
+      <I18nSync />
+      <WorkbenchLayout />
     </AppProvider>
   )
 }
 
 export default function App() {
-  return <AppRouter />
+  return (
+    <I18nProvider bootstrapFromSettings>
+      <AppRouter />
+    </I18nProvider>
+  )
 }

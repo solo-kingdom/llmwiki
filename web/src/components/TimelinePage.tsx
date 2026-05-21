@@ -5,20 +5,20 @@ import { getVCStatus, getVCLog, getVCDiff, createRollback } from "@/lib/api"
 import type { VCStatus, VCLogEntry } from "@/types"
 import { GitBranch, Clock, FileText, RotateCcw, Eye, ChevronDown, Settings, AlertTriangle } from "lucide-react"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
-import { CommitDiffDialog } from "@/components/CommitDiffDialog"
+import { CommitDiffDialog, DIFF_LOAD_FAILED_MARKER } from "@/components/CommitDiffDialog"
 import { formatGitCommitTimestamp } from "@/lib/format-timestamp"
+import { useT } from "@/i18n"
 
 export function TimelinePage() {
+  const t = useT()
   const [status, setStatus] = useState<VCStatus | null>(null)
   const [entries, setEntries] = useState<VCLogEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [limit, setLimit] = useState(50)
   const [hasMore, setHasMore] = useState(false)
 
-  // Diff modal state
   const [diffEntry, setDiffEntry] = useState<{ sha: string; diff: string; loading: boolean } | null>(null)
 
-  // Rollback confirm state
   const [rollbackEntry, setRollbackEntry] = useState<VCLogEntry | null>(null)
   const [rollbackLoading, setRollbackLoading] = useState(false)
 
@@ -54,7 +54,7 @@ export function TimelinePage() {
       setDiffEntry((prev) =>
         prev?.sha !== sha
           ? prev
-          : { sha, diff: "Failed to load diff", loading: false },
+          : { sha, diff: DIFF_LOAD_FAILED_MARKER, loading: false },
       )
     }
   }
@@ -77,7 +77,7 @@ export function TimelinePage() {
     return (
       <PageContainer>
         <div className="flex items-center justify-center py-12 text-muted-foreground">
-          Loading timeline...
+          {t("timeline.loading")}
         </div>
       </PageContainer>
     )
@@ -88,14 +88,14 @@ export function TimelinePage() {
       <PageContainer>
         <div className="flex flex-col items-center justify-center py-12 space-y-4">
           <GitBranch className="size-12 text-muted-foreground" />
-          <p className="text-muted-foreground">Version control is not enabled.</p>
+          <p className="text-muted-foreground">{t("timeline.disabled")}</p>
           <Button
             variant="outline"
             size="sm"
             onClick={() => navigateTo(workbenchViewHref("settings"))}
           >
             <Settings className="size-3.5 mr-1" />
-            Go to Settings
+            {t("timeline.go_settings")}
           </Button>
         </div>
       </PageContainer>
@@ -107,17 +107,17 @@ export function TimelinePage() {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-xl font-semibold flex items-center gap-2">
           <GitBranch className="size-5" />
-          Timeline
+          {t("timeline.title")}
         </h1>
         <span className="text-sm text-muted-foreground">
-          {status.commit_count} commit{status.commit_count !== 1 ? "s" : ""}
+          {t("timeline.commits", { count: status.commit_count })}
         </span>
       </div>
 
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 space-y-2">
           <Clock className="size-8 text-muted-foreground" />
-          <p className="text-muted-foreground">No history yet</p>
+          <p className="text-muted-foreground">{t("timeline.no_history")}</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -134,7 +134,7 @@ export function TimelinePage() {
                     </span>
                     {entry.is_rollback && (
                       <span className="text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
-                        rollback
+                        {t("timeline.rollback_badge")}
                       </span>
                     )}
                   </div>
@@ -146,7 +146,7 @@ export function TimelinePage() {
                     </span>
                     <span className="flex items-center gap-1">
                       <FileText className="size-3" />
-                      {entry.files_changed} file{entry.files_changed !== 1 ? "s" : ""}
+                      {t("timeline.files_changed", { count: entry.files_changed })}
                     </span>
                   </div>
                 </div>
@@ -158,7 +158,7 @@ export function TimelinePage() {
                     onClick={() => handleViewDiff(entry.sha)}
                   >
                     <Eye className="size-3.5 mr-1" />
-                    Diff
+                    {t("timeline.diff")}
                   </Button>
                   {!entry.is_rollback && (
                     <Button
@@ -168,7 +168,7 @@ export function TimelinePage() {
                       onClick={() => setRollbackEntry(entry)}
                     >
                       <RotateCcw className="size-3.5 mr-1" />
-                      Rollback
+                      {t("timeline.rollback")}
                     </Button>
                   )}
                 </div>
@@ -180,7 +180,7 @@ export function TimelinePage() {
             <div className="flex justify-center pt-2">
               <Button variant="outline" size="sm" onClick={loadMore}>
                 <ChevronDown className="size-3.5 mr-1" />
-                Load More
+                {t("timeline.load_more")}
               </Button>
             </div>
           )}
@@ -196,7 +196,6 @@ export function TimelinePage() {
         onClose={() => setDiffEntry(null)}
       />
 
-      {/* Rollback Confirm Modal */}
       {rollbackEntry && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setRollbackEntry(null)}>
           <div
@@ -205,17 +204,17 @@ export function TimelinePage() {
           >
             <div className="flex items-center gap-2">
               <AlertTriangle className="size-5 text-amber-500" />
-              <h2 className="font-semibold">Confirm Rollback</h2>
+              <h2 className="font-semibold">{t("timeline.confirm_rollback")}</h2>
             </div>
             <div className="text-sm space-y-2 text-muted-foreground">
-              <p>This will roll back the changes from:</p>
+              <p>{t("timeline.rollback_intro")}</p>
               <p className="font-mono text-xs bg-muted p-2 rounded">
                 {rollbackEntry.sha}: {rollbackEntry.subject}
               </p>
               <ul className="list-disc list-inside space-y-1">
-                <li>The wiki changes from this ingest will be reversed via LLM</li>
-                <li>Original source file will be moved to revert/ directory (if it still exists)</li>
-                <li>This action creates a new rollback commit in the timeline</li>
+                <li>{t("timeline.rollback_note_1")}</li>
+                <li>{t("timeline.rollback_note_2")}</li>
+                <li>{t("timeline.rollback_note_3")}</li>
               </ul>
             </div>
             <div className="flex gap-2 justify-end">
@@ -225,7 +224,7 @@ export function TimelinePage() {
                 onClick={() => setRollbackEntry(null)}
                 disabled={rollbackLoading}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 size="sm"
@@ -233,7 +232,7 @@ export function TimelinePage() {
                 onClick={handleRollback}
                 disabled={rollbackLoading}
               >
-                {rollbackLoading ? "Rolling back..." : "Confirm Rollback"}
+                {rollbackLoading ? t("timeline.rolling_back") : t("timeline.confirm_rollback")}
               </Button>
             </div>
           </div>

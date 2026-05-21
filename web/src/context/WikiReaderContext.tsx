@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -74,6 +75,7 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
     null,
   )
 
+  const fetchGeneration = useRef(0)
   const usePublicApi = publicWikiEnabled === true
 
   const refreshDocuments = useCallback(() => {
@@ -98,6 +100,7 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
   const selectDocument = useCallback(
     (id: string) => {
       if (id === currentDocId) return
+      const gen = ++fetchGeneration.current
       setCurrentDocId(id)
       setCurrentDoc(null)
       setLoading(true)
@@ -118,9 +121,18 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
         : api.getDocument(id)
 
       loadDoc
-        .then((doc) => setCurrentDoc(doc))
-        .catch((e) => setError((e as Error).message))
-        .finally(() => setLoading(false))
+        .then((doc) => {
+          if (gen !== fetchGeneration.current) return
+          setCurrentDoc(doc)
+        })
+        .catch((e) => {
+          if (gen !== fetchGeneration.current) return
+          setError((e as Error).message)
+        })
+        .finally(() => {
+          if (gen !== fetchGeneration.current) return
+          setLoading(false)
+        })
     },
     [currentDocId, usePublicApi],
   )

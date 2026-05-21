@@ -2,12 +2,14 @@ import { useState } from "react"
 import { Popover } from "@base-ui/react/popover"
 import { AlertTriangle } from "lucide-react"
 import type { RuntimeDependency } from "@/types"
+import { useT } from "@/i18n"
 
 interface WarningPopoverProps {
   missingDeps: RuntimeDependency[]
 }
 
 export function WarningPopover({ missingDeps }: WarningPopoverProps) {
+  const t = useT()
   const [open, setOpen] = useState(false)
 
   if (missingDeps.length === 0) return null
@@ -16,7 +18,7 @@ export function WarningPopover({ missingDeps }: WarningPopoverProps) {
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger
         className="inline-flex items-center justify-center text-amber-500 hover:text-amber-600 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
-        aria-label="运行时依赖缺失警告"
+        aria-label={t("warning.deps_aria")}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
       >
@@ -30,7 +32,7 @@ export function WarningPopover({ missingDeps }: WarningPopoverProps) {
             onMouseLeave={() => setOpen(false)}
           >
             <Popover.Title className="font-medium text-sm mb-2">
-              Runtime Dependencies
+              {t("warning.deps_title")}
             </Popover.Title>
             <div className="space-y-1.5">
               {missingDeps.map((d) => (
@@ -38,7 +40,7 @@ export function WarningPopover({ missingDeps }: WarningPopoverProps) {
                   <AlertTriangle className="size-3.5 text-amber-500 mt-0.5 shrink-0" />
                   <div>
                     <span className="font-medium">{d.name}</span>
-                    <span className="text-muted-foreground"> 未安装：</span>
+                    <span className="text-muted-foreground">{t("warning.not_installed")}</span>
                     <span className="text-muted-foreground">{d.purpose}</span>
                   </div>
                 </div>

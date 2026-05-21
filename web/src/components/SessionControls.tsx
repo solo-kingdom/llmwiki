@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Dialog } from "@base-ui/react/dialog"
 import { useApp } from "@/context/AppContext"
+import { useT } from "@/i18n"
 import { Button } from "@/components/ui/button"
 import type { SessionListItem } from "@/types"
 import {
@@ -12,11 +13,12 @@ import {
   X,
 } from "lucide-react"
 
-function sessionLabel(title: string) {
-  return title.trim() || "Untitled"
+function sessionLabel(title: string, untitled: string) {
+  return title.trim() || untitled
 }
 
 export function SessionControls() {
+  const t = useT()
   const {
     sessions,
     activeSessionId,
@@ -81,8 +83,12 @@ export function SessionControls() {
 
   const deletePrompt = deleteTarget
     ? deleteTarget.status === "archived"
-      ? `确认删除已归档会话「${sessionLabel(deleteTarget.title)}」？相关聊天记录将被永久删除，此操作不可撤销。`
-      : `确认删除会话「${sessionLabel(deleteTarget.title)}」？聊天记录将被永久删除，此操作不可撤销。`
+      ? t("session.delete_confirm_archived", {
+          title: sessionLabel(deleteTarget.title, t("common.untitled")),
+        })
+      : t("session.delete_confirm_active", {
+          title: sessionLabel(deleteTarget.title, t("common.untitled")),
+        })
     : ""
 
   const renderSessionRow = (s: SessionListItem, archived = false) => {
@@ -91,7 +97,9 @@ export function SessionControls() {
       <>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <MessageSquare className="size-3.5 shrink-0" />
-          <span className="truncate">{sessionLabel(s.title)}</span>
+          <span className="truncate">
+            {sessionLabel(s.title, t("common.untitled"))}
+          </span>
         </div>
         {(s.llm_instance_id || s.llm_model) && (
           <p className="mt-1 truncate pl-5.5 text-xs text-muted-foreground">
@@ -113,7 +121,7 @@ export function SessionControls() {
             size="sm"
             variant="ghost"
             className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
-            title="删除会话"
+            title={t("session.delete_title")}
             disabled={sessionBusy || deleting}
             onClick={(e) => handleDeleteClick(e, s)}
           >
@@ -143,7 +151,7 @@ export function SessionControls() {
           size="sm"
           variant="ghost"
           className="mt-1 size-8 shrink-0 text-muted-foreground hover:text-destructive"
-          title="删除会话"
+          title={t("session.delete_title")}
           disabled={sessionBusy || deleting}
           onClick={(e) => handleDeleteClick(e, s)}
         >
@@ -159,19 +167,19 @@ export function SessionControls() {
         size="sm"
         variant="outline"
         onClick={() => setSwitchOpen(true)}
-        title="切换会话"
+        title={t("session.switch_title")}
       >
         <List className="size-3.5" />
-        切换
+        {t("session.switch")}
       </Button>
       <Button
         size="sm"
         variant="outline"
         onClick={() => void handleNewChat()}
-        title="新建会话"
+        title={t("session.new_title")}
       >
         <Plus className="size-3.5" />
-        新建
+        {t("session.new")}
       </Button>
 
       <Dialog.Root open={switchOpen} onOpenChange={setSwitchOpen}>
@@ -180,7 +188,7 @@ export function SessionControls() {
           <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-md -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-background shadow-lg outline-none data-[starting-style]:scale-95 data-[starting-style]:opacity-0 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 transition-[opacity,scale] duration-200">
             <div className="flex items-center justify-between border-b px-4 py-3">
               <Dialog.Title className="text-base font-semibold">
-                切换会话
+                {t("session.switch_title")}
               </Dialog.Title>
               <Dialog.Close className="rounded-md p-1 text-muted-foreground hover:text-foreground">
                 <X className="size-4" />
@@ -191,7 +199,7 @@ export function SessionControls() {
               <div className="space-y-1 p-2">
                 {activeSessions.length === 0 && (
                   <p className="py-6 text-center text-xs text-muted-foreground">
-                    暂无活跃会话
+                    {t("session.no_active")}
                   </p>
                 )}
                 {activeSessions.map((s) => renderSessionRow(s))}
@@ -199,7 +207,7 @@ export function SessionControls() {
                   <>
                     <p className="flex items-center gap-1 px-3 py-2 text-xs font-medium text-muted-foreground">
                       <Archive className="size-3" />
-                      已归档 ({archivedSessions.length})
+                      {t("session.archived", { count: archivedSessions.length })}
                     </p>
                     {archivedSessions.map((s) => renderSessionRow(s, true))}
                   </>
@@ -220,7 +228,7 @@ export function SessionControls() {
           <Dialog.Backdrop className="fixed inset-0 z-[60] bg-black/50 data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 transition-opacity duration-200" />
           <Dialog.Popup className="fixed left-1/2 top-1/2 z-[60] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-background p-6 shadow-lg outline-none data-[starting-style]:scale-95 data-[starting-style]:opacity-0 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 transition-[opacity,scale] duration-200">
             <Dialog.Title className="text-base font-semibold">
-              删除会话
+              {t("session.delete_title")}
             </Dialog.Title>
             <p className="mt-3 text-sm text-muted-foreground">{deletePrompt}</p>
             <div className="mt-6 flex justify-end gap-2">
@@ -230,7 +238,7 @@ export function SessionControls() {
                 disabled={deleting}
                 onClick={() => setDeleteTarget(null)}
               >
-                取消
+                {t("common.cancel")}
               </Button>
               <Button
                 size="sm"
@@ -238,7 +246,7 @@ export function SessionControls() {
                 disabled={deleting}
                 onClick={() => void handleDeleteConfirm()}
               >
-                {deleting ? "删除中..." : "确认删除"}
+                {deleting ? t("common.deleting") : t("common.confirm_delete")}
               </Button>
             </div>
           </Dialog.Popup>

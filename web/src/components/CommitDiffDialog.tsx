@@ -20,6 +20,9 @@ import {
 } from "@/lib/parse-unified-diff"
 import type { FileData } from "react-diff-view"
 import { Columns2, Rows2 } from "lucide-react"
+import { useT } from "@/i18n"
+
+export const DIFF_LOAD_FAILED_MARKER = "__DIFF_LOAD_FAILED__"
 
 export interface CommitDiffDialogProps {
   open: boolean
@@ -96,10 +99,11 @@ function FileListItem({
 }
 
 function RawDiffFallback({ diff }: { diff: string }) {
+  const t = useT()
   return (
     <div className="flex flex-col gap-2 p-4 min-h-0 flex-1 overflow-y-auto">
       <p className="text-sm text-muted-foreground">
-        Unable to parse diff format. Showing raw output:
+        {t("diff.unable_parse")}
       </p>
       <pre className="text-xs font-mono whitespace-pre-wrap break-all bg-muted/50 p-3 rounded">
         {diff}
@@ -115,6 +119,7 @@ function DiffFileView({
   file: FileData
   viewType: ViewType
 }) {
+  const t = useT()
   const path = getFileDisplayPath(file)
   const language = inferLanguage(path)
 
@@ -125,13 +130,13 @@ function DiffFileView({
 
   if (file.isBinary) {
     return (
-      <p className="text-sm text-muted-foreground p-4">Binary file — no diff preview</p>
+      <p className="text-sm text-muted-foreground p-4">{t("diff.binary")}</p>
     )
   }
 
   if (file.hunks.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground p-4">No hunks in this file</p>
+      <p className="text-sm text-muted-foreground p-4">{t("diff.no_hunks")}</p>
     )
   }
 
@@ -164,13 +169,14 @@ function DiffContentBody({
   onSelectFile: (index: number) => void
   viewType: ViewType
 }) {
+  const t = useT()
   const selectedFile = files[selectedIndex] ?? null
 
   return (
     <div className="flex min-h-0 flex-1">
       <aside className="flex w-60 shrink-0 flex-col border-r min-h-0">
         <div className="shrink-0 border-b px-3 py-2 text-xs text-muted-foreground">
-          {files.length} file{files.length !== 1 ? "s" : ""}
+          {t("diff.file_count", { count: files.length })}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {files.map((file, i) => (
@@ -187,7 +193,7 @@ function DiffContentBody({
         {selectedFile ? (
           <DiffFileView file={selectedFile} viewType={viewType} />
         ) : (
-          <p className="p-4 text-sm text-muted-foreground">Select a file</p>
+          <p className="p-4 text-sm text-muted-foreground">{t("diff.select_file")}</p>
         )}
       </main>
     </div>
@@ -201,6 +207,7 @@ export function CommitDiffDialog({
   loading,
   onClose,
 }: CommitDiffDialogProps) {
+  const t = useT()
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [viewType, setViewType] = useState<ViewType>("unified")
 
@@ -209,7 +216,7 @@ export function CommitDiffDialog({
   const showRawFallback =
     !loading &&
     diff.trim() !== "" &&
-    !diff.startsWith("Failed to load") &&
+    !diff.startsWith(DIFF_LOAD_FAILED_MARKER) &&
     !canRenderDiff
 
   useEffect(() => {
@@ -230,15 +237,17 @@ export function CommitDiffDialog({
   let body: ReactNode
   if (loading) {
     body = (
-      <p className="text-muted-foreground text-sm p-4">Loading diff...</p>
+      <p className="text-muted-foreground text-sm p-4">{t("diff.loading")}</p>
     )
-  } else if (diff.startsWith("Failed to load")) {
+  } else if (diff === DIFF_LOAD_FAILED_MARKER) {
     body = (
-      <p className="text-red-600 dark:text-red-400 text-sm p-4">{diff}</p>
+      <p className="text-red-600 dark:text-red-400 text-sm p-4">
+        {t("timeline.diff_load_failed")}
+      </p>
     )
   } else if (diff.trim() === "") {
     body = (
-      <p className="text-muted-foreground text-sm p-4">(empty diff)</p>
+      <p className="text-muted-foreground text-sm p-4">{t("diff.empty")}</p>
     )
   } else if (showRawFallback) {
     body = <RawDiffFallback diff={diff} />
@@ -264,7 +273,7 @@ export function CommitDiffDialog({
       >
         <div className="flex items-center justify-between gap-2 p-4 border-b shrink-0">
           <h2 className="font-semibold text-sm truncate">
-            Diff: <span className="font-mono">{sha}</span>
+            {t("diff.title", { sha })}
           </h2>
           <div className="flex items-center gap-1 shrink-0">
             <Button
@@ -275,7 +284,7 @@ export function CommitDiffDialog({
               disabled={loading || !canRenderDiff}
             >
               <Rows2 className="size-3.5 mr-1" />
-              Unified
+              {t("diff.unified")}
             </Button>
             <Button
               size="sm"
@@ -285,9 +294,9 @@ export function CommitDiffDialog({
               disabled={loading || !canRenderDiff}
             >
               <Columns2 className="size-3.5 mr-1" />
-              Split
+              {t("diff.split")}
             </Button>
-            <Button size="sm" variant="ghost" onClick={onClose} aria-label="Close">
+            <Button size="sm" variant="ghost" onClick={onClose} aria-label={t("diff.close")}>
               ✕
             </Button>
           </div>

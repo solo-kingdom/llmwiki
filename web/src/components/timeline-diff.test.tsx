@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { TimelinePage } from "@/components/TimelinePage"
 import * as api from "@/lib/api"
 import type { VCLogEntry, VCStatus } from "@/types"
+import { I18nTestProvider } from "@/test/i18n"
 
 const diffA = `diff --git a/wiki/a.md b/wiki/a.md
 --- a/wiki/a.md
@@ -59,7 +60,11 @@ describe("TimelinePage diff loading", () => {
       return Promise.resolve({ sha: entryB.sha, diff: "" })
     })
 
-    render(<TimelinePage />)
+    render(
+      <I18nTestProvider lang="en">
+        <TimelinePage />
+      </I18nTestProvider>,
+    )
 
     await screen.findByText("commit A")
 

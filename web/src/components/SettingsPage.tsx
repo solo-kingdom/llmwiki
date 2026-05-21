@@ -252,39 +252,39 @@ export function SettingsPage() {
         servers?: Record<string, Record<string, unknown>>
       }
       if (parsed.version !== 1) {
-        return "version 必须为 1"
+        return t("settings.mcp.validation.version")
       }
       if (parsed.servers == null) {
-        return "servers 为必填对象，key 为 server id"
+        return t("settings.mcp.validation.servers_required")
       }
       if (Array.isArray(parsed.servers)) {
-        return "servers 必须是对象（key 为 id），不能是数组"
+        return t("settings.mcp.validation.servers_not_array")
       }
       if (typeof parsed.servers !== "object") {
-        return "servers 必须是对象，key 为 server id"
+        return t("settings.mcp.validation.servers_object")
       }
       for (const [key, srv] of Object.entries(parsed.servers)) {
         if (!key.trim()) {
-          return "servers 的 key 不能为空"
+          return t("settings.mcp.validation.key_empty")
         }
         const id = typeof srv?.id === "string" ? srv.id.trim() : ""
         if (id && id !== key) {
-          return `servers.${key}.id 必须与 key "${key}" 一致`
+          return t("settings.mcp.validation.id_mismatch", { key })
         }
         if (!srv?.name || String(srv.name).trim() === "") {
-          return `servers.${key}.name 为必填`
+          return t("settings.mcp.validation.name_required", { key })
         }
         if (!srv?.transport || String(srv.transport).trim() === "") {
-          return `servers.${key}.transport 为必填`
+          return t("settings.mcp.validation.transport_required", { key })
         }
         const transport = String(srv.transport).trim()
         if (transport !== "stdio" && (!srv?.url || String(srv.url).trim() === "")) {
-          return `servers.${key}.url 为必填（transport 为 ${transport}）`
+          return t("settings.mcp.validation.url_required", { key, transport })
         }
       }
       return null
     } catch (err) {
-      return err instanceof Error ? err.message : "JSON 格式无效"
+      return err instanceof Error ? err.message : t("settings.mcp.validation.invalid_json")
     }
   }
 
@@ -477,7 +477,7 @@ export function SettingsPage() {
                   ) : (
                     <RefreshCw className="size-3.5 mr-1" />
                   )}
-                  检查连接
+                  {t("settings.providers.check_connection")}
                 </Button>
                 <Button
                   size="sm"
@@ -507,7 +507,7 @@ export function SettingsPage() {
                     <>
                       <div className="space-y-2">
                         <div>
-                          <label className="text-xs font-medium text-muted-foreground">Provider 类型</label>
+                          <label className="text-xs font-medium text-muted-foreground">{t("settings.providers.type_label")}</label>
                           <select
                             value={editForm.catalog_id}
                             onChange={(e) => setEditForm((prev) =>
@@ -522,11 +522,11 @@ export function SettingsPage() {
                         </div>
                         {editForm.catalog_id !== editForm.original_catalog_id && (
                           <p className="text-xs text-amber-600">
-                            ⚠ 更改类型后，当前选定的模型将被重置
+                            {t("settings.providers.type_change_warning")}
                           </p>
                         )}
                         <div>
-                          <label className="text-xs font-medium text-muted-foreground">名称</label>
+                          <label className="text-xs font-medium text-muted-foreground">{t("settings.providers.name_label")}</label>
                           <Input
                             value={editForm.name}
                             onChange={(e) => setEditForm((prev) =>
@@ -537,11 +537,16 @@ export function SettingsPage() {
                         </div>
                         <div>
                           <label className="text-xs font-medium text-muted-foreground">
-                            API Key{inst.api_key_masked ? ` (当前: ${inst.api_key_masked})` : ""}
+                            {t("settings.providers.api_key_label")}
+                            {inst.api_key_masked
+                              ? t("settings.providers.api_key_current", {
+                                  masked: inst.api_key_masked,
+                                })
+                              : ""}
                           </label>
                           <Input
                             type="password"
-                            placeholder="输入新 key 以更换"
+                            placeholder={t("settings.providers.api_key_placeholder")}
                             value={editForm.api_key}
                             onChange={(e) => setEditForm((prev) =>
                               prev.mode === "edit" ? { ...prev, api_key: e.target.value } : prev,
@@ -551,7 +556,8 @@ export function SettingsPage() {
                         </div>
                         <div>
                           <label className="text-xs font-medium text-muted-foreground">
-                            Base URL{catalogInfo?.api_base ? " (可选)" : " (必填)"}
+                            {t("settings.providers.base_url_label")}
+                            {catalogInfo?.api_base ? t("common.optional") : t("common.required")}
                           </label>
                           <Input
                             value={editForm.base_url}
@@ -654,7 +660,7 @@ export function SettingsPage() {
                   </Button>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">Provider 类型</label>
+                  <label className="text-xs font-medium text-muted-foreground">{t("settings.providers.type_label")}</label>
                   <select
                     value={addForm.catalog_id}
                     onChange={(e) => handleAddCatalogChange(e.target.value)}
@@ -667,7 +673,7 @@ export function SettingsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">名称</label>
+                  <label className="text-xs font-medium text-muted-foreground">{t("settings.providers.name_label")}</label>
                   <Input
                     value={addForm.name}
                     onChange={(e) => setAddForm((prev) =>
@@ -693,7 +699,7 @@ export function SettingsPage() {
                   <label className="text-xs font-medium text-muted-foreground">
                     Base URL{(() => {
                       const catalogInfo = providers.find((p) => p.id === addForm.catalog_id)
-                      return catalogInfo?.api_base ? " (可选)" : " (必填)"
+                      return catalogInfo?.api_base ? t("common.optional") : t("common.required")
                     })()}
                   </label>
                   <Input
@@ -788,7 +794,7 @@ export function SettingsPage() {
                       disabled={!jobInstanceId || currentModels.length === 0}
                       className="mt-1 w-full h-9 rounded-md border border-input bg-transparent px-2 text-sm disabled:opacity-50"
                     >
-                      <option value="">选择模型</option>
+                      <option value="">{t("settings.providers.select_model")}</option>
                       {currentModels.map((m) => (
                         <option key={m.model_id} value={m.model_id}>
                           {m.name}
@@ -864,7 +870,7 @@ export function SettingsPage() {
             {mcpChecks && (
               <div className="space-y-2" data-testid="mcp-check-results">
                 {mcpChecks.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">未配置 MCP server</p>
+                  <p className="text-xs text-muted-foreground">{t("settings.mcp.no_servers")}</p>
                 ) : (
                   mcpChecks.map(renderMCPStatusBadge)
                 )}
@@ -1017,7 +1023,7 @@ export function SettingsPage() {
               Version Control
             </CardTitle>
             <CardDescription>
-              管理 wiki 版本历史、查看变更差异和回滚操作
+              {t("settings.vc.desc")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

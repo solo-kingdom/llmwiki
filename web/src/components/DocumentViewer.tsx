@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import rehypeHighlight from "rehype-highlight"
 import { useWikiReader } from "@/context/WikiReaderContext"
+import { useT } from "@/i18n"
 import { extractHeadings, slugifyHeading } from "@/lib/markdown"
 import type { OutlineItem } from "@/types"
 import "highlight.js/styles/github.css"
@@ -46,6 +47,7 @@ export function DocumentViewer({
   onOutlineChange,
   variant = "classic",
 }: DocumentViewerProps) {
+  const t = useT()
   const { currentDoc, currentDocId, loading, error, selectDocument } =
     useWikiReader()
   const isReader = variant === "reader"
@@ -57,6 +59,7 @@ export function DocumentViewer({
     } else {
       onOutlineChange([])
     }
+    return () => onOutlineChange([])
   }, [currentDoc?.content, onOutlineChange])
 
   const handleWikilink = useCallback(
@@ -73,7 +76,7 @@ export function DocumentViewer({
   if (loading) {
     return (
       <div className={isReader ? "py-8 text-center" : "flex flex-1 items-center justify-center"}>
-        <p className="text-muted-foreground">加载中...</p>
+        <p className="text-muted-foreground">{t("document.loading")}</p>
       </div>
     )
   }
@@ -89,7 +92,7 @@ export function DocumentViewer({
   if (!currentDoc) {
     return (
       <div className={isReader ? "py-8 text-center" : "flex flex-1 items-center justify-center"}>
-        <p className="text-muted-foreground">请从左侧选择一篇文档开始阅读</p>
+        <p className="text-muted-foreground">{t("document.select_hint")}</p>
       </div>
     )
   }
@@ -122,7 +125,7 @@ export function DocumentViewer({
           {currentDoc.content}
         </ReactMarkdown>
       ) : (
-        <p className="text-muted-foreground">暂无正文内容</p>
+        <p className="text-muted-foreground">{t("document.no_content")}</p>
       )}
     </article>
   )

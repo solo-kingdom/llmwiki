@@ -13,6 +13,26 @@ const en: Record<MessageKey, string> = {
   // WorkbenchLayout
   "app.title": "LLMWiki",
 
+  // Common
+  "common.cancel": "Cancel",
+  "common.confirm": "Confirm",
+  "common.confirm_delete": "Confirm delete",
+  "common.loading": "Loading...",
+  "common.loading_ellipsis": "Loading…",
+  "common.submitting": "Submitting...",
+  "common.deleting": "Deleting...",
+  "common.close": "Close",
+  "common.clear": "Clear",
+  "common.collapse": "Collapse",
+  "common.details": "Details",
+  "common.retry": "Retry",
+  "common.restart": "Restart",
+  "common.optional": " (optional)",
+  "common.required": " (required)",
+  "common.load_failed": "Failed to load",
+  "common.no_details": "(no details)",
+  "common.untitled": "Untitled",
+
   // Settings Page
   "settings.language.title": "Language Settings",
   "settings.language.ui_language": "UI Language",
@@ -39,6 +59,15 @@ const en: Record<MessageKey, string> = {
   "settings.providers.checking": "Checking",
   "settings.providers.status_ok": "OK",
   "settings.providers.status_error": "Error",
+  "settings.providers.type_label": "Provider type",
+  "settings.providers.type_change_warning":
+    "⚠ Changing type will reset the currently selected model",
+  "settings.providers.name_label": "Name",
+  "settings.providers.api_key_label": "API Key",
+  "settings.providers.api_key_current": " (current: {masked})",
+  "settings.providers.api_key_placeholder": "Enter new key to replace",
+  "settings.providers.base_url_label": "Base URL",
+  "settings.providers.select_model": "Select model",
 
   "settings.jobs.title": "Ingest Job Model",
   "settings.jobs.desc": "Provider and Model used for ingest jobs",
@@ -50,12 +79,31 @@ const en: Record<MessageKey, string> = {
   "settings.mcp.desc": "Global MCP client configuration (JSON format)",
   "settings.mcp.check_connection": "Check connection",
   "settings.mcp.save_note": "Format and connectivity will be validated on save",
+  "settings.mcp.no_servers": "No MCP servers configured",
+  "settings.mcp.validation.version": "version must be 1",
+  "settings.mcp.validation.servers_required":
+    "servers is required and must be an object keyed by server id",
+  "settings.mcp.validation.servers_not_array":
+    "servers must be an object (keyed by id), not an array",
+  "settings.mcp.validation.servers_object":
+    "servers must be an object keyed by server id",
+  "settings.mcp.validation.key_empty": "servers key must not be empty",
+  "settings.mcp.validation.id_mismatch":
+    'servers.{key}.id must match key "{key}"',
+  "settings.mcp.validation.name_required": "servers.{key}.name is required",
+  "settings.mcp.validation.transport_required":
+    "servers.{key}.transport is required",
+  "settings.mcp.validation.url_required":
+    "servers.{key}.url is required (transport is {transport})",
+  "settings.mcp.validation.invalid_json": "Invalid JSON format",
 
   "settings.logs.title": "Logs",
   "settings.logs.activity_max": "Max activity log entries",
-  "settings.logs.activity_max_desc": "Set to 0 to disable logging; excess entries are auto-cleaned",
+  "settings.logs.activity_max_desc":
+    "Set to 0 to disable logging; excess entries are auto-cleaned",
   "settings.logs.job_events_max": "Max events per ingest job",
-  "settings.logs.job_events_max_desc": "Set to 0 to disable events; excess entries are auto-cleaned",
+  "settings.logs.job_events_max_desc":
+    "Set to 0 to disable events; excess entries are auto-cleaned",
 
   "settings.processing.title": "Processing",
   "settings.processing.max_tokens": "Max Output Tokens",
@@ -64,15 +112,20 @@ const en: Record<MessageKey, string> = {
   "settings.processing.chunk_overlap": "Chunk Overlap",
   "settings.processing.auto_reindex": "Auto Reindex",
   "settings.processing.watch_sources": "Watch Sources",
-  "settings.processing.auto_reindex_desc": "Automatically trigger index rebuild on file changes",
-  "settings.processing.watch_sources_desc": "Automatically watch data source directory for file changes",
+  "settings.processing.auto_reindex_desc":
+    "Automatically trigger index rebuild on file changes",
+  "settings.processing.watch_sources_desc":
+    "Automatically watch data source directory for file changes",
 
   "settings.vc.title": "Version Control",
   "settings.vc.enabled": "Version control enabled",
   "settings.vc.enable": "Enable version control",
   "settings.vc.disable": "Disable version control",
-  "settings.vc.disable_note": "Disabling keeps the .git directory but stops auto-commits",
+  "settings.vc.disable_note":
+    "Disabling keeps the .git directory but stops auto-commits",
   "settings.vc.view_history": "View history",
+  "settings.vc.desc":
+    "Manage wiki version history, view change diffs, and roll back",
 
   // IngestChat
   "chat.copied": "Copied",
@@ -84,7 +137,8 @@ const en: Record<MessageKey, string> = {
   "chat.no_provider": "Please add a Provider in Settings first",
   "chat.select_model_hint": 'Click "Model" below to select a Provider and Model',
   "chat.start_topic": "Start a topic",
-  "chat.archive_desc": 'Have a multi-turn conversation to clarify, then click "Archive" to save to wiki',
+  "chat.archive_desc":
+    'Have a multi-turn conversation to clarify, then click "Archive" to save to wiki',
   "chat.select_model_start": "Select a Provider and Model to start...",
   "chat.input_placeholder": "Type a message… (Shift+Enter for new line)",
   "chat.model": "Model",
@@ -98,6 +152,185 @@ const en: Record<MessageKey, string> = {
   "chat.archive_submitted": "Archive job submitted",
   "chat.delete_session": "Delete session",
   "chat.new_session": "New session",
+  "chat.archive_requires_user": "At least one user message is required",
+
+  // Session controls
+  "session.switch": "Switch",
+  "session.switch_title": "Switch session",
+  "session.new": "New",
+  "session.new_title": "New session",
+  "session.delete_title": "Delete session",
+  "session.no_active": "No active sessions",
+  "session.archived": "Archived ({count})",
+  "session.delete_confirm_active":
+    'Delete session "{title}"? Chat history will be permanently deleted. This cannot be undone.',
+  "session.delete_confirm_archived":
+    'Delete archived session "{title}"? Related chat history will be permanently deleted. This cannot be undone.',
+
+  // Model select
+  "model.select_title": "Select model",
+  "model.no_provider": "Please add a Provider instance in Settings first",
+  "model.instance_label": "Provider instance",
+  "model.select_instance": "Select instance",
+  "model.select_model": "Select model",
+  "model.recent": "Recently used",
+
+  // Ingest hub
+  "ingest.paste_hint": "Paste conversation content to start ingest...",
+  "ingest.paste_subhint": "Supports Ctrl+V paste, file drop, or direct input",
+  "ingest.drop_to_upload": "Drop files to upload",
+  "ingest.input_placeholder": "Enter conversation content...",
+  "ingest.advanced": "Advanced options",
+  "ingest.session_title_optional": "Session title (optional)",
+  "ingest.source_optional": "Source (optional)",
+  "ingest.submit": "Submit ingest",
+  "ingest.submitted": "✓ Submitted",
+  "ingest.upload_files": "Upload files",
+  "ingest.text": "Text",
+  "ingest.upload_accepted": "✓ {count} accepted",
+  "ingest.upload_rejected": "{count} rejected: {details}",
+
+  // Ingest raw
+  "ingest.raw.title": "Raw data ingest",
+  "ingest.raw.desc_before":
+    "Use Ingest when you already have structured material: upload files or paste text blocks and submit in one step. For multi-turn exploration with the model, use ",
+  "ingest.raw.desc_after": ".",
+  "ingest.raw.files": "Files",
+  "ingest.raw.file_drop_hint": "Drop files here, or click to select multiple files",
+  "ingest.raw.select_files": "Select files",
+  "ingest.raw.remove_file": "Remove {name}",
+  "ingest.raw.text_blocks": "Text blocks",
+  "ingest.raw.add_block": "Add text block",
+  "ingest.raw.block_title_optional": "Block title (optional)",
+  "ingest.raw.block_content_required":
+    "Content (required; at least one non-empty text block to submit)",
+  "ingest.raw.delete_block": "Delete text block",
+  "ingest.raw.batch_info": "Batch info (optional)",
+  "ingest.raw.batch_title": "Batch title",
+  "ingest.raw.source": "Source",
+  "ingest.raw.submit": "Archive directly",
+  "ingest.raw.submit_hint": "Add at least one file or one non-empty text block",
+  "ingest.raw.success_count": "{count} task(s) succeeded",
+  "ingest.raw.text_job": " (text job: {id})",
+  "ingest.raw.file_jobs": "file job: {ids}",
+  "ingest.raw.failed_count": "{count} failed:",
+  "ingest.raw.failed_text": " text - {error};",
+  "ingest.raw.view_jobs": "View Jobs",
+  "ingest.raw.batch_upload": "(batch upload)",
+
+  // Text ingest dialog
+  "ingest.text.title": "Text ingest",
+  "ingest.text.title_optional": "Title (optional)",
+  "ingest.text.title_placeholder": "Text title",
+  "ingest.text.filename_optional": "Filename (optional)",
+  "ingest.text.content": "Content",
+  "ingest.text.content_placeholder": "Paste or enter text content...",
+  "ingest.text.submit": "Submit text ingest",
+
+  // Jobs
+  "jobs.empty": "No ingest jobs",
+  "jobs.log": "Log",
+  "jobs.retry": "Retry",
+  "jobs.restart": "Restart",
+  "jobs.cancel": "Cancel",
+  "jobs.status.all": "All",
+  "jobs.status.queued": "Queued",
+  "jobs.status.running": "Running",
+  "jobs.status.succeeded": "Succeeded",
+  "jobs.status.failed": "Failed",
+  "jobs.log_title": "Execution log",
+  "jobs.log_title_with_path": "Execution log · {path}",
+  "jobs.stale_recovered":
+    "This job was re-queued after a heartbeat timeout or service restart; failure info was cleared.",
+  "jobs.no_events": "No execution records",
+  "jobs.select_event": "Select an event to view details",
+
+  // Logs page
+  "logs.filter_category": "Filter by category",
+  "logs.all_categories": "All categories",
+  "logs.filter_level": "Filter by level",
+  "logs.all_levels": "All levels",
+  "logs.refreshing": "Refreshing…",
+  "logs.clear_confirm":
+    "This will permanently delete all system logs. This cannot be undone.",
+  "logs.confirm_clear": "Confirm clear",
+  "logs.clear_all": "Clear all logs",
+  "logs.empty": "No system logs",
+  "logs.load_more": "Load more",
+
+  // Warning popover
+  "warning.deps_aria": "Missing runtime dependency warning",
+  "warning.deps_title": "Runtime Dependencies",
+  "warning.not_installed": " not installed: ",
+
+  // Wiki reader
+  "wiki.public_reading": "Public reading",
+  "wiki.search_shortcut": "Search (Ctrl+K)",
+  "wiki.manage_workbench": "Manage workbench",
+  "wiki.collapse_files": "Collapse file list",
+  "wiki.expand_files": "Expand file list",
+  "wiki.collapse_outline": "Collapse outline",
+  "wiki.expand_outline": "Expand outline",
+
+  // Search modal
+  "search.placeholder": "Search filename or content...",
+  "search.recent": "Recent searches",
+  "search.hint": "Enter keywords to search documents",
+  "search.hint_sub": "Supports filename and content search",
+  "search.searching": "Searching...",
+  "search.no_results": "No matching documents",
+  "search.results": "Found {count} result(s)",
+  "search.navigate": "Navigate",
+  "search.open": "Open",
+  "search.quick": "Quick search",
+
+  // Document viewer
+  "document.loading": "Loading...",
+  "document.select_hint": "Select a document from the left to start reading",
+  "document.no_content": "No content",
+  "document.outline": "Outline",
+  "document.no_headings": "No headings in this document",
+
+  // Timeline
+  "timeline.loading": "Loading timeline...",
+  "timeline.disabled": "Version control is not enabled.",
+  "timeline.go_settings": "Go to Settings",
+  "timeline.title": "Timeline",
+  "timeline.commits": "{count} commit(s)",
+  "timeline.no_history": "No history yet",
+  "timeline.rollback_badge": "rollback",
+  "timeline.diff": "Diff",
+  "timeline.rollback": "Rollback",
+  "timeline.load_more": "Load More",
+  "timeline.files_changed": "{count} file(s)",
+  "timeline.confirm_rollback": "Confirm Rollback",
+  "timeline.rollback_intro": "This will roll back the changes from:",
+  "timeline.rollback_note_1":
+    "The wiki changes from this ingest will be reversed via LLM",
+  "timeline.rollback_note_2":
+    "Original source file will be moved to revert/ directory (if it still exists)",
+  "timeline.rollback_note_3":
+    "This action creates a new rollback commit in the timeline",
+  "timeline.rolling_back": "Rolling back...",
+  "timeline.diff_load_failed": "Failed to load diff",
+
+  // Commit diff
+  "diff.loading": "Loading diff...",
+  "diff.empty": "(empty diff)",
+  "diff.unable_parse": "Unable to parse diff format. Showing raw output:",
+  "diff.binary": "Binary file — no diff preview",
+  "diff.no_hunks": "No hunks in this file",
+  "diff.select_file": "Select a file",
+  "diff.file_count": "{count} file(s)",
+  "diff.title": "Diff: {sha}",
+  "diff.unified": "Unified",
+  "diff.split": "Split",
+  "diff.close": "Close",
+
+  // Errors
+  "error.reply_failed": "Reply failed",
+  "error.reply_timeout": "Reply timed out. Please refresh and try again",
+  "error.connection_interrupted": "Connection interrupted: {message}",
 }
 
 export default en

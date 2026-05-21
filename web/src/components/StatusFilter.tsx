@@ -1,13 +1,15 @@
 import { useMemo } from "react"
 import type { IngestJob } from "@/types"
+import { useT } from "@/i18n"
+import type { MessageKey } from "@/i18n"
 
 const STATUS_TABS = [
-  { key: "all", label: "All" },
-  { key: "queued", label: "Queued" },
-  { key: "running", label: "Running" },
-  { key: "succeeded", label: "Succeeded" },
-  { key: "failed", label: "Failed" },
-] as const
+  { key: "all", labelKey: "jobs.status.all" },
+  { key: "queued", labelKey: "jobs.status.queued" },
+  { key: "running", labelKey: "jobs.status.running" },
+  { key: "succeeded", labelKey: "jobs.status.succeeded" },
+  { key: "failed", labelKey: "jobs.status.failed" },
+] as const satisfies ReadonlyArray<{ key: string; labelKey: MessageKey }>
 
 type StatusKey = (typeof STATUS_TABS)[number]["key"]
 
@@ -20,6 +22,7 @@ export function StatusFilter({
   selected: StatusKey
   onSelect: (key: StatusKey) => void
 }) {
+  const t = useT()
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: jobs.length }
     for (const job of jobs) {
@@ -40,7 +43,7 @@ export function StatusFilter({
               : "text-muted-foreground hover:bg-muted hover:text-foreground"
           }`}
         >
-          {tab.label}
+          {t(tab.labelKey)}
           <span
             className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
               selected === tab.key

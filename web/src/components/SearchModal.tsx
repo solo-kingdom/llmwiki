@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator"
 import { cn, getSearchHistory, saveSearchHistory, clearSearchHistory } from "@/lib/utils"
 import { highlightText } from "@/lib/search-highlight"
 import { useWikiReader } from "@/context/WikiReaderContext"
+import { useT } from "@/i18n"
 import type { SearchChunk } from "@/types"
 
 interface SearchModalProps {
@@ -23,6 +24,7 @@ interface SearchModalProps {
 }
 
 export function SearchModal({ open, onOpenChange }: SearchModalProps) {
+  const t = useT()
   const { search, searchResults, searchQuery, clearSearch, selectDocument } =
     useWikiReader()
   const [query, setQuery] = useState("")
@@ -175,7 +177,7 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
               value={query}
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="搜索文件名或内容..."
+              placeholder={t("search.placeholder")}
               className="flex-1 border-0 bg-transparent px-3 text-base shadow-none focus-visible:ring-0"
               autoComplete="off"
               spellCheck={false}
@@ -188,7 +190,7 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
                 size="icon"
                 className="h-8 w-8 shrink-0"
                 onClick={() => (query ? handleClear() : onOpenChange(false))}
-                title={query ? "清除" : "关闭"}
+                title={query ? t("common.clear") : t("common.close")}
               >
                 <X className="h-4 w-4" />
               </Button>
@@ -202,7 +204,7 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
               <div className="py-2">
                 <div className="flex items-center justify-between px-4 py-1.5">
                   <span className="text-xs font-medium text-muted-foreground">
-                    最近搜索
+                    {t("search.recent")}
                   </span>
                   <Button
                     variant="ghost"
@@ -210,7 +212,7 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
                     onClick={handleClearHistory}
                   >
                     <Trash2 className="h-3 w-3" />
-                    清除
+                    {t("common.clear")}
                   </Button>
                 </div>
                 {history.map((item, index) => (
@@ -235,9 +237,9 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
             {!query && history.length === 0 && (
               <div className="py-16 text-center">
                 <Search className="mx-auto mb-4 h-12 w-12 text-muted-foreground/20" />
-                <p className="text-sm text-muted-foreground">输入关键词搜索文档</p>
+                <p className="text-sm text-muted-foreground">{t("search.hint")}</p>
                 <p className="mt-1 text-xs text-muted-foreground/60">
-                  支持文件名和内容搜索
+                  {t("search.hint_sub")}
                 </p>
               </div>
             )}
@@ -245,21 +247,21 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
             {query && loading && (
               <div className="py-16 text-center">
                 <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">搜索中...</p>
+                <p className="text-sm text-muted-foreground">{t("search.searching")}</p>
               </div>
             )}
 
             {query && !loading && results.length === 0 && searchQuery && (
               <div className="py-16 text-center">
                 <FileText className="mx-auto mb-4 h-12 w-12 text-muted-foreground/20" />
-                <p className="text-sm text-muted-foreground">未找到相关文档</p>
+                <p className="text-sm text-muted-foreground">{t("search.no_results")}</p>
               </div>
             )}
 
             {query && !loading && results.length > 0 && (
               <div className="py-2">
                 <div className="px-4 py-1.5 text-xs text-muted-foreground">
-                  找到 {results.length} 个结果
+                  {t("search.results", { count: results.length })}
                 </div>
                 <Separator className="bg-border/50" />
                 {results.map((result, index) => (
@@ -305,19 +307,19 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
                 <kbd className="rounded border bg-background px-1.5 py-0.5 text-[10px]">
                   ↑↓
                 </kbd>
-                导航
+                {t("search.navigate")}
               </span>
               <span className="flex items-center gap-1">
                 <kbd className="rounded border bg-background px-1.5 py-0.5 text-[10px]">
                   ↵
                 </kbd>
-                打开
+                {t("search.open")}
               </span>
               <span className="flex items-center gap-1">
                 <kbd className="rounded border bg-background px-1.5 py-0.5 text-[10px]">
                   Esc
                 </kbd>
-                关闭
+                {t("common.close")}
               </span>
             </div>
             <span className="hidden items-center gap-1 sm:flex">
@@ -327,7 +329,7 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
               <kbd className="rounded border bg-background px-1.5 py-0.5 text-[10px]">
                 K
               </kbd>
-              快速搜索
+              {t("search.quick")}
             </span>
           </div>
         </Dialog.Popup>

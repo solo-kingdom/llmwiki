@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Dialog } from "@base-ui/react/dialog"
 import { X, Loader2 } from "lucide-react"
 import { getIngestJobEvents } from "@/lib/api"
+import { useT } from "@/i18n"
 import type { IngestJob, IngestJobEvent } from "@/types"
 
 interface JobLogDialogProps {
@@ -27,6 +28,7 @@ function formatPayload(payload: string): string {
 }
 
 export function JobLogDialog({ open, onOpenChange, job }: JobLogDialogProps) {
+  const t = useT()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [events, setEvents] = useState<IngestJobEvent[]>([])
@@ -46,7 +48,7 @@ export function JobLogDialog({ open, onOpenChange, job }: JobLogDialogProps) {
         })
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载失败")
+      setError(e instanceof Error ? e.message : t("common.load_failed"))
     } finally {
       setLoading(false)
     }
@@ -82,7 +84,9 @@ export function JobLogDialog({ open, onOpenChange, job }: JobLogDialogProps) {
         <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-full max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-background shadow-lg outline-none data-[starting-style]:scale-95 data-[starting-style]:opacity-0 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 transition-[opacity,scale] duration-200">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <Dialog.Title className="text-base font-semibold truncate pr-2">
-              执行日志{job ? ` · ${job.source_path}` : ""}
+              {job
+                ? t("jobs.log_title_with_path", { path: job.source_path })
+                : t("jobs.log_title")}
             </Dialog.Title>
             <Dialog.Close className="rounded-md p-1 text-muted-foreground hover:text-foreground shrink-0">
               <X className="h-4 w-4" />
@@ -91,14 +95,14 @@ export function JobLogDialog({ open, onOpenChange, job }: JobLogDialogProps) {
 
           {hasStaleRecovered && (
             <p className="mx-4 mt-3 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-800/40 rounded-md px-3 py-2">
-              任务曾因心跳超时或服务重启被重新入队，失败信息已清空。
+              {t("jobs.stale_recovered")}
             </p>
           )}
 
           {loading && events.length === 0 && (
             <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              加载中…
+              {t("common.loading_ellipsis")}
             </div>
           )}
 
@@ -108,7 +112,7 @@ export function JobLogDialog({ open, onOpenChange, job }: JobLogDialogProps) {
 
           {!loading && !error && events.length === 0 && (
             <p className="px-4 py-8 text-sm text-center text-muted-foreground">
-              暂无执行记录
+              {t("jobs.no_events")}
             </p>
           )}
 
@@ -143,11 +147,11 @@ export function JobLogDialog({ open, onOpenChange, job }: JobLogDialogProps) {
                       <p className="text-muted-foreground">{selected.message}</p>
                     )}
                     <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 text-xs font-mono overflow-x-auto">
-                      {formatPayload(selected.payload) || "(无详情)"}
+                      {formatPayload(selected.payload) || t("common.no_details")}
                     </pre>
                   </div>
                 ) : (
-                  <p className="text-muted-foreground text-sm">选择一条事件查看详情</p>
+                  <p className="text-muted-foreground text-sm">{t("jobs.select_event")}</p>
                 )}
               </div>
             </div>

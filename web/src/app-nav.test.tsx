@@ -94,30 +94,30 @@ describe("App navigation", () => {
 
   it("defaults to chat and uses button navigation", async () => {
     render(<App />)
-    expect(await screen.findByRole("button", { name: "Chat" })).toBeInTheDocument()
-    expect(await screen.findByRole("button", { name: "Ingest" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "对话" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "摄入" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "模型" })).toBeInTheDocument()
     expect(window.location.pathname).toBe("/")
 
-    fireEvent.click(screen.getByRole("button", { name: "Ingest" }))
+    fireEvent.click(screen.getByRole("button", { name: "摄入" }))
     expect(await screen.findByTestId("ingest-raw-page")).toBeInTheDocument()
     expect(window.location.pathname).toBe("/ingest")
 
     fireEvent.click(
       within(screen.getByRole("navigation")).getByRole("button", {
-        name: "Settings",
+        name: "设置",
       }),
     )
     expect(
-      await screen.findByRole("heading", { name: "Settings" }),
+      await screen.findByRole("heading", { name: "设置" }),
     ).toBeInTheDocument()
     expect(window.location.pathname).toBe("/settings")
 
-    fireEvent.click(screen.getByRole("button", { name: "Jobs" }))
+    fireEvent.click(screen.getByRole("button", { name: "任务" }))
     expect(await screen.findByText("暂无摄入任务")).toBeInTheDocument()
     expect(window.location.pathname).toBe("/jobs")
 
-    fireEvent.click(screen.getByRole("button", { name: "Logs" }))
+    fireEvent.click(screen.getByRole("button", { name: "日志" }))
     expect(await screen.findByText("暂无系统日志")).toBeInTheDocument()
     expect(window.location.pathname).toBe("/logs")
 
@@ -128,7 +128,7 @@ describe("App navigation", () => {
   it("navigates to wiki reader shell when Wiki link is clicked", async () => {
     window.history.replaceState(null, "", "/")
     render(<App />)
-    await screen.findByRole("button", { name: "Chat" })
+    await screen.findByRole("button", { name: "对话" })
 
     fireEvent.click(screen.getByRole("link", { name: "Wiki" }))
     expect(window.location.pathname).toBe("/wiki")
@@ -140,7 +140,7 @@ describe("App navigation", () => {
     window.history.replaceState(null, "", "/settings")
     render(<App />)
     expect(
-      await screen.findByRole("heading", { name: "Settings" }),
+      await screen.findByRole("heading", { name: "设置" }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "模型" })).not.toBeInTheDocument()
     expect(window.location.pathname).toBe("/settings")
@@ -172,7 +172,7 @@ describe("App navigation", () => {
     vi.mocked(api.getVCStatus).mockResolvedValue(mockVCStatus(true))
     window.history.replaceState(null, "", "/timeline")
     render(<App />)
-    expect(await screen.findByText("Loading timeline...")).toBeInTheDocument()
+    expect(await screen.findByText("加载时间线...")).toBeInTheDocument()
     expect(window.location.pathname).toBe("/timeline")
   })
 })

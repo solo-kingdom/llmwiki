@@ -8,6 +8,7 @@ import {
 } from "@/lib/api"
 import type { ActivityLog } from "@/types"
 import { cn } from "@/lib/utils"
+import { useT } from "@/i18n"
 
 const CATEGORIES = [
   "all",
@@ -43,6 +44,7 @@ function LogRow({
   expanded: boolean
   onToggle: () => void
 }) {
+  const t = useT()
   const hasDetails = Boolean(log.details?.trim())
   return (
     <div className="rounded-lg border border-border/60 bg-card/50 px-3 py-2 text-sm">
@@ -59,7 +61,7 @@ function LogRow({
             className="text-xs text-muted-foreground hover:text-foreground"
             onClick={onToggle}
           >
-            {expanded ? "收起" : "详情"}
+            {expanded ? t("common.collapse") : t("common.details")}
           </button>
         )}
       </div>
@@ -81,6 +83,7 @@ function formatDetails(raw: string) {
 }
 
 export function LogsPage() {
+  const t = useT()
   const [category, setCategory] = useState<string>("all")
   const [level, setLevel] = useState<string>("all")
   const [limit, setLimit] = useState(50)
@@ -107,10 +110,10 @@ export function LogsPage() {
 
   useEffect(() => {
     void fetchLogs()
-    const t = setInterval(() => {
+    const timer = setInterval(() => {
       void fetchLogs()
     }, 3000)
-    return () => clearInterval(t)
+    return () => clearInterval(timer)
   }, [fetchLogs])
 
   const handleClear = async () => {
@@ -135,11 +138,11 @@ export function LogsPage() {
               className="h-8 rounded-md border border-input bg-background px-2 text-sm"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              aria-label="类别筛选"
+              aria-label={t("logs.filter_category")}
             >
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>
-                  {c === "all" ? "全部类别" : c}
+                  {c === "all" ? t("logs.all_categories") : c}
                 </option>
               ))}
             </select>
@@ -147,23 +150,23 @@ export function LogsPage() {
               className="h-8 rounded-md border border-input bg-background px-2 text-sm"
               value={level}
               onChange={(e) => setLevel(e.target.value)}
-              aria-label="级别筛选"
+              aria-label={t("logs.filter_level")}
             >
               {LEVELS.map((l) => (
                 <option key={l} value={l}>
-                  {l === "all" ? "全部级别" : l}
+                  {l === "all" ? t("logs.all_levels") : l}
                 </option>
               ))}
             </select>
             {loading && (
-              <span className="text-xs text-muted-foreground">刷新中…</span>
+              <span className="text-xs text-muted-foreground">{t("logs.refreshing")}</span>
             )}
           </div>
           <div className="flex items-center gap-2">
             {confirmClear ? (
               <>
                 <span className="text-sm text-muted-foreground">
-                  将永久删除所有系统日志，此操作不可恢复。
+                  {t("logs.clear_confirm")}
                 </span>
                 <Button
                   size="sm"
@@ -171,14 +174,14 @@ export function LogsPage() {
                   disabled={clearing}
                   onClick={() => void handleClear()}
                 >
-                  确认清空
+                  {t("logs.confirm_clear")}
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => setConfirmClear(false)}
                 >
-                  取消
+                  {t("common.cancel")}
                 </Button>
               </>
             ) : (
@@ -187,7 +190,7 @@ export function LogsPage() {
                 variant="outline"
                 onClick={() => setConfirmClear(true)}
               >
-                清空全部日志
+                {t("logs.clear_all")}
               </Button>
             )}
           </div>
@@ -196,7 +199,7 @@ export function LogsPage() {
         <div className="space-y-2">
           {logs.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              暂无系统日志
+              {t("logs.empty")}
             </p>
           )}
           {logs.map((log) => (
@@ -218,7 +221,7 @@ export function LogsPage() {
               size="sm"
               onClick={() => setLimit((n) => n + 50)}
             >
-              加载更多
+              {t("logs.load_more")}
             </Button>
           </div>
         )}

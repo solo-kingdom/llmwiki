@@ -10,11 +10,13 @@ import { AppHeaderBar } from "@/components/AppHeaderBar"
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@base-ui/react/dialog"
 import { useWikiReader } from "@/context/WikiReaderContext"
+import { useT } from "@/i18n"
 import { navigateTo, workbenchHref } from "@/lib/wiki-routes"
 import type { OutlineItem } from "@/types"
 import { cn } from "@/lib/utils"
 
 export function WikiReaderLayout() {
+  const t = useT()
   const { currentDoc, loading, publicWikiEnabled, error } = useWikiReader()
   const [outline, setOutline] = useState<OutlineItem[]>([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -82,7 +84,7 @@ export function WikiReaderLayout() {
             </a>
             {publicWikiEnabled && (
               <span className="hidden rounded-md border border-point-border bg-point-soft px-2 py-0.5 text-xs text-point-foreground sm:inline">
-                公开阅读
+                {t("wiki.public_reading")}
               </span>
             )}
           </>
@@ -93,7 +95,7 @@ export function WikiReaderLayout() {
               variant="ghost"
               size="icon"
               onClick={() => setSearchOpen(true)}
-              title="搜索 (Ctrl+K)"
+              title={t("wiki.search_shortcut")}
             >
               <Search className="h-4 w-4" />
             </Button>
@@ -115,7 +117,7 @@ export function WikiReaderLayout() {
                 navigateTo(workbenchHref())
               }}
             >
-              管理工作台
+              {t("wiki.manage_workbench")}
             </a>
           </>
         }
@@ -139,7 +141,7 @@ export function WikiReaderLayout() {
             <CollapseEdge
               side="left"
               onClick={() => setSidebarCollapsed(true)}
-              title="收起文件列表"
+              title={t("wiki.collapse_files")}
               icon={<ChevronLeft className="h-3.5 w-3.5 text-muted-foreground" />}
             />
           </div>
@@ -149,7 +151,7 @@ export function WikiReaderLayout() {
           <CollapseEdgeFloating
             side="left"
             onClick={() => setSidebarCollapsed(false)}
-            title="展开文件列表"
+            title={t("wiki.expand_files")}
             icon={<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
           />
         )}
@@ -163,7 +165,7 @@ export function WikiReaderLayout() {
         >
           {loading && !currentDoc ? (
             <div className="flex flex-1 items-center justify-center rounded-xl border border-border/70 bg-card/70 text-muted-foreground shadow-sm backdrop-blur-sm">
-              加载中...
+              {t("common.loading")}
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-point-border bg-card/70 shadow-sm backdrop-blur-sm">
@@ -197,7 +199,7 @@ export function WikiReaderLayout() {
               <CollapseEdge
                 side="right"
                 onClick={() => setOutlineCollapsed(true)}
-                title="收起目录"
+                title={t("wiki.collapse_outline")}
                 icon={<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
               />
             </div>
@@ -208,7 +210,7 @@ export function WikiReaderLayout() {
           <CollapseEdgeFloating
             side="right"
             onClick={() => setOutlineCollapsed(false)}
-            title="展开目录"
+            title={t("wiki.expand_outline")}
             icon={<ChevronLeft className="h-3.5 w-3.5 text-muted-foreground" />}
           />
         )}

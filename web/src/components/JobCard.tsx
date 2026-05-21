@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button"
+import { useT } from "@/i18n"
 import type { IngestJob } from "@/types"
 import { isPreviewable } from "@/components/SourcePreviewDialog"
 
@@ -34,6 +35,7 @@ export function JobCard({
   onPreviewSource?: (job: IngestJob) => void
   onViewLog?: (job: IngestJob) => void
 }) {
+  const t = useT()
   const canPreview = isPreviewable(job.source_path)
 
   return (
@@ -67,22 +69,22 @@ export function JobCard({
         <StatusBadge status={job.status} />
         {job.status !== "queued" && onViewLog && (
           <Button size="sm" variant="ghost" onClick={() => onViewLog(job)}>
-            日志
+            {t("jobs.log")}
           </Button>
         )}
         {job.status === "failed" && (
           <Button size="sm" variant="outline" onClick={() => onRetry(job.id)}>
-            Retry
+            {t("jobs.retry")}
           </Button>
         )}
         {job.status === "cancelled" && (
           <Button size="sm" variant="outline" onClick={() => onRetry(job.id)}>
-            Restart
+            {t("jobs.restart")}
           </Button>
         )}
         {(job.status === "queued" || job.status === "running") && (
           <Button size="sm" variant="outline" onClick={() => onCancel(job.id)}>
-            Cancel
+            {t("jobs.cancel")}
           </Button>
         )}
       </div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Dialog } from "@base-ui/react/dialog"
 import { Clock, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/i18n"
 import type { ModelInfo, ProviderInstance } from "@/types"
 import {
   cn,
@@ -35,6 +36,7 @@ export function ModelSelectDialog({
   onLoadModels,
   onConfirm,
 }: ModelSelectDialogProps) {
+  const t = useT()
   const [draftInstanceId, setDraftInstanceId] = useState(selectedInstanceId)
   const [draftModel, setDraftModel] = useState(selectedModel)
 
@@ -123,7 +125,7 @@ export function ModelSelectDialog({
         <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/40 data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 transition-opacity duration-200" />
         <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-background p-6 shadow-lg outline-none data-[starting-style]:scale-95 data-[starting-style]:opacity-0 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 transition-[opacity,scale] duration-200">
           <div className="mb-4 flex items-center justify-between">
-            <Dialog.Title className="text-base font-semibold">选择模型</Dialog.Title>
+            <Dialog.Title className="text-base font-semibold">{t("model.select_title")}</Dialog.Title>
             <Dialog.Close className="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <X className="size-4" />
             </Dialog.Close>
@@ -131,20 +133,20 @@ export function ModelSelectDialog({
 
           {instances.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              请先在 Settings 添加 Provider 实例
+              {t("model.no_provider")}
             </p>
           ) : (
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  Provider 实例
+                  {t("model.instance_label")}
                 </label>
                 <select
                   value={draftInstanceId}
                   onChange={(e) => handleInstanceChange(e.target.value)}
                   className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
                 >
-                  <option value="">选择实例</option>
+                  <option value="">{t("model.select_instance")}</option>
                   {instances.map((inst) => (
                     <option key={inst.id} value={inst.id}>
                       {inst.name}
@@ -162,7 +164,7 @@ export function ModelSelectDialog({
                   disabled={!draftInstanceId || models.length === 0}
                   className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring disabled:opacity-50"
                 >
-                  <option value="">选择模型</option>
+                  <option value="">{t("model.select_model")}</option>
                   {models.map((m) => (
                     <option key={m.model_id} value={m.model_id}>
                       {m.name}
@@ -175,7 +177,7 @@ export function ModelSelectDialog({
                 <div>
                   <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                     <Clock className="size-3" />
-                    最近常用
+                    {t("model.recent")}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {recentModels.map((entry) => (
@@ -202,13 +204,13 @@ export function ModelSelectDialog({
 
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              取消
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={!draftInstanceId || !draftModel}
               onClick={handleConfirm}
             >
-              确认
+              {t("common.confirm")}
             </Button>
           </div>
         </Dialog.Popup>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useApp } from "@/context/AppContext"
+import { useT } from "@/i18n"
 import { JobCard } from "@/components/JobCard"
 import { PageContainer } from "@/components/PageContainer"
 import { StatusFilter, type StatusKey } from "@/components/StatusFilter"
@@ -8,6 +9,7 @@ import { JobLogDialog } from "@/components/JobLogDialog"
 import type { IngestJob } from "@/types"
 
 export function JobsPage() {
+  const t = useT()
   const { ingestJobs, refreshIngestJobs, retryIngest, cancelIngest } = useApp()
   const [statusFilter, setStatusFilter] = useState<StatusKey>("all")
   const [previewJob, setPreviewJob] = useState<IngestJob | null>(null)
@@ -38,7 +40,7 @@ export function JobsPage() {
         <div className="space-y-2">
           {filteredJobs.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              暂无摄入任务
+              {t("jobs.empty")}
             </p>
           )}
           {filteredJobs.map((job) => (

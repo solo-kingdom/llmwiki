@@ -24,6 +24,7 @@ import type {
   SessionListItem,
 } from "@/types"
 import * as api from "@/lib/api"
+import { getCurrentLang, translate } from "@/i18n"
 import { Toast } from "@/components/Toast"
 
 const SESSION_STORAGE_KEY = "llmwiki.ingest.sessionId"
@@ -34,7 +35,17 @@ function streamErrorMessage(data: unknown): string {
     if (msg) return msg
   }
   if (typeof data === "string" && data.trim()) return data
-  return "回复失败"
+  return translate(getCurrentLang(), "error.reply_failed")
+}
+
+function localizeErrorMessage(message: string): string {
+  const prefix = "__i18n:error.connection_interrupted:"
+  if (message.startsWith(prefix)) {
+    return translate(getCurrentLang(), "error.connection_interrupted", {
+      message: message.slice(prefix.length),
+    })
+  }
+  return message
 }
 
 function hasStreamingAssistant(messages: IngestSessionMessage[]): boolean {
@@ -364,7 +375,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       while (!activeStreamRef.current && generation === pollGenerationRef.current) {
         if (Date.now() - startedAt > timeoutMs) {
-          setSessionError("等待回复超时，请刷新重试")
+          setSessionError(translate(getCurrentLang(), "error.reply_timeout"))
           break
         }
 
@@ -550,7 +561,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const { messages: loaded } = await api.listIngestSessionMessages(sessionId)
         setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
       } catch (e) {
-        const reason = (e as Error).message
+        const reason = localizeErrorMessage((e as Error).message)
         setSessionError(reason)
         setSessionMessages((prev) =>
           prev.map((m) =>
@@ -619,7 +630,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const { messages: loaded } = await api.listIngestSessionMessages(sessionId)
         setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
       } catch (e) {
-        const reason = (e as Error).message
+        const reason = localizeErrorMessage((e as Error).message)
         setSessionError(reason)
         setSessionMessages((prev) =>
           prev.map((m) =>

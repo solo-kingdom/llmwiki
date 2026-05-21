@@ -1,6 +1,7 @@
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { OutlineItem } from "@/types"
 import { cn } from "@/lib/utils"
+import { useT } from "@/i18n"
 
 interface DocumentOutlineProps {
   items: OutlineItem[]
@@ -13,6 +14,7 @@ export function DocumentOutline({
   className,
   variant = "classic",
 }: DocumentOutlineProps) {
+  const t = useT()
   const isReader = variant === "reader"
   if (items.length === 0) {
     return (
@@ -24,10 +26,10 @@ export function DocumentOutline({
         )}
       >
         <div className="border-b px-3 py-2 text-sm font-medium text-muted-foreground">
-          大纲
+          {t("document.outline")}
         </div>
         <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-          当前文档无标题
+          {t("document.no_headings")}
         </p>
       </div>
     )
@@ -47,7 +49,7 @@ export function DocumentOutline({
       )}
     >
       <div className="shrink-0 border-b px-3 py-2 text-sm font-medium text-muted-foreground">
-        大纲
+        {t("document.outline")}
       </div>
       <ScrollArea className="flex-1">
         <nav className="space-y-0.5 p-2">

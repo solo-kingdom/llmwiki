@@ -29,10 +29,13 @@ function canRetryAssistant(msg: IngestSessionMessage): boolean {
   )
 }
 
-function assistantErrorText(msg: IngestSessionMessage): string | null {
+function assistantErrorText(
+  msg: IngestSessionMessage,
+  t: ReturnType<typeof useT>,
+): string | null {
   if (msg.error_message?.trim()) return msg.error_message.trim()
-  if (msg.stream_status === "failed") return "回复失败"
-  if (msg.stream_status === "incomplete") return "回复未完成"
+  if (msg.stream_status === "failed") return t("chat.reply_failed")
+  if (msg.stream_status === "incomplete") return t("chat.reply_incomplete")
   return null
 }
 
@@ -45,13 +48,14 @@ function MessageBubble({
   onRetry: (assistantMessageId: string) => void
   sessionBusy: boolean
 }) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const isUser = msg.role === "user"
   const isFailed =
     msg.stream_status === "failed" || msg.stream_status === "incomplete"
-  const errorText = !isUser ? assistantErrorText(msg) : null
+  const errorText = !isUser ? assistantErrorText(msg, t) : null
   const showRetry = canRetryAssistant(msg)
 
   const isStreaming = msg.stream_status === "streaming"
@@ -90,8 +94,8 @@ function MessageBubble({
           <button
             type="button"
             className="absolute right-2 top-2 z-10 rounded p-1 opacity-0 transition-opacity hover:bg-background/20 group-hover:opacity-100"
-            title={copied ? "Copied" : "Copy"}
-            aria-label={copied ? "Copied" : "Copy"}
+            title={copied ? t("chat.copied") : t("chat.copy")}
+            aria-label={copied ? t("chat.copied") : t("chat.copy")}
             onClick={(e) => void handleCopy(e)}
           >
             <Copy className={`size-3.5 ${copied ? "text-green-600" : ""}`} />
@@ -102,7 +106,7 @@ function MessageBubble({
         ) : isStreaming && !hasContent ? (
           <Loader2
             className="size-4 animate-spin text-muted-foreground"
-            aria-label="Replying"
+            aria-label={t("chat.replying")}
           />
         ) : isStreaming ? (
           <p className="whitespace-pre-wrap pr-6">{msg.content}</p>
@@ -129,7 +133,7 @@ function MessageBubble({
                 onClick={() => onRetry(msg.id)}
               >
                 <RotateCcw className="size-3" />
-                Retry
+                {t("chat.retry")}
               </Button>
             )}
           </div>
@@ -476,7 +480,7 @@ export function IngestChat() {
             size="sm"
             disabled={sessionBusy || !hasUserMessage || !sessionId}
             onClick={() => setArchiveOpen(true)}
-            title={!hasUserMessage ? "至少需要一条用户消息" : undefined}
+            title={!hasUserMessage ? t("chat.archive_requires_user") : undefined}
           >
             <Archive className="size-3.5" />
             {t("chat.archive")}

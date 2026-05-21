@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react"
 import { Loader2, Plus, Trash2, Upload, X } from "lucide-react"
 import { useApp } from "@/context/AppContext"
+import { useT } from "@/i18n"
 import { PageContainer } from "@/components/PageContainer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,6 +30,7 @@ function createEmptyBlock(): TextBlockRow {
 }
 
 export function IngestRaw() {
+  const t = useT()
   const { submitText, submitUpload, refreshIngestJobs } = useApp()
 
   const [textBlocks, setTextBlocks] = useState<TextBlockRow[]>([createEmptyBlock()])
@@ -127,7 +129,7 @@ export function IngestRaw() {
           )
         } catch (e) {
           summary.rejected.push({
-            filename: "(批量上传)",
+            filename: t("ingest.raw.batch_upload"),
             message: (e as Error).message,
           })
         }
@@ -164,10 +166,9 @@ export function IngestRaw() {
         data-testid="ingest-raw-page"
       >
         <div className="space-y-1">
-          <h1 className="text-lg font-semibold">原始数据直投</h1>
+          <h1 className="text-lg font-semibold">{t("ingest.raw.title")}</h1>
           <p className="text-sm text-muted-foreground">
-            已有成型材料时使用 Ingest：上传文件或粘贴文本块，一键提交归档。
-            需要与模型多轮探索时，请使用{" "}
+            {t("ingest.raw.desc_before")}
             <button
               type="button"
               className="text-point underline-offset-2 hover:underline"
@@ -175,12 +176,12 @@ export function IngestRaw() {
             >
               Chat
             </button>
-            。
+            {t("ingest.raw.desc_after")}
           </p>
         </div>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-medium">文件</h2>
+          <h2 className="text-sm font-medium">{t("ingest.raw.files")}</h2>
           <div
             className={`rounded-xl border border-dashed p-6 transition-colors ${
               isDragging
@@ -204,7 +205,7 @@ export function IngestRaw() {
           >
             <div className="flex flex-col items-center gap-3 text-center">
               <p className="text-sm text-muted-foreground">
-                拖放文件到此处，或点击按钮选择多个文件
+                {t("ingest.raw.file_drop_hint")}
               </p>
               <Button
                 type="button"
@@ -213,7 +214,7 @@ export function IngestRaw() {
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Upload className="size-3.5" />
-                选择文件
+                {t("ingest.raw.select_files")}
               </Button>
               <input
                 ref={fileInputRef}
@@ -243,7 +244,7 @@ export function IngestRaw() {
                   <button
                     type="button"
                     className="inline-flex shrink-0 items-center rounded p-1 text-muted-foreground hover:text-foreground"
-                    aria-label={`移除 ${file.name}`}
+                    aria-label={t("ingest.raw.remove_file", { name: file.name })}
                     onClick={() => removeFile(index)}
                   >
                     <X className="size-3.5" />
@@ -256,10 +257,10 @@ export function IngestRaw() {
 
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-medium">文本块</h2>
+            <h2 className="text-sm font-medium">{t("ingest.raw.text_blocks")}</h2>
             <Button type="button" variant="outline" size="sm" onClick={addTextBlock}>
               <Plus className="size-3.5" />
-              新增文本块
+              {t("ingest.raw.add_block")}
             </Button>
           </div>
 
@@ -272,7 +273,7 @@ export function IngestRaw() {
               >
                 <div className="flex items-center justify-between gap-2">
                   <Input
-                    placeholder="块标题（可选）"
+                    placeholder={t("ingest.raw.block_title_optional")}
                     value={block.title}
                     onChange={(e) =>
                       updateTextBlock(block.id, { title: e.target.value })
@@ -283,7 +284,7 @@ export function IngestRaw() {
                     variant="ghost"
                     size="sm"
                     disabled={textBlocks.length === 1 && !block.title && !block.content}
-                    aria-label="删除文本块"
+                    aria-label={t("ingest.raw.delete_block")}
                     onClick={() => removeTextBlock(block.id)}
                   >
                     <Trash2 className="size-3.5" />
@@ -291,7 +292,7 @@ export function IngestRaw() {
                 </div>
                 <textarea
                   className="min-h-28 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  placeholder="正文（必填，至少一个非空文本块才能提交）"
+                  placeholder={t("ingest.raw.block_content_required")}
                   value={block.content}
                   onChange={(e) =>
                     updateTextBlock(block.id, { content: e.target.value })
@@ -303,15 +304,15 @@ export function IngestRaw() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-sm font-medium">批次信息（可选）</h2>
+          <h2 className="text-sm font-medium">{t("ingest.raw.batch_info")}</h2>
           <div className="grid gap-3 sm:grid-cols-2">
             <Input
-              placeholder="批次标题"
+              placeholder={t("ingest.raw.batch_title")}
               value={batchTitle}
               onChange={(e) => setBatchTitle(e.target.value)}
             />
             <Input
-              placeholder="来源"
+              placeholder={t("ingest.raw.source")}
               value={batchSource}
               onChange={(e) => setBatchSource(e.target.value)}
             />
@@ -329,15 +330,15 @@ export function IngestRaw() {
               {submitBusy ? (
                 <>
                   <Loader2 className="size-3.5 animate-spin" />
-                  提交中...
+                  {t("common.submitting")}
                 </>
               ) : (
-                "直接归档"
+                t("ingest.raw.submit")
               )}
             </Button>
             {!canSubmit && !submitBusy && (
               <span className="text-xs text-muted-foreground">
-                请至少添加一个文件或填写一个非空文本块
+                {t("ingest.raw.submit_hint")}
               </span>
             )}
           </div>
@@ -349,23 +350,25 @@ export function IngestRaw() {
             >
               {totalAccepted > 0 && (
                 <p className="text-green-700 dark:text-green-400">
-                  成功 {totalAccepted} 个任务
+                  {t("ingest.raw.success_count", { count: totalAccepted })}
                   {submitSummary.textJobId && (
-                    <span>（文本 job: {submitSummary.textJobId}）</span>
+                    <span>{t("ingest.raw.text_job", { id: submitSummary.textJobId })}</span>
                   )}
                   {submitSummary.accepted.length > 0 && (
                     <span>
                       {" "}
-                      文件 job:{" "}
-                      {submitSummary.accepted.map((a) => a.job_id).join(", ")}
+                      {t("ingest.raw.file_jobs", {
+                        ids: submitSummary.accepted.map((a) => a.job_id).join(", "),
+                      })}
                     </span>
                   )}
                 </p>
               )}
               {totalRejected > 0 && (
                 <p className="text-red-700 dark:text-red-400">
-                  失败 {totalRejected} 项：
-                  {submitSummary.textError && ` 文本 - ${submitSummary.textError};`}
+                  {t("ingest.raw.failed_count", { count: totalRejected })}
+                  {submitSummary.textError &&
+                    t("ingest.raw.failed_text", { error: submitSummary.textError })}
                   {submitSummary.rejected
                     .map((r) => ` ${r.filename} - ${r.message}`)
                     .join(";")}
@@ -377,7 +380,7 @@ export function IngestRaw() {
                 size="sm"
                 onClick={() => navigateTo(workbenchViewHref("jobs"))}
               >
-                查看 Jobs
+                {t("ingest.raw.view_jobs")}
               </Button>
             </div>
           )}

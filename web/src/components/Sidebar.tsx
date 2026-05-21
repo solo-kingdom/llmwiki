@@ -3,7 +3,6 @@ import { useWikiReader } from "@/context/WikiReaderContext"
 import { WikiEntityList } from "@/components/WikiEntityList"
 import { WikiTypeFilter } from "@/components/WikiTypeFilter"
 import { buildTree } from "@/lib/tree"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import type { TreeNode } from "@/types"
 
 function FolderIcon({ open }: { open: boolean }) {
@@ -157,18 +156,18 @@ export function Sidebar({ variant = "classic", onSelect }: SidebarProps) {
     <div
       className={
         isReader
-          ? "flex h-full w-full flex-col"
-          : "flex h-full w-64 flex-col border-r bg-card"
+          ? "flex h-full min-h-0 w-full flex-col"
+          : "flex h-full min-h-0 w-64 flex-col border-r bg-card"
       }
     >
       <WikiTypeFilter />
-      <WikiEntityList onSelect={onSelect} />
-      <div className="border-b px-3 py-2">
-        <p className="text-xs text-muted-foreground">
-          {filteredDocuments.length} pages
-        </p>
-      </div>
-      <ScrollArea className="flex-1">
+      <div className="min-h-0 flex-1 overflow-y-auto wiki-scrollbar wiki-scrollbar-hidden">
+        <WikiEntityList onSelect={onSelect} />
+        <div className="border-b px-3 py-2">
+          <p className="text-xs text-muted-foreground">
+            {filteredDocuments.length} pages
+          </p>
+        </div>
         <div className="py-1">
           {tree.map((node) => (
             <TreeNodeItem
@@ -185,7 +184,7 @@ export function Sidebar({ variant = "classic", onSelect }: SidebarProps) {
             </p>
           )}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   )
 }

@@ -155,7 +155,7 @@ export function WikiReaderLayout() {
             sidebarCollapsed ? "w-0 min-w-0" : "w-72 min-w-72",
           )}
         >
-          <div className="relative z-30 flex h-full w-full flex-col rounded-xl border border-border/70 bg-card/70 shadow-sm backdrop-blur-sm">
+          <div className="relative z-30 flex h-full min-h-0 w-full flex-col overflow-hidden rounded-xl border border-border/70 bg-card/70 shadow-sm backdrop-blur-sm">
             <Sidebar variant="reader" onSelect={() => setMobileMenuOpen(false)} />
             <CollapseEdge
               side="left"
@@ -217,7 +217,7 @@ export function WikiReaderLayout() {
               outlineCollapsed ? "w-0 min-w-0" : "w-72 min-w-72",
             )}
           >
-            <div className="relative z-30 flex h-full w-full flex-col rounded-xl border border-border/70 bg-card/70 shadow-sm backdrop-blur-sm">
+            <div className="relative z-30 flex h-full min-h-0 w-full flex-col overflow-hidden rounded-xl border border-border/70 bg-card/70 shadow-sm backdrop-blur-sm">
               <DocumentOutline items={outline} variant="reader" />
               <CollapseEdge
                 side="right"
@@ -242,7 +242,7 @@ export function WikiReaderLayout() {
       <Dialog.Root open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/40 lg:hidden" />
-          <Dialog.Popup className="fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r bg-card shadow-lg lg:hidden">
+          <Dialog.Popup className="fixed inset-y-0 left-0 z-50 flex h-full min-h-0 w-72 flex-col overflow-hidden border-r bg-card shadow-lg lg:hidden">
             <Sidebar variant="reader" onSelect={() => setMobileMenuOpen(false)} />
           </Dialog.Popup>
         </Dialog.Portal>
@@ -253,7 +253,7 @@ export function WikiReaderLayout() {
       <Dialog.Root open={mobileOutlineOpen} onOpenChange={setMobileOutlineOpen}>
         <Dialog.Portal>
           <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/40 lg:hidden" />
-          <Dialog.Popup className="fixed inset-y-0 right-0 z-50 flex w-72 flex-col border-l bg-card shadow-lg lg:hidden">
+          <Dialog.Popup className="fixed inset-y-0 right-0 z-50 flex h-full min-h-0 w-72 flex-col overflow-hidden border-l bg-card shadow-lg lg:hidden">
             <DocumentOutline items={outline} variant="reader" className="border-l-0" />
           </Dialog.Popup>
         </Dialog.Portal>

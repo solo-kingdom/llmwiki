@@ -4,38 +4,30 @@ import remarkGfm from "remark-gfm"
 import rehypeHighlight from "rehype-highlight"
 import { useWikiReader } from "@/context/WikiReaderContext"
 import { useT } from "@/i18n"
-import { extractHeadings, slugifyHeading } from "@/lib/markdown"
+import { extractHeadings, uniqueHeadingSlugSequence } from "@/lib/markdown"
 import type { OutlineItem } from "@/types"
 import "highlight.js/styles/github.css"
 
-function headingId(children: ReactNode): string {
-  const text =
-    typeof children === "string"
-      ? children
-      : Array.isArray(children)
-        ? children.map((c) => (typeof c === "string" ? c : "")).join("")
-        : String(children ?? "")
-  return slugifyHeading(text)
-}
-
-function makeHeading(Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
-  return function Heading({ children }: { children?: ReactNode }) {
-    const id = headingId(children)
-    return (
-      <Tag id={id} className="scroll-mt-20">
-        {children}
-      </Tag>
-    )
+function makeHeadingComponents(slugs: string[]) {
+  let index = 0
+  const nextSlug = () => slugs[index++] ?? ""
+  const makeHeading = (Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") =>
+    function Heading({ children }: { children?: ReactNode }) {
+      const id = nextSlug()
+      return (
+        <Tag id={id} className="scroll-mt-20">
+          {children}
+        </Tag>
+      )
+    }
+  return {
+    h1: makeHeading("h1"),
+    h2: makeHeading("h2"),
+    h3: makeHeading("h3"),
+    h4: makeHeading("h4"),
+    h5: makeHeading("h5"),
+    h6: makeHeading("h6"),
   }
-}
-
-const markdownComponents = {
-  h1: makeHeading("h1"),
-  h2: makeHeading("h2"),
-  h3: makeHeading("h3"),
-  h4: makeHeading("h4"),
-  h5: makeHeading("h5"),
-  h6: makeHeading("h6"),
 }
 
 interface DocumentViewerProps {
@@ -120,7 +112,9 @@ export function DocumentViewer({
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           rehypePlugins={[rehypeHighlight]}
-          components={markdownComponents}
+          components={makeHeadingComponents(
+            uniqueHeadingSlugSequence(currentDoc.content),
+          )}
         >
           {currentDoc.content}
         </ReactMarkdown>

@@ -142,17 +142,12 @@
 }
 
 .wiki-scrollbar-hidden {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .wiki-scrollbar-hidden::-webkit-scrollbar {
-  width: 0.5rem;
-  height: 0.5rem;
-}
-
-.wiki-scrollbar-hidden::-webkit-scrollbar-thumb {
-  background: transparent;
+  display: none;
 }
 
 .wiki-prose :where(:not(pre) > code):not(:where([class~="not-prose"] *)) {

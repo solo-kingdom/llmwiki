@@ -1,4 +1,3 @@
-import { ScrollArea } from "@/components/ui/scroll-area"
 import type { OutlineItem } from "@/types"
 import { cn } from "@/lib/utils"
 import { useT } from "@/i18n"
@@ -51,11 +50,11 @@ export function DocumentOutline({
       <div className="shrink-0 border-b px-3 py-2 text-sm font-medium text-muted-foreground">
         {t("document.outline")}
       </div>
-      <ScrollArea className="flex-1">
+      <div className="min-h-0 flex-1 overflow-y-auto wiki-scrollbar wiki-scrollbar-hidden">
         <nav className="space-y-0.5 p-2">
-          {items.map((item) => (
+          {items.map((item, index) => (
             <button
-              key={`${item.slug}-${item.text}`}
+              key={`${index}-${item.slug}`}
               type="button"
               onClick={() => handleClick(item.slug)}
               className={cn(
@@ -68,7 +67,7 @@ export function DocumentOutline({
             </button>
           ))}
         </nav>
-      </ScrollArea>
+      </div>
     </div>
   )
 }

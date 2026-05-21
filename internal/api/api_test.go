@@ -384,8 +384,15 @@ func TestGetIngestJobEvents(t *testing.T) {
 	if err := json.NewDecoder(eventsW.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Events) != 1 || resp.Events[0].Step != "analysis" {
-		t.Fatalf("unexpected events: %+v", resp.Events)
+	foundAnalysis := false
+	for _, ev := range resp.Events {
+		if ev.Step == "analysis" && ev.Phase == "request" {
+			foundAnalysis = true
+			break
+		}
+	}
+	if !foundAnalysis {
+		t.Fatalf("expected analysis request event among: %+v", resp.Events)
 	}
 
 	missReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/missing-id/events", nil)

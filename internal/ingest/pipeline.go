@@ -20,7 +20,8 @@ type Pipeline struct {
 	recorder    JobRecorder
 	mcpExecutor *pipelineMCPExecutor
 	toolLoopCfg llm.ToolLoopConfig
-	docLang     string // "zh" or "en", controls generation language
+	docLang          string // "zh" or "en", controls generation language
+	rulesSupplement  string
 }
 
 type CacheEntry struct {
@@ -73,6 +74,19 @@ func (p *Pipeline) SetToolLoopConfig(cfg llm.ToolLoopConfig) {
 // SetDocLanguage sets the document output language for generation prompts.
 func (p *Pipeline) SetDocLanguage(lang string) {
 	p.docLang = lang
+}
+
+// SetRulesSupplement sets append-only rules from Settings (rules_supplement).
+func (p *Pipeline) SetRulesSupplement(s string) {
+	p.rulesSupplement = s
+}
+
+func (p *Pipeline) promptCtx() PromptContext {
+	return PromptContext{
+		Workspace:       p.workspace,
+		DocLang:         p.docLang,
+		RulesSupplement: p.rulesSupplement,
+	}
 }
 
 func (p *Pipeline) Ingest(ctx context.Context, sourcePath string) ([]string, error) {
@@ -150,14 +164,10 @@ func (p *Pipeline) LockManager() *PageLockManager {
 }
 
 func (p *Pipeline) analyze(ctx context.Context, name, content string) (string, error) {
-	langInstruction := languageInstructionForPipeline(p.docLang)
-	systemMsg := "You are a knowledge analyst. Analyze the provided source document. Identify key entities, concepts, arguments, and connections."
-	if langInstruction != "" {
-		systemMsg += "\n\n" + langInstruction
-	}
+	systemMsg := ComposeSystemPrompt(StepAnalysis, p.promptCtx())
 	messages := []llm.Message{
 		{Role: "system", Content: systemMsg},
-		{Role: "user", Content: fmt.Sprintf("Analyze this source: **%s**\n\n---\n\n%s", name, content)},
+		{Role: "user", Content: fmt.Sprintf("源文件：**%s**\n\n---\n\n%s", name, content)},
 	}
 
 	const temp = 0.1
@@ -166,21 +176,17 @@ func (p *Pipeline) analyze(ctx context.Context, name, content string) (string, e
 }
 
 func (p *Pipeline) generate(ctx context.Context, name, content, analysis string) ([]string, error) {
-	langInstruction := languageInstructionForPipeline(p.docLang)
-	prompt := fmt.Sprintf(`Source: **%s**
+	prompt := fmt.Sprintf(`源文件：**%s**
 
-Analysis (context only):
+分析（仅供参考）：
 %s
 
-Original Content:
+原始内容：
 %s
 
-Generate wiki pages in FILE block format.`, name, analysis, content)
+请按 FILE 块格式生成 wiki 页面。`, name, analysis, content)
 
-	systemMsg := "You are a wiki generator. Output FILE blocks: ---FILE: path\ncontent\n---END FILE---"
-	if langInstruction != "" {
-		systemMsg += "\n\n" + langInstruction
-	}
+	systemMsg := ComposeSystemPrompt(StepGeneration, p.promptCtx())
 
 	messages := []llm.Message{
 		{Role: "system", Content: systemMsg},

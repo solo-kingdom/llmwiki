@@ -8,24 +8,15 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
-const ingestSessionSystemPrompt = `You are an assistant helping the user explore and refine knowledge before it is archived into their personal LLM Wiki.
-
-Your goals:
-- Help clarify topics, definitions, and structure
-- Ask focused follow-up questions when useful
-- Summarize key points when asked
-- Do not invent facts; say when uncertain
-
-The user may upload attachments; their summaries appear in the conversation.
-When the user is satisfied, they will click Archive to persist this thread into the wiki.`
-
 // AssembleIngestChatMessages builds LLM messages from session history.
-func AssembleIngestChatMessages(history []sqlite.IngestSessionMessage, userContent string, docLang string) []llm.Message {
+func AssembleIngestChatMessages(history []sqlite.IngestSessionMessage, userContent, docLang, workspace, rulesSupplement string) []llm.Message {
 	out := make([]llm.Message, 0, len(history)+2)
-	systemPrompt := ingestSessionSystemPrompt
-	if langInstruction := languageInstructionForPipeline(docLang); langInstruction != "" {
-		systemPrompt += "\n\n" + langInstruction
+	ctx := PromptContext{
+		Workspace:       workspace,
+		DocLang:         docLang,
+		RulesSupplement: rulesSupplement,
 	}
+	systemPrompt := ComposeSystemPrompt(StepSessionChat, ctx)
 	out = append(out, llm.Message{Role: "system", Content: systemPrompt})
 	for _, m := range history {
 		if m.StreamStatus == "streaming" {
@@ -43,7 +34,7 @@ func AssembleIngestChatMessages(history []sqlite.IngestSessionMessage, userConte
 		}
 		content := m.Content
 		if m.MessageType == "attachment_summary" {
-			content = fmt.Sprintf("[Attachment summary]\n%s", content)
+			content = fmt.Sprintf("[附件摘要]\n%s", content)
 		}
 		out = append(out, llm.Message{Role: role, Content: content})
 	}
@@ -57,7 +48,6 @@ func truncateMessages(msgs []llm.Message, maxMessages int) []llm.Message {
 	if len(msgs) <= maxMessages {
 		return msgs
 	}
-	// Keep system + tail
 	if len(msgs) == 0 {
 		return msgs
 	}
@@ -68,21 +58,40 @@ func truncateMessages(msgs []llm.Message, maxMessages int) []llm.Message {
 
 // AttachmentSummaryPrompt builds a user prompt for attachment understanding.
 func AttachmentSummaryPrompt(filename, extracted, docLang string) string {
-	langName := "Chinese"
 	if docLang == "en" {
-		langName = "English"
+		return attachmentSummaryPromptEN(filename, extracted)
 	}
+	return attachmentSummaryPromptZH(filename, extracted)
+}
+
+func attachmentSummaryPromptZH(filename, extracted string) string {
 	if strings.TrimSpace(extracted) == "" {
 		return fmt.Sprintf(
-			"The user uploaded file %q. No text could be extracted. Write a brief assistant message in %s acknowledging the upload and suggesting what the user might want to discuss about this file. Keep under 120 words.",
-			filename, langName,
+			"用户上传了文件 %q，未能提取文本。请用中文简短回复（不超过 120 字），确认收到并建议用户可讨论的方向。不要编造文件内容。",
+			filename,
+		)
+	}
+	if len(extracted) > 6000 {
+		extracted = extracted[:6000] + "\n...(已截断)"
+	}
+	return fmt.Sprintf(
+		"用户上传了文件 %q。提取内容：\n\n%s\n\n请用中文总结要点（不超过 200 字），并提及文件名。仅总结附件中的内容，不要补充附件未提及的信息。",
+		filename, extracted,
+	)
+}
+
+func attachmentSummaryPromptEN(filename, extracted string) string {
+	if strings.TrimSpace(extracted) == "" {
+		return fmt.Sprintf(
+			"The user uploaded %q but no text could be extracted. Reply briefly in English (under 120 words), acknowledge the upload, and suggest discussion topics. Do not invent file content.",
+			filename,
 		)
 	}
 	if len(extracted) > 6000 {
 		extracted = extracted[:6000] + "\n...(truncated)"
 	}
 	return fmt.Sprintf(
-		"The user uploaded file %q. Extracted content:\n\n%s\n\nSummarize the key points in %s for the user (under 200 words). Mention filename.",
-		filename, extracted, langName,
+		"The user uploaded %q. Extracted content:\n\n%s\n\nSummarize key points in English (under 200 words) and mention the filename. Only summarize the attachment text; do not add information not present in the file.",
+		filename, extracted,
 	)
 }

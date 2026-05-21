@@ -98,17 +98,10 @@ func (p *Pipeline) ApplyFromPlan(ctx context.Context, source *NormalizedSource, 
 }
 
 func (p *Pipeline) generatePlan(ctx context.Context, name, content, analysis, feedback string) (string, error) {
-	langInstruction := languageInstructionForPipeline(p.docLang)
-	systemMsg := `You are a wiki ingest planner. Produce:
-1) A human-readable plan in Markdown (what will change and why)
-2) A JSON block in a fenced code block with shape: {"summary":"...","changes":[{"path":"wiki/...","action":"create|update","rationale":"..."}]}
-Do NOT output FILE blocks. Do not write files. Planning only.`
-	if langInstruction != "" {
-		systemMsg += "\n\n" + langInstruction
-	}
+	systemMsg := ComposeSystemPrompt(StepPlan, p.promptCtx())
 
 	userParts := []string{
-		fmt.Sprintf("Source: **%s**\n\nAnalysis:\n%s\n\nOriginal:\n%s", name, analysis, content),
+		fmt.Sprintf("源文件：**%s**\n\n分析：\n%s\n\n原始内容：\n%s", name, analysis, content),
 	}
 	if strings.TrimSpace(feedback) != "" {
 		userParts = append(userParts, feedback)
@@ -122,24 +115,20 @@ Do NOT output FILE blocks. Do not write files. Planning only.`
 }
 
 func (p *Pipeline) generateFromPlan(ctx context.Context, name, content, analysis, planJSON string) ([]string, error) {
-	langInstruction := languageInstructionForPipeline(p.docLang)
-	prompt := fmt.Sprintf(`Source: **%s**
+	prompt := fmt.Sprintf(`源文件：**%s**
 
-Approved plan (MUST follow — regenerate FILE blocks from this plan only):
+已批准计划（必须遵循 — 仅据此重新生成 FILE 块）：
 %s
 
-Analysis (context):
+分析（参考）：
 %s
 
-Original Content:
+原始内容：
 %s
 
-Generate wiki pages in FILE block format.`, name, planJSON, analysis, content)
+请按 FILE 块格式生成 wiki 页面。`, name, planJSON, analysis, content)
 
-	systemMsg := "You are a wiki generator. Output FILE blocks: ---FILE: path\ncontent\n---END FILE---"
-	if langInstruction != "" {
-		systemMsg += "\n\n" + langInstruction
-	}
+	systemMsg := ComposeSystemPrompt(StepGeneration, p.promptCtx())
 
 	messages := []llm.Message{
 		{Role: "system", Content: systemMsg},

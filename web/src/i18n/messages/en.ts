@@ -43,6 +43,16 @@ const en: Record<MessageKey, string> = {
   "settings.language.zh": "中文",
   "settings.language.en": "English",
 
+  "settings.rules.title": "Wiki Rules",
+  "settings.rules.desc": "Primary rules live in workspace purpose.md and rules.md (edit in Obsidian or your editor). This field only appends temporary supplements after file rules.",
+  "settings.rules.supplement": "Supplement rules",
+  "settings.rules.supplement_placeholder": "e.g. Only archive paper conclusions; avoid generic background…",
+  "settings.rules.char_count": "{count} / {max} characters",
+  "settings.rules.purpose_preview": "purpose.md preview",
+  "settings.rules.rules_preview": "rules.md preview",
+  "settings.rules.file_missing": "(file not found)",
+  "settings.rules.edit_hint": "Edit purpose.md and rules.md at the workspace root for full control.",
+
   "settings.providers.title": "Provider Instances",
   "settings.providers.desc": "Manage configured Provider instances",
   "settings.providers.add": "Add",

@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -163,6 +164,7 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		return err
 	}
 	defer p.pipeline.SetMCPRouter(nil)
+	p.checkRulesDrift(job.ID)
 
 	// Run through the two-step LLM pipeline
 	files, err := p.pipeline.IngestNormalized(ctx, normalized)
@@ -484,8 +486,60 @@ func (p *JobProcessor) preparePipelineForJob(job *sqlite.IngestJob) error {
 	// at job creation time to ensure consistency.
 	docLang := resolveDocLang(p.db)
 	p.pipeline.SetDocLanguage(docLang)
+	p.pipeline.SetRulesSupplement(ResolveRulesSupplement(p.db))
 
 	return nil
+}
+
+// RecordRulesSnapshot writes rules_hash at job enqueue time.
+func RecordRulesSnapshot(db *sqlite.DB, jobID, workspace string) {
+	if db == nil || jobID == "" {
+		return
+	}
+	hash := ComputeRulesHash(workspace, ResolveRulesSupplement(db))
+	maxN := sqlite.DefaultJobEventsMaxCount
+	if v, err := db.GetConfig("ingest_job_events_max_count"); err == nil {
+		if n, err := sqlite.ParseJobEventsMaxCount(v); err == nil {
+			maxN = n
+		}
+	}
+	_ = db.InsertIngestJobEvent(jobID, "system", "queued", "rules snapshot", map[string]any{
+		"rules_hash": hash,
+	}, maxN)
+}
+
+// checkRulesDrift logs when execution-time rules differ from enqueue snapshot.
+func (p *JobProcessor) checkRulesDrift(jobID string) {
+	if p.pipeline.recorder == nil {
+		return
+	}
+	current := ComputeRulesHash(p.workspace, ResolveRulesSupplement(p.db))
+	snapshot := queuedRulesHash(p.db, jobID)
+	if snapshot != "" && snapshot != current {
+		p.pipeline.recorder.Record("system", "info", "rules_drift: workspace rules changed since job was queued", map[string]any{
+			"rules_hash_snapshot": snapshot,
+			"rules_hash_current":  current,
+		})
+	}
+}
+
+func queuedRulesHash(db *sqlite.DB, jobID string) string {
+	events, err := db.ListIngestJobEvents(jobID, 50)
+	if err != nil {
+		return ""
+	}
+	for _, ev := range events {
+		if ev.Step != "system" || ev.Phase != "queued" || ev.Payload == "" {
+			continue
+		}
+		var payload struct {
+			RulesHash string `json:"rules_hash"`
+		}
+		if json.Unmarshal([]byte(ev.Payload), &payload) == nil && payload.RulesHash != "" {
+			return payload.RulesHash
+		}
+	}
+	return ""
 }
 
 // resolveDocLang reads the doc_language setting from the database, defaulting to "zh".

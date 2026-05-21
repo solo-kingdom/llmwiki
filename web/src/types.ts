@@ -126,6 +126,14 @@ export interface Settings {
   mcp_servers_json?: string
   ui_language: string
   doc_language: string
+  rules_supplement?: string
+}
+
+export interface WorkspaceRuleFilesPreview {
+  purpose_preview: string
+  rules_preview: string
+  purpose_mtime?: number
+  rules_mtime?: number
 }
 
 export interface ActivityLog {

@@ -133,7 +133,7 @@ func (a *API) ReplanIngestReview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-	job, err := ingest.EnqueueReviewPlanJob(a.db, review)
+	job, err := ingest.EnqueueReviewPlanJob(a.db, a.workspace, review)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -171,7 +171,7 @@ func (a *API) ApproveIngestReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	review, _ = a.db.GetIngestReview(id)
-	job, err := ingest.EnqueueReviewApplyJob(a.db, review)
+	job, err := ingest.EnqueueReviewApplyJob(a.db, a.workspace, review)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

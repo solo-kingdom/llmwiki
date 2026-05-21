@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/solo-kingdom/llmwiki/internal/activity"
+	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/vcs"
 )
@@ -255,6 +256,7 @@ func (a *API) VCSRollback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create rollback job: %v", err))
 		return
 	}
+	ingest.RecordRulesSnapshot(a.db, job.ID, a.workspace)
 	activity.Record(a.db, activity.Entry{
 		Level:        "info",
 		Category:     "vcs",

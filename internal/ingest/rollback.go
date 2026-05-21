@@ -89,6 +89,7 @@ func (p *JobProcessor) processRollbackJob(ctx context.Context, job *sqlite.Inges
 	if err := p.preparePipelineForJob(job); err != nil {
 		return err
 	}
+	p.checkRulesDrift(job.ID)
 	if err := p.executeRollback(ctx, rbCtx, currentFiles); err != nil {
 		return p.failJob(job.ID, "rollback_failed",
 			fmt.Sprintf("LLM rollback failed: %v", err), "", "")
@@ -137,25 +138,24 @@ func (p *JobProcessor) processRollbackJob(ctx context.Context, job *sqlite.Inges
 	return nil
 }
 
-// buildRollbackPrompt constructs the LLM prompt for rollback.
-func buildRollbackPrompt(ctx *RollbackContext, currentFiles map[string]string, docLang string) string {
+// buildRollbackPrompt constructs the user message for rollback.
+func buildRollbackPrompt(ctx *RollbackContext, currentFiles map[string]string) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are performing a rollback of a wiki ingestion. ")
-	sb.WriteString("Your task is to reverse the changes made by a previous ingest operation.\n\n")
+	sb.WriteString("请根据以下信息回滚一次 wiki 摄入操作。\n\n")
 
-	sb.WriteString("## The original diff (what was added/changed):\n")
+	sb.WriteString("## 原始 diff（该次摄入的变更）\n")
 	sb.WriteString("```\n")
 	sb.WriteString(ctx.Diff)
 	sb.WriteString("\n```\n\n")
 
-	sb.WriteString("## Original source content that was ingested:\n")
+	sb.WriteString("## 该次摄入的原始源内容\n")
 	sb.WriteString("```\n")
 	sb.WriteString(ctx.NormalizedContent)
 	sb.WriteString("\n```\n\n")
 
 	if len(currentFiles) > 0 {
-		sb.WriteString("## Current wiki file contents:\n")
+		sb.WriteString("## 当前 wiki 文件内容\n")
 		for path, content := range currentFiles {
 			sb.WriteString(fmt.Sprintf("### %s\n", path))
 			sb.WriteString("```\n")
@@ -164,10 +164,7 @@ func buildRollbackPrompt(ctx *RollbackContext, currentFiles map[string]string, d
 		}
 	}
 
-	sb.WriteString("Based on the diff and source content, generate the wiki files as they should be AFTER rollback. ")
-	sb.WriteString("Remove any content that was added by this ingest, and restore any content that was modified or deleted.\n")
-	sb.WriteString("Output FILE blocks: ---FILE: path\ncontent\n---END FILE---\n")
-	sb.WriteString("If a file should be deleted entirely, output: ---FILE: path\n---DELETE---\n---END FILE---\n")
+	sb.WriteString("请生成回滚后的 wiki 文件：移除该次摄入新增的内容，恢复被修改或删除的内容。使用 FILE 块格式输出。")
 
 	return sb.String()
 }
@@ -178,13 +175,8 @@ func (p *JobProcessor) executeRollback(ctx context.Context, rbCtx *RollbackConte
 		return fmt.Errorf("LLM client not configured")
 	}
 
-	prompt := buildRollbackPrompt(rbCtx, currentFiles, resolveDocLang(p.db))
-
-	langInstruction := languageInstructionForPipeline(resolveDocLang(p.db))
-	systemMsg := "You are a wiki rollback assistant. Output FILE blocks to restore wiki content."
-	if langInstruction != "" {
-		systemMsg += "\n\n" + langInstruction
-	}
+	prompt := buildRollbackPrompt(rbCtx, currentFiles)
+	systemMsg := ComposeSystemPrompt(StepRollback, p.pipeline.promptCtx())
 
 	messages := []llm.Message{
 		{Role: "system", Content: systemMsg},

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -317,6 +318,44 @@ func TestUpdateSettingsLanguageInvalid(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid language, got %d; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateSettingsRulesSupplement(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"rules_supplement": "本 wiki 仅收录论文结论",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+	var resp settingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.RulesSupplement != "本 wiki 仅收录论文结论" {
+		t.Errorf("rules_supplement = %q", resp.RulesSupplement)
+	}
+}
+
+func TestUpdateSettingsRulesSupplementTooLong(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	long := strings.Repeat("x", 2049)
+	body, _ := json.Marshal(map[string]string{"rules_supplement": long})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d; body=%s", w.Code, w.Body.String())
 	}
 }
 

@@ -302,6 +302,20 @@ func TestPipelineSetDocLanguage(t *testing.T) {
 	}
 }
 
+func TestPipelineComposeAnalysisPromptZH(t *testing.T) {
+	dir := t.TempDir()
+	_ = WriteWorkspaceScaffoldsIfMissing(dir)
+	p := NewPipeline(dir, nil)
+	p.SetDocLanguage("zh")
+	p.SetRulesSupplement("仅处理技术文档")
+	out := ComposeSystemPrompt(StepAnalysis, p.promptCtx())
+	for _, want := range []string{"知识分析师", "源文档", "内容忠实性", "仅处理技术文档"} {
+		if !containsString(out, want) {
+			t.Errorf("analysis prompt missing %q", want)
+		}
+	}
+}
+
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStringHelper(s, substr))
 }

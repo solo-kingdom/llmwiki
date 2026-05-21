@@ -335,7 +335,9 @@ func (a *API) streamAssistantReply(
 	}
 	sendEvent("assistant_start", map[string]string{"id": assistantMsg.ID})
 
-	msgs := ingest.AssembleIngestChatMessages(history, userContent, ResolveDocLanguage(a.db))
+	msgs := ingest.AssembleIngestChatMessages(
+		history, userContent, ResolveDocLanguage(a.db), a.workspace, ingest.ResolveRulesSupplement(a.db),
+	)
 	ctx := r.Context()
 	ch, err := client.StreamChat(ctx, msgs, 0.7, 2048)
 	if err != nil {
@@ -659,7 +661,7 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	planJob, err := ingest.EnqueueReviewPlanJob(a.db, review)
+	planJob, err := ingest.EnqueueReviewPlanJob(a.db, a.workspace, review)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -101,6 +101,7 @@ func (a *API) createQueuedIngestJob(inputType, sourcePath, sourceRef string) (*s
 	if err := a.db.CreateIngestJob(job); err != nil {
 		return nil, err
 	}
+	ingest.RecordRulesSnapshot(a.db, job.ID, a.workspace)
 	activity.LogIngestJob(a.db, job, "queued", "api")
 	return job, nil
 }

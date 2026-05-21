@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
+	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
@@ -37,8 +38,9 @@ type settingsResponse struct {
 	ActivityLogsMaxCount     string `json:"activity_logs_max_count"`
 	IngestJobEventsMaxCount string `json:"ingest_job_events_max_count"`
 	MCPServersJSON          string `json:"mcp_servers_json"`
-	UILanguage  string `json:"ui_language"`
-	DocLanguage string `json:"doc_language"`
+	UILanguage       string `json:"ui_language"`
+	DocLanguage      string `json:"doc_language"`
+	RulesSupplement  string `json:"rules_supplement"`
 }
 
 func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
@@ -62,8 +64,9 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		ActivityLogsMaxCount:      activityLogsMaxCountForResponse(all["activity_logs_max_count"]),
 		IngestJobEventsMaxCount:   jobEventsMaxCountForResponse(all["ingest_job_events_max_count"]),
 		MCPServersJSON:            mcpServersJSONForResponse(all["mcp_servers_json"]),
-		UILanguage:  languageForResponse(all["ui_language"]),
-		DocLanguage: languageForResponse(all["doc_language"]),
+		UILanguage:      languageForResponse(all["ui_language"]),
+		DocLanguage:     languageForResponse(all["doc_language"]),
+		RulesSupplement: all["rules_supplement"],
 	})
 }
 
@@ -111,8 +114,9 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"activity_logs_max_count":      true,
 		"ingest_job_events_max_count": true,
 		"mcp_servers_json":            true,
-		"ui_language":  true,
-		"doc_language": true,
+		"ui_language":      true,
+		"doc_language":     true,
+		"rules_supplement": true,
 	}
 
 	for key, raw := range req {
@@ -147,6 +151,12 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if key == "ui_language" || key == "doc_language" {
 			if !isValidLanguage(value) {
 				writeError(w, http.StatusBadRequest, fmt.Sprintf("%s must be 'zh' or 'en", key))
+				return
+			}
+		}
+		if key == "rules_supplement" {
+			if err := validateRulesSupplement(value); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 		}
@@ -259,6 +269,10 @@ func ResolveDocLanguage(db interface{ GetConfig(string) (string, error) }) strin
 		return "zh"
 	}
 	return val
+}
+
+func validateRulesSupplement(s string) error {
+	return ingest.ValidateRulesSupplement(s)
 }
 
 // LanguageInstruction builds a prompt fragment that constrains LLM output language.

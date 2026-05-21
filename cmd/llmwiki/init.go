@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
+	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
@@ -29,6 +30,9 @@ func runInit(dir string) error {
 	}
 
 	if isWorkspaceInitialized(abs) {
+		if err := ingest.WriteWorkspaceScaffoldsIfMissing(abs); err != nil {
+			return err
+		}
 		fmt.Printf("Workspace already initialized: %s\n", abs)
 		return nil
 	}
@@ -82,6 +86,9 @@ Describe your research goals, key questions, and scope here.
 				return fmt.Errorf("write %s: %w", rel, err)
 			}
 		}
+	}
+	if err := ingest.WriteWorkspaceScaffoldsIfMissing(abs); err != nil {
+		return err
 	}
 
 	dbPath := workspaceIndexPath(abs)

@@ -3,6 +3,7 @@ import type {
   DocumentListItem,
   SearchResponse,
   Settings,
+  WorkspaceRuleFilesPreview,
   ReferenceSummary,
   StalePage,
   IngestJob,
@@ -98,6 +99,10 @@ export function updateSettings(
     method: "PUT",
     body: JSON.stringify(settings),
   })
+}
+
+export function getWorkspaceRuleFiles(): Promise<WorkspaceRuleFilesPreview> {
+  return request<WorkspaceRuleFilesPreview>("/api/v1/workspace/rule-files")
 }
 
 export type ActivityLogListResponse = {

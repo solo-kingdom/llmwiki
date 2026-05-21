@@ -10,10 +10,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import type { Settings, VCStatus, ProviderCheckResult, MCPServerCheckResult } from "@/types"
+import type { Settings, VCStatus, ProviderCheckResult, MCPServerCheckResult, WorkspaceRuleFilesPreview } from "@/types"
 import { PageContainer } from "@/components/PageContainer"
 import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff, CheckCircle2, XCircle, Loader2, CircleOff, RefreshCw } from "lucide-react"
-import { initVC, getVCStatus, disableVC, checkProviderInstance, checkAllProviderInstances, checkMCPStatus } from "@/lib/api"
+import { initVC, getVCStatus, disableVC, checkProviderInstance, checkAllProviderInstances, checkMCPStatus, getWorkspaceRuleFiles } from "@/lib/api"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 import { useI18n } from "@/i18n"
 
@@ -81,12 +81,15 @@ export function SettingsPage() {
   const [providerChecking, setProviderChecking] = useState(false)
   const [mcpChecks, setMcpChecks] = useState<MCPServerCheckResult[] | null>(null)
   const [mcpChecking, setMcpChecking] = useState(false)
+  const [rulePreview, setRulePreview] = useState<WorkspaceRuleFilesPreview | null>(null)
+  const rulesSupplementMax = 2048
 
   useEffect(() => {
     void loadSettings()
     void loadProviders()
     void loadInstances()
     void loadVCStatus()
+    void getWorkspaceRuleFiles().then(setRulePreview).catch(() => setRulePreview(null))
   }, [loadSettings, loadProviders, loadInstances])
 
   useEffect(() => {
@@ -459,6 +462,47 @@ export function SettingsPage() {
                 <option value="zh">{t("settings.language.zh")}</option>
                 <option value="en">{t("settings.language.en")}</option>
               </select>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("settings.rules.title")}</CardTitle>
+            <CardDescription>{t("settings.rules.desc")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <p className="text-sm font-medium mb-1">{t("settings.rules.purpose_preview")}</p>
+                <pre className="text-xs rounded-md border bg-muted/40 p-2 max-h-32 overflow-auto whitespace-pre-wrap">
+                  {rulePreview?.purpose_preview?.trim() || t("settings.rules.file_missing")}
+                </pre>
+              </div>
+              <div>
+                <p className="text-sm font-medium mb-1">{t("settings.rules.rules_preview")}</p>
+                <pre className="text-xs rounded-md border bg-muted/40 p-2 max-h-32 overflow-auto whitespace-pre-wrap">
+                  {rulePreview?.rules_preview?.trim() || t("settings.rules.file_missing")}
+                </pre>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("settings.rules.edit_hint")}</p>
+            <div>
+              <label className="text-sm font-medium">{t("settings.rules.supplement")}</label>
+              <textarea
+                value={mergedForm.rules_supplement ?? ""}
+                onChange={(e) => set("rules_supplement", e.target.value)}
+                placeholder={t("settings.rules.supplement_placeholder")}
+                rows={4}
+                className="mt-1 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                data-testid="rules-supplement"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                {t("settings.rules.char_count", {
+                  count: String((mergedForm.rules_supplement ?? "").length),
+                  max: String(rulesSupplementMax),
+                })}
+              </p>
             </div>
           </CardContent>
         </Card>

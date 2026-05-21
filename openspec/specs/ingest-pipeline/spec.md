@@ -14,15 +14,15 @@ The ingest pipeline SHALL accept `session_archive` input type where normalized c
 ## MODIFIED Requirements
 
 ### Requirement: Two-step ingest pipeline
-The system SHALL orchestrate a two-step LLM pipeline for ingestion jobs: first analyzing normalized ingest content, then generating wiki page files based on the analysis.
+The system SHALL orchestrate a two-step LLM pipeline for ingestion jobs: first analyzing normalized ingest content, then generating wiki page files based on the analysis. System prompts for both steps SHALL be composed via `ComposeSystemPrompt` including workspace `purpose.md`, `rules.md`, optional `.llmwiki/prompts.yaml` append segments, and `rules_supplement` from settings.
 
 #### Scenario: Analysis step
 - **WHEN** an ingest job enters processing stage with normalized source content
-- **THEN** the system SHALL send the content to the LLM with a system prompt requesting structured analysis of entities, concepts, arguments, connections to existing wiki, contradictions, and structural recommendations (temperature=0.1, max_tokens=4096)
+- **THEN** the system SHALL send the content to the LLM with a composed Chinese (when `doc_language=zh`) system prompt requesting structured analysis of entities, concepts, arguments, connections to existing wiki, contradictions, and structural recommendations, grounded in the source without external hallucination (temperature=0.1, max_tokens=4096)
 
 #### Scenario: Generation step
 - **WHEN** the analysis step completes
-- **THEN** the system SHALL send the original normalized content and analysis results to the LLM with a system prompt requesting FILE block output (temperature=0.1, max_tokens=8192), starting with `---FILE:` immediately with no preamble
+- **THEN** the system SHALL send the original normalized content and analysis results to the LLM with a composed system prompt requesting FILE block output (temperature=0.1, max_tokens=8192), starting with `---FILE:` immediately with no preamble, with fidelity constraints prohibiting content not supported by the source
 
 #### Scenario: Conversational draft as ingest input
 - **WHEN** a user-confirmed conversational draft is submitted via legacy conversation API
@@ -68,3 +68,10 @@ The ingest pipeline SHALL emit structured execution events to the job recorder f
 #### Scenario: Index step recorded
 - **WHEN** post-ingest file indexing runs
 - **THEN** processor SHALL record per-file or summary `step=index` events for failures at minimum
+
+### Requirement: Review plan step prompt composition
+The ingest review plan step SHALL use the same prompt composer with step `plan`, including workspace rules and append-only overrides.
+
+#### Scenario: Plan step uses composed prompt
+- **WHEN** the pipeline runs the review plan LLM step
+- **THEN** the system message SHALL be produced by `ComposeSystemPrompt(plan, ctx)` and SHALL NOT output FILE blocks

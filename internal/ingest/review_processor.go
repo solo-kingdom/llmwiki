@@ -27,6 +27,7 @@ func (p *JobProcessor) processReviewPlanJob(ctx context.Context, job *sqlite.Ing
 		return err
 	}
 	defer p.pipeline.SetMCPRouter(nil)
+	p.checkRulesDrift(job.ID)
 
 	normalized, err := NormalizeJobSource(p.workspace, string(InputKindSessionArchive), job.SourcePath, job.SourceRef)
 	if err != nil {
@@ -105,6 +106,7 @@ func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.In
 		return err
 	}
 	defer p.pipeline.SetMCPRouter(nil)
+	p.checkRulesDrift(job.ID)
 
 	plan, err := p.db.GetIngestReviewPlan(reviewID, review.ApprovedPlanVersion)
 	if err != nil || plan == nil {
@@ -171,6 +173,7 @@ func (p *JobProcessor) preparePipelineForReviewJob(job *sqlite.IngestJob, review
 	p.pipeline.SetLLMClient(client)
 	p.attachMCPRouter()
 	p.pipeline.SetDocLanguage(resolveDocLang(p.db))
+	p.pipeline.SetRulesSupplement(ResolveRulesSupplement(p.db))
 	return nil
 }
 
@@ -254,7 +257,7 @@ func (p *JobProcessor) logReviewEvent(reviewID, sessionID, action, message, stat
 }
 
 // EnqueueReviewPlanJob queues a background plan generation job for a review.
-func EnqueueReviewPlanJob(db *sqlite.DB, review *sqlite.IngestReview) (*sqlite.IngestJob, error) {
+func EnqueueReviewPlanJob(db *sqlite.DB, workspace string, review *sqlite.IngestReview) (*sqlite.IngestJob, error) {
 	if review == nil {
 		return nil, fmt.Errorf("nil review")
 	}
@@ -268,12 +271,13 @@ func EnqueueReviewPlanJob(db *sqlite.DB, review *sqlite.IngestReview) (*sqlite.I
 	if err := db.CreateIngestJob(job); err != nil {
 		return nil, err
 	}
+	RecordRulesSnapshot(db, job.ID, workspace)
 	activity.LogIngestJob(db, job, "queued", "api")
 	return job, nil
 }
 
 // EnqueueReviewApplyJob queues apply execution after approval.
-func EnqueueReviewApplyJob(db *sqlite.DB, review *sqlite.IngestReview) (*sqlite.IngestJob, error) {
+func EnqueueReviewApplyJob(db *sqlite.DB, workspace string, review *sqlite.IngestReview) (*sqlite.IngestJob, error) {
 	if review == nil {
 		return nil, fmt.Errorf("nil review")
 	}
@@ -287,6 +291,7 @@ func EnqueueReviewApplyJob(db *sqlite.DB, review *sqlite.IngestReview) (*sqlite.
 	if err := db.CreateIngestJob(job); err != nil {
 		return nil, err
 	}
+	RecordRulesSnapshot(db, job.ID, workspace)
 	activity.LogIngestJob(db, job, "queued", "api")
 	return job, nil
 }

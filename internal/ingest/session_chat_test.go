@@ -13,7 +13,7 @@ func TestAssembleIngestChatMessagesSkipsFailedAssistant(t *testing.T) {
 		{Role: "assistant", Content: "error text", StreamStatus: "failed"},
 		{Role: "user", Content: "second", StreamStatus: "complete"},
 	}
-	msgs := AssembleIngestChatMessages(history, "third", "zh")
+	msgs := AssembleIngestChatMessages(history, "third", "zh", "", "")
 	roles := make([]string, 0, len(msgs))
 	for _, m := range msgs {
 		if m.Role == "system" {
@@ -34,15 +34,17 @@ func TestAssembleIngestChatMessagesSkipsFailedAssistant(t *testing.T) {
 
 func TestAssembleIngestChatMessagesLanguageInstruction(t *testing.T) {
 	history := []sqlite.IngestSessionMessage{}
-	msgs := AssembleIngestChatMessages(history, "", "zh")
+	msgs := AssembleIngestChatMessages(history, "", "zh", "", "")
 	if len(msgs) < 1 || msgs[0].Role != "system" {
 		t.Fatal("expected system message")
 	}
-	if !strings.Contains(msgs[0].Content, "中文") {
-		t.Errorf("system prompt for zh should contain Chinese instruction, got: %s", msgs[0].Content)
+	for _, want := range []string{"中文", "内容忠实性", "对话助手"} {
+		if !strings.Contains(msgs[0].Content, want) {
+			t.Errorf("system prompt for zh should contain %q, got: %s", want, msgs[0].Content)
+		}
 	}
 
-	msgsEN := AssembleIngestChatMessages(history, "", "en")
+	msgsEN := AssembleIngestChatMessages(history, "", "en", "", "")
 	if !strings.Contains(msgsEN[0].Content, "English") {
 		t.Errorf("system prompt for en should contain English instruction, got: %s", msgsEN[0].Content)
 	}
@@ -50,8 +52,10 @@ func TestAssembleIngestChatMessagesLanguageInstruction(t *testing.T) {
 
 func TestAttachmentSummaryPromptLanguage(t *testing.T) {
 	promptZH := AttachmentSummaryPrompt("test.pdf", "some content", "zh")
-	if !strings.Contains(promptZH, "Chinese") {
-		t.Errorf("zh prompt should mention Chinese, got: %s", promptZH)
+	for _, want := range []string{"用户上传", "中文", "不要补充"} {
+		if !strings.Contains(promptZH, want) {
+			t.Errorf("zh prompt should contain %q, got: %s", want, promptZH)
+		}
 	}
 
 	promptEN := AttachmentSummaryPrompt("test.pdf", "some content", "en")

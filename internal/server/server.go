@@ -163,6 +163,7 @@ func (s *Server) Start() error {
 
 		r.Get("/settings", s.api.GetSettings)
 		r.Put("/settings", s.api.UpdateSettings)
+		r.Get("/workspace/rule-files", s.api.GetWorkspaceRuleFiles)
 		r.Put("/settings/last-model", s.api.UpdateLastModel)
 		r.Get("/logs", s.api.ListActivityLogsHandler)
 		r.Delete("/logs", s.api.DeleteAllActivityLogsHandler)

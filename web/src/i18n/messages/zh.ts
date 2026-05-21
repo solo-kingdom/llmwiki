@@ -41,6 +41,16 @@ const zh = {
   "settings.language.zh": "中文",
   "settings.language.en": "English",
 
+  "settings.rules.title": "Wiki 规则",
+  "settings.rules.desc": "主规则保存在工作区 purpose.md 与 rules.md（请在 Obsidian 或编辑器中修改）。此处仅追加临时补充，会附加在文件规则之后。",
+  "settings.rules.supplement": "补充规则",
+  "settings.rules.supplement_placeholder": "例如：本 wiki 只收录论文结论，不要写背景科普…",
+  "settings.rules.char_count": "{count} / {max} 字符",
+  "settings.rules.purpose_preview": "purpose.md 预览",
+  "settings.rules.rules_preview": "rules.md 预览",
+  "settings.rules.file_missing": "（文件不存在）",
+  "settings.rules.edit_hint": "完整编辑请直接修改工作区根目录下的 purpose.md 与 rules.md。",
+
   "settings.providers.title": "Provider 实例",
   "settings.providers.desc": "管理已添加的 Provider 实例",
   "settings.providers.add": "添加",

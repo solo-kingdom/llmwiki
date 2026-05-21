@@ -17,7 +17,7 @@ func TestBuildRollbackPrompt(t *testing.T) {
 		"wiki/page.md": "# Page\nnew content",
 	}
 
-	prompt := buildRollbackPrompt(ctx, currentFiles, "zh")
+	prompt := buildRollbackPrompt(ctx, currentFiles)
 
 	if prompt == "" {
 		t.Fatal("expected non-empty prompt")

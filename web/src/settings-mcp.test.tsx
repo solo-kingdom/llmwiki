@@ -70,6 +70,26 @@ describe("SettingsPage MCP JSON", () => {
     )
   })
 
+  it("accepts null servers", async () => {
+    render(<SettingsPage />)
+    const area = screen.getByTestId("mcp-servers-json")
+    const valid = JSON.stringify(
+      {
+        version: 1,
+        servers: null,
+        defaults: { readonly_only: true, fallback_mode: "local_only" },
+      },
+      null,
+      2,
+    )
+    fireEvent.change(area, { target: { value: valid } })
+    expect(screen.queryByTestId("mcp-json-error")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /Save Settings/i }))
+    await waitFor(() => {
+      expect(mockSaveSettings).toHaveBeenCalled()
+    })
+  })
+
   it("saves valid MCP JSON", async () => {
     render(<SettingsPage />)
     const area = screen.getByTestId("mcp-servers-json")

@@ -133,7 +133,7 @@ func ParseConfig(raw string) (*Config, error) {
 func DefaultConfig() *Config {
 	return &Config{
 		Version: ConfigVersion,
-		Servers: nil,
+		Servers: map[string]ServerConfig{},
 		Defaults: Defaults{
 			ReadonlyOnly: DefaultReadonlyOnly,
 			FallbackMode: DefaultFallbackMode,
@@ -145,6 +145,9 @@ func DefaultConfig() *Config {
 func NormalizeConfig(cfg *Config) {
 	if cfg == nil {
 		return
+	}
+	if cfg.Servers == nil {
+		cfg.Servers = map[string]ServerConfig{}
 	}
 	if cfg.Version == 0 {
 		cfg.Version = ConfigVersion
@@ -213,7 +216,7 @@ func ValidateConfig(cfg *Config) error {
 func parseServersJSON(raw json.RawMessage) (map[string]ServerConfig, error) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || trimmed == "null" {
-		return nil, nil
+		return map[string]ServerConfig{}, nil
 	}
 	switch trimmed[0] {
 	case '{':

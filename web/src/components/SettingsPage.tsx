@@ -254,16 +254,16 @@ export function SettingsPage() {
       if (parsed.version !== 1) {
         return t("settings.mcp.validation.version")
       }
-      if (parsed.servers == null) {
-        return t("settings.mcp.validation.servers_required")
+      if (parsed.servers != null) {
+        if (Array.isArray(parsed.servers)) {
+          return t("settings.mcp.validation.servers_not_array")
+        }
+        if (typeof parsed.servers !== "object") {
+          return t("settings.mcp.validation.servers_object")
+        }
       }
-      if (Array.isArray(parsed.servers)) {
-        return t("settings.mcp.validation.servers_not_array")
-      }
-      if (typeof parsed.servers !== "object") {
-        return t("settings.mcp.validation.servers_object")
-      }
-      for (const [key, srv] of Object.entries(parsed.servers)) {
+      const servers = parsed.servers ?? {}
+      for (const [key, srv] of Object.entries(servers)) {
         if (!key.trim()) {
           return t("settings.mcp.validation.key_empty")
         }

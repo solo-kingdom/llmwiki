@@ -13,6 +13,39 @@ func TestParseConfigEmpty(t *testing.T) {
 	if !cfg.Defaults.ReadonlyOnly {
 		t.Error("expected readonly_only default true")
 	}
+	if cfg.Servers == nil {
+		t.Error("expected empty servers map, got nil")
+	}
+	if len(cfg.Servers) != 0 {
+		t.Errorf("expected 0 servers, got %d", len(cfg.Servers))
+	}
+}
+
+func TestParseConfigNullServers(t *testing.T) {
+	raw := `{"version":1,"servers":null,"defaults":{"readonly_only":true,"fallback_mode":"local_only"}}`
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Servers == nil {
+		t.Error("expected empty servers map, got nil")
+	}
+	if len(cfg.Servers) != 0 {
+		t.Errorf("expected 0 servers, got %d", len(cfg.Servers))
+	}
+}
+
+func TestDefaultConfigCanonicalJSON(t *testing.T) {
+	canonical, err := CanonicalJSON(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(canonical, `"servers": null`) {
+		t.Errorf("expected servers object, got null in %s", canonical)
+	}
+	if !strings.Contains(canonical, `"servers": {}`) && !strings.Contains(canonical, `"servers": {\n  }`) {
+		t.Errorf("expected empty servers object in %s", canonical)
+	}
 }
 
 func TestParseConfigValid(t *testing.T) {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useT } from "@/i18n"
+import type { MessageKey } from "@/i18n"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 import * as api from "@/lib/api"
 import type { IngestReview, IngestReviewPlan } from "@/types"
@@ -11,10 +12,22 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { CheckCircle2, Loader2, RefreshCw } from "lucide-react"
 
-function reviewStatusLabel(status: string, t: ReturnType<typeof useT>): string {
-  const key = `review.status.${status}` as const
-  const msg = t(key)
-  return msg === key ? status : msg
+const REVIEW_STATUS_LABEL_KEYS = {
+  planning: "review.status.planning",
+  ready_for_review: "review.status.ready_for_review",
+  revising: "review.status.revising",
+  approved: "review.status.approved",
+  applying: "review.status.applying",
+  succeeded: "review.status.succeeded",
+  failed: "review.status.failed",
+  cancelled: "review.status.cancelled",
+} as const satisfies Record<IngestReview["status"], MessageKey>
+
+function reviewStatusLabel(
+  status: IngestReview["status"],
+  t: ReturnType<typeof useT>,
+): string {
+  return t(REVIEW_STATUS_LABEL_KEYS[status])
 }
 
 export function ReviewPage() {

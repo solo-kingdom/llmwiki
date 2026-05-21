@@ -13,6 +13,8 @@ import type {
   IngestSession,
   IngestSessionMessage,
   ArchiveSessionResponse,
+  IngestReview,
+  IngestReviewPlan,
   Provider,
   ProviderInstance,
   ModelInfo,
@@ -385,6 +387,53 @@ export function archiveIngestSession(
       method: "POST",
       body: JSON.stringify({ title: title ?? "" }),
     },
+  )
+}
+
+export function listIngestReviews(): Promise<IngestReview[]> {
+  return request<{ reviews: IngestReview[] }>("/api/v1/ingest/reviews").then(
+    (r) => r.reviews ?? [],
+  )
+}
+
+export function getIngestReview(id: string): Promise<IngestReview> {
+  return request<{ review: IngestReview }>(
+    `/api/v1/ingest/reviews/${encodeURIComponent(id)}`,
+  ).then((r) => r.review)
+}
+
+export function listIngestReviewPlans(
+  reviewId: string,
+): Promise<IngestReviewPlan[]> {
+  return request<{ plans: IngestReviewPlan[] }>(
+    `/api/v1/ingest/reviews/${encodeURIComponent(reviewId)}/plans`,
+  ).then((r) => r.plans ?? [])
+}
+
+export function addIngestReviewFeedback(
+  reviewId: string,
+  content: string,
+): Promise<void> {
+  return request(
+    `/api/v1/ingest/reviews/${encodeURIComponent(reviewId)}/feedback`,
+    {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    },
+  )
+}
+
+export function replanIngestReview(reviewId: string): Promise<void> {
+  return request(
+    `/api/v1/ingest/reviews/${encodeURIComponent(reviewId)}/replan`,
+    { method: "POST" },
+  )
+}
+
+export function approveIngestReview(reviewId: string): Promise<void> {
+  return request(
+    `/api/v1/ingest/reviews/${encodeURIComponent(reviewId)}/approve`,
+    { method: "POST" },
   )
 }
 

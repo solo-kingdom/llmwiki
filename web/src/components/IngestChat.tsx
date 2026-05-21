@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useApp } from "@/context/AppContext"
@@ -173,6 +174,7 @@ export function IngestChat() {
   const [input, setInput] = useState("")
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [archiveTitle, setArchiveTitle] = useState("")
+  const [pendingReviewId, setPendingReviewId] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [modelDialogOpen, setModelDialogOpen] = useState(false)
   const [selectedInstanceId, setSelectedInstanceId] = useState("")
@@ -334,10 +336,10 @@ export function IngestChat() {
 
   const handleArchive = async () => {
     try {
-      const jobId = await archiveSession(archiveTitle || undefined)
-      showToast(`${t("chat.archive_submitted")}：${jobId}`)
+      const reviewId = await archiveSession(archiveTitle || undefined)
+      setPendingReviewId(reviewId)
+      showToast(t("chat.archive_review_hint"))
       setArchiveOpen(false)
-      await refreshIngestJobs()
     } catch {
       // archiveSession 已通过 sessionError → 全局 toast 展示错误
     }
@@ -387,6 +389,22 @@ export function IngestChat() {
           </div>
         </ScrollArea>
       </div>
+
+      {pendingReviewId && (
+        <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-900 dark:bg-green-950/30">
+          <span>{t("chat.archive_review_ready")}</span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              navigateTo(workbenchViewHref("review"))
+              setPendingReviewId(null)
+            }}
+          >
+            {t("chat.go_to_review")}
+          </Button>
+        </div>
+      )}
 
       {archiveOpen && (
         <div className="mb-2 space-y-3 rounded-lg border bg-card p-4">

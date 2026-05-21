@@ -141,6 +141,13 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		return p.processRollbackJob(ctx, job)
 	}
 
+	if job.InputType == string(InputKindReviewPlan) {
+		return p.processReviewPlanJob(ctx, job)
+	}
+	if job.InputType == string(InputKindReviewApply) {
+		return p.processReviewApplyJob(ctx, job)
+	}
+
 	// Check if this is a commit_failed retry — skip pipeline, just redo git commit
 	if job.ErrorCode == "commit_failed" {
 		return p.retryCommitOnly(job)

@@ -32,7 +32,7 @@ func NormalizeJobSource(workspace string, inputType, sourcePath, sourceRef strin
 			SourceRef:     sourceRef,
 			Content:       content,
 		}, nil
-	case string(InputKindSessionArchive):
+	case string(InputKindSessionArchive), string(InputKindReviewPlan), string(InputKindReviewApply):
 		return &NormalizedSource{
 			Kind:          InputKindSessionArchive,
 			CanonicalPath: sourcePath,

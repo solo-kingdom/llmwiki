@@ -686,22 +686,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSessionError(null)
       try {
         const res = await api.archiveIngestSession(sessionId, title)
-        const instanceId = settings?.last_instance_id
-        const model = settings?.last_model
-        const { session } = await api.createIngestSession()
-        setSessionId(session.id)
-        setActiveSessionId(session.id)
-        localStorage.setItem(SESSION_STORAGE_KEY, session.id)
-        setSessionMessages([])
-        if (instanceId && model) {
-          try {
-            await api.updateIngestSession(session.id, { instance_id: instanceId, model })
-          } catch {
-            // non-critical
-          }
-        }
         void listSessionsInternal()
-        return res.job_id
+        return res.review_id
       } catch (e) {
         setSessionError((e as Error).message)
         throw e
@@ -709,7 +695,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSessionBusy(false)
       }
     },
-    [sessionId, settings],
+    [sessionId],
   )
 
   const listSessionsInternal = async () => {

@@ -268,9 +268,40 @@ export interface IngestSessionMessage {
 }
 
 export interface ArchiveSessionResponse {
-  job_id: string
+  review_id: string
+  status: string
   source_path: string
   session_id: string
+  plan_job_id?: string
+}
+
+export interface IngestReview {
+  id: string
+  session_id: string
+  archive_source_path: string
+  status:
+    | "planning"
+    | "ready_for_review"
+    | "revising"
+    | "approved"
+    | "applying"
+    | "succeeded"
+    | "failed"
+    | "cancelled"
+  current_plan_version: number
+  approved_plan_version: number
+  final_job_id?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface IngestReviewPlan {
+  id: string
+  review_id: string
+  version: number
+  plan_markdown: string
+  plan_json: string
+  created_at: string
 }
 
 export interface OutlineItem {

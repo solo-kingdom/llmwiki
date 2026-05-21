@@ -79,13 +79,17 @@ func TestIngestSessionCRUDAndArchive(t *testing.T) {
 		t.Fatalf("archive: %d %s", w.Code, w.Body.String())
 	}
 	var arch struct {
-		JobID string `json:"job_id"`
+		ReviewID string `json:"review_id"`
+		Status   string `json:"status"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&arch); err != nil {
 		t.Fatal(err)
 	}
-	if arch.JobID == "" {
-		t.Fatal("expected job id")
+	if arch.ReviewID == "" {
+		t.Fatal("expected review id")
+	}
+	if arch.Status != "planning" {
+		t.Fatalf("expected planning status, got %q", arch.Status)
 	}
 
 	// Unknown session -> 404

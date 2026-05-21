@@ -5,6 +5,7 @@ export const PATH_CHANGE_EVENT = "llmwiki:pathchange"
 export type WorkbenchView =
   | "chat"
   | "ingest"
+  | "review"
   | "jobs"
   | "timeline"
   | "logs"
@@ -27,6 +28,8 @@ export function getWorkbenchViewFromPath(pathname: string): WorkbenchView {
   switch (pathname) {
     case "/ingest":
       return "ingest"
+    case "/review":
+      return "review"
     case "/jobs":
       return "jobs"
     case "/settings":
@@ -44,6 +47,8 @@ export function workbenchViewHref(view: WorkbenchView): string {
   switch (view) {
     case "ingest":
       return "/ingest"
+    case "review":
+      return "/review"
     case "jobs":
       return "/jobs"
     case "settings":

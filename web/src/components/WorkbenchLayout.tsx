@@ -5,6 +5,7 @@ import { SettingsPage } from "@/components/SettingsPage"
 import { IngestChat } from "@/components/IngestChat"
 import { IngestRaw } from "@/components/IngestRaw"
 import { JobsPage } from "@/components/JobsPage"
+import { ReviewPage } from "@/components/ReviewPage"
 import { LogsPage } from "@/components/LogsPage"
 import { TimelinePage } from "@/components/TimelinePage"
 import { WarningPopover } from "@/components/WarningPopover"
@@ -26,6 +27,7 @@ import type { MessageKey } from "@/i18n"
 const NAV_ITEMS: { id: WorkbenchView; labelKey: MessageKey }[] = [
   { id: "chat", labelKey: "nav.chat" },
   { id: "ingest", labelKey: "nav.ingest" },
+  { id: "review", labelKey: "nav.review" },
   { id: "jobs", labelKey: "nav.jobs" },
   { id: "timeline", labelKey: "nav.timeline" },
   { id: "logs", labelKey: "nav.logs" },
@@ -38,6 +40,7 @@ const LEGACY_HASH_VIEWS = new Set<string>([
   "timeline",
   "logs",
   "ingest",
+  "review",
 ])
 
 function NavButton({
@@ -167,6 +170,7 @@ export function WorkbenchLayout() {
             </div>
           )}
           {view === "ingest" && <IngestRaw />}
+          {view === "review" && <ReviewPage />}
           {view === "jobs" && <JobsPage />}
           {view === "timeline" && vcEnabled === true && <TimelinePage />}
           {view === "logs" && <LogsPage />}

@@ -15,6 +15,11 @@ describe("wiki-routes workbench views", () => {
     expect(workbenchViewHref("ingest")).toBe("/ingest")
   })
 
+  it("maps review path", () => {
+    expect(getWorkbenchViewFromPath("/review")).toBe("review")
+    expect(workbenchViewHref("review")).toBe("/review")
+  })
+
   it("maps other workbench paths", () => {
     expect(getWorkbenchViewFromPath("/jobs")).toBe("jobs")
     expect(getWorkbenchViewFromPath("/settings")).toBe("settings")

@@ -626,7 +626,8 @@ describe("IngestChat", () => {
       ],
     })
     vi.mocked(api.archiveIngestSession).mockResolvedValue({
-      job_id: "job-abc123",
+      review_id: "review-abc123",
+      status: "planning",
       source_path: "raw/sources/web-ingest/sessions/sess-1",
       session_id: "sess-1",
     })
@@ -655,9 +656,9 @@ describe("IngestChat", () => {
     fireEvent.click(screen.getByRole("button", { name: /确认归档/ }))
 
     expect(
-      await screen.findByText("已提交归档任务：job-abc123"),
+      await screen.findByText("归档已提交，请前往审核页查看计划"),
     ).toBeInTheDocument()
-    expect(screen.getByRole("status")).toBeInTheDocument()
+    expect(screen.getByText("去审核")).toBeInTheDocument()
   })
 
   it("shows archive failure as top toast", async () => {

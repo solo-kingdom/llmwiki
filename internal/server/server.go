@@ -204,6 +204,14 @@ func (s *Server) Start() error {
 				r.Post("/{id}/attachments", s.api.UploadIngestSessionAttachment)
 				r.Post("/{id}/archive", s.api.ArchiveIngestSession)
 			})
+			r.Route("/reviews", func(r chi.Router) {
+				r.Get("/", s.api.ListIngestReviews)
+				r.Get("/{id}", s.api.GetIngestReview)
+				r.Get("/{id}/plans", s.api.ListIngestReviewPlans)
+				r.Post("/{id}/feedback", s.api.AddIngestReviewFeedback)
+				r.Post("/{id}/replan", s.api.ReplanIngestReview)
+				r.Post("/{id}/approve", s.api.ApproveIngestReview)
+			})
 			r.Route("/jobs", func(r chi.Router) {
 				r.Get("/", s.api.ListIngestJobs)
 				r.Get("/{id}/events", s.api.GetIngestJobEvents)

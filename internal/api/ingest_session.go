@@ -43,9 +43,11 @@ type messageResponse struct {
 }
 
 type archiveResponse struct {
-	JobID       string `json:"job_id"`
-	SourcePath  string `json:"source_path"`
-	SessionID   string `json:"session_id"`
+	ReviewID   string `json:"review_id"`
+	Status     string `json:"status"`
+	SourcePath string `json:"source_path"`
+	SessionID  string `json:"session_id"`
+	PlanJobID  string `json:"plan_job_id,omitempty"`
 }
 
 func (a *API) CreateIngestSession(w http.ResponseWriter, r *http.Request) {
@@ -648,7 +650,16 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("persist archive failed: %v", err))
 		return
 	}
-	job, err := a.createQueuedIngestJob(string(normalized.Kind), normalized.CanonicalPath, normalized.SourceRef)
+	review := &sqlite.IngestReview{
+		SessionID:         sessionID,
+		ArchiveSourcePath: normalized.CanonicalPath,
+		Status:            "planning",
+	}
+	if err := a.db.CreateIngestReview(review); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	planJob, err := ingest.EnqueueReviewPlanJob(a.db, review)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -657,10 +668,26 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 	if title != session.Title {
 		_ = a.db.UpdateIngestSessionTitle(sessionID, title)
 	}
+	activity.Record(a.db, activity.Entry{
+		Level:        "info",
+		Category:     "ingest",
+		Action:       "review_created",
+		Message:      fmt.Sprintf("归档审阅已创建，等待计划生成"),
+		ResourceType: "review",
+		ResourceID:   review.ID,
+		Status:       "pending",
+		Source:       "api",
+		Details: map[string]interface{}{
+			"session_id":  sessionID,
+			"plan_job_id": planJob.ID,
+		},
+	})
 	writeJSON(w, http.StatusCreated, archiveResponse{
-		JobID:      job.ID,
+		ReviewID:   review.ID,
+		Status:     review.Status,
 		SourcePath: normalized.CanonicalPath,
 		SessionID:  sessionID,
+		PlanJobID:  planJob.ID,
 	})
 }
 

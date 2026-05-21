@@ -213,6 +213,49 @@ CREATE TABLE IF NOT EXISTS ingest_session_messages (
 CREATE INDEX IF NOT EXISTS idx_ingest_session_messages_session
     ON ingest_session_messages(session_id, datetime(created_at));
 
+CREATE TABLE IF NOT EXISTS ingest_reviews (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    session_id TEXT NOT NULL DEFAULT '',
+    archive_source_path TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'planning' CHECK (
+        status IN (
+            'planning', 'ready_for_review', 'revising', 'approved',
+            'applying', 'succeeded', 'failed', 'cancelled'
+        )
+    ),
+    current_plan_version INTEGER NOT NULL DEFAULT 0,
+    approved_plan_version INTEGER NOT NULL DEFAULT 0,
+    final_job_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS ingest_review_messages (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    review_id TEXT NOT NULL REFERENCES ingest_reviews(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    message_type TEXT NOT NULL DEFAULT 'feedback' CHECK (
+        message_type IN ('feedback', 'plan_summary', 'status_note')
+    ),
+    content TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS ingest_review_plans (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    review_id TEXT NOT NULL REFERENCES ingest_reviews(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    plan_markdown TEXT NOT NULL DEFAULT '',
+    plan_json TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(review_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingest_reviews_status ON ingest_reviews(status);
+CREATE INDEX IF NOT EXISTS idx_ingest_reviews_session ON ingest_reviews(session_id);
+CREATE INDEX IF NOT EXISTS idx_ingest_review_messages_review ON ingest_review_messages(review_id, datetime(created_at));
+CREATE INDEX IF NOT EXISTS idx_ingest_review_plans_review ON ingest_review_plans(review_id, version);
+
 -- Application configuration key-value store
 CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,

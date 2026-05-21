@@ -88,6 +88,16 @@ func (r *Reindexer) Rebuild(userID string) (int, error) {
 		log.Printf("Warning: reindex verification found issues: %v", verr)
 	}
 
+	ib := NewIndexBuilder(r.workspace)
+	if err := ib.RebuildIndex(); err != nil {
+		return indexed, fmt.Errorf("rebuild wiki index: %w", err)
+	}
+	indexPath := filepath.Join(r.workspace, indexRelPath)
+	if err := r.indexFile(userID, indexRelPath, indexPath); err != nil {
+		return indexed, fmt.Errorf("index %s: %w", indexRelPath, err)
+	}
+	indexed++
+
 	return indexed, nil
 }
 

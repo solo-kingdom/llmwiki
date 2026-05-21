@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
@@ -29,66 +29,21 @@ func runInit(dir string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
-	if isWorkspaceInitialized(abs) {
-		if err := ingest.WriteWorkspaceScaffoldsIfMissing(abs); err != nil {
-			return err
-		}
-		fmt.Printf("Workspace already initialized: %s\n", abs)
-		return nil
+	if err := engine.EnsureWorkspaceStructure(abs); err != nil {
+		return fmt.Errorf("ensure workspace structure: %w", err)
 	}
 
-	dirs := []string{
-		"wiki",
-		"wiki/entities",
-		"wiki/concepts",
-		"wiki/sources",
-		"raw/sources",
-		"revert",
-		".llmwiki",
-		".llmwiki/cache",
-	}
-	for _, d := range dirs {
-		if err := os.MkdirAll(filepath.Join(abs, d), 0o755); err != nil {
-			return fmt.Errorf("create %s: %w", d, err)
-		}
-	}
-
-	scaffolds := map[string]string{
-		"wiki/overview.md": `---
-title: Overview
-description: Global knowledge base overview (auto-maintained)
----
-
-# Overview
-
-Welcome to your LLM Wiki workspace. This page is automatically maintained as you ingest sources.
-`,
-		"wiki/log.md": `---
-title: Operation Log
----
-
-# Operation Log
-
-`,
-		"purpose.md": `---
-title: Research Purpose
----
-
-# Purpose
-
-Describe your research goals, key questions, and scope here.
-`,
-	}
-	for rel, content := range scaffolds {
-		path := filepath.Join(abs, rel)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-				return fmt.Errorf("write %s: %w", rel, err)
-			}
-		}
+	initDate := time.Now().Format("2006-01-02")
+	if err := engine.WriteWorkspaceScaffoldsIfMissing(abs, initDate); err != nil {
+		return fmt.Errorf("write scaffolds: %w", err)
 	}
 	if err := ingest.WriteWorkspaceScaffoldsIfMissing(abs); err != nil {
 		return err
+	}
+
+	if isWorkspaceInitialized(abs) {
+		fmt.Printf("Workspace already initialized: %s\n", abs)
+		return nil
 	}
 
 	dbPath := workspaceIndexPath(abs)

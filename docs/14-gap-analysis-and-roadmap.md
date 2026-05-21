@@ -23,7 +23,9 @@
 
 ## 一、P0：阻塞核心工作流（4 项）
 
-### P0-1: `wiki/index.md` 不生成
+### P0-1: `wiki/index.md` 不生成 ✅ 已实现
+
+> **状态（2026-05-21）**: `llmwiki init` 创建中文空表格框架；`llmwiki reindex` 末尾通过 `engine/index_builder.go` 幂等重建 `wiki/index.md` 并写入 SQLite 索引。
 
 **影响**:
 - LLM 在查询时无法快速定位相关页面。Karpathy 原始设计的工作流是"LLM 先读 index 找相关页面，再深入阅读"
@@ -62,7 +64,9 @@
 
 ---
 
-### P0-3: Wiki 子目录不完整
+### P0-3: Wiki 子目录不完整 ✅ 已实现
+
+> **状态（2026-05-21）**: `engine/scaffold.go` 定义完整目录列表；`llmwiki init` 创建 6 个 wiki 子目录 + `raw/assets/` + `.obsidian/`。
 
 **影响**:
 - `llmwiki init` 只创建 `wiki/entities/`、`wiki/concepts/`、`wiki/sources/` 三个子目录
@@ -151,7 +155,9 @@
 
 ---
 
-### P1-3: Obsidian 兼容缺失
+### P1-3: Obsidian 兼容缺失 ✅ 已实现
+
+> **状态（2026-05-21）**: `llmwiki init` 在缺失时写入 `.obsidian/app.json`（wikilink 模式、frontmatter 显示等最小配置），不覆盖已有文件。
 
 **影响**:
 - Karpathy 原始概念中，"Obsidian 是 IDE，LLM 是程序员，Wiki 是代码库"
@@ -172,7 +178,9 @@
 
 ---
 
-### P1-4: 引导文件内容不完整
+### P1-4: 引导文件内容不完整 ✅ 已实现
+
+> **状态（2026-05-21）**: 中文 scaffold（`purpose.md`、`wiki/overview.md`、`wiki/log.md` 含 init 条目）由 `engine/scaffold.go` 提供；仅缺失时写入。
 
 **影响**:
 - `llmwiki init` 生成的 `purpose.md` 和 `wiki/log.md` 内容过于空白

@@ -154,6 +154,8 @@ func (s *Server) Start() error {
 			r.Get("/", s.api.Search)
 		})
 
+		r.Get("/lint", s.api.Lint)
+
 		r.Route("/graph", func(r chi.Router) {
 			r.Get("/backlinks/{id}", s.api.Backlinks)
 			r.Get("/forward/{id}", s.api.ForwardReferences)

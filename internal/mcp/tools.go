@@ -85,11 +85,11 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *eng
 
 	registerTool(Tool{
 		Name:        "search",
-		Description: "Browse or search the knowledge vault. Modes: list (browse files), search (keyword search), references (citation graph queries).",
+		Description: "Browse or search the knowledge vault. Modes: list (browse files), search (keyword search), references (citation graph), lint (wiki health checks).",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"mode":  map[string]interface{}{"type": "string", "enum": []string{"list", "search", "references"}, "default": "list"},
+				"mode":  map[string]interface{}{"type": "string", "enum": []string{"list", "search", "references", "lint"}, "default": "list"},
 				"query": map[string]interface{}{"type": "string", "default": ""},
 				"path":  map[string]interface{}{"type": "string", "default": "*"},
 				"limit": map[string]interface{}{"type": "integer", "default": 10},
@@ -191,6 +191,16 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *eng
 				sb.WriteString(fmt.Sprintf("  → %s [%s] (%s)\n", fr.Title, fr.Path, fr.ReferenceType))
 			}
 			return sb.String(), nil
+
+		case "lint":
+			if workspace == "" {
+				return "Error: workspace not configured", nil
+			}
+			report, err := engine.LintWorkspace(workspace)
+			if err != nil {
+				return "", fmt.Errorf("lint: %w", err)
+			}
+			return formatLintMCP(report), nil
 
 		default:
 			return "Unknown mode: " + mode, nil
@@ -422,6 +432,50 @@ func writeWikiPageFile(workspace, relPath, content string) error {
 		return err
 	}
 	return os.WriteFile(fullPath, []byte(content), 0o644)
+}
+
+func formatLintMCP(report *engine.LintReport) string {
+	var sb strings.Builder
+	errors, warnings := 0, 0
+	for _, issue := range report.Issues {
+		switch issue.Severity {
+		case engine.LintSeverityError:
+			errors++
+		case engine.LintSeverityWarning:
+			warnings++
+		}
+	}
+	sb.WriteString(fmt.Sprintf("# Wiki Lint\n\n%d 错误, %d 警告\n\n", errors, warnings))
+	sb.WriteString(fmt.Sprintf("统计：%d 页, %d 源文件", report.Stats.PageCount, report.Stats.SourceCount))
+	if report.Stats.LastUpdated != "" {
+		sb.WriteString(fmt.Sprintf(", 最后更新 %s", report.Stats.LastUpdated))
+	}
+	sb.WriteString("\n\n")
+
+	for _, sev := range []string{engine.LintSeverityError, engine.LintSeverityWarning, engine.LintSeverityInfo} {
+		var group []engine.LintIssue
+		for _, issue := range report.Issues {
+			if issue.Severity == sev {
+				group = append(group, issue)
+			}
+		}
+		if len(group) == 0 {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("## %s (%d)\n\n", sev, len(group)))
+		for _, issue := range group {
+			loc := issue.Path
+			if issue.Line > 0 {
+				loc = fmt.Sprintf("%s:%d", issue.Path, issue.Line)
+			}
+			sb.WriteString(fmt.Sprintf("- **%s** `%s` — %s\n", issue.Code, loc, issue.Message))
+		}
+		sb.WriteString("\n")
+	}
+	if len(report.Issues) == 0 {
+		sb.WriteString("未发现问题。\n")
+	}
+	return sb.String()
 }
 
 var _ = os.Args

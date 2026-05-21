@@ -38,7 +38,7 @@ The system SHALL provide a `guide` tool that returns architecture documentation,
 - **THEN** the response SHALL include the LLM Wiki architecture overview and a list of available knowledge bases
 
 ### Requirement: Search tool
-The system SHALL provide a `search` tool supporting three modes: list (browse files), search (FTS5 keyword search), and references (reference graph queries).
+The system SHALL provide a `search` tool supporting four modes: list (browse files), search (FTS5 keyword search), references (reference graph queries), and lint (wiki health checks).
 
 #### Scenario: List mode
 - **WHEN** client uses `search(mode="list", path="/wiki/*")`
@@ -51,6 +51,10 @@ The system SHALL provide a `search` tool supporting three modes: list (browse fi
 #### Scenario: References mode for backlinks
 - **WHEN** client uses `search(mode="references", path="/wiki/concepts/attention.md")`
 - **THEN** results SHALL show both forward references (what this page cites) and backlinks (what links to this page)
+
+#### Scenario: Lint mode via MCP
+- **WHEN** agent invokes search with `mode="lint"`
+- **THEN** the tool SHALL return wiki health check results grouped by severity
 
 ### Requirement: Read tool
 The system SHALL provide a `read` tool that handles different file types (markdown, PDF, spreadsheets, images, glob batch) with appropriate rendering.

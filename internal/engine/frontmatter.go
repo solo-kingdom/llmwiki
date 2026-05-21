@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"regexp"
 
 	"gopkg.in/yaml.v3"
@@ -11,7 +12,53 @@ type Frontmatter struct {
 	Title       string   `yaml:"title"`
 	Description string   `yaml:"description"`
 	Date        string   `yaml:"date"`
+	Type        string   `yaml:"type"`
 	Tags        []string `yaml:"tags"`
+}
+
+// ValidateFrontmatter checks required fields and type↔directory consistency.
+func ValidateFrontmatter(relPath string, fm Frontmatter, subdir string) []LintIssue {
+	var issues []LintIssue
+
+	if fm.Title == "" {
+		issues = append(issues, LintIssue{
+			Severity: LintSeverityError,
+			Code:     LintCodeMissingFrontmatter,
+			Path:     relPath,
+			Message:  "缺少必需 frontmatter 字段：title",
+		})
+	}
+	if fm.GetDate() == "" {
+		issues = append(issues, LintIssue{
+			Severity: LintSeverityError,
+			Code:     LintCodeMissingFrontmatter,
+			Path:     relPath,
+			Message:  "缺少必需 frontmatter 字段：date",
+		})
+	}
+	if fm.Type == "" {
+		issues = append(issues, LintIssue{
+			Severity: LintSeverityError,
+			Code:     LintCodeMissingFrontmatter,
+			Path:     relPath,
+			Message:  "缺少必需 frontmatter 字段：type",
+		})
+		return issues
+	}
+
+	expected, ok := dirToPageType[subdir]
+	if !ok {
+		return issues
+	}
+	if fm.Type != expected {
+		issues = append(issues, LintIssue{
+			Severity: LintSeverityError,
+			Code:     LintCodeTypeDirMismatch,
+			Path:     relPath,
+			Message:  fmt.Sprintf("type 与目录不匹配：目录 %s/ 应为 type: %s，实际为 %s", subdir, expected, fm.Type),
+		})
+	}
+	return issues
 }
 
 // frontmatterRegex matches YAML frontmatter delimited by ---.

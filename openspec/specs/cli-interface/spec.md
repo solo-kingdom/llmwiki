@@ -53,6 +53,21 @@ The system SHALL provide `llmwiki ingest <file>` to trigger the two-step ingesti
 - **WHEN** user runs `llmwiki ingest paper.pdf`
 - **THEN** the system SHALL run the two-step pipeline and report the number of wiki pages created/updated
 
+### Requirement: Lint command
+The system SHALL provide `llmwiki lint [dir]` to run mechanical wiki content health checks, with optional `--json` output.
+
+#### Scenario: Lint CLI success
+- **WHEN** user runs `llmwiki lint ~/research`
+- **THEN** the command SHALL print a human-readable issue summary and exit 0 if no error-severity issues (warnings allowed)
+
+#### Scenario: Lint CLI JSON
+- **WHEN** user runs `llmwiki lint --json`
+- **THEN** output SHALL be valid JSON matching the LintReport structure
+
+#### Scenario: Lint command available
+- **WHEN** user runs `llmwiki --help`
+- **THEN** `lint` subcommand SHALL be listed alongside init, serve, reindex
+
 ### Requirement: Version command
 The system SHALL provide `llmwiki version` to print the binary version and build information.
 

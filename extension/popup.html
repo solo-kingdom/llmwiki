@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LLM Wiki 剪藏</title>
+    <link rel="stylesheet" href="/src/popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <header class="popup__header">
+        <h1>LLM Wiki 剪藏</h1>
+        <p class="popup__subtitle">将当前页面正文提交到 ingest</p>
+      </header>
+
+      <section class="popup__section">
+        <label class="popup__label" for="server-url">服务地址</label>
+        <input
+          id="server-url"
+          class="popup__input"
+          type="url"
+          placeholder="http://localhost:8868"
+          autocomplete="off"
+        />
+        <button id="save-settings" class="popup__button popup__button--secondary" type="button">
+          保存设置
+        </button>
+      </section>
+
+      <section class="popup__section">
+        <button id="clip-button" class="popup__button popup__button--primary" type="button">
+          剪藏当前页
+        </button>
+        <p id="status" class="popup__status" aria-live="polite"></p>
+      </section>
+    </main>
+    <script type="module" src="/src/popup.ts"></script>
+  </body>
+</html>

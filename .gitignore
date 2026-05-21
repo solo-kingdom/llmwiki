@@ -35,6 +35,10 @@ web/node_modules/
 web/dist/*
 !web/dist/.gitkeep
 
+# Chrome extension
+extension/node_modules/
+extension/dist/
+
 # Build output
 /llmwiki
 *.test

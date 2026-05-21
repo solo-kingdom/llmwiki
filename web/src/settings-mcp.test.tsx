@@ -101,7 +101,9 @@ describe("SettingsPage MCP JSON", () => {
     fireEvent.change(area, { target: { value: valid } })
     fireEvent.click(screen.getByRole("button", { name: /Save Settings/i }))
     await waitFor(() => {
-      expect(mockSaveSettings).toHaveBeenCalled()
+      expect(mockSaveSettings).toHaveBeenCalledWith({
+        mcp_servers_json: valid,
+      })
     })
   })
 

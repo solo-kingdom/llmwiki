@@ -132,6 +132,72 @@ export function SettingsPage() {
     }
   }
 
+  const mergedForm = useMemo(() => {
+    return {
+      ...(settings ?? ({} as Partial<Settings>)),
+      ...(form ?? {}),
+    }
+  }, [form, settings])
+
+  const jobInstanceId = mergedForm.job_instance_id ?? ""
+  const jobModel = mergedForm.job_model ?? ""
+
+  useEffect(() => {
+    if (!jobInstanceId) return
+    const inst = instances.find((i) => i.id === jobInstanceId)
+    if (inst) void loadModels(inst.catalog_id)
+  }, [jobInstanceId, instances, loadModels])
+
+  const fallbackInstance = instances.find(
+    (i) => i.id === (settings?.last_instance_id ?? ""),
+  )
+  const usingConversationModel = !jobInstanceId && !jobModel
+
+  const validateMCPJson = (raw: string): string | null => {
+    const trimmed = raw.trim()
+    if (!trimmed) return null
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        version?: number
+        servers?: Record<string, Record<string, unknown>>
+      }
+      if (parsed.version !== 1) {
+        return t("settings.mcp.validation.version")
+      }
+      if (parsed.servers != null) {
+        if (Array.isArray(parsed.servers)) {
+          return t("settings.mcp.validation.servers_not_array")
+        }
+        if (typeof parsed.servers !== "object") {
+          return t("settings.mcp.validation.servers_object")
+        }
+      }
+      const servers = parsed.servers ?? {}
+      for (const [key, srv] of Object.entries(servers)) {
+        if (!key.trim()) {
+          return t("settings.mcp.validation.key_empty")
+        }
+        const id = typeof srv?.id === "string" ? srv.id.trim() : ""
+        if (id && id !== key) {
+          return t("settings.mcp.validation.id_mismatch", { key })
+        }
+        if (!srv?.name || String(srv.name).trim() === "") {
+          return t("settings.mcp.validation.name_required", { key })
+        }
+        if (!srv?.transport || String(srv.transport).trim() === "") {
+          return t("settings.mcp.validation.transport_required", { key })
+        }
+        const transport = String(srv.transport).trim()
+        if (transport !== "stdio" && (!srv?.url || String(srv.url).trim() === "")) {
+          return t("settings.mcp.validation.url_required", { key, transport })
+        }
+      }
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : t("settings.mcp.validation.invalid_json")
+    }
+  }
+
   const runMCPCheck = async () => {
     const raw = mergedForm.mcp_servers_json ?? settings?.mcp_servers_json ?? ""
     const err = validateMCPJson(raw)
@@ -224,69 +290,8 @@ export function SettingsPage() {
     }
   }
 
-  const mergedForm = useMemo(() => {
-    if (form) return form
-    return settings ?? ({} as Partial<Settings>)
-  }, [form, settings])
-
-  const jobInstanceId = mergedForm.job_instance_id ?? ""
-  const jobModel = mergedForm.job_model ?? ""
-
-  useEffect(() => {
-    if (!jobInstanceId) return
-    const inst = instances.find((i) => i.id === jobInstanceId)
-    if (inst) void loadModels(inst.catalog_id)
-  }, [jobInstanceId, instances, loadModels])
-
-  const fallbackInstance = instances.find(
-    (i) => i.id === (settings?.last_instance_id ?? ""),
-  )
-  const usingConversationModel = !jobInstanceId && !jobModel
-
-  const validateMCPJson = (raw: string): string | null => {
-    const trimmed = raw.trim()
-    if (!trimmed) return null
-    try {
-      const parsed = JSON.parse(trimmed) as {
-        version?: number
-        servers?: Record<string, Record<string, unknown>>
-      }
-      if (parsed.version !== 1) {
-        return t("settings.mcp.validation.version")
-      }
-      if (parsed.servers != null) {
-        if (Array.isArray(parsed.servers)) {
-          return t("settings.mcp.validation.servers_not_array")
-        }
-        if (typeof parsed.servers !== "object") {
-          return t("settings.mcp.validation.servers_object")
-        }
-      }
-      const servers = parsed.servers ?? {}
-      for (const [key, srv] of Object.entries(servers)) {
-        if (!key.trim()) {
-          return t("settings.mcp.validation.key_empty")
-        }
-        const id = typeof srv?.id === "string" ? srv.id.trim() : ""
-        if (id && id !== key) {
-          return t("settings.mcp.validation.id_mismatch", { key })
-        }
-        if (!srv?.name || String(srv.name).trim() === "") {
-          return t("settings.mcp.validation.name_required", { key })
-        }
-        if (!srv?.transport || String(srv.transport).trim() === "") {
-          return t("settings.mcp.validation.transport_required", { key })
-        }
-        const transport = String(srv.transport).trim()
-        if (transport !== "stdio" && (!srv?.url || String(srv.url).trim() === "")) {
-          return t("settings.mcp.validation.url_required", { key, transport })
-        }
-      }
-      return null
-    } catch (err) {
-      return err instanceof Error ? err.message : t("settings.mcp.validation.invalid_json")
-    }
-  }
+  const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
+    setForm((prev) => ({ ...(prev ?? {}), [key]: value }))
 
   const handleMCPJsonChange = (value: string) => {
     set("mcp_servers_json", value)
@@ -295,6 +300,10 @@ export function SettingsPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
+    const payload = form ?? {}
+    if (Object.keys(payload).length === 0) {
+      return
+    }
     const mcpErr = validateMCPJson(mergedForm.mcp_servers_json ?? "")
     if (mcpErr) {
       setMcpJsonError(mcpErr)
@@ -303,7 +312,9 @@ export function SettingsPage() {
     setSaving(true)
     setSaved(false)
     try {
-      await saveSettings(mergedForm)
+      await saveSettings(payload)
+      setForm(null)
+      setMcpJsonError(null)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch {
@@ -313,12 +324,9 @@ export function SettingsPage() {
     }
   }
 
-  const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
-    setForm((prev) => ({ ...(prev ?? settings ?? {}), [key]: value }))
-
   const handleJobInstanceChange = (instanceId: string) => {
     setForm((prev) => ({
-      ...(prev ?? settings ?? {}),
+      ...(prev ?? {}),
       job_instance_id: instanceId,
       job_model: "",
     }))
@@ -326,7 +334,7 @@ export function SettingsPage() {
 
   const handleClearJobLLM = () => {
     setForm((prev) => ({
-      ...(prev ?? settings ?? {}),
+      ...(prev ?? {}),
       job_instance_id: "",
       job_model: "",
     }))

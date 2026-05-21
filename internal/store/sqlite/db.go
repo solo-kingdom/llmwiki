@@ -76,7 +76,10 @@ func (d *DB) Migrate() error {
 	if _, err := d.db.Exec(schemaSQL); err != nil {
 		return err
 	}
-	return d.migrateIngestQueue()
+	if err := d.migrateIngestQueue(); err != nil {
+		return err
+	}
+	return d.migrateFTSTrigram()
 }
 
 // Ensure embed is used

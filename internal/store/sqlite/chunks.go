@@ -81,7 +81,7 @@ func (d *DB) SearchChunks(query string, limit int, pathFilter string) ([]SearchC
 	}
 	results = mergeSearchResults(results, meta, limit)
 
-	if len(results) == 0 || ftsErr != nil {
+	if len(results) == 0 {
 		like, err := d.searchLIKEBroad(query, limit, pathFilter)
 		if err != nil {
 			if ftsErr != nil {
@@ -92,20 +92,51 @@ func (d *DB) SearchChunks(query string, limit int, pathFilter string) ([]SearchC
 		results = mergeSearchResults(results, like, limit)
 	}
 
+	if len(results) == 0 && ftsErr != nil {
+		return nil, ftsErr
+	}
+
 	return results, nil
 }
 
 func escapeFTSQuery(query string) string {
-	terms := strings.Fields(query)
-	if len(terms) == 0 {
+	query = strings.TrimSpace(query)
+	if query == "" {
 		return query
 	}
-	parts := make([]string, len(terms))
-	for i, t := range terms {
-		t = strings.ReplaceAll(t, `"`, `""`)
-		parts[i] = `"` + t + `"`
+	if hasCJK(query) {
+		return sanitizeFTSLiterals(query)
+	}
+	terms := strings.Fields(query)
+	if len(terms) == 0 {
+		return sanitizeFTSLiterals(query)
+	}
+	parts := make([]string, 0, len(terms))
+	for _, t := range terms {
+		if t = sanitizeFTSLiterals(t); t != "" {
+			parts = append(parts, t)
+		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// sanitizeFTSLiterals strips FTS5 operators so trigram MATCH queries stay safe.
+func sanitizeFTSLiterals(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '"', '*', ':', '(', ')', '^':
+			continue
+		case '-':
+			if b.Len() == 0 {
+				continue
+			}
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func mergeSearchResults(primary, extra []SearchChunk, limit int) []SearchChunk {

@@ -98,7 +98,9 @@ After `llmwiki init ~/research`:
 4. **CLI** — For humans and scripts. Powered by cobra.
 5. **File Watcher** — Automatic index updates on file changes.
 
-**Data model**: Files are the source of truth. SQLite is an index only — deleting the database and running `reindex` fully rebuilds it. FTS5 provides full-text search with BM25 ranking.
+**Data model**: Files are the source of truth. SQLite is an index only — deleting the database and running `reindex` fully rebuilds it. FTS5 provides full-text search with BM25 ranking (trigram tokenizer for Chinese/CJK substring matching).
+
+> **Upgrading from an older index?** After pulling a version with CJK search improvements, run `llmwiki reindex [dir]` once so the FTS5 index is rebuilt with the trigram tokenizer.
 
 **Web UI**: React 19 + Vite + TypeScript, embedded via `go:embed` into the binary. SPA with client-side routing, served with index.html fallback.
 

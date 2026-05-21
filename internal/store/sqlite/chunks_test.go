@@ -274,13 +274,13 @@ func TestSearchChunkCJK(t *testing.T) {
 		t.Fatalf("StoreChunks() error = %v", err)
 	}
 
-	results, err := db.SearchChunks("中文", 10, "")
+	results, err := db.SearchChunks("中文测试", 10, "")
 	if err != nil {
 		t.Fatalf("SearchChunks() CJK error = %v", err)
 	}
-	// Note: unicode61 tokenizer has limited CJK support. Full CJK bigram support
-	// will be addressed in task 5.4. For now, just verify the query doesn't error.
-	t.Logf("CJK search returned %d results (unicode61 tokenizer, full CJK support pending task 5.4)", len(results))
+	if len(results) == 0 {
+		t.Fatal("expected CJK trigram FTS results")
+	}
 }
 
 // --- helpers ---

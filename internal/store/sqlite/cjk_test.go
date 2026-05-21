@@ -27,10 +27,27 @@ func TestHasCJK(t *testing.T) {
 	}
 }
 
-func TestSearchChunksCJKFallback(t *testing.T) {
+func TestEscapeFTSQueryTrigram(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"machine learning", "machine learning"},
+		{"中文测试", "中文测试"},
+		{`foo"bar*baz`, "foobarbaz"},
+		{"  spaced  ", "spaced"},
+	}
+	for _, tt := range tests {
+		got := escapeFTSQuery(tt.in)
+		if got != tt.want {
+			t.Errorf("escapeFTSQuery(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestSearchChunksCJKViaFTS(t *testing.T) {
 	db := helperDB(t)
 
-	doc := createTestDoc(t, db, "cjk-fallback.md", "/wiki", "wiki/cjk-fallback.md")
+	doc := createTestDoc(t, db, "cjk-fts.md", "/wiki", "wiki/cjk-fts.md")
 
 	chunks := []Chunk{
 		{ChunkIndex: 0, Content: "这是一段中文测试文本，用于验证全文搜索功能", TokenCount: 10},
@@ -46,9 +63,70 @@ func TestSearchChunksCJKFallback(t *testing.T) {
 		t.Fatalf("SearchChunks() CJK error = %v", err)
 	}
 	if len(results) == 0 {
-		t.Error("expected CJK LIKE fallback results, got none")
-	} else {
-		t.Logf("CJK LIKE fallback returned %d results", len(results))
+		t.Fatal("expected CJK FTS results, got none")
+	}
+	if results[0].Score == 0 {
+		t.Fatal("expected BM25-ranked FTS result (non-zero score), got LIKE fallback score 0")
+	}
+}
+
+func TestSearchChunksCJKShortQueryLIKEFallback(t *testing.T) {
+	db := helperDB(t)
+
+	doc := createTestDoc(t, db, "cjk-fallback.md", "/wiki", "wiki/cjk-fallback.md")
+	if err := db.StoreChunks(doc.ID, []Chunk{
+		{ChunkIndex: 0, Content: "这是一段中文测试文本，用于验证全文搜索功能", TokenCount: 10},
+	}); err != nil {
+		t.Fatalf("StoreChunks() error = %v", err)
+	}
+
+	results, err := db.SearchChunks("中文", 10, "")
+	if err != nil {
+		t.Fatalf("SearchChunks() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected results for short CJK query via LIKE fallback")
+	}
+}
+
+func TestSearchChunksMixedQuery(t *testing.T) {
+	db := helperDB(t)
+
+	doc := createTestDoc(t, db, "mixed.md", "/wiki", "wiki/mixed.md")
+	if err := db.StoreChunks(doc.ID, []Chunk{
+		{ChunkIndex: 0, Content: "Transformer 注意力机制在 NLP 中很重要", TokenCount: 12},
+	}); err != nil {
+		t.Fatalf("StoreChunks() error = %v", err)
+	}
+
+	results, err := db.SearchChunks("注意力机制", 10, "")
+	if err != nil {
+		t.Fatalf("SearchChunks() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected mixed CJK query results")
+	}
+}
+
+func TestSearchChunksEnglishRegression(t *testing.T) {
+	db := helperDB(t)
+
+	doc := createTestDoc(t, db, "english.md", "/wiki", "wiki/english.md")
+	if err := db.StoreChunks(doc.ID, []Chunk{
+		{ChunkIndex: 0, Content: "Machine learning models process natural language efficiently", TokenCount: 8},
+	}); err != nil {
+		t.Fatalf("StoreChunks() error = %v", err)
+	}
+
+	results, err := db.SearchChunks("machine learning", 10, "")
+	if err != nil {
+		t.Fatalf("SearchChunks() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected English FTS results")
+	}
+	if results[0].Score == 0 {
+		t.Fatal("expected BM25-ranked FTS result for English query")
 	}
 }
 
@@ -67,6 +145,6 @@ func TestSearchChunksCJKNoFallbackForASCII(t *testing.T) {
 		t.Fatalf("SearchChunks() error = %v", err)
 	}
 	if len(results) != 0 {
-		t.Errorf("expected no results for non-CJK query with no match, got %d", len(results))
+		t.Errorf("expected no results for non-matching query, got %d", len(results))
 	}
 }

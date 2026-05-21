@@ -2,8 +2,6 @@ package ingest
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,9 +23,10 @@ type Pipeline struct {
 }
 
 type CacheEntry struct {
-	SourceName   string   `json:"source_name"`
-	SHA256       string   `json:"sha256"`
-	WrittenFiles []string `json:"written_files"`
+	SourceName    string   `json:"source_name"`
+	SHA256        string   `json:"sha256"`
+	ContentSHA256 string   `json:"content_sha256,omitempty"`
+	WrittenFiles  []string `json:"written_files"`
 }
 
 type cacheFile struct {
@@ -90,11 +89,6 @@ func (p *Pipeline) promptCtx() PromptContext {
 }
 
 func (p *Pipeline) Ingest(ctx context.Context, sourcePath string) ([]string, error) {
-	cached, err := p.checkCache(sourcePath)
-	if err == nil && cached != nil {
-		return cached.WrittenFiles, nil
-	}
-
 	content, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return nil, fmt.Errorf("read source: %w", err)
@@ -105,17 +99,19 @@ func (p *Pipeline) Ingest(ctx context.Context, sourcePath string) ([]string, err
 		return nil, fmt.Errorf("normalize: %w", err)
 	}
 
-	files, err := p.IngestNormalized(ctx, normalized)
+	absPath, err := filepath.Abs(sourcePath)
 	if err != nil {
-		return nil, err
+		absPath = sourcePath
 	}
 
-	p.saveCache(sourcePath, files)
-
-	return files, nil
+	return p.ingestNormalized(ctx, normalized, []string{absPath})
 }
 
 func (p *Pipeline) IngestNormalized(ctx context.Context, source *NormalizedSource) ([]string, error) {
+	return p.ingestNormalized(ctx, source, nil)
+}
+
+func (p *Pipeline) ingestNormalized(ctx context.Context, source *NormalizedSource, legacyKeys []string) ([]string, error) {
 	if source == nil {
 		return nil, fmt.Errorf("normalized source is nil")
 	}
@@ -131,6 +127,16 @@ func (p *Pipeline) IngestNormalized(ctx context.Context, source *NormalizedSourc
 			"canonical_path": source.CanonicalPath,
 			"input_type":     string(source.Kind),
 		})
+	}
+
+	if cached, err := p.lookupCacheForSource(source, legacyKeys); err == nil && cached != nil {
+		if p.recorder != nil {
+			p.recorder.Record("cache", "hit", "cache hit", map[string]any{
+				"canonical_path": source.CanonicalPath,
+				"paths_written":  cached.WrittenFiles,
+			})
+		}
+		return cached.WrittenFiles, nil
 	}
 
 	analysis, err := p.analyze(ctx, name, content)
@@ -155,6 +161,8 @@ func (p *Pipeline) IngestNormalized(ctx context.Context, source *NormalizedSourc
 			"paths_written": files,
 		})
 	}
+
+	p.saveCacheForSource(source, files)
 
 	return files, nil
 }
@@ -214,78 +222,6 @@ func (p *Pipeline) cachePath() string {
 	return filepath.Join(p.workspace, ".llmwiki", "cache.json")
 }
 
-func (p *Pipeline) checkCache(sourcePath string) (*CacheEntry, error) {
-	hash, err := computeSHA256(sourcePath)
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := os.ReadFile(p.cachePath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("not cached")
-		}
-		return nil, err
-	}
-
-	var cf cacheFile
-	if err := json.Unmarshal(data, &cf); err != nil {
-		return nil, err
-	}
-
-	absPath, err := filepath.Abs(sourcePath)
-	if err != nil {
-		absPath = sourcePath
-	}
-
-	entry, ok := cf.Entries[absPath]
-	if !ok {
-		return nil, fmt.Errorf("not cached")
-	}
-
-	if entry.SHA256 == hash {
-		return entry, nil
-	}
-
-	return nil, fmt.Errorf("cache miss: hash changed")
-}
-
-func (p *Pipeline) saveCache(sourcePath string, files []string) {
-	hash, err := computeSHA256(sourcePath)
-	if err != nil {
-		return
-	}
-
-	absPath, err := filepath.Abs(sourcePath)
-	if err != nil {
-		absPath = sourcePath
-	}
-
-	dir := filepath.Join(p.workspace, ".llmwiki")
-	os.MkdirAll(dir, 0o755)
-
-	var cf cacheFile
-	data, err := os.ReadFile(p.cachePath())
-	if err == nil {
-		json.Unmarshal(data, &cf)
-	}
-	if cf.Entries == nil {
-		cf.Entries = make(map[string]*CacheEntry)
-	}
-
-	cf.Entries[absPath] = &CacheEntry{
-		SourceName:   filepath.Base(sourcePath),
-		SHA256:       hash,
-		WrittenFiles: files,
-	}
-
-	out, err := json.MarshalIndent(cf, "", "  ")
-	if err != nil {
-		return
-	}
-	os.WriteFile(p.cachePath(), out, 0o644)
-}
-
 func (p *Pipeline) runLLMStep(ctx context.Context, step string, messages []llm.Message, temp float64, maxTok int) (string, error) {
 	RecordLLMRequest(p.recorder, step, p.llmClient.Model(), llmMessagesForRecord(messages), temp, maxTok)
 	start := time.Now()
@@ -336,15 +272,6 @@ func llmMessagesForRecord(messages []llm.Message) []map[string]string {
 		out[i] = map[string]string{"role": m.Role, "content": m.Content}
 	}
 	return out
-}
-
-func computeSHA256(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	h := sha256.Sum256(data)
-	return fmt.Sprintf("%x", h), nil
 }
 
 // languageInstructionForPipeline builds a language constraint prompt fragment.

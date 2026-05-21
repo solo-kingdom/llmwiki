@@ -61,6 +61,10 @@ The ingest pipeline SHALL emit structured execution events to the job recorder f
 - **WHEN** wiki FILE blocks are applied to workspace
 - **THEN** pipeline SHALL record `step=apply_files`, `phase=complete` with written and deleted paths
 
+#### Scenario: Cache hit recorded
+- **WHEN** ingest pipeline skips LLM steps due to SHA256 cache hit
+- **THEN** pipeline SHALL record `step=cache`, `phase=hit` with canonical path and written paths metadata
+
 #### Scenario: Git commit recorded
 - **WHEN** version control is enabled and commit runs for the job
 - **THEN** processor SHALL record `step=git_commit` with success SHA or error details
@@ -75,3 +79,22 @@ The ingest review plan step SHALL use the same prompt composer with step `plan`,
 #### Scenario: Plan step uses composed prompt
 - **WHEN** the pipeline runs the review plan LLM step
 - **THEN** the system message SHALL be produced by `ComposeSystemPrompt(plan, ctx)` and SHALL NOT output FILE blocks
+
+### Requirement: SHA256 incremental cache
+The ingest pipeline SHALL skip LLM analysis and generation when the source content hash matches a cached entry for the same canonical path.
+
+#### Scenario: File ingest cache hit
+- **WHEN** `Ingest()` is called on a source file whose SHA256 matches the cache entry
+- **THEN** the pipeline SHALL skip LLM steps and return previously written wiki paths
+
+#### Scenario: Normalized ingest cache hit
+- **WHEN** `IngestNormalized()` is called with content whose SHA256 matches a cached entry for the same canonical path
+- **THEN** the pipeline SHALL skip LLM steps and return previously written wiki paths
+
+#### Scenario: Cache miss on content change
+- **WHEN** source content SHA256 differs from cached entry
+- **THEN** the pipeline SHALL run full two-step ingest and update the cache entry
+
+#### Scenario: Cache miss when written files missing
+- **WHEN** cache entry exists but one or more `WrittenFiles` no longer exist on disk
+- **THEN** the pipeline SHALL treat as cache miss and re-run ingest

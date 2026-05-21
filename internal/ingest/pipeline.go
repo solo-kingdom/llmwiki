@@ -20,6 +20,7 @@ type Pipeline struct {
 	toolLoopCfg llm.ToolLoopConfig
 	docLang          string // "zh" or "en", controls generation language
 	rulesSupplement  string
+	forceOverwrite   bool
 }
 
 type CacheEntry struct {
@@ -78,6 +79,22 @@ func (p *Pipeline) SetDocLanguage(lang string) {
 // SetRulesSupplement sets append-only rules from Settings (rules_supplement).
 func (p *Pipeline) SetRulesSupplement(s string) {
 	p.rulesSupplement = s
+}
+
+// SetForceOverwrite skips merge protection and overwrites existing wiki pages.
+func (p *Pipeline) SetForceOverwrite(force bool) {
+	p.forceOverwrite = force
+}
+
+func (p *Pipeline) applyWikiBlocksOpts() *ApplyWikiBlocksOpts {
+	return &ApplyWikiBlocksOpts{
+		ForceOverwrite: p.forceOverwrite,
+		Merge: &MergeContext{
+			LLMClient: p.llmClient,
+			DocLang:   p.docLang,
+			Recorder:  p.recorder,
+		},
+	}
 }
 
 func (p *Pipeline) promptCtx() PromptContext {
@@ -215,7 +232,7 @@ func (p *Pipeline) generate(ctx context.Context, name, content, analysis string)
 		p.lockMgr.Unlock(path)
 	}
 
-	return ApplyWikiBlocks(p.workspace, blocks)
+	return ApplyWikiBlocks(ctx, p.workspace, blocks, p.applyWikiBlocksOpts())
 }
 
 func (p *Pipeline) cachePath() string {

@@ -44,7 +44,9 @@
 
 ---
 
-### P0-2: 页面合并保护缺失
+### P0-2: 页面合并保护缺失 ✅ 已实现
+
+> **状态（2026-05-21）**: `internal/ingest/merge.go` 在 `ApplyWikiBlocks` 写入前合并已有页面：frontmatter 锁定字段 + 数组 union + 正文 LLM 合并（70% 长度 guard）。`llmwiki ingest --force-overwrite` 可跳过合并。
 
 **影响**:
 - LLM 的摄入输出直接 `os.WriteFile` 覆盖已有 wiki 页面，不检查旧内容

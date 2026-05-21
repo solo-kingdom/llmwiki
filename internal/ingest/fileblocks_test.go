@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,7 @@ func TestApplyWikiBlocksWritesFiles(t *testing.T) {
 	blocks := map[string]string{
 		"wiki/generated.md": "# Generated\n\nUniqueSearchTermXYZ123 content here.\n",
 	}
-	paths, err := ApplyWikiBlocks(ws, blocks)
+	paths, err := ApplyWikiBlocks(context.Background(), ws, blocks, nil)
 	if err != nil {
 		t.Fatalf("ApplyWikiBlocks: %v", err)
 	}

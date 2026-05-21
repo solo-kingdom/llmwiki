@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +29,7 @@ func TestProcessorIndexesWrittenWikiFiles(t *testing.T) {
 	blocks := map[string]string{
 		"wiki/searchable-ingest.md": "# Searchable\n\n" + longBody + "\n",
 	}
-	paths, err := ApplyWikiBlocks(ws, blocks)
+	paths, err := ApplyWikiBlocks(context.Background(), ws, blocks, nil)
 	if err != nil {
 		t.Fatalf("ApplyWikiBlocks: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestPipelineFileBlocksWritePaths(t *testing.T) {
 
 	output := "---FILE: wiki/from-pipeline.md\n# From Pipeline\n\nPipelineWriteToken555.\n---END FILE---"
 	blocks := parseFileBlocksWithContent(output)
-	paths, err := ApplyWikiBlocks(ws, blocks)
+	paths, err := ApplyWikiBlocks(context.Background(), ws, blocks, nil)
 	if err != nil {
 		t.Fatalf("ApplyWikiBlocks: %v", err)
 	}

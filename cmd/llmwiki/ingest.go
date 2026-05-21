@@ -12,17 +12,20 @@ import (
 )
 
 func newIngestCmd() *cobra.Command {
-	return &cobra.Command{
+	var forceOverwrite bool
+	cmd := &cobra.Command{
 		Use:   "ingest <file>",
 		Short: "Ingest a source file into the workspace",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runIngest("", args[0])
+			return runIngest("", args[0], forceOverwrite)
 		},
 	}
+	cmd.Flags().BoolVar(&forceOverwrite, "force-overwrite", false, "Skip merge protection and overwrite existing wiki pages")
+	return cmd
 }
 
-func runIngest(workspaceDir, sourceFile string) error {
+func runIngest(workspaceDir, sourceFile string, forceOverwrite bool) error {
 	ws, err := resolveWorkspaceDir(workspaceDir)
 	if err != nil {
 		return err
@@ -51,6 +54,7 @@ func runIngest(workspaceDir, sourceFile string) error {
 	})
 
 	pipeline := ingest.NewPipeline(ws, client)
+	pipeline.SetForceOverwrite(forceOverwrite)
 	files, err := pipeline.Ingest(context.Background(), absSource)
 	if err != nil {
 		return fmt.Errorf("ingest: %w", err)

@@ -35,6 +35,15 @@ make dev
 | `llmwiki mcp [dir]` | Run MCP JSON-RPC 2.0 server on stdin/stdout (legacy local mode) |
 | `llmwiki mcp-config` | Print MCP configuration JSON for Claude Desktop / Claude Code |
 | `llmwiki version` | Print version, commit, and build date |
+| `llmwiki ingest <file>` | Ingest a source file into wiki pages (with merge protection) |
+
+### Ingest Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--force-overwrite` | `false` | Skip merge protection and overwrite existing wiki pages |
+
+When ingesting into an existing wiki page, the pipeline merges instead of blind overwrite: locked frontmatter fields (`type`, `title`, `created`) are preserved; array fields (`tags`, `sources`, `related`) are union-merged; differing body text is merged via LLM with a 70% length guard. Use `--force-overwrite` to restore legacy overwrite behavior.
 
 ### Serve Flags
 

@@ -203,7 +203,7 @@ func (p *JobProcessor) executeRollback(ctx context.Context, rbCtx *RollbackConte
 
 // applyRollbackContent parses FILE blocks from LLM output and applies them.
 func (p *JobProcessor) applyRollbackContent(output string) error {
-	_, err := ApplyWikiBlocks(p.workspace, parseFileBlocksWithContent(output))
+	_, err := ApplyWikiBlocks(context.Background(), p.workspace, parseFileBlocksWithContent(output), nil)
 	return err
 }
 

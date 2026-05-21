@@ -15,6 +15,7 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
+	"github.com/solo-kingdom/llmwiki/internal/mcp"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
@@ -23,7 +24,8 @@ type createSessionRequest struct {
 }
 
 type appendMessageRequest struct {
-	Content string `json:"content"`
+	Content  string                `json:"content"`
+	WikiRefs []ingest.WikiRefRequest `json:"wiki_refs"`
 }
 
 type archiveSessionRequest struct {
@@ -159,9 +161,15 @@ func (a *API) AppendIngestSessionMessage(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	wikiRefs, err := ingest.ParseWikiRefRequests(a.db, req.WikiRefs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	stream := r.URL.Query().Get("stream") == "1" || strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 	if stream {
-		a.streamSessionReply(w, r, session, req.Content)
+		a.streamSessionReply(w, r, session, req.Content, wikiRefs)
 		return
 	}
 
@@ -171,11 +179,13 @@ func (a *API) AppendIngestSessionMessage(w http.ResponseWriter, r *http.Request)
 		Content:      req.Content,
 		MessageType:  "text",
 		StreamStatus: "complete",
+		WikiRefsJSON: ingest.WikiRefsJSONFromInputs(wikiRefs),
 	}
 	if err := a.db.CreateIngestSessionMessage(userMsg); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	ingest.RecordSessionReferences(a.db, sessionID, wikiRefs, sqlite.SessionRefSourceUserMention)
 	writeJSON(w, http.StatusCreated, messageResponse{Message: userMsg})
 }
 
@@ -238,10 +248,33 @@ func (a *API) RetryIngestSessionMessage(w http.ResponseWriter, r *http.Request) 
 	assistantMsg.StreamStatus = "streaming"
 
 	filtered := filterHistoryForRetry(history, assistantMsg.ID, userMsg.ID)
-	a.streamAssistantReply(w, r, session, filtered, userMsg.Content, assistantMsg, nil)
+	wikiRefs, _ := ingest.WikiRefsFromStoredJSON(userMsg.WikiRefsJSON)
+	llmUserContent, err := a.buildLLMUserContent(r.Context(), userMsg.Content, wikiRefs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.streamAssistantReply(w, r, session, filtered, llmUserContent, userMsg.Content, wikiRefs, assistantMsg, nil)
 }
 
-func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session *sqlite.IngestSession, userContent string) {
+func (a *API) ListIngestSessionReferences(w http.ResponseWriter, r *http.Request) {
+	sessionID := getID(r)
+	session, err := a.loadSession(sessionID, w)
+	if err != nil || session == nil {
+		return
+	}
+	refs, err := a.db.ListSessionReferences(sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if refs == nil {
+		refs = []sqlite.IngestSessionReference{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"references": refs})
+}
+
+func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session *sqlite.IngestSession, userContent string, wikiRefs []ingest.WikiRefInput) {
 	llmClient, instanceID, model := a.sessionLLMClient(session)
 	if llmClient == nil {
 		if instanceID == "" || model == "" {
@@ -271,9 +304,17 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		Content:      userContent,
 		MessageType:  "text",
 		StreamStatus: "complete",
+		WikiRefsJSON: ingest.WikiRefsJSONFromInputs(wikiRefs),
 	}
 	if err := a.db.CreateIngestSessionMessage(userMsg); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ingest.RecordSessionReferences(a.db, session.ID, wikiRefs, sqlite.SessionRefSourceUserMention)
+
+	llmUserContent, err := a.buildLLMUserContent(r.Context(), userContent, wikiRefs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -289,7 +330,28 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 
-	a.streamAssistantReply(w, r, session, history, userContent, assistantMsg, userMsg)
+	a.streamAssistantReply(w, r, session, history, llmUserContent, userContent, wikiRefs, assistantMsg, userMsg)
+}
+
+func (a *API) buildLLMUserContent(_ context.Context, userText string, wikiRefs []ingest.WikiRefInput) (string, error) {
+	if len(wikiRefs) == 0 {
+		return userText, nil
+	}
+	bodies, err := ingest.LoadWikiPageBodies(a.db, wikiRefs)
+	if err != nil {
+		return "", err
+	}
+	docLang := ResolveDocLanguage(a.db)
+	return ingest.InjectWikiRefsIntoUserContent(docLang, wikiRefs, bodies, userText), nil
+}
+
+func (a *API) sessionChatRouter() *mcp.Router {
+	raw, _ := a.db.GetConfig("mcp_servers_json")
+	reg, err := mcp.NewRegistry(raw)
+	if err != nil {
+		return nil
+	}
+	return mcp.NewRouter(reg, nil)
 }
 
 func (a *API) streamAssistantReply(
@@ -297,7 +359,9 @@ func (a *API) streamAssistantReply(
 	r *http.Request,
 	session *sqlite.IngestSession,
 	history []sqlite.IngestSessionMessage,
-	userContent string,
+	llmUserContent string,
+	displayUserContent string,
+	wikiRefs []ingest.WikiRefInput,
 	assistantMsg *sqlite.IngestSessionMessage,
 	userMsg *sqlite.IngestSessionMessage,
 ) {
@@ -335,10 +399,92 @@ func (a *API) streamAssistantReply(
 	}
 	sendEvent("assistant_start", map[string]string{"id": assistantMsg.ID})
 
+	docLang := ResolveDocLanguage(a.db)
+	resolver := &ingest.ContextResolver{DB: a.db, Workspace: a.workspace}
+	subset, err := resolver.ResolveRelatedSubset(displayUserContent, wikiRefs)
+	if err != nil {
+		log.Printf("[ingest-session] subset resolve failed session=%s: %v", session.ID, err)
+	}
+	subsetSection := ingest.FormatRelatedSubsetSection(docLang, subset)
+
 	msgs := ingest.AssembleIngestChatMessages(
-		history, userContent, ResolveDocLanguage(a.db), a.workspace, ingest.ResolveRulesSupplement(a.db),
+		history, llmUserContent, docLang, a.workspace, ingest.ResolveRulesSupplement(a.db), subsetSection,
 	)
 	ctx := r.Context()
+
+	router := a.sessionChatRouter()
+	onToolRead := func(documentID, relativePath, title string) {
+		ingest.RecordToolReadReference(a.db, session.ID, documentID, relativePath, title)
+	}
+	executor := ingest.NewChatWikiExecutor(a.workspace, a.db, session.ID, router, onToolRead)
+	tools, _ := executor.ListTools(ctx)
+
+	toolHandler := func(phase, toolName, detail string) {
+		eventType := "tool_done"
+		if phase == "start" {
+			eventType = "tool_start"
+		}
+		sendEvent(eventType, map[string]string{
+			"tool":   toolName,
+			"detail": detail,
+		})
+	}
+
+	cfg := llm.ToolLoopConfig{MaxRounds: 4, MaxToolCallsPerRound: 4}
+	finalText, err := ingest.RunSessionChatToolLoop(ctx, client, executor, msgs, tools, 0.7, 2048, cfg, toolHandler)
+	if err != nil {
+		log.Printf(
+			"[ingest-session] tool loop failed session=%s instance=%s model=%s: %v; falling back to stream",
+			session.ID, instanceID, model, err,
+		)
+		a.streamSessionChatDirect(ctx, w, sendEvent, client, session, instanceID, model, msgs, assistantMsg)
+		return
+	}
+
+	streamStatus := "complete"
+	if strings.TrimSpace(finalText) == "" {
+		streamStatus = "failed"
+		lastErr := "LLM returned an empty response"
+		_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, lastErr, streamStatus)
+		sendEvent("error", map[string]string{"message": lastErr})
+		return
+	}
+
+	// Emit final text in chunks for progressive UI rendering.
+	chunkSize := 48
+	runes := []rune(finalText)
+	for i := 0; i < len(runes); i += chunkSize {
+		end := i + chunkSize
+		if end > len(runes) {
+			end = len(runes)
+		}
+		part := string(runes[i:end])
+		sendEvent("token", map[string]string{"content": part})
+		if i == 0 {
+			_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, part, "streaming")
+		} else {
+			cur, _ := a.db.GetIngestSessionMessage(assistantMsg.ID)
+			if cur != nil {
+				_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, cur.Content+part, "streaming")
+			}
+		}
+	}
+	_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, finalText, streamStatus)
+	assistantMsg.Content = finalText
+	assistantMsg.StreamStatus = streamStatus
+	sendEvent("done", assistantMsg)
+}
+
+func (a *API) streamSessionChatDirect(
+	ctx context.Context,
+	w http.ResponseWriter,
+	sendEvent func(string, interface{}),
+	client *llm.Client,
+	session *sqlite.IngestSession,
+	instanceID, model string,
+	msgs []llm.Message,
+	assistantMsg *sqlite.IngestSessionMessage,
+) {
 	ch, err := client.StreamChat(ctx, msgs, 0.7, 2048)
 	if err != nil {
 		log.Printf(
@@ -384,10 +530,6 @@ func (a *API) streamAssistantReply(
 			streamStatus = "failed"
 			if ev.Error != nil {
 				lastErr = ev.Error.Error()
-				log.Printf(
-					"[ingest-session] stream error session=%s instance=%s model=%s: %v",
-					session.ID, instanceID, model, ev.Error,
-				)
 				sendEvent("error", map[string]string{"message": lastErr})
 			} else {
 				lastErr = "LLM stream failed"
@@ -401,10 +543,6 @@ func (a *API) streamAssistantReply(
 	if streamStatus == "complete" && builder.Len() == 0 {
 		streamStatus = "failed"
 		lastErr = "LLM returned an empty response"
-		log.Printf(
-			"[ingest-session] empty stream session=%s instance=%s model=%s",
-			session.ID, instanceID, model,
-		)
 		sendEvent("error", map[string]string{"message": lastErr})
 	}
 	content := builder.String()
@@ -426,6 +564,7 @@ func (a *API) streamAssistantReply(
 		return
 	}
 	sendEvent("done", assistantMsg)
+	_ = w
 }
 
 func sessionHasStreamingAssistant(msgs []sqlite.IngestSessionMessage) bool {
@@ -642,7 +781,20 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 		archiveMsgs = append(archiveMsgs, am)
 	}
 	now := time.Now()
-	md := ingest.BuildSessionArchiveMarkdown(sessionID, title, archiveMsgs, now)
+	sessionRefs, err := a.db.ListSessionReferences(sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	archiveRefs := make([]ingest.SessionArchiveReference, 0, len(sessionRefs))
+	for _, ref := range sessionRefs {
+		archiveRefs = append(archiveRefs, ingest.SessionArchiveReference{
+			Path:   ref.RelativePath,
+			Title:  ref.Title,
+			Source: ref.Source,
+		})
+	}
+	md := ingest.BuildSessionArchiveMarkdown(sessionID, title, archiveMsgs, archiveRefs, now)
 	normalized, err := ingest.NormalizeSessionArchive(sessionID, title, md, "session:"+sessionID, now)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

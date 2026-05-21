@@ -312,6 +312,11 @@ func validateServer(s *ServerConfig, prefix string, readonlyOnly bool) error {
 }
 
 func isWriteToolName(name string) bool {
+	return IsWriteToolName(name)
+}
+
+// IsWriteToolName reports whether a tool name is treated as a write operation.
+func IsWriteToolName(name string) bool {
 	n := strings.ToLower(strings.TrimSpace(name))
 	if writeToolNames[n] {
 		return true

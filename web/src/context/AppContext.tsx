@@ -22,8 +22,10 @@ import type {
   ProviderInstance,
   ModelInfo,
   SessionListItem,
+  WikiRefPayload,
 } from "@/types"
 import * as api from "@/lib/api"
+import { parseWikiRefsJSON } from "@/components/WikiMentionPicker"
 import { getCurrentLang, translate } from "@/i18n"
 import { Toast } from "@/components/Toast"
 
@@ -54,6 +56,17 @@ function hasStreamingAssistant(messages: IngestSessionMessage[]): boolean {
   )
 }
 
+function enrichSessionMessage(msg: IngestSessionMessage): IngestSessionMessage {
+  return {
+    ...msg,
+    wiki_refs: msg.wiki_refs ?? parseWikiRefsJSON(msg.wiki_refs_json),
+  }
+}
+
+function enrichSessionMessages(messages: IngestSessionMessage[]): IngestSessionMessage[] {
+  return messages.map(enrichSessionMessage)
+}
+
 function mergeLoadedSessionMessages(
   prev: IngestSessionMessage[],
   loaded: IngestSessionMessage[],
@@ -61,7 +74,7 @@ function mergeLoadedSessionMessages(
   const failedLocal = [...prev]
     .reverse()
     .find((m) => m.stream_status === "failed" && m.error_message)
-  if (!failedLocal?.error_message) return loaded
+  if (!failedLocal?.error_message) return enrichSessionMessages(loaded)
 
   let lastFailedIdx = -1
   for (let i = loaded.length - 1; i >= 0; i--) {
@@ -73,16 +86,18 @@ function mergeLoadedSessionMessages(
       break
     }
   }
-  if (lastFailedIdx < 0) return loaded
+  if (lastFailedIdx < 0) return enrichSessionMessages(loaded)
 
-  return loaded.map((m, i) =>
-    i === lastFailedIdx
-      ? {
-          ...m,
-          error_message: failedLocal.error_message,
-          content: m.content || failedLocal.error_message || m.content,
-        }
-      : m,
+  return enrichSessionMessages(
+    loaded.map((m, i) =>
+      i === lastFailedIdx
+        ? {
+            ...m,
+            error_message: failedLocal.error_message,
+            content: m.content || failedLocal.error_message || m.content,
+          }
+        : m,
+    ),
   )
 }
 
@@ -136,7 +151,7 @@ interface AppState {
   loadCapabilities: () => Promise<void>
 
   ensureIngestSession: () => Promise<void>
-  sendSessionMessage: (content: string) => Promise<void>
+  sendSessionMessage: (content: string, wikiRefs?: WikiRefPayload[]) => Promise<void>
   retrySessionMessage: (assistantMessageId: string) => Promise<void>
   uploadSessionAttachment: (file: File) => Promise<void>
   archiveSession: (title?: string) => Promise<string>
@@ -482,10 +497,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSessionMessages((prev) =>
           prev.map((m) =>
             isStreamingAssistant(m.id)
-              ? { ...m, content: m.content + tok }
+              ? { ...m, content: m.content + tok, tool_status: null }
               : m,
           ),
         )
+      }
+      if (event === "tool_start" && data && typeof data === "object") {
+        const payload = data as { tool?: string; detail?: string }
+        const tool = payload.tool ?? ""
+        let status = translate(getCurrentLang(), "chat.tool_searching")
+        if (tool === "read") {
+          let path = payload.detail ?? ""
+          try {
+            const parsed = JSON.parse(payload.detail ?? "{}") as { path?: string }
+            if (parsed.path) path = parsed.path
+          } catch {
+            // keep raw detail
+          }
+          status = translate(getCurrentLang(), "chat.tool_reading", { path })
+        }
+        setSessionMessages((prev) =>
+          prev.map((m) =>
+            isStreamingAssistant(m.id) ? { ...m, tool_status: status } : m,
+          ),
+        )
+      }
+      if (event === "tool_done" && data && typeof data === "object") {
+        const payload = data as { tool?: string; detail?: string }
+        if (payload.tool === "read") {
+          const pathMatch = /Path:\s*(.+)/.exec(payload.detail ?? "")
+          const path = pathMatch?.[1]?.trim()
+          if (path) {
+            setSessionMessages((prev) =>
+              prev.map((m) => {
+                if (!isStreamingAssistant(m.id)) return m
+                const reads = m.tool_reads ?? []
+                if (reads.includes(path)) return { ...m, tool_status: null }
+                return {
+                  ...m,
+                  tool_status: null,
+                  tool_reads: [...reads, path],
+                }
+              }),
+            )
+          }
+        } else {
+          setSessionMessages((prev) =>
+            prev.map((m) =>
+              isStreamingAssistant(m.id) ? { ...m, tool_status: null } : m,
+            ),
+          )
+        }
       }
       if (event === "done" && data && typeof data === "object") {
         const am = data as IngestSessionMessage
@@ -517,7 +579,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const sendSessionMessage = useCallback(
-    async (content: string) => {
+    async (content: string, wikiRefs: WikiRefPayload[] = []) => {
       if (!sessionId) return
       pollGenerationRef.current += 1
       activeStreamRef.current = true
@@ -531,6 +593,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         message_type: "text",
         attachment_id: "",
         stream_status: "complete",
+        wiki_refs: wikiRefs,
         created_at: new Date().toISOString(),
       }
       const tempAssistant: IngestSessionMessage = {
@@ -557,7 +620,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             tempAssistant.id,
             tempUser.id,
           )
-        })
+        }, wikiRefs)
         const { messages: loaded } = await api.listIngestSessionMessages(sessionId)
         setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
       } catch (e) {

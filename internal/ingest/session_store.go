@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 const SessionBaseDir = "raw/sources/web-ingest/sessions"
+
+var archiveFrontmatterRe = regexp.MustCompile(`(?s)^---\n(.*?)\n---`)
 
 // DefaultIngestSessionTitle returns the default session name: "#{no} {date}".
 func DefaultIngestSessionTitle(no int, now time.Time) string {
@@ -72,8 +76,23 @@ func WriteSessionAttachment(workspace, sessionID, filename string, data []byte) 
 	return attachmentID, relPath, nil
 }
 
+// SessionArchiveReference is one wiki page referenced during session chat.
+type SessionArchiveReference struct {
+	Path   string `yaml:"path" json:"path"`
+	Title  string `yaml:"title" json:"title"`
+	Source string `yaml:"source" json:"source"`
+}
+
+// SessionArchiveMessage is one row in a session archive transcript.
+type SessionArchiveMessage struct {
+	Role           string
+	Content        string
+	MessageType    string
+	AttachmentPath string
+}
+
 // BuildSessionArchiveMarkdown renders a transcript for ingest pipeline input.
-func BuildSessionArchiveMarkdown(sessionID, title string, messages []SessionArchiveMessage, archivedAt time.Time) string {
+func BuildSessionArchiveMarkdown(sessionID, title string, messages []SessionArchiveMessage, refs []SessionArchiveReference, archivedAt time.Time) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString(fmt.Sprintf("session_id: %s\n", sessionID))
@@ -82,8 +101,27 @@ func BuildSessionArchiveMarkdown(sessionID, title string, messages []SessionArch
 	}
 	b.WriteString(fmt.Sprintf("archived_at: %s\n", archivedAt.UTC().Format(time.RFC3339)))
 	b.WriteString("source: web-ingest-session\n")
+	if len(refs) > 0 {
+		data, _ := yaml.Marshal(map[string]interface{}{"referenced_wiki_pages": refs})
+		trimmed := strings.TrimSpace(string(data))
+		if trimmed != "" {
+			b.WriteString(trimmed)
+			b.WriteString("\n")
+		}
+	}
 	b.WriteString("---\n\n")
 	b.WriteString("# Ingest Session Archive\n\n")
+	if len(refs) > 0 {
+		b.WriteString("## Referenced Wiki Pages\n\n")
+		for _, ref := range refs {
+			label := ref.Title
+			if label == "" {
+				label = ref.Path
+			}
+			b.WriteString(fmt.Sprintf("- [[%s]] — %s (%s)\n", ref.Path, label, ref.Source))
+		}
+		b.WriteString("\n")
+	}
 	for _, m := range messages {
 		role := m.Role
 		if role == "user" {
@@ -102,11 +140,40 @@ func BuildSessionArchiveMarkdown(sessionID, title string, messages []SessionArch
 	return b.String()
 }
 
-type SessionArchiveMessage struct {
-	Role           string
-	Content        string
-	MessageType    string
-	AttachmentPath string
+// ParseReferencedWikiPagesFromArchive extracts referenced_wiki_pages from archive frontmatter.
+func ParseReferencedWikiPagesFromArchive(content string) []SessionArchiveReference {
+	match := archiveFrontmatterRe.FindStringSubmatch(content)
+	if len(match) < 2 {
+		return nil
+	}
+	var envelope struct {
+		ReferencedWikiPages []SessionArchiveReference `yaml:"referenced_wiki_pages"`
+	}
+	if err := yaml.Unmarshal([]byte(match[1]), &envelope); err != nil {
+		return nil
+	}
+	return envelope.ReferencedWikiPages
+}
+
+// FormatReferencedPagesForAnalysis renders analysis context for archived session references.
+func FormatReferencedPagesForAnalysis(docLang string, refs []SessionArchiveReference) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	if docLang == "en" {
+		b.WriteString("Existing wiki pages referenced during the session (prefer update/merge over create when planning):\n")
+	} else {
+		b.WriteString("会话中引用的已有 wiki 页面（规划时优先 update/merge，而非盲目 create）：\n")
+	}
+	for _, ref := range refs {
+		title := ref.Title
+		if title == "" {
+			title = ref.Path
+		}
+		b.WriteString(fmt.Sprintf("- %s — %s [%s]\n", ref.Path, title, ref.Source))
+	}
+	return b.String()
 }
 
 func NormalizeSessionArchive(sessionID, title, content, sourceRef string, now time.Time) (*NormalizedSource, error) {

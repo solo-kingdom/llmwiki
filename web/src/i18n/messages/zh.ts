@@ -157,6 +157,13 @@ const zh = {
   "chat.delete_session": "删除会话",
   "chat.new_session": "新建会话",
   "chat.archive_requires_user": "至少需要一条用户消息",
+  "chat.wiki_mention_placeholder": "@ 搜索 wiki 页面…",
+  "chat.wiki_mention_limit": "最多引用 5 个 wiki 页面",
+  "chat.wiki_mention_empty": "未找到匹配的 wiki 页面",
+  "chat.wiki_refs_label": "引用的 wiki 页面",
+  "chat.tool_searching": "正在检索 wiki…",
+  "chat.tool_reading": "正在读取 {{path}}…",
+  "chat.tool_reads_label": "查阅的 wiki 页面",
 
   // Session controls
   "session.switch": "切换",

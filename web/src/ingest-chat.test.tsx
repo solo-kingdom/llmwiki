@@ -62,6 +62,7 @@ vi.mock("@/lib/api", () => ({
   listIngestSessionMessages: vi.fn().mockResolvedValue({ messages: [] }),
   streamIngestSessionMessage: vi.fn().mockResolvedValue(undefined),
   streamRetryIngestSessionMessage: vi.fn().mockResolvedValue(undefined),
+  searchDocuments: vi.fn().mockResolvedValue({ results: [] }),
   uploadIngestSessionAttachment: vi.fn(),
   archiveIngestSession: vi.fn(),
   createConversationIngestJob: vi.fn(),
@@ -739,5 +740,158 @@ describe("IngestChat", () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getByRole("status")).toBeInTheDocument()
+  })
+
+  it("adds wiki mention chip when selecting from @ picker", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+    vi.mocked(api.listProviderModels).mockResolvedValue([
+      {
+        provider_id: "cat-1",
+        model_id: "gpt-4",
+        name: "GPT-4",
+        family: "GPT-4",
+        context_limit: 128000,
+        output_limit: 16384,
+        cost_input: 2.5,
+        cost_output: 10,
+        reasoning: false,
+        tool_call: true,
+        attachment: true,
+      },
+    ])
+    vi.mocked(api.searchDocuments).mockResolvedValue({
+      results: [
+        {
+          document_id: "doc-alpha",
+          path: "wiki/concepts/alpha.md",
+          title: "Alpha Page",
+          filename: "alpha.md",
+          chunk_index: 0,
+          content: "alpha content",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    const mentionInput = await screen.findByPlaceholderText(/搜索 wiki 页面/)
+    fireEvent.focus(mentionInput)
+    fireEvent.change(mentionInput, { target: { value: "alpha" } })
+
+    const option = await screen.findByRole("button", { name: /Alpha Page/ })
+    fireEvent.click(option)
+
+    expect(await screen.findByText("@Alpha Page")).toBeInTheDocument()
+  })
+
+  it("shows user wiki refs and assistant tool reads in message bubbles", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "explain alpha",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+          wiki_refs_json: JSON.stringify([
+            {
+              document_id: "doc-alpha",
+              relative_path: "wiki/concepts/alpha.md",
+              title: "Alpha Page",
+            },
+          ]),
+        },
+        {
+          id: "msg-assistant",
+          session_id: "sess-1",
+          role: "assistant",
+          content: "Alpha is a concept.",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:01Z",
+          tool_status: "正在读取 wiki/concepts/beta.md…",
+          tool_reads: ["wiki/concepts/beta.md"],
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    expect(await screen.findByText("引用的 wiki 页面")).toBeInTheDocument()
+    expect(screen.getByText("Alpha Page")).toBeInTheDocument()
+    expect(screen.getByText("查阅的 wiki 页面")).toBeInTheDocument()
+    expect(screen.getByText("wiki/concepts/beta.md")).toBeInTheDocument()
+    expect(screen.getByText("正在读取 wiki/concepts/beta.md…")).toBeInTheDocument()
   })
 })

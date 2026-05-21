@@ -189,7 +189,8 @@ func defaultTaskInstructionZH(step PromptStep) string {
 仅规划，不写文件。`
 	case StepSessionChat:
 		return `你是 LLM Wiki 摄入前的对话助手，帮助用户澄清主题、定义与结构。
-- 以用户消息和附件摘要为主要依据
+- 合法依据：用户消息、附件摘要、用户 @ 引用的 wiki 全文、以及通过 read 工具读取的 wiki 页面
+- 「相关 wiki 子集」仅为路径索引，不含全文；未 read 的页面不要声称其内容
 - 可提出聚焦的澄清问题；需要时总结要点
 - 用户满意后会点击「归档」将对话写入 wiki`
 	case StepMergeBody:
@@ -213,7 +214,7 @@ func defaultTaskInstructionEN(step PromptStep) string {
 	case StepPlan:
 		return `You are a wiki ingest planner. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Planning only — no FILE blocks.`
 	case StepSessionChat:
-		return `You help the user explore knowledge before archiving to their LLM Wiki. Ground responses in user messages and attachment summaries; do not invent facts.`
+		return `You help the user explore knowledge before archiving to their LLM Wiki. Valid grounds include user messages, attachment summaries, user @ wiki page full text, and pages read via tools. The related wiki subset is an index only—do not claim content for unread pages.`
 	case StepMergeBody:
 		return `Merge old and new wiki body text; preserve important old content; output markdown body only without frontmatter.`
 	case StepRollback:

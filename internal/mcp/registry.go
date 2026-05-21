@@ -51,6 +51,23 @@ func (r *Registry) JobServers() []ServerConfig {
 	return out
 }
 
+// ChatServers returns enabled servers scoped to session chat.
+func (r *Registry) ChatServers() []ServerConfig {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var out []ServerConfig
+	for _, s := range r.cfg.Servers {
+		if !s.Enabled || !s.Scope.Chat {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
 // Reload replaces configuration from raw JSON.
 func (r *Registry) Reload(raw string) error {
 	cfg, err := ParseConfig(raw)

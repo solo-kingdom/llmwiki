@@ -32,8 +32,21 @@ func TestBuildSessionArchiveMarkdown(t *testing.T) {
 	md := BuildSessionArchiveMarkdown("s1", "T", []SessionArchiveMessage{
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: "hello"},
+	}, []SessionArchiveReference{
+		{Path: "wiki/concepts/a.md", Title: "A", Source: "user_mention"},
 	}, time.Now())
 	if !strings.Contains(md, "session_id: s1") || !strings.Contains(md, "hi") {
 		t.Fatalf("unexpected markdown: %s", md)
+	}
+	if !strings.Contains(md, "referenced_wiki_pages") || !strings.Contains(md, "## Referenced Wiki Pages") {
+		t.Fatalf("expected referenced pages section: %s", md)
+	}
+}
+
+func TestParseReferencedWikiPagesFromArchive(t *testing.T) {
+	content := "---\nreferenced_wiki_pages:\n  - path: wiki/a.md\n    title: A\n    source: tool_read\n---\n\n# body"
+	refs := ParseReferencedWikiPagesFromArchive(content)
+	if len(refs) != 1 || refs[0].Path != "wiki/a.md" {
+		t.Fatalf("refs = %#v", refs)
 	}
 }

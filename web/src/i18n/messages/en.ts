@@ -173,6 +173,13 @@ const en: Record<MessageKey, string> = {
   "chat.delete_session": "Delete session",
   "chat.new_session": "New session",
   "chat.archive_requires_user": "At least one user message is required",
+  "chat.wiki_mention_placeholder": "@ Search wiki pages…",
+  "chat.wiki_mention_limit": "Up to 5 wiki page references",
+  "chat.wiki_mention_empty": "No matching wiki pages",
+  "chat.wiki_refs_label": "Referenced wiki pages",
+  "chat.tool_searching": "Searching wiki…",
+  "chat.tool_reading": "Reading {{path}}…",
+  "chat.tool_reads_label": "Wiki pages read",
 
   // Session controls
   "session.switch": "Switch",

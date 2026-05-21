@@ -190,9 +190,15 @@ func (p *Pipeline) LockManager() *PageLockManager {
 
 func (p *Pipeline) analyze(ctx context.Context, name, content string) (string, error) {
 	systemMsg := ComposeSystemPrompt(StepAnalysis, p.promptCtx())
+	userBody := fmt.Sprintf("源文件：**%s**\n\n---\n\n%s", name, content)
+	if refs := ParseReferencedWikiPagesFromArchive(content); len(refs) > 0 {
+		if note := FormatReferencedPagesForAnalysis(p.docLang, refs); note != "" {
+			userBody = note + "\n\n" + userBody
+		}
+	}
 	messages := []llm.Message{
 		{Role: "system", Content: systemMsg},
-		{Role: "user", Content: fmt.Sprintf("源文件：**%s**\n\n---\n\n%s", name, content)},
+		{Role: "user", Content: userBody},
 	}
 
 	const temp = 0.1

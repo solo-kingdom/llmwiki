@@ -281,6 +281,12 @@ export interface IngestSession {
   updated_at: string
 }
 
+export interface WikiRefPayload {
+  document_id: string
+  relative_path: string
+  title: string
+}
+
 export interface IngestSessionMessage {
   id: string
   session_id: string
@@ -289,9 +295,25 @@ export interface IngestSessionMessage {
   message_type: "text" | "attachment_summary"
   attachment_id: string
   stream_status: "streaming" | "complete" | "incomplete" | "failed"
+  wiki_refs_json?: string
   /** Populated when stream_status is failed (from SSE error or client-side stream failure). */
   error_message?: string
+  /** Client-side parsed wiki refs for display. */
+  wiki_refs?: WikiRefPayload[]
+  /** Client-side tool activity during streaming. */
+  tool_status?: string | null
+  tool_reads?: string[]
   created_at: string
+}
+
+export interface SessionWikiReference {
+  id: string
+  session_id: string
+  document_id: string
+  relative_path: string
+  title: string
+  source: "user_mention" | "tool_read"
+  first_seen_at: string
 }
 
 export interface ArchiveSessionResponse {

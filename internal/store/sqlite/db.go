@@ -79,6 +79,9 @@ func (d *DB) Migrate() error {
 	if err := d.migrateIngestQueue(); err != nil {
 		return err
 	}
+	if err := d.migrateSessionReferences(); err != nil {
+		return err
+	}
 	return d.migrateFTSTrigram()
 }
 

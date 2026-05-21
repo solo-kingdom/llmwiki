@@ -10,7 +10,8 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ModelSelectDialog } from "@/components/ModelSelectDialog"
 import { SessionControls } from "@/components/SessionControls"
-import type { IngestSessionMessage } from "@/types"
+import { WikiMentionPicker } from "@/components/WikiMentionPicker"
+import type { IngestSessionMessage, WikiRefPayload } from "@/types"
 import {
   Archive,
   Bot,
@@ -103,7 +104,19 @@ function MessageBubble({
           </button>
         )}
         {isUser ? (
-          <p className="whitespace-pre-wrap pr-6">{msg.content}</p>
+          <div className="pr-6">
+            <p className="whitespace-pre-wrap">{msg.content}</p>
+            {msg.wiki_refs && msg.wiki_refs.length > 0 && (
+              <div className="mt-2 border-t border-primary-foreground/20 pt-2 text-xs opacity-90">
+                <p className="mb-1 font-medium">{t("chat.wiki_refs_label")}</p>
+                <ul className="space-y-0.5">
+                  {msg.wiki_refs.map((ref) => (
+                    <li key={ref.document_id}>{ref.title || ref.relative_path}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         ) : isStreaming && !hasContent ? (
           <Loader2
             className="size-4 animate-spin text-muted-foreground"
@@ -115,6 +128,19 @@ function MessageBubble({
           <p className="whitespace-pre-wrap pr-6 text-destructive">{errorText}</p>
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none pr-6">
+            {msg.tool_status && (
+              <p className="mb-2 text-xs text-muted-foreground">{msg.tool_status}</p>
+            )}
+            {msg.tool_reads && msg.tool_reads.length > 0 && (
+              <details className="mb-2 text-xs text-muted-foreground">
+                <summary>{t("chat.tool_reads_label")}</summary>
+                <ul className="mt-1 space-y-0.5">
+                  {msg.tool_reads.map((path) => (
+                    <li key={path}>{path}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {msg.content}
             </ReactMarkdown>
@@ -172,6 +198,7 @@ export function IngestChat() {
   const t = useT()
 
   const [input, setInput] = useState("")
+  const [wikiRefs, setWikiRefs] = useState<WikiRefPayload[]>([])
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [archiveTitle, setArchiveTitle] = useState("")
   const [pendingReviewId, setPendingReviewId] = useState<string | null>(null)
@@ -307,7 +334,9 @@ export function IngestChat() {
     const text = input.trim()
     if (!text || sessionBusy || !isReady) return
     setInput("")
-    await sendSessionMessage(text)
+    const refs = wikiRefs
+    setWikiRefs([])
+    await sendSessionMessage(text, refs)
   }
 
   const handleRetry = useCallback(
@@ -471,6 +500,11 @@ export function IngestChat() {
             )}
           </div>
         )}
+        <WikiMentionPicker
+          value={wikiRefs}
+          onChange={setWikiRefs}
+          disabled={textareaDisabled}
+        />
         <textarea
           className="max-h-40 min-h-[72px] w-full resize-y bg-transparent px-2 py-2 text-sm outline-none"
           placeholder={

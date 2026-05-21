@@ -18,14 +18,15 @@ type IngestSession struct {
 }
 
 type IngestSessionMessage struct {
-	ID           string `json:"id"`
-	SessionID    string `json:"session_id"`
-	Role         string `json:"role"`
-	Content      string `json:"content"`
-	MessageType  string `json:"message_type"`
-	AttachmentID string `json:"attachment_id"`
-	StreamStatus string `json:"stream_status"`
-	CreatedAt    string `json:"created_at"`
+	ID            string `json:"id"`
+	SessionID     string `json:"session_id"`
+	Role          string `json:"role"`
+	Content       string `json:"content"`
+	MessageType   string `json:"message_type"`
+	AttachmentID  string `json:"attachment_id"`
+	StreamStatus  string `json:"stream_status"`
+	WikiRefsJSON  string `json:"wiki_refs_json,omitempty"`
+	CreatedAt     string `json:"created_at"`
 }
 
 func scanIngestSession(scanner interface{ Scan(...interface{}) error }, s *IngestSession) error {
@@ -39,7 +40,7 @@ func scanIngestSession(scanner interface{ Scan(...interface{}) error }, s *Inges
 func scanIngestSessionMessage(scanner interface{ Scan(...interface{}) error }, m *IngestSessionMessage) error {
 	return scanner.Scan(
 		&m.ID, &m.SessionID, &m.Role, &m.Content, &m.MessageType,
-		&m.AttachmentID, &m.StreamStatus, &m.CreatedAt,
+		&m.AttachmentID, &m.StreamStatus, &m.WikiRefsJSON, &m.CreatedAt,
 	)
 }
 
@@ -137,14 +138,15 @@ func (d *DB) CreateIngestSessionMessage(msg *IngestSessionMessage) error {
 	}
 	_, err := d.db.Exec(`
 		INSERT INTO ingest_session_messages (
-			session_id, role, content, message_type, attachment_id, stream_status, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+			session_id, role, content, message_type, attachment_id, stream_status, wiki_refs_json, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
 		msg.SessionID,
 		msg.Role,
 		msg.Content,
 		msg.MessageType,
 		strings.TrimSpace(msg.AttachmentID),
 		msg.StreamStatus,
+		defaultWikiRefsJSON(msg.WikiRefsJSON),
 	)
 	if err != nil {
 		return fmt.Errorf("create session message: %w", err)
@@ -152,7 +154,7 @@ func (d *DB) CreateIngestSessionMessage(msg *IngestSessionMessage) error {
 	created, err := d.db.Query(`
 		SELECT COALESCE(id,''), COALESCE(session_id,''), COALESCE(role,''),
 		       COALESCE(content,''), COALESCE(message_type,''), COALESCE(attachment_id,''),
-		       COALESCE(stream_status,''), COALESCE(created_at,'')
+		       COALESCE(stream_status,''), COALESCE(wiki_refs_json,'[]'), COALESCE(created_at,'')
 		FROM ingest_session_messages WHERE rowid = last_insert_rowid()`)
 	if err != nil {
 		return err
@@ -175,7 +177,7 @@ func (d *DB) GetIngestSessionMessage(id string) (*IngestSessionMessage, error) {
 	err := scanIngestSessionMessage(d.db.QueryRow(`
 		SELECT COALESCE(id,''), COALESCE(session_id,''), COALESCE(role,''),
 		       COALESCE(content,''), COALESCE(message_type,''), COALESCE(attachment_id,''),
-		       COALESCE(stream_status,''), COALESCE(created_at,'')
+		       COALESCE(stream_status,''), COALESCE(wiki_refs_json,'[]'), COALESCE(created_at,'')
 		FROM ingest_session_messages WHERE id = ?`, id), m)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -190,7 +192,7 @@ func (d *DB) ListIngestSessionMessages(sessionID string) ([]IngestSessionMessage
 	rows, err := d.db.Query(`
 		SELECT COALESCE(id,''), COALESCE(session_id,''), COALESCE(role,''),
 		       COALESCE(content,''), COALESCE(message_type,''), COALESCE(attachment_id,''),
-		       COALESCE(stream_status,''), COALESCE(created_at,'')
+		       COALESCE(stream_status,''), COALESCE(wiki_refs_json,'[]'), COALESCE(created_at,'')
 		FROM ingest_session_messages
 		WHERE session_id = ?
 		ORDER BY datetime(created_at) ASC`, sessionID)
@@ -267,4 +269,11 @@ func (d *DB) DeleteIngestSession(id string) error {
 		return fmt.Errorf("session not found")
 	}
 	return nil
+}
+
+func defaultWikiRefsJSON(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return "[]"
+	}
+	return raw
 }

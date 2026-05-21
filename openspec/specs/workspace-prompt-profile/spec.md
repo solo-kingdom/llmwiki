@@ -1,3 +1,8 @@
+# workspace-prompt-profile Specification
+
+## Purpose
+Define centralized prompt composition for ingest-related LLM steps, including workspace rules injection and session chat wiki grounding defaults.
+
 ## Requirements
 
 ### Requirement: Centralized prompt composition
@@ -50,3 +55,16 @@ When an ingest job is created, the system SHALL record a `rules_hash` in job exe
 - **WHEN** a new ingest job is enqueued
 - **THEN** job execution events SHALL include `rules_hash` as a hex digest on the queued system event
 - **AND** the hash SHALL change when any contributing rules file or supplement changes
+
+### Requirement: Session chat wiki grounding defaults
+For `session_chat`, default task instructions in composed prompts SHALL define wiki-aware grounding rules when `doc_language` is `zh` or `en`.
+
+#### Scenario: Chinese session chat defaults
+- **WHEN** `ComposeSystemPrompt(session_chat, ctx)` runs with `doc_language=zh`
+- **THEN** the default task portion SHALL state that responses MAY use user messages, attachment summaries, user `@` wiki page full text, and tool-read wiki pages as grounds
+- **AND** SHALL state the model MUST NOT claim existing wiki content for paths it has not read
+- **AND** SHALL state the related subset index is a navigation hint only, not full content
+
+#### Scenario: English session chat defaults
+- **WHEN** `ComposeSystemPrompt(session_chat, ctx)` runs with `doc_language=en`
+- **THEN** the default task portion SHALL express the same wiki grounding rules in English

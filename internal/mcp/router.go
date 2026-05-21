@@ -31,6 +31,14 @@ func (r *Router) HasJobServers() bool {
 	return len(r.registry.JobServers()) > 0
 }
 
+// HasChatServers reports whether any chat-scoped MCP servers are configured.
+func (r *Router) HasChatServers() bool {
+	if r == nil || r.registry == nil {
+		return false
+	}
+	return len(r.registry.ChatServers()) > 0
+}
+
 // ListToolsForJob returns policy-filtered tools from all job servers.
 func (r *Router) ListToolsForJob(ctx context.Context) ([]Tool, string, error) {
 	if r == nil || r.registry == nil {
@@ -57,6 +65,68 @@ func (r *Router) ListToolsForJob(ctx context.Context) ([]Tool, string, error) {
 		return nil, "", lastErr
 	}
 	return dedupeTools(all), "", nil
+}
+
+// ListToolsForChat returns policy-filtered tools from chat-scoped servers.
+func (r *Router) ListToolsForChat(ctx context.Context) ([]Tool, string, error) {
+	if r == nil || r.registry == nil {
+		return nil, "", nil
+	}
+	cfg := r.registry.Config()
+	servers := r.registry.ChatServers()
+	var all []Tool
+	var lastErr error
+	for _, srv := range servers {
+		tools, err := r.listToolsOnServer(ctx, cfg, srv)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		all = append(all, tools...)
+	}
+	if len(all) == 0 && lastErr != nil {
+		return nil, "", lastErr
+	}
+	return dedupeTools(all), "", nil
+}
+
+// ChatToolAllowed reports whether a tool is allowed on any chat server.
+func (r *Router) ChatToolAllowed(toolName string) (bool, error) {
+	if r == nil || r.registry == nil {
+		return false, nil
+	}
+	cfg := r.registry.Config()
+	for _, srv := range r.registry.ChatServers() {
+		if IsToolCallAllowed(cfg, &srv, toolName) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// CallToolForChat invokes a tool on chat-scoped servers with failover.
+func (r *Router) CallToolForChat(ctx context.Context, toolName string, args map[string]interface{}) (result string, localOnly bool, err error) {
+	if r == nil || r.registry == nil {
+		return "", true, nil
+	}
+	cfg := r.registry.Config()
+	servers := r.registry.ChatServers()
+	if len(servers) == 0 {
+		return "", true, nil
+	}
+	var lastErr error
+	for _, srv := range servers {
+		if !IsToolCallAllowed(cfg, &srv, toolName) {
+			lastErr = fmt.Errorf("tool %q not allowed on server %q", toolName, srv.ID)
+			continue
+		}
+		out, callErr := r.callOnServer(ctx, cfg, srv, toolName, args)
+		if callErr == nil {
+			return out, false, nil
+		}
+		lastErr = callErr
+	}
+	return "", true, lastErr
 }
 
 func (r *Router) listToolsOnServer(ctx context.Context, cfg *Config, srv ServerConfig) ([]Tool, error) {

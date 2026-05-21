@@ -15,6 +15,8 @@ import type {
   IngestSession,
   IngestSessionMessage,
   ArchiveSessionResponse,
+  WikiRefPayload,
+  SessionWikiReference,
   IngestReview,
   IngestReviewPlan,
   Provider,
@@ -341,6 +343,7 @@ export async function streamIngestSessionMessage(
   sessionId: string,
   content: string,
   onEvent: SessionStreamHandler,
+  wikiRefs?: WikiRefPayload[],
 ): Promise<void> {
   const res = await fetch(
     `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/messages?stream=1`,
@@ -350,10 +353,18 @@ export async function streamIngestSessionMessage(
         "Content-Type": "application/json",
         Accept: "text/event-stream",
       },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, wiki_refs: wikiRefs ?? [] }),
     },
   )
   await consumeSessionSSE(res, onEvent)
+}
+
+export function listIngestSessionReferences(
+  sessionId: string,
+): Promise<{ references: SessionWikiReference[] }> {
+  return request<{ references: SessionWikiReference[] }>(
+    `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/references`,
+  )
 }
 
 export async function streamRetryIngestSessionMessage(

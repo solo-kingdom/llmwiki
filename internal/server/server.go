@@ -205,6 +205,7 @@ func (s *Server) Start() error {
 				r.Get("/{id}/messages", s.api.ListIngestSessionMessages)
 				r.Post("/{id}/messages", s.api.AppendIngestSessionMessage)
 				r.Post("/{id}/messages/{messageId}/retry", s.api.RetryIngestSessionMessage)
+				r.Get("/{id}/references", s.api.ListIngestSessionReferences)
 				r.Post("/{id}/attachments", s.api.UploadIngestSessionAttachment)
 				r.Post("/{id}/archive", s.api.ArchiveIngestSession)
 			})

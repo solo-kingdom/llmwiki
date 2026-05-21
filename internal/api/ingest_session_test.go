@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,7 @@ func setupSessionRoutes(api *API, r chi.Router) {
 		r.Get("/{id}/messages", api.ListIngestSessionMessages)
 		r.Post("/{id}/messages", api.AppendIngestSessionMessage)
 		r.Post("/{id}/messages/{messageId}/retry", api.RetryIngestSessionMessage)
+		r.Get("/{id}/references", api.ListIngestSessionReferences)
 		r.Post("/{id}/archive", api.ArchiveIngestSession)
 	})
 }
@@ -622,19 +624,48 @@ func openAIStreamChunk(content string) string {
 	return "data: " + string(payload) + "\n\n"
 }
 
+func openAIJSONCompletion(content string) []byte {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{"message": map[string]string{"content": content}},
+		},
+	})
+	return payload
+}
+
+func mockOpenAIHandler(streamFn func(w http.ResponseWriter), failJSON bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/chat/completions") {
+			http.NotFound(w, req)
+			return
+		}
+		raw, _ := io.ReadAll(req.Body)
+		var body struct {
+			Stream bool `json:"stream"`
+		}
+		_ = json.Unmarshal(raw, &body)
+		if body.Stream {
+			streamFn(w)
+			return
+		}
+		if failJSON {
+			http.Error(w, "tool loop unavailable in test", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(openAIJSONCompletion("tool loop final answer with enough content"))
+	}
+}
+
 func TestStreamSessionReplyIncrementalPersist(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 	seedOpenAIProviderForStream(t, api)
 
 	streamDone := make(chan struct{})
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if !strings.HasSuffix(req.URL.Path, "/chat/completions") {
-			http.NotFound(w, req)
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
+	llmSrv := httptest.NewServer(mockOpenAIHandler(func(w http.ResponseWriter) {
 		flusher := w.(http.Flusher)
+		w.Header().Set("Content-Type", "text/event-stream")
 		for _, tok := range []string{
 			"hello ", "from ", "incremental ", "stream ",
 			"with ", "enough ", "content ", "to ", "flush ",
@@ -646,7 +677,7 @@ func TestStreamSessionReplyIncrementalPersist(t *testing.T) {
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		flusher.Flush()
 		close(streamDone)
-	}))
+	}, true))
 	t.Cleanup(llmSrv.Close)
 
 	inst := &sqlite.ProviderInstance{
@@ -749,7 +780,7 @@ func TestStreamSessionReplyClientDisconnectMarksIncomplete(t *testing.T) {
 	seedOpenAIProviderForStream(t, api)
 
 	release := make(chan struct{})
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	llmSrv := httptest.NewServer(mockOpenAIHandler(func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
 		fmt.Fprint(w, openAIStreamChunk("partial "))
@@ -759,7 +790,7 @@ func TestStreamSessionReplyClientDisconnectMarksIncomplete(t *testing.T) {
 		flusher.Flush()
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		flusher.Flush()
-	}))
+	}, true))
 	t.Cleanup(llmSrv.Close)
 
 	inst := &sqlite.ProviderInstance{
@@ -839,13 +870,13 @@ func TestRetryIngestSessionMessageReusesSameRows(t *testing.T) {
 	setupSessionRoutes(api, r)
 	seedOpenAIProviderForStream(t, api)
 
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	llmSrv := httptest.NewServer(mockOpenAIHandler(func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
 		fmt.Fprint(w, openAIStreamChunk("retry success"))
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		flusher.Flush()
-	}))
+	}, true))
 	t.Cleanup(llmSrv.Close)
 
 	inst := &sqlite.ProviderInstance{
@@ -968,5 +999,173 @@ func TestRetryIngestSessionMessageNotRetriable(t *testing.T) {
 	r.ServeHTTP(retryW, retryReq)
 	if retryW.Code != http.StatusBadRequest {
 		t.Fatalf("retry complete assistant: expected 400, got %d; body=%s", retryW.Code, retryW.Body.String())
+	}
+}
+
+func TestAppendSessionMessageRejectsInvalidWikiRef(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var created sessionResponse
+	_ = json.NewDecoder(w.Body).Decode(&created)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"content": "hello",
+		"wiki_refs": []map[string]string{
+			{"document_id": "missing-id", "relative_path": "wiki/x.md"},
+		},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+created.Session.ID+"/messages", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid wiki ref, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestListSessionReferencesEmpty(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var created sessionResponse
+	_ = json.NewDecoder(w.Body).Decode(&created)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/ingest/sessions/"+created.Session.ID+"/references", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list references: %d %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		References []sqlite.IngestSessionReference `json:"references"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.References) != 0 {
+		t.Fatalf("expected empty references, got %d", len(resp.References))
+	}
+}
+
+func TestArchiveSessionIncludesReferencedWikiPages(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+	dir := api.workspace
+
+	mentionDoc := &sqlite.Document{
+		Filename:     "alpha.md",
+		Title:        "Alpha Page",
+		Path:         "/wiki/",
+		RelativePath: "wiki/concepts/alpha.md",
+		SourceKind:   "wiki",
+		Status:       "ready",
+		FileType:     "md",
+		Content:      "# Alpha",
+	}
+	if err := api.db.CreateDocument(mentionDoc); err != nil {
+		t.Fatalf("CreateDocument mention: %v", err)
+	}
+	readDoc := &sqlite.Document{
+		Filename:     "beta.md",
+		Title:        "Beta Page",
+		Path:         "/wiki/",
+		RelativePath: "wiki/concepts/beta.md",
+		SourceKind:   "wiki",
+		Status:       "ready",
+		FileType:     "md",
+		Content:      "# Beta",
+	}
+	if err := api.db.CreateDocument(readDoc); err != nil {
+		t.Fatalf("CreateDocument read: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader([]byte(`{"title":"Wiki Chat"}`)))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create session: %d %s", w.Code, w.Body.String())
+	}
+	var created sessionResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := created.Session.ID
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"content": "discuss alpha",
+		"wiki_refs": []map[string]string{
+			{
+				"document_id":   mentionDoc.ID,
+				"relative_path": mentionDoc.RelativePath,
+				"title":         mentionDoc.Title,
+			},
+		},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+sessionID+"/messages", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("append message: %d %s", w.Code, w.Body.String())
+	}
+
+	if err := api.db.UpsertSessionReference(
+		sessionID,
+		readDoc.ID,
+		readDoc.RelativePath,
+		readDoc.Title,
+		sqlite.SessionRefSourceToolRead,
+	); err != nil {
+		t.Fatalf("UpsertSessionReference tool_read: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/ingest/sessions/"+sessionID+"/references", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list references: %d %s", w.Code, w.Body.String())
+	}
+	var refsResp struct {
+		References []sqlite.IngestSessionReference `json:"references"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&refsResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(refsResp.References) != 2 {
+		t.Fatalf("expected 2 references, got %d", len(refsResp.References))
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+sessionID+"/archive", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("archive: %d %s", w.Code, w.Body.String())
+	}
+
+	glob, _ := filepath.Glob(filepath.Join(dir, "raw/sources/web-ingest/sessions", sessionID, "archive-*.md"))
+	if len(glob) == 0 {
+		t.Fatal("expected archive markdown on disk")
+	}
+	archiveBytes, err := os.ReadFile(glob[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := string(archiveBytes)
+	if !strings.Contains(archive, "referenced_wiki_pages:") {
+		t.Fatalf("archive missing referenced_wiki_pages frontmatter: %s", archive)
+	}
+	if !strings.Contains(archive, "wiki/concepts/alpha.md") || !strings.Contains(archive, "user_mention") {
+		t.Fatalf("archive missing user_mention ref: %s", archive)
+	}
+	if !strings.Contains(archive, "wiki/concepts/beta.md") || !strings.Contains(archive, "tool_read") {
+		t.Fatalf("archive missing tool_read ref: %s", archive)
+	}
+	if !strings.Contains(archive, "## Referenced Wiki Pages") {
+		t.Fatalf("archive missing referenced pages section: %s", archive)
 	}
 }

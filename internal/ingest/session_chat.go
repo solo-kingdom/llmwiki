@@ -9,7 +9,7 @@ import (
 )
 
 // AssembleIngestChatMessages builds LLM messages from session history.
-func AssembleIngestChatMessages(history []sqlite.IngestSessionMessage, userContent, docLang, workspace, rulesSupplement string) []llm.Message {
+func AssembleIngestChatMessages(history []sqlite.IngestSessionMessage, userContent, docLang, workspace, rulesSupplement, relatedSubsetSection string) []llm.Message {
 	out := make([]llm.Message, 0, len(history)+2)
 	ctx := PromptContext{
 		Workspace:       workspace,
@@ -17,6 +17,9 @@ func AssembleIngestChatMessages(history []sqlite.IngestSessionMessage, userConte
 		RulesSupplement: rulesSupplement,
 	}
 	systemPrompt := ComposeSystemPrompt(StepSessionChat, ctx)
+	if strings.TrimSpace(relatedSubsetSection) != "" {
+		systemPrompt += "\n\n" + strings.TrimSpace(relatedSubsetSection)
+	}
 	out = append(out, llm.Message{Role: "system", Content: systemPrompt})
 	for _, m := range history {
 		if m.StreamStatus == "streaming" {

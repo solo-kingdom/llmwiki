@@ -49,6 +49,44 @@ func TestIngestReviewStateTransitions(t *testing.T) {
 	}
 }
 
+func TestGetLatestIngestReviewBySessionID(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	r1 := &IngestReview{
+		SessionID:         "sess-a",
+		ArchiveSourcePath: "raw/a.md",
+		Status:            "planning",
+	}
+	if err := db.CreateIngestReview(r1); err != nil {
+		t.Fatal(err)
+	}
+	r2 := &IngestReview{
+		SessionID:         "sess-a",
+		ArchiveSourcePath: "raw/b.md",
+		Status:            "planning",
+	}
+	if err := db.CreateIngestReview(r2); err != nil {
+		t.Fatal(err)
+	}
+
+	latest, err := db.GetLatestIngestReviewBySessionID("sess-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest == nil || latest.ID != r2.ID {
+		t.Fatalf("latest = %+v, want id %s", latest, r2.ID)
+	}
+	n, err := db.CountIngestReviewsBySessionID("sess-a")
+	if err != nil || n != 2 {
+		t.Fatalf("count = %d, err %v", n, err)
+	}
+}
+
 func TestIngestReviewPlanVersionIncrement(t *testing.T) {
 	dir := t.TempDir()
 	db, err := Open(filepath.Join(dir, "test.db"))

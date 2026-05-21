@@ -328,7 +328,17 @@ export function IngestChat() {
     }
   }
 
-  const hasUserMessage = sessionMessages.some((m) => m.role === "user")
+  const hasPersistedUserMessage = sessionMessages.some(
+    (m) => m.role === "user" && !m.id.startsWith("temp-"),
+  )
+  const sessionArchived = activeSession?.status === "archived"
+  const archiveDisabled =
+    sessionBusy || !hasPersistedUserMessage || !sessionId || sessionArchived
+  const archiveDisabledReason = sessionArchived
+    ? t("chat.archive_already_archived")
+    : !hasPersistedUserMessage
+      ? t("chat.archive_requires_user")
+      : undefined
 
   const handleSend = async () => {
     const text = input.trim()
@@ -530,9 +540,9 @@ export function IngestChat() {
           </Button>
           <Button
             size="sm"
-            disabled={sessionBusy || !hasUserMessage || !sessionId}
+            disabled={archiveDisabled}
             onClick={() => setArchiveOpen(true)}
-            title={!hasUserMessage ? t("chat.archive_requires_user") : undefined}
+            title={archiveDisabledReason}
           >
             <Archive className="size-3.5" />
             {t("chat.archive")}

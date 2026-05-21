@@ -125,6 +125,55 @@ func (d *DB) CreateIngestReview(r *IngestReview) error {
 	return scanIngestReview(row, r)
 }
 
+// ActiveIngestReviewStatuses are review states where a duplicate archive must not create a new review.
+var ActiveIngestReviewStatuses = map[string]bool{
+	"planning":         true,
+	"ready_for_review": true,
+	"revising":         true,
+	"approved":         true,
+	"applying":         true,
+}
+
+func IsActiveIngestReviewStatus(status string) bool {
+	return ActiveIngestReviewStatuses[strings.TrimSpace(status)]
+}
+
+func (d *DB) GetLatestIngestReviewBySessionID(sessionID string) (*IngestReview, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, nil
+	}
+	row := d.db.QueryRow(`
+		SELECT `+ingestReviewSelectColumns+`
+		FROM ingest_reviews
+		WHERE session_id = ?
+		ORDER BY rowid DESC
+		LIMIT 1`, sessionID)
+	var r IngestReview
+	if err := scanIngestReview(row, &r); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &r, nil
+}
+
+func (d *DB) CountIngestReviewsBySessionID(sessionID string) (int, error) {
+	var n int
+	err := d.db.QueryRow(`
+		SELECT COUNT(*) FROM ingest_reviews WHERE session_id = ?`, sessionID).Scan(&n)
+	return n, err
+}
+
+func (d *DB) DeleteIngestReview(id string) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("review id is required")
+	}
+	_, err := d.db.Exec(`DELETE FROM ingest_reviews WHERE id = ?`, id)
+	return err
+}
+
 func (d *DB) GetIngestReview(id string) (*IngestReview, error) {
 	row := d.db.QueryRow(`SELECT `+ingestReviewSelectColumns+` FROM ingest_reviews WHERE id = ?`, id)
 	var r IngestReview

@@ -159,6 +159,29 @@ func (d *DB) CreateIngestJob(job *IngestJob) error {
 	return created.Err()
 }
 
+func (d *DB) GetIngestJobBySourceRef(sourceRef, inputType string) (*IngestJob, error) {
+	sourceRef = strings.TrimSpace(sourceRef)
+	inputType = strings.TrimSpace(inputType)
+	if sourceRef == "" || inputType == "" {
+		return nil, nil
+	}
+	job := &IngestJob{}
+	err := scanIngestJob(d.db.QueryRow(`
+		SELECT `+ingestJobSelectColumns+`
+		FROM ingest_jobs
+		WHERE source_ref = ? AND input_type = ?
+		ORDER BY datetime(created_at) DESC
+		LIMIT 1`, sourceRef, inputType), job)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get ingest job by source ref: %w", err)
+	}
+	job.Status = normalizeJobStatus(job.Status)
+	return job, nil
+}
+
 func (d *DB) GetIngestJob(id string) (*IngestJob, error) {
 	job := &IngestJob{}
 	err := scanIngestJob(d.db.QueryRow(`

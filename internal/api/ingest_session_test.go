@@ -94,12 +94,87 @@ func TestIngestSessionCRUDAndArchive(t *testing.T) {
 		t.Fatalf("expected planning status, got %q", arch.Status)
 	}
 
+	// Duplicate archive is idempotent (same review_id, no second row)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+created.Session.ID+"/archive", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("duplicate archive: expected 200, got %d %s", w.Code, w.Body.String())
+	}
+	var arch2 struct {
+		ReviewID string `json:"review_id"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&arch2); err != nil {
+		t.Fatal(err)
+	}
+	if arch2.ReviewID != arch.ReviewID {
+		t.Fatalf("duplicate archive: review_id %q, want %q", arch2.ReviewID, arch.ReviewID)
+	}
+	count, err := api.db.CountIngestReviewsBySessionID(created.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("review count = %d, want 1", count)
+	}
+
 	// Unknown session -> 404
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/ingest/sessions/nope/messages", nil)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestArchiveSessionIdempotentWhilePlanning(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader([]byte(`{"title":"Dup"}`)))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var created struct {
+		Session struct {
+			ID string `json:"id"`
+		} `json:"session"`
+	}
+	_ = json.NewDecoder(w.Body).Decode(&created)
+
+	body, _ := json.Marshal(map[string]string{"content": "hello"})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+created.Session.ID+"/messages", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("message: %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+created.Session.ID+"/archive", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("first archive: %d %s", w.Code, w.Body.String())
+	}
+	var first struct {
+		ReviewID string `json:"review_id"`
+	}
+	_ = json.NewDecoder(w.Body).Decode(&first)
+
+	// Session still active in DB until first archive completes — simulate in-flight review
+	_ = api.db.UpdateIngestSessionStatus(created.Session.ID, "active")
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+created.Session.ID+"/archive", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("second archive while planning: %d %s", w.Code, w.Body.String())
+	}
+	var second struct {
+		ReviewID string `json:"review_id"`
+	}
+	_ = json.NewDecoder(w.Body).Decode(&second)
+	if second.ReviewID != first.ReviewID {
+		t.Fatalf("review_id %q != %q", second.ReviewID, first.ReviewID)
 	}
 }
 

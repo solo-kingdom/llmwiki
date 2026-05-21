@@ -157,6 +157,7 @@ const zh = {
   "chat.delete_session": "删除会话",
   "chat.new_session": "新建会话",
   "chat.archive_requires_user": "至少需要一条用户消息",
+  "chat.archive_already_archived": "该会话已归档",
   "chat.wiki_mention_placeholder": "@ 搜索 wiki 页面…",
   "chat.wiki_mention_limit": "最多引用 5 个 wiki 页面",
   "chat.wiki_mention_empty": "未找到匹配的 wiki 页面",

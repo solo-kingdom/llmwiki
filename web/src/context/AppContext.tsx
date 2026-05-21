@@ -240,6 +240,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loadedModelsProviderRef = useRef<string | null>(null)
   const activeStreamRef = useRef(false)
   const pollGenerationRef = useRef(0)
+  const archivingRef = useRef(false)
 
   const refreshDocuments = useCallback(() => {
     api
@@ -745,6 +746,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const archiveSession = useCallback(
     async (title?: string) => {
       if (!sessionId) throw new Error("no session")
+      if (archivingRef.current) {
+        throw new Error("archive already in progress")
+      }
+      archivingRef.current = true
       setSessionBusy(true)
       setSessionError(null)
       try {
@@ -755,6 +760,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSessionError((e as Error).message)
         throw e
       } finally {
+        archivingRef.current = false
         setSessionBusy(false)
       }
     },

@@ -139,3 +139,18 @@ The system SHALL emit SSE events for tool activity during session chat streaming
 #### Scenario: Tool done event
 - **WHEN** tool execution completes
 - **THEN** the SSE stream SHALL emit `event: tool_done` with tool name and success or error summary
+
+### Requirement: Session archive idempotency
+The system SHALL expose `POST /api/v1/ingest/sessions/{id}/archive` to freeze a session transcript into an ingest review without creating duplicate reviews on retry.
+
+#### Scenario: Archive requires persisted user messages
+- **WHEN** client posts archive for a session with zero persisted `role=user` messages
+- **THEN** the API SHALL return 400 with an error indicating no user messages to archive
+
+#### Scenario: Duplicate archive returns existing review
+- **WHEN** client posts archive for a session that is already `archived` or has an active ingest review (`planning`, `ready_for_review`, `revising`, `approved`, `applying`)
+- **THEN** the API SHALL return the existing `review_id` (HTTP 200) and SHALL NOT create a second ingest review row
+
+#### Scenario: Archive failure leaves no orphan review
+- **WHEN** archive fails after writing the archive markdown file or creating a review row (e.g. plan job enqueue failure)
+- **THEN** the API SHALL roll back the review row and remove the archive file before returning an error

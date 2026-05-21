@@ -581,6 +581,165 @@ describe("IngestChat", () => {
     expect(api.streamIngestSessionMessage).not.toHaveBeenCalled()
   })
 
+  it("disables archive when only optimistic temp user messages exist", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "temp-user-123",
+          session_id: "sess-1",
+          role: "user",
+          content: "pending",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    })
+    vi.mocked(api.listIngestSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: "sess-1",
+          title: "",
+          status: "active",
+          llm_instance_id: "inst-1",
+          llm_model: "gpt-4",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    await screen.findByText("pending")
+    expect(screen.getByRole("button", { name: /归档/ })).toBeDisabled()
+  })
+
+  it("calls archive API only once when confirm is double-clicked", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "archive me",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    })
+    let resolveArchive!: (v: Awaited<ReturnType<typeof api.archiveIngestSession>>) => void
+    const archivePromise = new Promise<
+      Awaited<ReturnType<typeof api.archiveIngestSession>>
+    >((resolve) => {
+      resolveArchive = resolve
+    })
+    vi.mocked(api.archiveIngestSession).mockImplementation(
+      () => archivePromise,
+    )
+    vi.mocked(api.listIngestSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: "sess-1",
+          title: "",
+          status: "active",
+          llm_instance_id: "inst-1",
+          llm_model: "gpt-4",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    await screen.findByText("archive me")
+    fireEvent.click(screen.getByRole("button", { name: /归档/ }))
+    const confirm = screen.getByRole("button", { name: /确认归档/ })
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
+    expect(api.archiveIngestSession).toHaveBeenCalledTimes(1)
+
+    resolveArchive({
+      review_id: "review-abc123",
+      status: "planning",
+      source_path: "raw/sources/web-ingest/sessions/sess-1",
+      session_id: "sess-1",
+    })
+    await screen.findByText("归档已提交，请前往审核页查看计划")
+  })
+
   it("shows archive success as toast that auto-dismisses after 3 seconds", async () => {
     const api = await import("@/lib/api")
     localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
@@ -789,6 +948,7 @@ describe("IngestChat", () => {
       },
     ])
     vi.mocked(api.searchDocuments).mockResolvedValue({
+      query: "alpha",
       results: [
         {
           document_id: "doc-alpha",
@@ -797,6 +957,10 @@ describe("IngestChat", () => {
           filename: "alpha.md",
           chunk_index: 0,
           content: "alpha content",
+          page: 1,
+          header_breadcrumb: "",
+          file_type: "md",
+          score: 0.5,
         },
       ],
     })

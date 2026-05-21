@@ -55,6 +55,19 @@ func (a *API) writeFileBytesFirst(canonicalPath string, content []byte) error {
 	return nil
 }
 
+// removeWorkspaceFile deletes a file under the workspace by canonical relative path.
+func (a *API) removeWorkspaceFile(canonicalPath string) error {
+	if a.workspace == "" {
+		return nil
+	}
+	relPath := strings.TrimPrefix(canonicalPath, "/")
+	fullPath := filepath.Join(a.workspace, relPath)
+	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove file %s: %w", fullPath, err)
+	}
+	return nil
+}
+
 // resolveCanonicalPath builds the canonical file path from document metadata.
 func resolveCanonicalPath(relativePath string) string {
 	return strings.TrimPrefix(relativePath, "/")

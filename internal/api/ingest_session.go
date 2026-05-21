@@ -728,6 +728,61 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
+func (a *API) archiveResponseForReview(review *sqlite.IngestReview) archiveResponse {
+	resp := archiveResponse{
+		ReviewID:   review.ID,
+		Status:     review.Status,
+		SourcePath: review.ArchiveSourcePath,
+		SessionID:  review.SessionID,
+	}
+	job, err := a.db.GetIngestJobBySourceRef(
+		ingest.ReviewSourceRef(review.ID),
+		string(ingest.InputKindReviewPlan),
+	)
+	if err == nil && job != nil {
+		resp.PlanJobID = job.ID
+	}
+	return resp
+}
+
+func (a *API) tryReturnExistingArchive(w http.ResponseWriter, session *sqlite.IngestSession) bool {
+	existing, err := a.db.GetLatestIngestReviewBySessionID(session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return true
+	}
+
+	if session.Status == "archived" {
+		if existing == nil {
+			writeError(w, http.StatusConflict, "session already archived")
+			return true
+		}
+		writeJSON(w, http.StatusOK, a.archiveResponseForReview(existing))
+		return true
+	}
+
+	if existing != nil && sqlite.IsActiveIngestReviewStatus(existing.Status) {
+		job, err := a.db.GetIngestJobBySourceRef(
+			ingest.ReviewSourceRef(existing.ID),
+			string(ingest.InputKindReviewPlan),
+		)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return true
+		}
+		if job == nil {
+			if _, err := ingest.EnqueueReviewPlanJob(a.db, a.workspace, existing); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return true
+			}
+		}
+		writeJSON(w, http.StatusOK, a.archiveResponseForReview(existing))
+		return true
+	}
+
+	return false
+}
+
 func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := getID(r)
 	if !a.requireWorkspaceForIngest(w) {
@@ -744,6 +799,10 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if count == 0 {
 		writeError(w, http.StatusBadRequest, "session has no user messages to archive")
+		return
+	}
+
+	if a.tryReturnExistingArchive(w, session) {
 		return
 	}
 
@@ -764,6 +823,7 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 
 	msgs, err := a.db.ListIngestSessionMessages(sessionID)
 	if err != nil {
+		a.logArchiveFailed(sessionID, err.Error())
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -783,6 +843,7 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	sessionRefs, err := a.db.ListSessionReferences(sessionID)
 	if err != nil {
+		a.logArchiveFailed(sessionID, err.Error())
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -797,31 +858,73 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 	md := ingest.BuildSessionArchiveMarkdown(sessionID, title, archiveMsgs, archiveRefs, now)
 	normalized, err := ingest.NormalizeSessionArchive(sessionID, title, md, "session:"+sessionID, now)
 	if err != nil {
+		a.logArchiveFailed(sessionID, err.Error())
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := a.writeFileBytesFirst(normalized.CanonicalPath, normalized.Content); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("persist archive failed: %v", err))
+		msg := fmt.Sprintf("persist archive failed: %v", err)
+		a.logArchiveFailed(sessionID, msg)
+		writeError(w, http.StatusInternalServerError, msg)
 		return
 	}
+
 	review := &sqlite.IngestReview{
 		SessionID:         sessionID,
 		ArchiveSourcePath: normalized.CanonicalPath,
 		Status:            "planning",
 	}
 	if err := a.db.CreateIngestReview(review); err != nil {
+		a.rollbackArchiveAttempt("", normalized.CanonicalPath, "")
+		a.logArchiveFailed(sessionID, err.Error())
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	planJob, err := ingest.EnqueueReviewPlanJob(a.db, a.workspace, review)
 	if err != nil {
+		a.rollbackArchiveAttempt(review.ID, normalized.CanonicalPath, "")
+		a.logArchiveFailed(sessionID, err.Error())
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = a.db.UpdateIngestSessionStatus(sessionID, "archived")
-	if title != session.Title {
-		_ = a.db.UpdateIngestSessionTitle(sessionID, title)
+
+	tx, err := a.db.DB().Begin()
+	if err != nil {
+		a.rollbackArchiveAttempt(review.ID, normalized.CanonicalPath, planJob.ID)
+		a.logArchiveFailed(sessionID, err.Error())
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
+	if _, err := tx.Exec(
+		`UPDATE ingest_sessions SET status = ?, updated_at = datetime('now') WHERE id = ?`,
+		"archived", sessionID,
+	); err != nil {
+		_ = tx.Rollback()
+		a.rollbackArchiveAttempt(review.ID, normalized.CanonicalPath, planJob.ID)
+		a.logArchiveFailed(sessionID, err.Error())
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if title != session.Title {
+		if _, err := tx.Exec(
+			`UPDATE ingest_sessions SET title = ?, updated_at = datetime('now') WHERE id = ?`,
+			title, sessionID,
+		); err != nil {
+			_ = tx.Rollback()
+			a.rollbackArchiveAttempt(review.ID, normalized.CanonicalPath, planJob.ID)
+			a.logArchiveFailed(sessionID, err.Error())
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		a.rollbackArchiveAttempt(review.ID, normalized.CanonicalPath, planJob.ID)
+		a.logArchiveFailed(sessionID, err.Error())
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	activity.Record(a.db, activity.Entry{
 		Level:        "info",
 		Category:     "ingest",
@@ -843,6 +946,20 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 		SessionID:  sessionID,
 		PlanJobID:  planJob.ID,
 	})
+}
+
+func (a *API) logArchiveFailed(sessionID, message string) {
+	activity.LogSession(a.db, "archive_failed", sessionID, message, "failure", "api", nil)
+}
+
+func (a *API) rollbackArchiveAttempt(reviewID, archivePath, planJobID string) {
+	if planJobID != "" {
+		_, _ = a.db.DB().Exec(`DELETE FROM ingest_jobs WHERE id = ?`, planJobID)
+	}
+	if reviewID != "" {
+		_ = a.db.DeleteIngestReview(reviewID)
+	}
+	_ = a.removeWorkspaceFile(archivePath)
 }
 
 func (a *API) loadSession(id string, w http.ResponseWriter) (*sqlite.IngestSession, error) {

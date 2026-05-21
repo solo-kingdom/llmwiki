@@ -90,8 +90,16 @@ The UI SHALL provide an **归档** action that confirms intent, triggers archive
 - **THEN** UI SHALL show success state with link or navigation to Jobs tab and job id
 
 #### Scenario: Archive disabled when empty
-- **WHEN** session has no user messages
+- **WHEN** session has no persisted user messages (including when only optimistic `temp-*` client rows exist)
 - **THEN** **归档** button SHALL be disabled with tooltip explaining why
+
+#### Scenario: Archive disabled when session archived
+- **WHEN** the active ingest session `status` is `archived`
+- **THEN** **归档** button SHALL be disabled with tooltip indicating the session is already archived
+
+#### Scenario: Archive submit deduplication
+- **WHEN** user confirms archive while a submit is already in flight
+- **THEN** the UI SHALL invoke the archive API at most once until the in-flight request completes
 
 ### Requirement: Navigation label Ingest
 Global navigation SHALL label the default ingest entry **Ingest** (not Ingest Hub).

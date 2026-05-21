@@ -1,5 +1,7 @@
 import { useState, useMemo } from "react"
 import { useWikiReader } from "@/context/WikiReaderContext"
+import { WikiEntityList } from "@/components/WikiEntityList"
+import { WikiTypeFilter } from "@/components/WikiTypeFilter"
 import { buildTree } from "@/lib/tree"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { TreeNode } from "@/types"
@@ -142,8 +144,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({ variant = "classic", onSelect }: SidebarProps) {
-  const { documents, currentDocId, selectDocument } = useWikiReader()
-  const tree = useMemo(() => buildTree(documents), [documents])
+  const { filteredDocuments, currentDocId, selectDocument } = useWikiReader()
+  const tree = useMemo(() => buildTree(filteredDocuments), [filteredDocuments])
   const isReader = variant === "reader"
 
   const handleSelect = (id: string) => {
@@ -159,8 +161,12 @@ export function Sidebar({ variant = "classic", onSelect }: SidebarProps) {
           : "flex h-full w-64 flex-col border-r bg-card"
       }
     >
+      <WikiTypeFilter />
+      <WikiEntityList onSelect={onSelect} />
       <div className="border-b px-3 py-2">
-        <p className="text-xs text-muted-foreground">{documents.length} files</p>
+        <p className="text-xs text-muted-foreground">
+          {filteredDocuments.length} pages
+        </p>
       </div>
       <ScrollArea className="flex-1">
         <div className="py-1">

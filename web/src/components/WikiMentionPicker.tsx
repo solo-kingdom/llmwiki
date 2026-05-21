@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { searchDocuments } from "@/lib/api"
-import type { SearchChunk, WikiRefPayload } from "@/types"
+import type { DocumentListItem, WikiRefPayload } from "@/types"
+import { fuzzySearchDocs } from "@/lib/fuzzy-search"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/i18n"
 import { X } from "lucide-react"
@@ -21,64 +21,150 @@ interface WikiMentionPickerProps {
   value: WikiRefPayload[]
   onChange: (refs: WikiRefPayload[]) => void
   disabled?: boolean
+  /** 全量文档列表，用于 fzf 模糊匹配 */
+  documents?: DocumentListItem[]
+  /** textarea 引用，用于监听 @ 输入 */
+  textareaRef?: React.RefObject<HTMLTextAreaElement | null>
+  /** textarea 当前值 */
+  inputValue?: string
+  /** 当组件修改 textarea 内容时回调 */
+  onInputChange?: (value: string) => void
 }
 
 export function WikiMentionPicker({
   value,
   onChange,
   disabled,
+  documents = [],
+  textareaRef,
+  inputValue = "",
+  onInputChange,
 }: WikiMentionPickerProps) {
   const t = useT()
-  const [query, setQuery] = useState("")
-  const [results, setResults] = useState<SearchChunk[]>([])
   const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [mentionStart, setMentionStart] = useState(-1) // position of @ char
+  const [searchQuery, setSearchQuery] = useState("")
+  const panelRef = useRef<HTMLDivElement>(null)
 
   const selectedIds = useMemo(
     () => new Set(value.map((v) => v.document_id)),
     [value],
   )
 
+  // Filter documents to wiki pages only
+  const wikiDocs = useMemo(
+    () => documents.filter((d) => d.path?.includes("wiki/")),
+    [documents],
+  )
+
+  // Fuzzy search results
+  const results = useMemo(
+    () => fuzzySearchDocs(wikiDocs, searchQuery, 8),
+    [wikiDocs, searchQuery],
+  )
+
+  // Watch textarea input for @ trigger
   useEffect(() => {
-    if (!open || query.trim().length < 1) {
-      setResults([])
-      return
+    if (!textareaRef?.current) return
+    const el = textareaRef.current
+
+    const handleInput = () => {
+      const pos = el.selectionStart
+      const val = el.value
+      if (pos <= 0) return
+
+      // Check if the character just typed is @ and preceded by start/space/newline
+      if (val[pos - 1] === "@") {
+        const before = pos <= 1 ? "" : val[pos - 2]
+        if (before === "" || before === " " || before === "\n") {
+          setMentionStart(pos - 1)
+          setSearchQuery("")
+          setOpen(true)
+          return
+        }
+      }
+
+      // If panel is open, update search query from text after @
+      if (open && mentionStart >= 0) {
+        const queryText = val.slice(mentionStart + 1, pos)
+        if (queryText.includes(" ") || queryText.includes("\n") || val[mentionStart] !== "@") {
+          // Closed by space/newline or @ deleted
+          setOpen(false)
+          setMentionStart(-1)
+          setSearchQuery("")
+        } else {
+          setSearchQuery(queryText)
+        }
+      }
     }
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => {
-      setLoading(true)
-      void searchDocuments(query.trim(), 8)
-        .then((resp) => {
-          const wikiOnly = resp.results.filter((r) =>
-            r.path?.includes("wiki/"),
-          )
-          setResults(wikiOnly)
-        })
-        .catch(() => setResults([]))
-        .finally(() => setLoading(false))
-    }, 200)
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
+
+    el.addEventListener("input", handleInput)
+    return () => el.removeEventListener("input", handleInput)
+  }, [textareaRef, open, mentionStart])
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false)
+        setMentionStart(-1)
+        setSearchQuery("")
+      }
     }
-  }, [query, open])
+    document.addEventListener("keydown", handleKeyDown)
+    return () => document.removeEventListener("keydown", handleKeyDown)
+  }, [open])
+
+  // Close on click outside
+  useEffect(() => {
+    if (!open) return
+    const handleClick = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOpen(false)
+        setMentionStart(-1)
+        setSearchQuery("")
+      }
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
+  }, [open])
 
   const addRef = useCallback(
-    (doc: SearchChunk) => {
-      if (selectedIds.has(doc.document_id)) return
+    (doc: DocumentListItem) => {
+      if (selectedIds.has(doc.id)) return
       if (value.length >= MAX_WIKI_REFS) return
+
+      // Remove the @query text from textarea
+      if (mentionStart >= 0 && onInputChange && textareaRef?.current) {
+        const val = textareaRef.current.value
+        const before = val.slice(0, mentionStart)
+        const after = val.slice(textareaRef.current.selectionStart)
+        onInputChange(before + after)
+        // Reset cursor position
+        requestAnimationFrame(() => {
+          if (textareaRef.current) {
+            const newPos = before.length
+            textareaRef.current.selectionStart = newPos
+            textareaRef.current.selectionEnd = newPos
+            textareaRef.current.focus()
+          }
+        })
+      }
+
       onChange([
         ...value,
         {
-          document_id: doc.document_id,
+          document_id: doc.id,
           relative_path: doc.path,
           title: doc.title || doc.filename,
         },
       ])
-      setQuery("")
       setOpen(false)
+      setMentionStart(-1)
+      setSearchQuery("")
     },
-    [onChange, selectedIds, value],
+    [onChange, selectedIds, value, mentionStart, onInputChange, textareaRef],
   )
 
   const removeRef = (id: string) => {
@@ -108,53 +194,37 @@ export function WikiMentionPicker({
           ))}
         </div>
       )}
-      <div className="relative">
-        <input
-          className="w-full rounded-md border border-border/60 bg-background px-2 py-1 text-xs outline-none"
-          placeholder={t("chat.wiki_mention_placeholder")}
-          value={query}
-          disabled={disabled || value.length >= MAX_WIKI_REFS}
-          onFocus={() => setOpen(true)}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setOpen(true)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setOpen(false)
-          }}
-        />
-        {value.length >= MAX_WIKI_REFS && (
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            {t("chat.wiki_mention_limit")}
-          </p>
-        )}
-        {open && query.trim() && (
-          <div className="absolute bottom-full z-20 mb-1 max-h-48 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md">
-            {loading && (
-              <p className="px-2 py-1 text-xs text-muted-foreground">...</p>
-            )}
-            {!loading && results.length === 0 && (
-              <p className="px-2 py-1 text-xs text-muted-foreground">
-                {t("chat.wiki_mention_empty")}
-              </p>
-            )}
-            {results.map((doc) => (
-              <Button
-                key={doc.document_id}
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-auto w-full justify-start whitespace-normal px-2 py-1 text-left text-xs"
-                disabled={selectedIds.has(doc.document_id)}
-                onClick={() => addRef(doc)}
-              >
-                <span className="font-medium">{doc.title || doc.filename}</span>
-                <span className="ml-1 text-muted-foreground">{doc.path}</span>
-              </Button>
-            ))}
-          </div>
-        )}
-      </div>
+      {value.length >= MAX_WIKI_REFS && (
+        <p className="text-[11px] text-muted-foreground">
+          {t("chat.wiki_mention_limit")}
+        </p>
+      )}
+      {open && (
+        <div
+          ref={panelRef}
+          className="max-h-48 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md"
+        >
+          {results.length === 0 && (
+            <p className="px-2 py-1 text-xs text-muted-foreground">
+              {t("chat.wiki_mention_empty")}
+            </p>
+          )}
+          {results.map((doc) => (
+            <Button
+              key={doc.id}
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-auto w-full justify-start whitespace-normal px-2 py-1 text-left text-xs"
+              disabled={selectedIds.has(doc.id)}
+              onClick={() => addRef(doc)}
+            >
+              <span className="font-medium">{doc.title || doc.filename}</span>
+              <span className="ml-1 text-muted-foreground">{doc.path}</span>
+            </Button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

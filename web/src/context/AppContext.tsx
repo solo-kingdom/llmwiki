@@ -153,6 +153,8 @@ interface AppState {
   ensureIngestSession: () => Promise<void>
   sendSessionMessage: (content: string, wikiRefs?: WikiRefPayload[]) => Promise<void>
   retrySessionMessage: (assistantMessageId: string) => Promise<void>
+  cancelStream: () => void
+  toggleMessageExclude: (messageId: string) => Promise<void>
   uploadSessionAttachment: (file: File) => Promise<void>
   archiveSession: (title?: string) => Promise<string>
 
@@ -239,6 +241,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currentModels, setCurrentModels] = useState<ModelInfo[]>([])
   const loadedModelsProviderRef = useRef<string | null>(null)
   const activeStreamRef = useRef(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
   const pollGenerationRef = useRef(0)
   const archivingRef = useRef(false)
 
@@ -586,6 +589,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activeStreamRef.current = true
       setSessionBusy(true)
       setSessionError(null)
+      const controller = new AbortController()
+      abortControllerRef.current = controller
       const tempUser: IngestSessionMessage = {
         id: `temp-user-${Date.now()}`,
         session_id: sessionId,
@@ -621,33 +626,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
             tempAssistant.id,
             tempUser.id,
           )
-        }, wikiRefs)
+        }, wikiRefs, controller.signal)
         const { messages: loaded } = await api.listIngestSessionMessages(sessionId)
         setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
       } catch (e) {
-        const reason = localizeErrorMessage((e as Error).message)
-        setSessionError(reason)
-        setSessionMessages((prev) =>
-          prev.map((m) =>
-            isStreamingAssistant(m.id)
-              ? {
-                  ...m,
-                  stream_status: "failed",
-                  error_message: reason,
-                  content: m.content || reason,
-                }
-              : m,
-          ),
-        )
-        try {
-          const { messages: loaded } =
-            await api.listIngestSessionMessages(sessionId)
-          setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
-        } catch {
-          // keep optimistic failed message
+        const aborted = e instanceof DOMException && e.name === "AbortError"
+        if (aborted) {
+          // User cancelled — mark as incomplete, reload from server
+          setSessionMessages((prev) =>
+            prev.map((m) =>
+              isStreamingAssistant(m.id)
+                ? { ...m, stream_status: "incomplete" as const }
+                : m,
+            ),
+          )
+          try {
+            const { messages: loaded } = await api.listIngestSessionMessages(sessionId)
+            setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
+          } catch {
+            // keep optimistic incomplete message
+          }
+        } else {
+          const reason = localizeErrorMessage((e as Error).message)
+          setSessionError(reason)
+          setSessionMessages((prev) =>
+            prev.map((m) =>
+              isStreamingAssistant(m.id)
+                ? {
+                    ...m,
+                    stream_status: "failed",
+                    error_message: reason,
+                    content: m.content || reason,
+                  }
+                : m,
+            ),
+          )
+          try {
+            const { messages: loaded } =
+              await api.listIngestSessionMessages(sessionId)
+            setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
+          } catch {
+            // keep optimistic failed message
+          }
         }
       } finally {
         activeStreamRef.current = false
+        abortControllerRef.current = null
         setSessionBusy(false)
       }
     },
@@ -661,6 +685,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activeStreamRef.current = true
       setSessionBusy(true)
       setSessionError(null)
+      const controller = new AbortController()
+      abortControllerRef.current = controller
 
       const assistantIdRef = { current: assistantMessageId }
       setSessionMessages((prev) =>
@@ -690,37 +716,92 @@ export function AppProvider({ children }: { children: ReactNode }) {
               assistantMessageId,
             )
           },
+          controller.signal,
         )
         const { messages: loaded } = await api.listIngestSessionMessages(sessionId)
         setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
       } catch (e) {
-        const reason = localizeErrorMessage((e as Error).message)
-        setSessionError(reason)
-        setSessionMessages((prev) =>
-          prev.map((m) =>
-            isStreamingAssistant(m.id)
-              ? {
-                  ...m,
-                  stream_status: "failed",
-                  error_message: reason,
-                  content: m.content || reason,
-                }
-              : m,
-          ),
-        )
-        try {
-          const { messages: loaded } =
-            await api.listIngestSessionMessages(sessionId)
-          setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
-        } catch {
-          // keep optimistic failed message
+        const aborted = e instanceof DOMException && e.name === "AbortError"
+        if (aborted) {
+          setSessionMessages((prev) =>
+            prev.map((m) =>
+              isStreamingAssistant(m.id)
+                ? { ...m, stream_status: "incomplete" as const }
+                : m,
+            ),
+          )
+          try {
+            const { messages: loaded } = await api.listIngestSessionMessages(sessionId)
+            setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
+          } catch {
+            // keep optimistic incomplete message
+          }
+        } else {
+          const reason = localizeErrorMessage((e as Error).message)
+          setSessionError(reason)
+          setSessionMessages((prev) =>
+            prev.map((m) =>
+              isStreamingAssistant(m.id)
+                ? {
+                    ...m,
+                    stream_status: "failed",
+                    error_message: reason,
+                    content: m.content || reason,
+                  }
+                : m,
+            ),
+          )
+          try {
+            const { messages: loaded } =
+              await api.listIngestSessionMessages(sessionId)
+            setSessionMessages((prev) => mergeLoadedSessionMessages(prev, loaded))
+          } catch {
+            // keep optimistic failed message
+          }
         }
       } finally {
         activeStreamRef.current = false
+        abortControllerRef.current = null
         setSessionBusy(false)
       }
     },
     [sessionId, applyAssistantStreamEvent],
+  )
+
+  const cancelStream = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    activeStreamRef.current = false
+    setSessionBusy(false)
+  }, [])
+
+  const toggleMessageExclude = useCallback(
+    async (messageId: string) => {
+      if (!sessionId) return
+      const msg = sessionMessages.find((m) => m.id === messageId)
+      if (!msg) return
+      const newExclude = !msg.exclude_from_archive
+      setSessionMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId ? { ...m, exclude_from_archive: newExclude } : m,
+        ),
+      )
+      try {
+        await api.patchIngestSessionMessage(sessionId, messageId, {
+          exclude_from_archive: newExclude,
+        })
+      } catch {
+        // revert on error
+        setSessionMessages((prev) =>
+          prev.map((m) =>
+            m.id === messageId ? { ...m, exclude_from_archive: !newExclude } : m,
+          ),
+        )
+      }
+    },
+    [sessionId, sessionMessages],
   )
 
   const uploadSessionAttachment = useCallback(
@@ -1013,6 +1094,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ensureIngestSession,
         sendSessionMessage,
         retrySessionMessage,
+        cancelStream,
+        toggleMessageExclude,
         uploadSessionAttachment,
         archiveSession,
         loadProviders,

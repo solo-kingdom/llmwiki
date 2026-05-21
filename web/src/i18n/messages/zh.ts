@@ -165,6 +165,10 @@ const zh = {
   "chat.tool_searching": "正在检索 wiki…",
   "chat.tool_reading": "正在读取 {{path}}…",
   "chat.tool_reads_label": "查阅的 wiki 页面",
+  "chat.stop": "停止",
+  "chat.exclude_from_archive": "不归档",
+  "chat.excluded_from_archive": "已排除归档",
+  "chat.wiki_mention_searching": "搜索中…",
 
   // Session controls
   "session.switch": "切换",
@@ -299,6 +303,15 @@ const zh = {
   "wiki.expand_files": "展开文件列表",
   "wiki.collapse_outline": "收起目录",
   "wiki.expand_outline": "展开目录",
+  "wiki.type_filter": "页面类型",
+  "wiki.entity_list": "实体",
+  "wiki.graph_entry": "知识图谱",
+  "wiki.type.entity": "实体",
+  "wiki.type.concept": "概念",
+  "wiki.type.source": "来源摘要",
+  "wiki.type.synthesis": "综合",
+  "wiki.type.comparison": "对比",
+  "wiki.type.query": "查询",
 
   // Search modal
   "search.placeholder": "搜索文件名或内容...",

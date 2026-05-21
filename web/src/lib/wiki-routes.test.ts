@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest"
 import {
   getWorkbenchViewFromPath,
+  isWikiGraphPath,
+  wikiGraphHref,
   workbenchViewHref,
 } from "@/lib/wiki-routes"
 
@@ -25,7 +27,14 @@ describe("wiki-routes workbench views", () => {
     expect(getWorkbenchViewFromPath("/settings")).toBe("settings")
     expect(getWorkbenchViewFromPath("/timeline")).toBe("timeline")
     expect(getWorkbenchViewFromPath("/logs")).toBe("logs")
-    expect(getWorkbenchViewFromPath("/graph")).toBe("graph")
-    expect(workbenchViewHref("graph")).toBe("/graph")
+    expect(getWorkbenchViewFromPath("/graph")).toBe("chat")
+  })
+})
+
+describe("wiki graph routes", () => {
+  it("recognizes wiki graph path", () => {
+    expect(isWikiGraphPath("/wiki/graph")).toBe(true)
+    expect(isWikiGraphPath("/wiki")).toBe(false)
+    expect(wikiGraphHref()).toBe("/wiki/graph")
   })
 })

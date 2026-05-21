@@ -1,7 +1,8 @@
 import { useRef, type ReactNode } from "react"
 import { useEffect, useState } from "react"
-import { ChevronLeft, ChevronRight, List, Menu, Search } from "lucide-react"
+import { ChevronLeft, ChevronRight, GitBranch, List, Menu, Search } from "lucide-react"
 import { Sidebar } from "@/components/Sidebar"
+import { GraphPage } from "@/components/GraphPage"
 import { DocumentViewer } from "@/components/DocumentViewer"
 import { DocumentOutline } from "@/components/DocumentOutline"
 import { WikiDocumentInfoBar } from "@/components/WikiDocumentInfo"
@@ -11,12 +12,20 @@ import { Button } from "@/components/ui/button"
 import { Dialog } from "@base-ui/react/dialog"
 import { useWikiReader } from "@/context/WikiReaderContext"
 import { useT } from "@/i18n"
-import { navigateTo, workbenchHref } from "@/lib/wiki-routes"
+import {
+  isWikiGraphPath,
+  navigateTo,
+  usePathname,
+  wikiGraphHref,
+  workbenchHref,
+} from "@/lib/wiki-routes"
 import type { OutlineItem } from "@/types"
 import { cn } from "@/lib/utils"
 
 export function WikiReaderLayout() {
   const t = useT()
+  const pathname = usePathname()
+  const isGraphView = isWikiGraphPath(pathname)
   const { currentDoc, loading, publicWikiEnabled, error } = useWikiReader()
   const [outline, setOutline] = useState<OutlineItem[]>([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -99,7 +108,17 @@ export function WikiReaderLayout() {
             >
               <Search className="h-4 w-4" />
             </Button>
-            {hasOutline && (
+            <Button
+              variant={isGraphView ? "secondary" : "ghost"}
+              size="sm"
+              className="hidden gap-1 sm:inline-flex"
+              onClick={() => navigateTo(wikiGraphHref())}
+              title={t("wiki.graph_entry")}
+            >
+              <GitBranch className="h-4 w-4" />
+              <span className="text-xs">{t("nav.graph")}</span>
+            </Button>
+            {hasOutline && !isGraphView && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -163,7 +182,11 @@ export function WikiReaderLayout() {
             outlineCollapsed && "-mr-4",
           )}
         >
-          {loading && !currentDoc ? (
+          {isGraphView ? (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-point-border bg-card/70 p-4 shadow-sm backdrop-blur-sm">
+              <GraphPage />
+            </div>
+          ) : loading && !currentDoc ? (
             <div className="flex flex-1 items-center justify-center rounded-xl border border-border/70 bg-card/70 text-muted-foreground shadow-sm backdrop-blur-sm">
               {t("common.loading")}
             </div>
@@ -187,7 +210,7 @@ export function WikiReaderLayout() {
           )}
         </div>
 
-        {hasOutline && (
+        {hasOutline && !isGraphView && (
           <aside
             className={cn(
               "hidden lg:flex h-full relative shrink-0 overflow-hidden transition-all duration-200 ease-out",

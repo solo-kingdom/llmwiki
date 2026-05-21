@@ -33,7 +33,14 @@ type bulkDeleteRequest struct {
 }
 
 func (a *API) ListDocuments(w http.ResponseWriter, r *http.Request) {
-	docs, err := a.db.ListDocuments()
+	filter := sqlite.ListDocumentsFilter{
+		SourceKind: r.URL.Query().Get("source_kind"),
+		PageTypes:  r.URL.Query()["type"],
+	}
+	if len(r.URL.Query()["types"]) > 0 {
+		filter.PageTypes = r.URL.Query()["types"]
+	}
+	docs, err := a.db.ListDocumentsFiltered(filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

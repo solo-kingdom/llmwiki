@@ -257,6 +257,44 @@ func (a *API) RetryIngestSessionMessage(w http.ResponseWriter, r *http.Request) 
 	a.streamAssistantReply(w, r, session, filtered, llmUserContent, userMsg.Content, wikiRefs, assistantMsg, nil)
 }
 
+func (a *API) PatchIngestSessionMessage(w http.ResponseWriter, r *http.Request) {
+	sessionID := getID(r)
+	messageID := chi.URLParam(r, "messageId")
+	if !a.requireWorkspaceForIngest(w) {
+		return
+	}
+	session, err := a.loadSession(sessionID, w)
+	if err != nil || session == nil {
+		return
+	}
+	msg, err := a.db.GetIngestSessionMessage(messageID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if msg == nil || msg.SessionID != session.ID {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+	var req struct {
+		ExcludeFromArchive *bool `json:"exclude_from_archive"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.ExcludeFromArchive == nil {
+		writeError(w, http.StatusBadRequest, "exclude_from_archive is required")
+		return
+	}
+	if err := a.db.UpdateIngestSessionMessageExclude(messageID, *req.ExcludeFromArchive); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	msg.ExcludeFromArchive = *req.ExcludeFromArchive
+	writeJSON(w, http.StatusOK, messageResponse{Message: msg})
+}
+
 func (a *API) ListIngestSessionReferences(w http.ResponseWriter, r *http.Request) {
 	sessionID := getID(r)
 	session, err := a.loadSession(sessionID, w)
@@ -829,6 +867,9 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 	}
 	archiveMsgs := make([]ingest.SessionArchiveMessage, 0, len(msgs))
 	for _, m := range msgs {
+		if m.ExcludeFromArchive {
+			continue
+		}
 		am := ingest.SessionArchiveMessage{
 			Role:        m.Role,
 			Content:     m.Content,

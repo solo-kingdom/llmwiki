@@ -30,6 +30,9 @@ export interface DocumentListItem {
   filename: string
   title: string
   path: string
+  relative_path?: string
+  source_kind?: string
+  page_type?: string
   file_type: string
   page_count: number
   updated_at: string
@@ -296,6 +299,7 @@ export interface IngestSessionMessage {
   attachment_id: string
   stream_status: "streaming" | "complete" | "incomplete" | "failed"
   wiki_refs_json?: string
+  exclude_from_archive?: boolean
   /** Populated when stream_status is failed (from SSE error or client-side stream failure). */
   error_message?: string
   /** Client-side parsed wiki refs for display. */

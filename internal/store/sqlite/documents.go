@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-
 	"github.com/google/uuid"
+	"github.com/solo-kingdom/llmwiki/internal/engine"
 )
 
 // Document represents a row in the documents table.
@@ -34,6 +34,7 @@ type Document struct {
 	Highlights     string   `json:"highlights"`
 	CreatedAt      string   `json:"created_at"`
 	UpdatedAt      string   `json:"updated_at"`
+	PageType       string   `json:"page_type,omitempty"`
 }
 
 // docSelect returns the SELECT column list with COALESCE for nullable fields.
@@ -241,11 +242,31 @@ func (d *DB) ArchiveDocuments(ids []string) (int64, error) {
 	return result.RowsAffected()
 }
 
+// ListDocumentsFilter optionally restricts listed documents.
+type ListDocumentsFilter struct {
+	SourceKind string
+	PageTypes  []string
+}
+
 // ListDocuments returns all non-failed documents.
 func (d *DB) ListDocuments() ([]Document, error) {
-	rows, err := d.db.Query(`
-		SELECT id, filename, title, path, file_type, COALESCE(page_count, 0), COALESCE(updated_at, '')
-		FROM documents WHERE status != 'failed' ORDER BY path, filename`)
+	return d.ListDocumentsFiltered(ListDocumentsFilter{})
+}
+
+// ListDocumentsFiltered returns documents matching optional source_kind and page type filters.
+func (d *DB) ListDocumentsFiltered(f ListDocumentsFilter) ([]Document, error) {
+	sqlStr := `
+		SELECT id, filename, title, path, file_type, COALESCE(page_count, 0), COALESCE(updated_at, ''),
+			COALESCE(relative_path, ''), COALESCE(source_kind, '')
+		FROM documents WHERE status != 'failed' `
+	var args []interface{}
+	if f.SourceKind != "" {
+		sqlStr += "AND source_kind = ? "
+		args = append(args, f.SourceKind)
+	}
+	sqlStr += "ORDER BY path, filename"
+
+	rows, err := d.db.Query(sqlStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list documents: %w", err)
 	}
@@ -255,12 +276,31 @@ func (d *DB) ListDocuments() ([]Document, error) {
 	for rows.Next() {
 		var doc Document
 		if err := rows.Scan(&doc.ID, &doc.Filename, &doc.Title, &doc.Path,
-			&doc.FileType, &doc.PageCount, &doc.UpdatedAt); err != nil {
+			&doc.FileType, &doc.PageCount, &doc.UpdatedAt, &doc.RelativePath, &doc.SourceKind); err != nil {
 			return nil, fmt.Errorf("scan document: %w", err)
+		}
+		doc.PageType = PageTypeForDocument(doc)
+		if len(f.PageTypes) > 0 && !matchPageType(doc, f.PageTypes) {
+			continue
 		}
 		docs = append(docs, doc)
 	}
 	return docs, nil
+}
+
+func matchPageType(doc Document, types []string) bool {
+	pt := engine.WikiPageTypeFromPaths(doc.RelativePath, doc.Path)
+	for _, want := range types {
+		if pt == want {
+			return true
+		}
+	}
+	return false
+}
+
+// PageTypeForDocument returns the wiki page type for a document row.
+func PageTypeForDocument(doc Document) string {
+	return engine.WikiPageTypeFromPaths(doc.RelativePath, doc.Path)
 }
 
 // ListDocumentsWithContent returns all non-failed documents with content.

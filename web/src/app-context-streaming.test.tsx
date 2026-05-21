@@ -193,7 +193,7 @@ describe("AppContext retry session message", () => {
         },
       ],
     })
-    mockStreamRetry.mockImplementation(async (_sid, _aid, onEvent) => {
+    mockStreamRetry.mockImplementation(async (_sid, _aid, onEvent, _signal?) => {
       onEvent("assistant_start", { id: "msg-assistant" })
       onEvent("token", { content: "ok" })
       onEvent("done", {
@@ -238,6 +238,7 @@ describe("AppContext retry session message", () => {
         "sess-1",
         "msg-assistant",
         expect.any(Function),
+        expect.any(AbortSignal),
       )
       expect(counts[counts.length - 1]).toBe(2)
     })

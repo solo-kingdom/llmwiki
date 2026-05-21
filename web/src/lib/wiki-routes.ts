@@ -9,11 +9,18 @@ export type WorkbenchView =
   | "jobs"
   | "timeline"
   | "logs"
-  | "graph"
   | "settings"
 
 export function isWikiReaderPath(pathname: string): boolean {
   return pathname === "/wiki" || pathname.startsWith("/wiki/")
+}
+
+export function isWikiGraphPath(pathname: string): boolean {
+  return pathname === "/wiki/graph"
+}
+
+export function wikiGraphHref(): string {
+  return "/wiki/graph"
 }
 
 export function wikiReaderHref(docId?: string | null): string {
@@ -39,8 +46,6 @@ export function getWorkbenchViewFromPath(pathname: string): WorkbenchView {
       return "timeline"
     case "/logs":
       return "logs"
-    case "/graph":
-      return "graph"
     default:
       return "chat"
   }
@@ -60,8 +65,6 @@ export function workbenchViewHref(view: WorkbenchView): string {
       return "/timeline"
     case "logs":
       return "/logs"
-    case "graph":
-      return "/graph"
     default:
       return "/"
   }

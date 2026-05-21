@@ -181,6 +181,10 @@ const en: Record<MessageKey, string> = {
   "chat.tool_searching": "Searching wiki…",
   "chat.tool_reading": "Reading {{path}}…",
   "chat.tool_reads_label": "Wiki pages read",
+  "chat.stop": "Stop",
+  "chat.exclude_from_archive": "Exclude from archive",
+  "chat.excluded_from_archive": "Excluded from archive",
+  "chat.wiki_mention_searching": "Searching…",
 
   // Session controls
   "session.switch": "Switch",
@@ -319,6 +323,15 @@ const en: Record<MessageKey, string> = {
   "wiki.expand_files": "Expand file list",
   "wiki.collapse_outline": "Collapse outline",
   "wiki.expand_outline": "Expand outline",
+  "wiki.type_filter": "Page type",
+  "wiki.entity_list": "Entities",
+  "wiki.graph_entry": "Knowledge graph",
+  "wiki.type.entity": "Entity",
+  "wiki.type.concept": "Concept",
+  "wiki.type.source": "Source summary",
+  "wiki.type.synthesis": "Synthesis",
+  "wiki.type.comparison": "Comparison",
+  "wiki.type.query": "Query",
 
   // Search modal
   "search.placeholder": "Search filename or content...",

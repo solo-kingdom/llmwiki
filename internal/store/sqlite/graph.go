@@ -2,7 +2,8 @@ package sqlite
 
 import (
 	"fmt"
-	"strings"
+
+	"github.com/solo-kingdom/llmwiki/internal/engine"
 )
 
 // GraphNode is a wiki page node for the knowledge graph API.
@@ -25,25 +26,6 @@ type GraphEdge struct {
 type GraphData struct {
 	Nodes []GraphNode `json:"nodes"`
 	Edges []GraphEdge `json:"edges"`
-}
-
-var wikiSubdirType = map[string]string{
-	"entities":    "entity",
-	"concepts":    "concept",
-	"sources":     "source",
-	"synthesis":   "synthesis",
-	"comparisons": "comparison",
-	"queries":     "query",
-}
-
-func wikiPageType(relPath string) string {
-	parts := strings.Split(strings.Trim(relPath, "/"), "/")
-	if len(parts) >= 2 {
-		if t, ok := wikiSubdirType[parts[1]]; ok {
-			return t
-		}
-	}
-	return "page"
 }
 
 // BuildKnowledgeGraph returns wiki page nodes and links_to edges for visualization.
@@ -70,7 +52,7 @@ func (d *DB) BuildKnowledgeGraph() (*GraphData, error) {
 			ID:         relPath,
 			DocumentID: docID,
 			Title:      title,
-			Type:       wikiPageType(relPath),
+			Type:       engine.WikiPageType(relPath),
 		})
 	}
 	if err := rows.Err(); err != nil {

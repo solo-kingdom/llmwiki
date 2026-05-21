@@ -8,13 +8,16 @@ import (
 
 // PublicWikiListItem is the safe document summary exposed on public read-only routes.
 type PublicWikiListItem struct {
-	ID         string `json:"id"`
-	Filename   string `json:"filename"`
-	Title      string `json:"title"`
-	Path       string `json:"path"`
-	FileType   string `json:"file_type"`
-	PageCount  int64  `json:"page_count"`
-	UpdatedAt  string `json:"updated_at"`
+	ID           string `json:"id"`
+	Filename     string `json:"filename"`
+	Title        string `json:"title"`
+	Path         string `json:"path"`
+	RelativePath string `json:"relative_path"`
+	SourceKind   string `json:"source_kind"`
+	PageType     string `json:"page_type"`
+	FileType     string `json:"file_type"`
+	PageCount    int64  `json:"page_count"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // PublicWikiDocument is the safe document payload for public read-only routes.
@@ -46,13 +49,16 @@ type PublicWikiSearchResult struct {
 
 func toPublicListItem(doc sqlite.Document) PublicWikiListItem {
 	return PublicWikiListItem{
-		ID:        doc.ID,
-		Filename:  doc.Filename,
-		Title:     doc.Title,
-		Path:      doc.Path,
-		FileType:  doc.FileType,
-		PageCount: doc.PageCount,
-		UpdatedAt: doc.UpdatedAt,
+		ID:           doc.ID,
+		Filename:     doc.Filename,
+		Title:        doc.Title,
+		Path:         doc.Path,
+		RelativePath: doc.RelativePath,
+		SourceKind:   doc.SourceKind,
+		PageType:     doc.PageType,
+		FileType:     doc.FileType,
+		PageCount:    doc.PageCount,
+		UpdatedAt:    doc.UpdatedAt,
 	}
 }
 
@@ -112,7 +118,10 @@ func (a *API) ListPublicWikiDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	docs, err := a.db.ListDocuments()
+	filter := sqlite.ListDocumentsFilter{
+		SourceKind: "wiki",
+	}
+	docs, err := a.db.ListDocumentsFiltered(filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -171,8 +180,12 @@ func (a *API) SearchPublicWiki(w http.ResponseWriter, r *http.Request) {
 
 	limit := getIntQuery(r, "limit", 10)
 	filter := r.URL.Query().Get("filter")
+	if filter == "" {
+		filter = "wiki"
+	}
+	pageTypes := r.URL.Query()["types"]
 
-	results, err := a.db.SearchChunks(query, limit, filter)
+	results, err := a.db.SearchChunks(query, limit, filter, pageTypes...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

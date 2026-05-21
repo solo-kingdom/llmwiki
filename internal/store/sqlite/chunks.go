@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/solo-kingdom/llmwiki/internal/engine"
 )
 
 // Chunk represents a text chunk for FTS5 indexing.
@@ -63,7 +64,7 @@ type SearchChunk struct {
 
 // SearchChunks performs full-text search over chunk content and document metadata
 // (filename, title, path). Uses FTS5 when possible and LIKE fallbacks for CJK or misses.
-func (d *DB) SearchChunks(query string, limit int, pathFilter string) ([]SearchChunk, error) {
+func (d *DB) SearchChunks(query string, limit int, pathFilter string, pageTypes ...string) ([]SearchChunk, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, nil
@@ -96,7 +97,29 @@ func (d *DB) SearchChunks(query string, limit int, pathFilter string) ([]SearchC
 		return nil, ftsErr
 	}
 
+	if len(pageTypes) > 0 {
+		results = filterSearchChunksByPageType(results, pageTypes)
+	}
+
 	return results, nil
+}
+
+func filterSearchChunksByPageType(results []SearchChunk, pageTypes []string) []SearchChunk {
+	if len(results) == 0 {
+		return results
+	}
+	typeSet := make(map[string]bool, len(pageTypes))
+	for _, t := range pageTypes {
+		typeSet[t] = true
+	}
+	filtered := make([]SearchChunk, 0, len(results))
+	for _, r := range results {
+		pt := engine.WikiPageTypeFromPaths("", strings.TrimPrefix(r.Path, "/"))
+		if typeSet[pt] {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
 }
 
 func escapeFTSQuery(query string) string {

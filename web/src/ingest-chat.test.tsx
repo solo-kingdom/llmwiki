@@ -89,7 +89,7 @@ describe("IngestChat", () => {
       await screen.findByText(/请先在 Settings 添加 Provider/),
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /模型/ })).toBeInTheDocument()
-    const archiveBtn = screen.getByRole("button", { name: /归档/ })
+    const archiveBtn = screen.getByRole("button", { name: /^归档$/ })
     expect(archiveBtn).toBeDisabled()
     expect(screen.getByRole("button", { name: /切换/ })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /新建/ })).toBeInTheDocument()
@@ -194,10 +194,10 @@ describe("IngestChat", () => {
     fireEvent.change(textarea, { target: { value: "draft while streaming" } })
     expect(textarea).toHaveValue("draft while streaming")
 
-    const sendBtn = screen.getByRole("button", { name: /发送/ })
-    await waitFor(() => {
-      expect(sendBtn).toBeDisabled()
-    })
+    // While streaming, the send button becomes a Stop button
+    const stopBtn = screen.getByRole("button", { name: /停止/ })
+    expect(stopBtn).toBeInTheDocument()
+    expect(stopBtn).not.toBeDisabled()
   })
 
   it("copies message content when copy button is clicked", async () => {
@@ -576,6 +576,7 @@ describe("IngestChat", () => {
         "sess-1",
         "msg-assistant",
         expect.any(Function),
+        expect.any(AbortSignal),
       )
     })
     expect(api.streamIngestSessionMessage).not.toHaveBeenCalled()
@@ -647,7 +648,7 @@ describe("IngestChat", () => {
     )
 
     await screen.findByText("pending")
-    expect(screen.getByRole("button", { name: /归档/ })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /^归档$/ })).toBeDisabled()
   })
 
   it("calls archive API only once when confirm is double-clicked", async () => {
@@ -725,7 +726,7 @@ describe("IngestChat", () => {
     )
 
     await screen.findByText("archive me")
-    fireEvent.click(screen.getByRole("button", { name: /归档/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^归档$/ }))
     const confirm = screen.getByRole("button", { name: /确认归档/ })
     fireEvent.click(confirm)
     fireEvent.click(confirm)
@@ -812,7 +813,7 @@ describe("IngestChat", () => {
     )
 
     await screen.findByText("archive me")
-    fireEvent.click(screen.getByRole("button", { name: /归档/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^归档$/ }))
     fireEvent.click(screen.getByRole("button", { name: /确认归档/ }))
 
     expect(
@@ -890,7 +891,7 @@ describe("IngestChat", () => {
     )
 
     await screen.findByText("archive me")
-    fireEvent.click(screen.getByRole("button", { name: /归档/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^归档$/ }))
     fireEvent.click(screen.getByRole("button", { name: /确认归档/ }))
 
     expect(
@@ -947,23 +948,18 @@ describe("IngestChat", () => {
         attachment: true,
       },
     ])
-    vi.mocked(api.searchDocuments).mockResolvedValue({
-      query: "alpha",
-      results: [
-        {
-          document_id: "doc-alpha",
-          path: "wiki/concepts/alpha.md",
-          title: "Alpha Page",
-          filename: "alpha.md",
-          chunk_index: 0,
-          content: "alpha content",
-          page: 1,
-          header_breadcrumb: "",
-          file_type: "md",
-          score: 0.5,
-        },
-      ],
-    })
+    // Provide documents for the fzf search
+    vi.mocked(api.listDocuments).mockResolvedValue([
+      {
+        id: "doc-alpha",
+        filename: "alpha.md",
+        title: "Alpha Page",
+        path: "wiki/concepts/alpha.md",
+        file_type: "md",
+        page_count: 1,
+        updated_at: "2026-01-01",
+      },
+    ])
 
     render(
       <AppProvider>
@@ -971,11 +967,12 @@ describe("IngestChat", () => {
       </AppProvider>,
     )
 
-    const mentionInput = await screen.findByPlaceholderText(/搜索 wiki 页面/)
-    fireEvent.focus(mentionInput)
-    fireEvent.change(mentionInput, { target: { value: "alpha" } })
+    const textarea = await screen.findByPlaceholderText(/输入消息/)
+    // Simulate typing @ in textarea — dispatch native input event for the DOM listener
+    fireEvent.change(textarea, { target: { value: "@", selectionStart: 1 } })
+    textarea.dispatchEvent(new Event("input", { bubbles: true }))
 
-    const option = await screen.findByRole("button", { name: /Alpha Page/ })
+    const option = await screen.findByRole("button", { name: /Alpha Page/ }, { timeout: 3000 })
     fireEvent.click(option)
 
     expect(await screen.findByText("@Alpha Page")).toBeInTheDocument()

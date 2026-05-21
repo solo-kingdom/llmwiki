@@ -109,7 +109,7 @@ describe("GraphPage", () => {
 
   it("navigates to wiki reader when node is clicked", async () => {
     vi.mocked(api.getKnowledgeGraph).mockResolvedValue(mockGraph)
-    window.history.replaceState(null, "", "/graph")
+    window.history.replaceState(null, "", "/wiki/graph")
     renderGraphPage()
 
     const pageA = await screen.findByRole("button", { name: "Page A" })

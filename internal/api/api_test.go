@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -1070,6 +1071,90 @@ func TestIngestUploadAllUnsupported(t *testing.T) {
 	}
 	if len(resp.Rejected) != 3 {
 		t.Fatalf("rejected = %d, want 3", len(resp.Rejected))
+	}
+}
+
+func TestListDocumentsSourceKindFilter(t *testing.T) {
+	api, r := setupTestAPI(t)
+
+	if err := api.db.CreateDocument(&sqlite.Document{
+		Filename: "wiki.md", Title: "Wiki Page", Path: "/wiki/entities",
+		RelativePath: "wiki/entities/wiki.md", SourceKind: "wiki",
+		FileType: "md", Status: "ready",
+	}); err != nil {
+		t.Fatalf("create wiki doc: %v", err)
+	}
+	if err := api.db.CreateDocument(&sqlite.Document{
+		Filename: "raw.md", Title: "Raw", Path: "/raw",
+		RelativePath: "raw/sources/x.md", SourceKind: "source",
+		FileType: "md", Status: "ready",
+	}); err != nil {
+		t.Fatalf("create raw doc: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/documents?source_kind=wiki", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status %d", w.Code)
+	}
+	var docs []sqlite.Document
+	if err := json.NewDecoder(w.Body).Decode(&docs); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, d := range docs {
+		if d.SourceKind != "wiki" {
+			t.Errorf("expected wiki only, got source_kind=%q path=%q", d.SourceKind, d.Path)
+		}
+	}
+}
+
+func TestSearchDefaultWikiScope(t *testing.T) {
+	api, r := setupTestAPI(t)
+
+	wiki := &sqlite.Document{
+		Filename: "w.md", Title: "Wiki Hit", Path: "/wiki/entities",
+		RelativePath: "wiki/entities/w.md", SourceKind: "wiki",
+		FileType: "md", Status: "ready", Content: "UniqueWikiSearchTokenXYZ",
+	}
+	raw := &sqlite.Document{
+		Filename: "r.md", Title: "Raw Hit", Path: "/raw",
+		RelativePath: "raw/sources/r.md", SourceKind: "source",
+		FileType: "md", Status: "ready", Content: "UniqueWikiSearchTokenXYZ",
+	}
+	if err := api.db.CreateDocument(wiki); err != nil {
+		t.Fatalf("wiki doc: %v", err)
+	}
+	if err := api.db.CreateDocument(raw); err != nil {
+		t.Fatalf("raw doc: %v", err)
+	}
+	if err := api.db.StoreChunks(wiki.ID, []sqlite.Chunk{{
+		DocumentID: wiki.ID, ChunkIndex: 0, Content: "UniqueWikiSearchTokenXYZ",
+	}}); err != nil {
+		t.Fatalf("wiki chunks: %v", err)
+	}
+	if err := api.db.StoreChunks(raw.ID, []sqlite.Chunk{{
+		DocumentID: raw.ID, ChunkIndex: 0, Content: "UniqueWikiSearchTokenXYZ",
+	}}); err != nil {
+		t.Fatalf("raw chunks: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/search?q=UniqueWikiSearchTokenXYZ", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("search status %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Results []sqlite.SearchChunk `json:"results"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, hit := range resp.Results {
+		if hit.Path != "" && !strings.Contains(hit.Path, "wiki") {
+			t.Errorf("unexpected non-wiki hit path=%q", hit.Path)
+		}
 	}
 }
 

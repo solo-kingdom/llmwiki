@@ -2,9 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { WikiReaderProvider } from "@/context/WikiReaderContext"
 import { WikiReaderLayout } from "@/components/WikiReaderLayout"
+import * as api from "@/lib/api"
 import type { SearchResponse } from "@/types"
-
-const searchDocuments = vi.fn()
 
 vi.mock("@/lib/api", () => ({
   getPublicWikiStatus: vi.fn().mockResolvedValue({ enabled: false }),
@@ -22,7 +21,7 @@ vi.mock("@/lib/api", () => ({
     updated_at: "",
   }),
   getPublicDocument: vi.fn(),
-  searchDocuments: (...args: unknown[]) => searchDocuments(...args),
+  searchDocuments: vi.fn(),
   searchPublicWiki: vi.fn(),
 }))
 
@@ -30,6 +29,21 @@ describe("Wiki reader shell", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/wiki")
     vi.clearAllMocks()
+    vi.mocked(api.getPublicWikiStatus).mockResolvedValue({ enabled: false })
+    vi.mocked(api.listDocuments).mockResolvedValue([])
+    vi.mocked(api.listPublicDocuments).mockResolvedValue([])
+  })
+
+  it("loads wiki-only documents", async () => {
+    render(
+      <WikiReaderProvider>
+        <WikiReaderLayout />
+      </WikiReaderProvider>,
+    )
+    await screen.findByText("管理工作台")
+    await waitFor(() => {
+      expect(api.listDocuments).toHaveBeenCalledWith({ source_kind: "wiki" })
+    })
   })
 
   it("renders reader header without management tabs", async () => {
@@ -58,7 +72,7 @@ describe("Wiki reader shell", () => {
   })
 
   it("selects document by document_id from search results", async () => {
-    searchDocuments.mockResolvedValueOnce({
+    vi.mocked(api.searchDocuments).mockResolvedValueOnce({
       query: "hello",
       results: [
         {
@@ -88,7 +102,8 @@ describe("Wiki reader shell", () => {
     fireEvent.change(input, { target: { value: "hello" } })
 
     await waitFor(
-      () => expect(searchDocuments).toHaveBeenCalledWith("hello"),
+      () =>
+        expect(api.searchDocuments).toHaveBeenCalledWith("hello", 10, undefined),
       { timeout: 2000 },
     )
 
@@ -98,7 +113,7 @@ describe("Wiki reader shell", () => {
     )
     fireEvent.click(resultBtn)
 
-    expect(searchDocuments).toHaveBeenCalledWith("hello")
+    expect(api.searchDocuments).toHaveBeenCalledWith("hello", 10, undefined)
     expect(window.location.search).toContain("doc=doc-abc")
   })
 })

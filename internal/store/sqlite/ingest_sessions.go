@@ -18,15 +18,16 @@ type IngestSession struct {
 }
 
 type IngestSessionMessage struct {
-	ID            string `json:"id"`
-	SessionID     string `json:"session_id"`
-	Role          string `json:"role"`
-	Content       string `json:"content"`
-	MessageType   string `json:"message_type"`
-	AttachmentID  string `json:"attachment_id"`
-	StreamStatus  string `json:"stream_status"`
-	WikiRefsJSON  string `json:"wiki_refs_json,omitempty"`
-	CreatedAt     string `json:"created_at"`
+	ID                   string `json:"id"`
+	SessionID            string `json:"session_id"`
+	Role                 string `json:"role"`
+	Content              string `json:"content"`
+	MessageType          string `json:"message_type"`
+	AttachmentID         string `json:"attachment_id"`
+	StreamStatus         string `json:"stream_status"`
+	WikiRefsJSON         string `json:"wiki_refs_json,omitempty"`
+	ExcludeFromArchive   bool   `json:"exclude_from_archive"`
+	CreatedAt            string `json:"created_at"`
 }
 
 func scanIngestSession(scanner interface{ Scan(...interface{}) error }, s *IngestSession) error {
@@ -40,7 +41,7 @@ func scanIngestSession(scanner interface{ Scan(...interface{}) error }, s *Inges
 func scanIngestSessionMessage(scanner interface{ Scan(...interface{}) error }, m *IngestSessionMessage) error {
 	return scanner.Scan(
 		&m.ID, &m.SessionID, &m.Role, &m.Content, &m.MessageType,
-		&m.AttachmentID, &m.StreamStatus, &m.WikiRefsJSON, &m.CreatedAt,
+		&m.AttachmentID, &m.StreamStatus, &m.WikiRefsJSON, &m.ExcludeFromArchive, &m.CreatedAt,
 	)
 }
 
@@ -154,7 +155,8 @@ func (d *DB) CreateIngestSessionMessage(msg *IngestSessionMessage) error {
 	created, err := d.db.Query(`
 		SELECT COALESCE(id,''), COALESCE(session_id,''), COALESCE(role,''),
 		       COALESCE(content,''), COALESCE(message_type,''), COALESCE(attachment_id,''),
-		       COALESCE(stream_status,''), COALESCE(wiki_refs_json,'[]'), COALESCE(created_at,'')
+		       COALESCE(stream_status,''), COALESCE(wiki_refs_json,'[]'),
+		       COALESCE(exclude_from_archive,0), COALESCE(created_at,'')
 		FROM ingest_session_messages WHERE rowid = last_insert_rowid()`)
 	if err != nil {
 		return err
@@ -177,7 +179,8 @@ func (d *DB) GetIngestSessionMessage(id string) (*IngestSessionMessage, error) {
 	err := scanIngestSessionMessage(d.db.QueryRow(`
 		SELECT COALESCE(id,''), COALESCE(session_id,''), COALESCE(role,''),
 		       COALESCE(content,''), COALESCE(message_type,''), COALESCE(attachment_id,''),
-		       COALESCE(stream_status,''), COALESCE(wiki_refs_json,'[]'), COALESCE(created_at,'')
+		       COALESCE(stream_status,''), COALESCE(wiki_refs_json,'[]'),
+		       COALESCE(exclude_from_archive,0), COALESCE(created_at,'')
 		FROM ingest_session_messages WHERE id = ?`, id), m)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -192,7 +195,8 @@ func (d *DB) ListIngestSessionMessages(sessionID string) ([]IngestSessionMessage
 	rows, err := d.db.Query(`
 		SELECT COALESCE(id,''), COALESCE(session_id,''), COALESCE(role,''),
 		       COALESCE(content,''), COALESCE(message_type,''), COALESCE(attachment_id,''),
-		       COALESCE(stream_status,''), COALESCE(wiki_refs_json,'[]'), COALESCE(created_at,'')
+		       COALESCE(stream_status,''), COALESCE(wiki_refs_json,'[]'),
+		       COALESCE(exclude_from_archive,0), COALESCE(created_at,'')
 		FROM ingest_session_messages
 		WHERE session_id = ?
 		ORDER BY datetime(created_at) ASC`, sessionID)
@@ -216,6 +220,14 @@ func (d *DB) UpdateIngestSessionMessageContent(id, content, streamStatus string)
 		UPDATE ingest_session_messages
 		SET content = ?, stream_status = ?
 		WHERE id = ?`, content, streamStatus, id)
+	return err
+}
+
+func (d *DB) UpdateIngestSessionMessageExclude(id string, exclude bool) error {
+	_, err := d.db.Exec(`
+		UPDATE ingest_session_messages
+		SET exclude_from_archive = ?
+		WHERE id = ?`, exclude, id)
 	return err
 }
 

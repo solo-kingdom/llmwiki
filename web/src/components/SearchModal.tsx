@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator"
 import { cn, getSearchHistory, saveSearchHistory, clearSearchHistory } from "@/lib/utils"
 import { highlightText } from "@/lib/search-highlight"
 import { useWikiReader } from "@/context/WikiReaderContext"
+import { WikiTypeFilter } from "@/components/WikiTypeFilter"
 import { useT } from "@/i18n"
 import type { SearchChunk } from "@/types"
 
@@ -25,8 +26,14 @@ interface SearchModalProps {
 
 export function SearchModal({ open, onOpenChange }: SearchModalProps) {
   const t = useT()
-  const { search, searchResults, searchQuery, clearSearch, selectDocument } =
-    useWikiReader()
+  const {
+    search,
+    searchResults,
+    searchQuery,
+    clearSearch,
+    selectDocument,
+    selectedPageTypes,
+  } = useWikiReader()
   const [query, setQuery] = useState("")
   const [loading, setLoading] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(-1)
@@ -70,9 +77,11 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
     (q: string) => {
       if (!q.trim()) return
       setLoading(true)
-      search(q)
+      const types =
+        selectedPageTypes.length > 0 ? selectedPageTypes : undefined
+      search(q, types)
     },
-    [search],
+    [search, selectedPageTypes],
   )
 
   const handleInputChange = (value: string) => {
@@ -196,7 +205,7 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
               </Button>
             )}
           </div>
-
+          <WikiTypeFilter />
           <Separator />
 
           <div ref={resultsRef} className="min-h-0 flex-1 overflow-y-auto">

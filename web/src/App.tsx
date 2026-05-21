@@ -3,7 +3,12 @@ import { WikiReaderProvider } from "@/context/WikiReaderContext"
 import { I18nProvider, useI18n } from "@/i18n"
 import { WorkbenchLayout } from "@/components/WorkbenchLayout"
 import { WikiReaderLayout } from "@/components/WikiReaderLayout"
-import { isWikiReaderPath, usePathname } from "@/lib/wiki-routes"
+import {
+  isWikiReaderPath,
+  navigateTo,
+  usePathname,
+  wikiGraphHref,
+} from "@/lib/wiki-routes"
 import { useEffect } from "react"
 import "./App.css"
 
@@ -26,6 +31,12 @@ function I18nSync() {
 
 function AppRouter() {
   const pathname = usePathname()
+
+  useEffect(() => {
+    if (pathname === "/graph") {
+      navigateTo(wikiGraphHref())
+    }
+  }, [pathname])
 
   if (isWikiReaderPath(pathname)) {
     return (

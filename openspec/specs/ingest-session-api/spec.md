@@ -140,6 +140,18 @@ The system SHALL emit SSE events for tool activity during session chat streaming
 - **WHEN** tool execution completes
 - **THEN** the SSE stream SHALL emit `event: tool_done` with tool name and success or error summary
 
+### Requirement: Session message exclude from archive
+The system SHALL allow marking session messages as excluded from archive and SHALL omit them when building archive transcripts.
+
+#### Scenario: Patch message exclude flag
+- **WHEN** client sends `PATCH /api/v1/ingest/sessions/{id}/messages/{messageId}` with `{ exclude_from_archive: true }`
+- **THEN** the system SHALL persist the flag on that message
+- **AND** return the updated message representation
+
+#### Scenario: Archive omits excluded messages
+- **WHEN** client posts archive for a session containing messages with `exclude_from_archive=true`
+- **THEN** those messages SHALL NOT appear in the generated archive markdown transcript
+
 ### Requirement: Session archive idempotency
 The system SHALL expose `POST /api/v1/ingest/sessions/{id}/archive` to freeze a session transcript into an ingest review without creating duplicate reviews on retry.
 

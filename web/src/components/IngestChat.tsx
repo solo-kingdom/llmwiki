@@ -15,6 +15,7 @@ import type { IngestSessionMessage, WikiRefPayload } from "@/types"
 import {
   Archive,
   Bot,
+  CircleOff,
   Copy,
   Cpu,
   Loader2,
@@ -22,6 +23,7 @@ import {
   RotateCcw,
   Send,
   SlidersHorizontal,
+  Square,
 } from "lucide-react"
 
 function canRetryAssistant(msg: IngestSessionMessage): boolean {
@@ -44,10 +46,12 @@ function assistantErrorText(
 function MessageBubble({
   msg,
   onRetry,
+  onToggleExclude,
   sessionBusy,
 }: {
   msg: IngestSessionMessage
   onRetry: (assistantMessageId: string) => void
+  onToggleExclude: (messageId: string) => void
   sessionBusy: boolean
 }) {
   const t = useT()
@@ -63,6 +67,8 @@ function MessageBubble({
   const isStreaming = msg.stream_status === "streaming"
   const hasContent = !!msg.content?.trim()
   const copyText = msg.content?.trim() || errorText || ""
+
+  const isExcluded = !!msg.exclude_from_archive
 
   useEffect(
     () => () => {
@@ -81,88 +87,112 @@ function MessageBubble({
     copyTimerRef.current = setTimeout(() => setCopied(false), 2000)
   }
 
+  const showActionBar =
+    (isUser || msg.role === "assistant") &&
+    msg.message_type !== "attachment_summary" &&
+    !isStreaming
+
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`relative max-w-[92%] rounded-2xl px-4 py-2 text-sm ${
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : msg.message_type === "attachment_summary"
-              ? "bg-muted border border-dashed"
-              : "bg-muted"
-        }`}
-      >
-        {copyText && (
-          <button
-            type="button"
-            className="absolute right-2 top-2 z-10 rounded p-1 opacity-0 transition-opacity hover:bg-background/20 group-hover:opacity-100"
-            title={copied ? t("chat.copied") : t("chat.copy")}
-            aria-label={copied ? t("chat.copied") : t("chat.copy")}
-            onClick={(e) => void handleCopy(e)}
-          >
-            <Copy className={`size-3.5 ${copied ? "text-green-600" : ""}`} />
-          </button>
-        )}
-        {isUser ? (
-          <div className="pr-6">
+      <div className={`max-w-[92%] ${isExcluded ? "opacity-60" : ""}`}>
+        <div
+          className={`relative rounded-2xl px-4 py-2 text-sm ${
+            isUser
+              ? "bg-primary text-primary-foreground"
+              : msg.message_type === "attachment_summary"
+                ? "bg-muted border border-dashed"
+                : "bg-muted"
+          }`}
+        >
+          {isUser ? (
+            <div>
+              <p className="whitespace-pre-wrap">{msg.content}</p>
+              {msg.wiki_refs && msg.wiki_refs.length > 0 && (
+                <div className="mt-2 border-t border-primary-foreground/20 pt-2 text-xs opacity-90">
+                  <p className="mb-1 font-medium">{t("chat.wiki_refs_label")}</p>
+                  <ul className="space-y-0.5">
+                    {msg.wiki_refs.map((ref) => (
+                      <li key={ref.document_id}>{ref.title || ref.relative_path}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : isStreaming && !hasContent ? (
+            <Loader2
+              className="size-4 animate-spin text-muted-foreground"
+              aria-label={t("chat.replying")}
+            />
+          ) : isStreaming ? (
             <p className="whitespace-pre-wrap">{msg.content}</p>
-            {msg.wiki_refs && msg.wiki_refs.length > 0 && (
-              <div className="mt-2 border-t border-primary-foreground/20 pt-2 text-xs opacity-90">
-                <p className="mb-1 font-medium">{t("chat.wiki_refs_label")}</p>
-                <ul className="space-y-0.5">
-                  {msg.wiki_refs.map((ref) => (
-                    <li key={ref.document_id}>{ref.title || ref.relative_path}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        ) : isStreaming && !hasContent ? (
-          <Loader2
-            className="size-4 animate-spin text-muted-foreground"
-            aria-label={t("chat.replying")}
-          />
-        ) : isStreaming ? (
-          <p className="whitespace-pre-wrap pr-6">{msg.content}</p>
-        ) : !hasContent && isFailed && errorText ? (
-          <p className="whitespace-pre-wrap pr-6 text-destructive">{errorText}</p>
-        ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none pr-6">
-            {msg.tool_status && (
-              <p className="mb-2 text-xs text-muted-foreground">{msg.tool_status}</p>
-            )}
-            {msg.tool_reads && msg.tool_reads.length > 0 && (
-              <details className="mb-2 text-xs text-muted-foreground">
-                <summary>{t("chat.tool_reads_label")}</summary>
-                <ul className="mt-1 space-y-0.5">
-                  {msg.tool_reads.map((path) => (
-                    <li key={path}>{path}</li>
-                  ))}
-                </ul>
-              </details>
-            )}
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {msg.content}
-            </ReactMarkdown>
-          </div>
-        )}
-        {isFailed && (
-          <div className="mt-2 space-y-1 border-t border-destructive/20 pt-2">
-            {hasContent && errorText && (
-              <p className="text-xs text-destructive">{errorText}</p>
-            )}
-            {showRetry && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs"
-                disabled={sessionBusy}
-                onClick={() => onRetry(msg.id)}
+          ) : !hasContent && isFailed && errorText ? (
+            <p className="whitespace-pre-wrap text-destructive">{errorText}</p>
+          ) : (
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              {msg.tool_status && (
+                <p className="mb-2 text-xs text-muted-foreground">{msg.tool_status}</p>
+              )}
+              {msg.tool_reads && msg.tool_reads.length > 0 && (
+                <details className="mb-2 text-xs text-muted-foreground">
+                  <summary>{t("chat.tool_reads_label")}</summary>
+                  <ul className="mt-1 space-y-0.5">
+                    {msg.tool_reads.map((path) => (
+                      <li key={path}>{path}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {msg.content}
+              </ReactMarkdown>
+            </div>
+          )}
+          {isFailed && (
+            <div className="mt-2 space-y-1 border-t border-destructive/20 pt-2">
+              {hasContent && errorText && (
+                <p className="text-xs text-destructive">{errorText}</p>
+              )}
+              {showRetry && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={sessionBusy}
+                  onClick={() => onRetry(msg.id)}
+                >
+                  <RotateCcw className="size-3" />
+                  {t("chat.retry")}
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+        {showActionBar && (
+          <div className="flex h-0 items-center gap-1 overflow-visible px-1 pt-1 opacity-0 transition-opacity group-hover:opacity-100">
+            {copyText && (
+              <button
+                type="button"
+                className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                title={copied ? t("chat.copied") : t("chat.copy")}
+                aria-label={copied ? t("chat.copied") : t("chat.copy")}
+                onClick={(e) => void handleCopy(e)}
               >
-                <RotateCcw className="size-3" />
-                {t("chat.retry")}
-              </Button>
+                <Copy className={`size-3.5 ${copied ? "text-green-600" : ""}`} />
+              </button>
             )}
+            <button
+              type="button"
+              className={`rounded p-1 transition-colors ${
+                isExcluded
+                  ? "text-orange-500"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title={isExcluded ? t("chat.excluded_from_archive") : t("chat.exclude_from_archive")}
+              aria-label={isExcluded ? t("chat.excluded_from_archive") : t("chat.exclude_from_archive")}
+              onClick={() => onToggleExclude(msg.id)}
+            >
+              <CircleOff className="size-3.5" />
+            </button>
           </div>
         )}
       </div>
@@ -181,9 +211,12 @@ export function IngestChat() {
     currentModels,
     activeSessionId,
     sessions,
+    documents,
     ensureIngestSession,
     sendSessionMessage,
     retrySessionMessage,
+    cancelStream,
+    toggleMessageExclude,
     uploadSessionAttachment,
     archiveSession,
     refreshIngestJobs,
@@ -209,6 +242,7 @@ export function IngestChat() {
   const [configLoaded, setConfigLoaded] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const initRef = useRef(false)
   useEffect(() => {
@@ -421,6 +455,7 @@ export function IngestChat() {
                 key={m.id}
                 msg={m}
                 onRetry={handleRetry}
+                onToggleExclude={toggleMessageExclude}
                 sessionBusy={sessionBusy}
               />
             ))}
@@ -514,8 +549,13 @@ export function IngestChat() {
           value={wikiRefs}
           onChange={setWikiRefs}
           disabled={textareaDisabled}
+          documents={documents}
+          textareaRef={textareaRef}
+          inputValue={input}
+          onInputChange={setInput}
         />
         <textarea
+          ref={textareaRef}
           className="max-h-40 min-h-[72px] w-full resize-y bg-transparent px-2 py-2 text-sm outline-none"
           placeholder={
             !isReady
@@ -569,16 +609,16 @@ export function IngestChat() {
           />
           <Button
             size="sm"
-            variant="secondary"
-            disabled={sendDisabled}
-            onClick={() => void handleSend()}
+            variant={sessionBusy ? "destructive" : "secondary"}
+            disabled={sessionBusy ? false : sendDisabled}
+            onClick={sessionBusy ? cancelStream : () => void handleSend()}
           >
             {sessionBusy ? (
-              <Loader2 className="size-3.5 animate-spin" />
+              <Square className="size-3.5" />
             ) : (
               <Send className="size-3.5" />
             )}
-            {t("chat.send")}
+            {sessionBusy ? t("chat.stop") : t("chat.send")}
           </Button>
         </div>
       </div>

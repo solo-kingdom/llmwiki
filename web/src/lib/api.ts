@@ -51,8 +51,17 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json()
 }
 
-export function listDocuments(): Promise<DocumentListItem[]> {
-  return request<DocumentListItem[]>("/api/v1/documents/")
+export function listDocuments(params?: {
+  source_kind?: string
+  types?: string[]
+}): Promise<DocumentListItem[]> {
+  const q = new URLSearchParams()
+  if (params?.source_kind) q.set("source_kind", params.source_kind)
+  for (const t of params?.types ?? []) q.append("types", t)
+  const qs = q.toString()
+  return request<DocumentListItem[]>(
+    `/api/v1/documents/${qs ? `?${qs}` : ""}`,
+  )
 }
 
 export function getDocument(id: string): Promise<Document> {
@@ -62,10 +71,14 @@ export function getDocument(id: string): Promise<Document> {
 export function searchDocuments(
   q: string,
   limit = 10,
+  types?: string[],
 ): Promise<SearchResponse> {
-  return request<SearchResponse>(
-    `/api/v1/search/?q=${encodeURIComponent(q)}&limit=${limit}`,
-  )
+  const params = new URLSearchParams({
+    q,
+    limit: String(limit),
+  })
+  for (const t of types ?? []) params.append("types", t)
+  return request<SearchResponse>(`/api/v1/search/?${params.toString()}`)
 }
 
 export function getPublicWikiStatus(): Promise<{ enabled: boolean }> {
@@ -85,9 +98,15 @@ export function getPublicDocument(id: string): Promise<PublicWikiDocument> {
 export function searchPublicWiki(
   q: string,
   limit = 10,
+  types?: string[],
 ): Promise<SearchResponse> {
+  const params = new URLSearchParams({
+    q,
+    limit: String(limit),
+  })
+  for (const t of types ?? []) params.append("types", t)
   return request<SearchResponse>(
-    `/api/public/wiki/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    `/api/public/wiki/search?${params.toString()}`,
   )
 }
 
@@ -344,6 +363,7 @@ export async function streamIngestSessionMessage(
   content: string,
   onEvent: SessionStreamHandler,
   wikiRefs?: WikiRefPayload[],
+  signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch(
     `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/messages?stream=1`,
@@ -354,6 +374,7 @@ export async function streamIngestSessionMessage(
         Accept: "text/event-stream",
       },
       body: JSON.stringify({ content, wiki_refs: wikiRefs ?? [] }),
+      signal,
     },
   )
   await consumeSessionSSE(res, onEvent)
@@ -371,12 +392,14 @@ export async function streamRetryIngestSessionMessage(
   sessionId: string,
   assistantMessageId: string,
   onEvent: SessionStreamHandler,
+  signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch(
     `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(assistantMessageId)}/retry?stream=1`,
     {
       method: "POST",
       headers: { Accept: "text/event-stream" },
+      signal,
     },
   )
   await consumeSessionSSE(res, onEvent)
@@ -396,6 +419,21 @@ export function uploadIngestSessionAttachment(
     method: "POST",
     body: form,
   })
+}
+
+export function patchIngestSessionMessage(
+  sessionId: string,
+  messageId: string,
+  patch: { exclude_from_archive?: boolean },
+): Promise<{ message: IngestSessionMessage }> {
+  return request<{ message: IngestSessionMessage }>(
+    `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  )
 }
 
 export function archiveIngestSession(

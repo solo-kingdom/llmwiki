@@ -9,11 +9,12 @@ The system SHALL expose `GET /api/v1/graph` returning wiki page nodes and refere
 - **AND** edges SHALL include links_to relationships from the reference graph
 
 ### Requirement: Knowledge graph Web UI
-The Web UI SHALL provide a graph visualization view for browsing wiki page relationships.
+The Web UI SHALL provide a graph visualization view for browsing wiki page relationships within the Wiki reader shell.
 
 #### Scenario: Graph view navigation
-- **WHEN** user opens the Graph entry in workbench navigation
+- **WHEN** user opens the knowledge graph from the Wiki reader (e.g. `/wiki/graph`)
 - **THEN** a force-directed graph SHALL display wiki pages as nodes and links as edges
+- **AND** the view SHALL NOT be a primary Workbench top-level navigation tab
 
 #### Scenario: Node click opens reader
 - **WHEN** user clicks a node in the graph view
@@ -22,3 +23,7 @@ The Web UI SHALL provide a graph visualization view for browsing wiki page relat
 #### Scenario: Empty graph state
 - **WHEN** workspace has fewer than 2 linked wiki pages
 - **THEN** the graph view SHALL show a Chinese empty state message
+
+#### Scenario: Legacy graph URL redirect
+- **WHEN** user navigates to `/graph`
+- **THEN** the system SHALL redirect to `/wiki/graph` or equivalent Wiki graph route

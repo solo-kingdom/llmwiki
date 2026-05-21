@@ -63,6 +63,31 @@ The UI SHALL render user and assistant messages with distinct styling and suppor
 - **THEN** UI SHALL show error message with retry affordance on the failed assistant message
 - **AND** retry SHALL reuse the same assistant message row and SHALL NOT create duplicate user messages
 
+### Requirement: Stop streaming reply
+While the assistant is streaming, the composer SHALL allow the user to cancel the in-flight request.
+
+#### Scenario: Stop button during stream
+- **WHEN** a session message stream is in progress
+- **THEN** the send control SHALL become a Stop button
+- **AND** clicking Stop SHALL abort the client fetch via `AbortController`
+
+#### Scenario: Partial content preserved after stop
+- **WHEN** user stops a stream
+- **THEN** the assistant message SHALL remain visible with `stream_status=incomplete`
+- **AND** UI SHALL offer retry on that message row
+
+### Requirement: Message action bar
+User and assistant message bubbles SHALL expose a hover action bar below the bubble with copy and exclude-from-archive controls.
+
+#### Scenario: Action bar on hover
+- **WHEN** user hovers a user or assistant message
+- **THEN** UI SHALL show an action bar below the bubble with copy and exclude-from-archive affordances
+
+#### Scenario: Toggle exclude from archive
+- **WHEN** user toggles exclude-from-archive on a message
+- **THEN** UI SHALL persist the flag via `PATCH /api/v1/ingest/sessions/{id}/messages/{messageId}`
+- **AND** SHALL reflect excluded state visually on that message
+
 ### Requirement: Attachment interaction in chat
 The UI SHALL allow attaching images and files from the composer and display attachment summaries as assistant messages.
 
@@ -113,11 +138,12 @@ Global navigation SHALL label the default ingest entry **Ingest** (not Ingest Hu
 - **THEN** warning icon SHALL appear adjacent to the Ingest entry label (same behavior as prior Ingest Hub warning)
 
 ### Requirement: Wiki page mention in composer
-The Ingest Chat composer SHALL support `@` mentions of wiki pages with autocomplete and visual chips.
+The Ingest Chat composer SHALL support `@` mentions of wiki pages with in-text fuzzy search and visual chips. The composer SHALL NOT use a separate standalone wiki search input above the textarea.
 
-#### Scenario: Open mention picker
-- **WHEN** user types `@` in the chat composer
-- **THEN** UI SHALL show a dropdown of wiki pages searchable by title and path via the document search API
+#### Scenario: Open mention picker from textarea
+- **WHEN** user types `@` in the chat composer textarea
+- **THEN** UI SHALL open a popup panel anchored to the composer
+- **AND** SHALL filter loaded wiki documents client-side with fuzzy matching on title and path
 
 #### Scenario: Select mention chip
 - **WHEN** user selects a page from the mention dropdown

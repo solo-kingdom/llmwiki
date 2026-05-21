@@ -4,10 +4,12 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react"
+import { filterByPageTypes } from "@/lib/wiki-page-types"
 import type {
   Document,
   DocumentListItem,
@@ -48,6 +50,9 @@ function publicToDocument(pub: PublicWikiDocument): Document {
 
 interface WikiReaderState {
   documents: DocumentListItem[]
+  filteredDocuments: DocumentListItem[]
+  selectedPageTypes: string[]
+  setSelectedPageTypes: (types: string[]) => void
   currentDoc: Document | null
   currentDocId: string | null
   searchResults: SearchResponse | null
@@ -56,7 +61,7 @@ interface WikiReaderState {
   error: string | null
   publicWikiEnabled: boolean | null
   selectDocument: (id: string) => void
-  search: (q: string) => void
+  search: (q: string, types?: string[]) => void
   clearSearch: () => void
   refreshDocuments: () => void
 }
@@ -65,6 +70,7 @@ const WikiReaderContext = createContext<WikiReaderState | null>(null)
 
 export function WikiReaderProvider({ children }: { children: ReactNode }) {
   const [documents, setDocuments] = useState<DocumentListItem[]>([])
+  const [selectedPageTypes, setSelectedPageTypes] = useState<string[]>([])
   const [currentDoc, setCurrentDoc] = useState<Document | null>(null)
   const [currentDocId, setCurrentDocId] = useState<string | null>(null)
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null)
@@ -79,11 +85,18 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
   const usePublicApi = publicWikiEnabled === true
 
   const refreshDocuments = useCallback(() => {
-    const loader = usePublicApi ? api.listPublicDocuments : api.listDocuments
+    const loader = usePublicApi
+      ? api.listPublicDocuments
+      : () => api.listDocuments({ source_kind: "wiki" })
     loader()
       .then(setDocuments)
       .catch((e) => setError((e as Error).message))
   }, [usePublicApi])
+
+  const filteredDocuments = useMemo(
+    () => filterByPageTypes(documents, selectedPageTypes),
+    [documents, selectedPageTypes],
+  )
 
   useEffect(() => {
     api
@@ -149,7 +162,7 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
   }, [publicWikiEnabled, documents, currentDocId, selectDocument])
 
   const search = useCallback(
-    (q: string) => {
+    (q: string, types?: string[]) => {
       if (!q.trim()) {
         setSearchResults(null)
         setSearchQuery("")
@@ -157,7 +170,7 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
       }
       setSearchQuery(q)
       const searcher = usePublicApi ? api.searchPublicWiki : api.searchDocuments
-      searcher(q)
+      searcher(q, 10, types)
         .then(setSearchResults)
         .catch((e) => setError((e as Error).message))
     },
@@ -173,6 +186,9 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
     <WikiReaderContext.Provider
       value={{
         documents,
+        filteredDocuments,
+        selectedPageTypes,
+        setSelectedPageTypes,
         currentDoc,
         currentDocId,
         searchResults,

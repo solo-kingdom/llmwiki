@@ -15,8 +15,12 @@ func (a *API) Search(w http.ResponseWriter, r *http.Request) {
 
 	limit := getIntQuery(r, "limit", 10)
 	filter := r.URL.Query().Get("filter")
+	if filter == "" {
+		filter = "wiki"
+	}
+	pageTypes := r.URL.Query()["types"]
 
-	results, err := a.db.SearchChunks(query, limit, filter)
+	results, err := a.db.SearchChunks(query, limit, filter, pageTypes...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

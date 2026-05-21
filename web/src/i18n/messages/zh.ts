@@ -5,9 +5,15 @@ const zh = {
   "nav.review": "审核",
   "nav.jobs": "任务",
   "nav.timeline": "时间线",
+  "nav.graph": "图谱",
   "nav.logs": "日志",
   "nav.settings": "设置",
   "nav.wiki": "Wiki",
+
+  // Graph
+  "graph.title": "知识图谱",
+  "graph.loading": "加载图谱中…",
+  "graph.empty": "暂无足够页面生成图谱",
 
   // WorkbenchLayout
   "app.title": "LLMWiki",

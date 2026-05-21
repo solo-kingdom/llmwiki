@@ -157,6 +157,7 @@ func (s *Server) Start() error {
 		r.Get("/lint", s.api.Lint)
 
 		r.Route("/graph", func(r chi.Router) {
+			r.Get("/", s.api.KnowledgeGraph)
 			r.Get("/backlinks/{id}", s.api.Backlinks)
 			r.Get("/forward/{id}", s.api.ForwardReferences)
 			r.Get("/uncited", s.api.UncitedSources)

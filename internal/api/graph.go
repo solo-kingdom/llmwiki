@@ -6,6 +6,27 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
+// KnowledgeGraph returns wiki page nodes and links_to edges for visualization.
+func (a *API) KnowledgeGraph(w http.ResponseWriter, r *http.Request) {
+	if a.db == nil {
+		writeError(w, http.StatusInternalServerError, "database not configured")
+		return
+	}
+
+	data, err := a.db.BuildKnowledgeGraph()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if data.Nodes == nil {
+		data.Nodes = []sqlite.GraphNode{}
+	}
+	if data.Edges == nil {
+		data.Edges = []sqlite.GraphEdge{}
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
 func (a *API) Backlinks(w http.ResponseWriter, r *http.Request) {
 	id := getID(r)
 	if id == "" {

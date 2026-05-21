@@ -47,6 +47,7 @@ func setupTestAPI(t *testing.T) (*API, *chi.Mux) {
 	})
 	r.Get("/api/v1/search", api.Search)
 	r.Route("/api/v1/graph", func(r chi.Router) {
+		r.Get("/", api.KnowledgeGraph)
 		r.Get("/uncited", api.UncitedSources)
 		r.Get("/stale", api.StalePages)
 		r.Get("/{id}/backlinks", api.Backlinks)

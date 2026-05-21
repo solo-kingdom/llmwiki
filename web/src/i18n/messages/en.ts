@@ -7,9 +7,15 @@ const en: Record<MessageKey, string> = {
   "nav.review": "Review",
   "nav.jobs": "Jobs",
   "nav.timeline": "Timeline",
+  "nav.graph": "Graph",
   "nav.logs": "Logs",
   "nav.settings": "Settings",
   "nav.wiki": "Wiki",
+
+  // Graph
+  "graph.title": "Knowledge Graph",
+  "graph.loading": "Loading graph…",
+  "graph.empty": "Not enough linked pages to build a graph",
 
   // WorkbenchLayout
   "app.title": "LLMWiki",

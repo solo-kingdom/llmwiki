@@ -6,6 +6,7 @@ import type {
   WorkspaceRuleFilesPreview,
   ReferenceSummary,
   StalePage,
+  KnowledgeGraphResponse,
   IngestJob,
   IngestJobResponse,
   IngestJobEventsResponse,
@@ -152,6 +153,10 @@ export function getForwardReferences(
 
 export function getStalePages(): Promise<StalePage[]> {
   return request<StalePage[]>("/api/v1/graph/stale")
+}
+
+export function getKnowledgeGraph(): Promise<KnowledgeGraphResponse> {
+  return request<KnowledgeGraphResponse>("/api/v1/graph")
 }
 
 export function healthCheck(): Promise<{ status: string }> {

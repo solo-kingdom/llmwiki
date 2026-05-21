@@ -158,6 +158,25 @@ export interface ReferenceSummary {
   page: number
 }
 
+export interface GraphNode {
+  id: string
+  document_id: string
+  title: string
+  type: string
+  link_count: number
+}
+
+export interface GraphEdge {
+  source: string
+  target: string
+  type: string
+}
+
+export interface KnowledgeGraphResponse {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+
 export interface StalePage {
   filename: string
   title: string

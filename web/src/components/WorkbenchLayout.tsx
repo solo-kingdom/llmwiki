@@ -7,6 +7,7 @@ import { IngestRaw } from "@/components/IngestRaw"
 import { JobsPage } from "@/components/JobsPage"
 import { ReviewPage } from "@/components/ReviewPage"
 import { LogsPage } from "@/components/LogsPage"
+import { GraphPage } from "@/components/GraphPage"
 import { TimelinePage } from "@/components/TimelinePage"
 import { WarningPopover } from "@/components/WarningPopover"
 import { AppHeaderBar } from "@/components/AppHeaderBar"
@@ -30,6 +31,7 @@ const NAV_ITEMS: { id: WorkbenchView; labelKey: MessageKey }[] = [
   { id: "review", labelKey: "nav.review" },
   { id: "jobs", labelKey: "nav.jobs" },
   { id: "timeline", labelKey: "nav.timeline" },
+  { id: "graph", labelKey: "nav.graph" },
   { id: "logs", labelKey: "nav.logs" },
   { id: "settings", labelKey: "nav.settings" },
 ]
@@ -173,6 +175,7 @@ export function WorkbenchLayout() {
           {view === "review" && <ReviewPage />}
           {view === "jobs" && <JobsPage />}
           {view === "timeline" && vcEnabled === true && <TimelinePage />}
+          {view === "graph" && <GraphPage />}
           {view === "logs" && <LogsPage />}
           {view === "settings" && <SettingsPage />}
         </main>

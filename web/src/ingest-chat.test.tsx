@@ -955,6 +955,7 @@ describe("IngestChat", () => {
         filename: "alpha.md",
         title: "Alpha Page",
         path: "wiki/concepts/alpha.md",
+        relative_path: "wiki/concepts/alpha.md",
         file_type: "md",
         page_count: 1,
         updated_at: "2026-01-01",

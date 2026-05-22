@@ -168,7 +168,7 @@ function MessageBubble({
           )}
         </div>
         {showActionBar && (
-          <div className="flex h-0 items-center gap-1 overflow-visible px-1 pt-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="flex items-center gap-1 px-1 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100">
             {copyText && (
               <button
                 type="button"

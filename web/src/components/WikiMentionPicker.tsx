@@ -44,6 +44,7 @@ export function WikiMentionPicker({
   const [open, setOpen] = useState(false)
   const [mentionStart, setMentionStart] = useState(-1) // position of @ char
   const [searchQuery, setSearchQuery] = useState("")
+  const [highlightIndex, setHighlightIndex] = useState(0)
   const panelRef = useRef<HTMLDivElement>(null)
 
   const selectedIds = useMemo(
@@ -61,6 +62,44 @@ export function WikiMentionPicker({
   const results = useMemo(
     () => fuzzySearchDocs(wikiDocs, searchQuery, 8),
     [wikiDocs, searchQuery],
+  )
+
+  const addRef = useCallback(
+    (doc: DocumentListItem) => {
+      if (selectedIds.has(doc.id)) return
+      if (value.length >= MAX_WIKI_REFS) return
+
+      // Remove the @query text from textarea
+      if (mentionStart >= 0 && onInputChange && textareaRef?.current) {
+        const val = textareaRef.current.value
+        const before = val.slice(0, mentionStart)
+        const after = val.slice(textareaRef.current.selectionStart)
+        onInputChange(before + after)
+        // Reset cursor position
+        requestAnimationFrame(() => {
+          if (textareaRef.current) {
+            const newPos = before.length
+            textareaRef.current.selectionStart = newPos
+            textareaRef.current.selectionEnd = newPos
+            textareaRef.current.focus()
+          }
+        })
+      }
+
+      onChange([
+        ...value,
+        {
+          document_id: doc.id,
+          relative_path: doc.relative_path ?? doc.path,
+          title: doc.title || doc.filename,
+        },
+      ])
+      setOpen(false)
+      setMentionStart(-1)
+      setSearchQuery("")
+      setHighlightIndex(0)
+    },
+    [onChange, selectedIds, value, mentionStart, onInputChange, textareaRef],
   )
 
   // Watch textarea input for @ trigger
@@ -110,11 +149,41 @@ export function WikiMentionPicker({
         setOpen(false)
         setMentionStart(-1)
         setSearchQuery("")
+        setHighlightIndex(0)
       }
     }
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
   }, [open])
+
+  // Keyboard navigation for mention panel (ArrowUp/Down/Enter)
+  useEffect(() => {
+    if (!open || !textareaRef?.current) return
+    const el = textareaRef.current
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault()
+        setHighlightIndex((i) => Math.min(i + 1, results.length - 1))
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault()
+        setHighlightIndex((i) => Math.max(i - 1, 0))
+      } else if (e.key === "Enter") {
+        if (results.length > 0) {
+          e.preventDefault()
+          addRef(results[highlightIndex])
+        }
+      }
+    }
+
+    el.addEventListener("keydown", handleKeyDown)
+    return () => el.removeEventListener("keydown", handleKeyDown)
+  }, [open, textareaRef, results, highlightIndex, addRef])
+
+  // Reset highlight index when search query changes
+  useEffect(() => {
+    setHighlightIndex(0)
+  }, [searchQuery])
 
   // Close on click outside
   useEffect(() => {
@@ -124,48 +193,12 @@ export function WikiMentionPicker({
         setOpen(false)
         setMentionStart(-1)
         setSearchQuery("")
+        setHighlightIndex(0)
       }
     }
     document.addEventListener("mousedown", handleClick)
     return () => document.removeEventListener("mousedown", handleClick)
   }, [open])
-
-  const addRef = useCallback(
-    (doc: DocumentListItem) => {
-      if (selectedIds.has(doc.id)) return
-      if (value.length >= MAX_WIKI_REFS) return
-
-      // Remove the @query text from textarea
-      if (mentionStart >= 0 && onInputChange && textareaRef?.current) {
-        const val = textareaRef.current.value
-        const before = val.slice(0, mentionStart)
-        const after = val.slice(textareaRef.current.selectionStart)
-        onInputChange(before + after)
-        // Reset cursor position
-        requestAnimationFrame(() => {
-          if (textareaRef.current) {
-            const newPos = before.length
-            textareaRef.current.selectionStart = newPos
-            textareaRef.current.selectionEnd = newPos
-            textareaRef.current.focus()
-          }
-        })
-      }
-
-      onChange([
-        ...value,
-        {
-          document_id: doc.id,
-          relative_path: doc.path,
-          title: doc.title || doc.filename,
-        },
-      ])
-      setOpen(false)
-      setMentionStart(-1)
-      setSearchQuery("")
-    },
-    [onChange, selectedIds, value, mentionStart, onInputChange, textareaRef],
-  )
 
   const removeRef = (id: string) => {
     onChange(value.filter((v) => v.document_id !== id))
@@ -209,13 +242,13 @@ export function WikiMentionPicker({
               {t("chat.wiki_mention_empty")}
             </p>
           )}
-          {results.map((doc) => (
+          {results.map((doc, idx) => (
             <Button
               key={doc.id}
               type="button"
               variant="ghost"
               size="sm"
-              className="h-auto w-full justify-start whitespace-normal px-2 py-1 text-left text-xs"
+              className={`h-auto w-full justify-start whitespace-normal px-2 py-1 text-left text-xs ${idx === highlightIndex ? "bg-accent" : ""}`}
               disabled={selectedIds.has(doc.id)}
               onClick={() => addRef(doc)}
             >

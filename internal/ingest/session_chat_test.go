@@ -13,7 +13,7 @@ func TestAssembleIngestChatMessagesSkipsFailedAssistant(t *testing.T) {
 		{Role: "assistant", Content: "error text", StreamStatus: "failed"},
 		{Role: "user", Content: "second", StreamStatus: "complete"},
 	}
-	msgs := AssembleIngestChatMessages(history, "third", "zh", "", "", "")
+	msgs := AssembleIngestChatMessages(history, "third", "zh", "", "", "", StepSessionChat)
 	roles := make([]string, 0, len(msgs))
 	for _, m := range msgs {
 		if m.Role == "system" {
@@ -34,7 +34,7 @@ func TestAssembleIngestChatMessagesSkipsFailedAssistant(t *testing.T) {
 
 func TestAssembleIngestChatMessagesLanguageInstruction(t *testing.T) {
 	history := []sqlite.IngestSessionMessage{}
-	msgs := AssembleIngestChatMessages(history, "", "zh", "", "", "")
+	msgs := AssembleIngestChatMessages(history, "", "zh", "", "", "", StepSessionChat)
 	if len(msgs) < 1 || msgs[0].Role != "system" {
 		t.Fatal("expected system message")
 	}
@@ -44,7 +44,7 @@ func TestAssembleIngestChatMessagesLanguageInstruction(t *testing.T) {
 		}
 	}
 
-	msgsEN := AssembleIngestChatMessages(history, "", "en", "", "", "")
+	msgsEN := AssembleIngestChatMessages(history, "", "en", "", "", "", StepSessionChat)
 	if !strings.Contains(msgsEN[0].Content, "English") {
 		t.Errorf("system prompt for en should contain English instruction, got: %s", msgsEN[0].Content)
 	}

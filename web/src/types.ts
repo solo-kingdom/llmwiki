@@ -108,6 +108,7 @@ export interface SessionListItem {
   status: "active" | "archived"
   llm_instance_id: string
   llm_model: string
+  mode?: string
   created_at: string
   updated_at: string
 }
@@ -276,6 +277,7 @@ export interface CapabilitiesResponse {
 export interface IngestSession {
   id: string
   title: string
+  mode: string
   status: "active" | "archived"
   storage_path: string
   llm_instance_id: string

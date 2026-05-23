@@ -198,6 +198,9 @@ const en: Record<MessageKey, string> = {
     'Delete session "{title}"? Chat history will be permanently deleted. This cannot be undone.',
   "session.delete_confirm_archived":
     'Delete archived session "{title}"? Related chat history will be permanently deleted. This cannot be undone.',
+  "session.mode_ingest": "Ingest",
+  "session.mode_qa": "Q&A",
+  "session.mode_organize": "Organize",
 
   // Model select
   "model.select_title": "Select model",

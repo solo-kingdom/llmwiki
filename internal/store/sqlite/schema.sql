@@ -193,6 +193,7 @@ CREATE TABLE IF NOT EXISTS ingest_sessions (
     storage_path TEXT NOT NULL DEFAULT '',
     llm_instance_id TEXT NOT NULL DEFAULT '',
     llm_model TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'ingest' CHECK (mode IN ('ingest', 'qa', 'organize')),
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );

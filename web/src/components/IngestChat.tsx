@@ -18,12 +18,14 @@ import {
   CircleOff,
   Copy,
   Cpu,
+  Lightbulb,
   Loader2,
   Paperclip,
   RotateCcw,
   Send,
   SlidersHorizontal,
   Square,
+  Wrench,
 } from "lucide-react"
 
 function canRetryAssistant(msg: IngestSessionMessage): boolean {
@@ -205,6 +207,7 @@ export function IngestChat() {
     sessionId,
     sessionMessages,
     sessionBusy,
+    sessionMode,
     showToast,
     settings,
     instances,
@@ -527,6 +530,18 @@ export function IngestChat() {
             <span className="min-w-0 truncate" title={sessionTitle}>
               {sessionTitle}
             </span>
+            {sessionMode === "qa" && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                <Lightbulb className="size-3" />
+                {t("session.mode_qa")}
+              </span>
+            )}
+            {sessionMode === "organize" && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                <Wrench className="size-3" />
+                {t("session.mode_organize")}
+              </span>
+            )}
             {(selectedInstance || effectiveModel) && (
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                 {selectedInstance && (

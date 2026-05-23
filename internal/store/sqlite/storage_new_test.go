@@ -242,3 +242,85 @@ func openTestDB(t *testing.T) *DB {
 	t.Cleanup(func() { db.Close() })
 	return db
 }
+
+func TestSessionModeDefault(t *testing.T) {
+	db := openTestDB(t)
+
+	session := &IngestSession{Title: "mode test"}
+	if err := db.CreateIngestSession(session); err != nil {
+		t.Fatalf("CreateIngestSession: %v", err)
+	}
+	if session.Mode != "ingest" {
+		t.Errorf("expected default mode 'ingest', got %q", session.Mode)
+	}
+
+	got, err := db.GetIngestSession(session.ID)
+	if err != nil {
+		t.Fatalf("GetIngestSession: %v", err)
+	}
+	if got.Mode != "ingest" {
+		t.Errorf("expected mode 'ingest' from DB, got %q", got.Mode)
+	}
+}
+
+func TestSessionModeExplicit(t *testing.T) {
+	db := openTestDB(t)
+
+	for _, mode := range []string{"ingest", "qa", "organize"} {
+		session := &IngestSession{Title: "mode " + mode, Mode: mode}
+		if err := db.CreateIngestSession(session); err != nil {
+			t.Fatalf("CreateIngestSession(mode=%s): %v", mode, err)
+		}
+		if session.Mode != mode {
+			t.Errorf("expected mode %q, got %q", mode, session.Mode)
+		}
+	}
+}
+
+func TestSessionModeUpdate(t *testing.T) {
+	db := openTestDB(t)
+
+	session := &IngestSession{Title: "update mode"}
+	if err := db.CreateIngestSession(session); err != nil {
+		t.Fatalf("CreateIngestSession: %v", err)
+	}
+
+	if err := db.UpdateIngestSessionMode(session.ID, "organize"); err != nil {
+		t.Fatalf("UpdateIngestSessionMode: %v", err)
+	}
+
+	got, err := db.GetIngestSession(session.ID)
+	if err != nil {
+		t.Fatalf("GetIngestSession: %v", err)
+	}
+	if got.Mode != "organize" {
+		t.Errorf("expected mode 'organize' after update, got %q", got.Mode)
+	}
+
+	// Switch to qa
+	if err := db.UpdateIngestSessionMode(session.ID, "qa"); err != nil {
+		t.Fatalf("UpdateIngestSessionMode qa: %v", err)
+	}
+	got, _ = db.GetIngestSession(session.ID)
+	if got.Mode != "qa" {
+		t.Errorf("expected mode 'qa' after second update, got %q", got.Mode)
+	}
+}
+
+func TestSessionModeMigration(t *testing.T) {
+	db := openTestDB(t)
+
+	// Migration should be idempotent
+	if err := MigrateAddSessionMode(db); err != nil {
+		t.Fatalf("MigrateAddSessionMode (second call): %v", err)
+	}
+
+	// Verify column exists and works
+	session := &IngestSession{Title: "post-migration", Mode: "qa"}
+	if err := db.CreateIngestSession(session); err != nil {
+		t.Fatalf("CreateIngestSession after migration: %v", err)
+	}
+	if session.Mode != "qa" {
+		t.Errorf("expected mode 'qa', got %q", session.Mode)
+	}
+}

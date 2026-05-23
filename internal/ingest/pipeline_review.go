@@ -98,7 +98,17 @@ func (p *Pipeline) ApplyFromPlan(ctx context.Context, source *NormalizedSource, 
 }
 
 func (p *Pipeline) generatePlan(ctx context.Context, name, content, analysis, feedback string) (string, error) {
-	systemMsg := ComposeSystemPrompt(StepPlan, p.promptCtx())
+	// Detect session mode from archive content
+	planStep := StepPlan
+	if mode := ParseSessionModeFromArchive(content); mode != "" {
+		switch mode {
+		case "organize":
+			planStep = StepPlanOrganize
+		case "qa":
+			planStep = StepPlanQA
+		}
+	}
+	systemMsg := ComposeSystemPrompt(planStep, p.promptCtx())
 
 	userParts := []string{
 		fmt.Sprintf("源文件：**%s**\n\n分析：\n%s\n\n原始内容：\n%s", name, analysis, content),

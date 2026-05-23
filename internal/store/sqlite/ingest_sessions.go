@@ -13,6 +13,7 @@ type IngestSession struct {
 	StoragePath    string `json:"storage_path"`
 	LLMInstanceID  string `json:"llm_instance_id"`
 	LLMModel       string `json:"llm_model"`
+	Mode           string `json:"mode"`
 	CreatedAt      string `json:"created_at"`
 	UpdatedAt      string `json:"updated_at"`
 }
@@ -33,7 +34,7 @@ type IngestSessionMessage struct {
 func scanIngestSession(scanner interface{ Scan(...interface{}) error }, s *IngestSession) error {
 	return scanner.Scan(
 		&s.ID, &s.Title, &s.Status, &s.StoragePath,
-		&s.LLMInstanceID, &s.LLMModel,
+		&s.LLMInstanceID, &s.LLMModel, &s.Mode,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
@@ -58,14 +59,18 @@ func (d *DB) CreateIngestSession(session *IngestSession) error {
 	if session.Status == "" {
 		session.Status = "active"
 	}
+	if session.Mode == "" {
+		session.Mode = "ingest"
+	}
 	_, err := d.db.Exec(`
-		INSERT INTO ingest_sessions (title, status, storage_path, llm_instance_id, llm_model, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		INSERT INTO ingest_sessions (title, status, storage_path, llm_instance_id, llm_model, mode, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		strings.TrimSpace(session.Title),
 		session.Status,
 		strings.TrimSpace(session.StoragePath),
 		session.LLMInstanceID,
 		session.LLMModel,
+		session.Mode,
 	)
 	if err != nil {
 		return fmt.Errorf("create ingest session: %w", err)
@@ -73,6 +78,7 @@ func (d *DB) CreateIngestSession(session *IngestSession) error {
 	created, err := d.db.Query(`
 		SELECT COALESCE(id,''), COALESCE(title,''), COALESCE(status,''),
 		       COALESCE(storage_path,''), COALESCE(llm_instance_id,''), COALESCE(llm_model,''),
+		       COALESCE(mode,'ingest'),
 		       COALESCE(created_at,''), COALESCE(updated_at,'')
 		FROM ingest_sessions WHERE rowid = last_insert_rowid()`)
 	if err != nil {
@@ -92,6 +98,7 @@ func (d *DB) GetIngestSession(id string) (*IngestSession, error) {
 	err := scanIngestSession(d.db.QueryRow(`
 		SELECT COALESCE(id,''), COALESCE(title,''), COALESCE(status,''),
 		       COALESCE(storage_path,''), COALESCE(llm_instance_id,''), COALESCE(llm_model,''),
+		       COALESCE(mode,'ingest'),
 		       COALESCE(created_at,''), COALESCE(updated_at,'')
 		FROM ingest_sessions WHERE id = ?`, id), s)
 	if err != nil {
@@ -121,6 +128,27 @@ func (d *DB) UpdateIngestSessionStatus(id, status string) error {
 	_, err := d.db.Exec(`
 		UPDATE ingest_sessions SET status = ?, updated_at = datetime('now') WHERE id = ?`,
 		status, id)
+	return err
+}
+
+func (d *DB) UpdateIngestSessionMode(id, mode string) error {
+	_, err := d.db.Exec(`
+		UPDATE ingest_sessions SET mode = ?, updated_at = datetime('now') WHERE id = ?`,
+		mode, id)
+	return err
+}
+
+// MigrateAddSessionMode adds the mode column to ingest_sessions if missing.
+func MigrateAddSessionMode(d *DB) error {
+	var hasMode bool
+	row := d.db.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info('ingest_sessions') WHERE name = 'mode'`)
+	if err := row.Scan(&hasMode); err != nil {
+		return fmt.Errorf("check mode column: %w", err)
+	}
+	if hasMode {
+		return nil
+	}
+	_, err := d.db.Exec(`ALTER TABLE ingest_sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'ingest' CHECK(mode IN ('ingest','qa','organize'))`)
 	return err
 }
 
@@ -243,6 +271,7 @@ func (d *DB) ListIngestSessions() ([]IngestSession, error) {
 	rows, err := d.db.Query(`
 		SELECT COALESCE(id,''), COALESCE(title,''), COALESCE(status,''),
 		       COALESCE(storage_path,''), COALESCE(llm_instance_id,''), COALESCE(llm_model,''),
+		       COALESCE(mode,'ingest'),
 		       COALESCE(created_at,''), COALESCE(updated_at,'')
 		FROM ingest_sessions
 		ORDER BY datetime(updated_at) DESC`)

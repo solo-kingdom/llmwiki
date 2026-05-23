@@ -268,11 +268,23 @@ export function getCapabilities(): Promise<CapabilitiesResponse> {
   return request<CapabilitiesResponse>("/api/v1/capabilities")
 }
 
-export function createIngestSession(title?: string): Promise<{ session: IngestSession }> {
+export function createIngestSession(title?: string, mode?: string): Promise<{ session: IngestSession }> {
+  const body: Record<string, string> = { title: title ?? "" }
+  if (mode) body.mode = mode
   return request<{ session: IngestSession }>("/api/v1/ingest/sessions", {
     method: "POST",
-    body: JSON.stringify({ title: title ?? "" }),
+    body: JSON.stringify(body),
   })
+}
+
+export function updateSessionMode(id: string, mode: string): Promise<{ session: IngestSession }> {
+  return request<{ session: IngestSession }>(
+    `/api/v1/ingest/sessions/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ mode }),
+    },
+  )
 }
 
 export function getIngestSession(id: string): Promise<{ session: IngestSession }> {

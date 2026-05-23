@@ -11,6 +11,9 @@ import {
   List,
   Trash2,
   X,
+  BookOpen,
+  Lightbulb,
+  Wrench,
 } from "lucide-react"
 
 function sessionLabel(title: string, untitled: string) {
@@ -25,12 +28,14 @@ export function SessionControls() {
     sessionBusy,
     instances,
     settings,
+    sessionMode,
     createSession,
     switchSession,
     deleteSession,
     listSessions,
     loadInstances,
     loadSettings,
+    switchSessionMode,
   } = useApp()
 
   const [switchOpen, setSwitchOpen] = useState(false)
@@ -55,6 +60,11 @@ export function SessionControls() {
     const instanceId = settings?.last_instance_id
     const model = settings?.last_model
     await createSession(instanceId, model)
+  }
+
+  const handleModeChange = async (mode: string) => {
+    if (mode === sessionMode) return
+    await switchSessionMode(mode)
   }
 
   const handleSwitch = async (id: string) => {
@@ -181,6 +191,27 @@ export function SessionControls() {
         <Plus className="size-3.5" />
         {t("session.new")}
       </Button>
+
+      <div className="flex items-center rounded-md border border-border p-0.5">
+        {([
+          { key: "ingest", icon: BookOpen, label: t("session.mode_ingest") },
+          { key: "qa", icon: Lightbulb, label: t("session.mode_qa") },
+          { key: "organize", icon: Wrench, label: t("session.mode_organize") },
+        ] as const).map(({ key, icon: Icon, label }) => (
+          <Button
+            key={key}
+            size="sm"
+            variant={sessionMode === key ? "secondary" : "ghost"}
+            className="h-7 gap-1 px-2 text-xs"
+            disabled={sessionBusy}
+            onClick={() => void handleModeChange(key)}
+            title={label}
+          >
+            <Icon className="size-3" />
+            {label}
+          </Button>
+        ))}
+      </div>
 
       <Dialog.Root open={switchOpen} onOpenChange={setSwitchOpen}>
         <Dialog.Portal>

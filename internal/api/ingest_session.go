@@ -60,6 +60,7 @@ func (a *API) CreateIngestSession(w http.ResponseWriter, r *http.Request) {
 		Title      string `json:"title"`
 		InstanceID string `json:"instance_id"`
 		Model      string `json:"model"`
+		Mode       string `json:"mode"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -85,11 +86,16 @@ func (a *API) CreateIngestSession(w http.ResponseWriter, r *http.Request) {
 		title = ingest.DefaultIngestSessionTitle(count+1, time.Now())
 	}
 
+	mode := req.Mode
+	if mode == "" {
+		mode = "ingest"
+	}
 	session := &sqlite.IngestSession{
 		Title:         title,
 		Status:        "active",
 		LLMInstanceID: instanceID,
 		LLMModel:      model,
+		Mode:          mode,
 	}
 	if err := a.db.CreateIngestSession(session); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -445,8 +451,9 @@ func (a *API) streamAssistantReply(
 	}
 	subsetSection := ingest.FormatRelatedSubsetSection(docLang, subset)
 
+	step := ingest.PromptStepForMode(session.Mode)
 	msgs := ingest.AssembleIngestChatMessages(
-		history, llmUserContent, docLang, a.workspace, ingest.ResolveRulesSupplement(a.db), subsetSection,
+		history, llmUserContent, docLang, a.workspace, ingest.ResolveRulesSupplement(a.db), subsetSection, step,
 	)
 	ctx := r.Context()
 
@@ -454,7 +461,7 @@ func (a *API) streamAssistantReply(
 	onToolRead := func(documentID, relativePath, title string) {
 		ingest.RecordToolReadReference(a.db, session.ID, documentID, relativePath, title)
 	}
-	executor := ingest.NewChatWikiExecutor(a.workspace, a.db, session.ID, router, onToolRead)
+	executor := ingest.NewChatWikiExecutor(a.workspace, a.db, session.ID, router, session.Mode, onToolRead)
 	tools, _ := executor.ListTools(ctx)
 
 	toolHandler := func(phase, toolName, detail string) {
@@ -468,8 +475,10 @@ func (a *API) streamAssistantReply(
 		})
 	}
 
-	cfg := llm.ToolLoopConfig{MaxRounds: 4, MaxToolCallsPerRound: 4}
-	finalText, err := ingest.RunSessionChatToolLoop(ctx, client, executor, msgs, tools, 0.7, 2048, cfg, toolHandler)
+	cfg := mcp.ToolLoopConfigForMode(session.Mode)
+	temp := mcp.ToolTemperatureForMode(session.Mode)
+	tokens := mcp.ToolMaxTokensForMode(session.Mode)
+	finalText, err := ingest.RunSessionChatToolLoop(ctx, client, executor, msgs, tools, temp, tokens, cfg, toolHandler)
 	if err != nil {
 		log.Printf(
 			"[ingest-session] tool loop failed session=%s instance=%s model=%s: %v; falling back to stream",
@@ -896,7 +905,7 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 			Source: ref.Source,
 		})
 	}
-	md := ingest.BuildSessionArchiveMarkdown(sessionID, title, archiveMsgs, archiveRefs, now)
+	md := ingest.BuildSessionArchiveMarkdown(sessionID, title, session.Mode, archiveMsgs, archiveRefs, now)
 	normalized, err := ingest.NormalizeSessionArchive(sessionID, title, md, "session:"+sessionID, now)
 	if err != nil {
 		a.logArchiveFailed(sessionID, err.Error())
@@ -1041,6 +1050,7 @@ func (a *API) UpdateIngestSessionHandler(w http.ResponseWriter, r *http.Request)
 		InstanceID string `json:"instance_id"`
 		Model      string `json:"model"`
 		Title      string `json:"title"`
+		Mode       string `json:"mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1064,6 +1074,18 @@ func (a *API) UpdateIngestSessionHandler(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Title != "" {
 		_ = a.db.UpdateIngestSessionTitle(sessionID, req.Title)
+		updated = true
+	}
+	if req.Mode != "" {
+		validModes := map[string]bool{"ingest": true, "qa": true, "organize": true}
+		if !validModes[req.Mode] {
+			writeError(w, http.StatusBadRequest, "invalid mode, must be one of: ingest, qa, organize")
+			return
+		}
+		if err := a.db.UpdateIngestSessionMode(sessionID, req.Mode); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		updated = true
 	}
 

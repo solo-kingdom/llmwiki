@@ -47,26 +47,28 @@ func ParseWikiRefRequests(db *sqlite.DB, refs []WikiRefRequest) ([]WikiRefInput,
 
 // ChatWikiExecutor runs readonly wiki tools for session chat.
 type ChatWikiExecutor struct {
-	workspace string
-	db        *sqlite.DB
-	sessionID string
-	router    *mcp.Router
+	workspace  string
+	db         *sqlite.DB
+	sessionID  string
+	router     *mcp.Router
+	mode       string
 	onToolRead func(documentID, relativePath, title string)
 }
 
-func NewChatWikiExecutor(workspace string, db *sqlite.DB, sessionID string, router *mcp.Router, onToolRead func(string, string, string)) *ChatWikiExecutor {
+func NewChatWikiExecutor(workspace string, db *sqlite.DB, sessionID string, router *mcp.Router, mode string, onToolRead func(string, string, string)) *ChatWikiExecutor {
 	return &ChatWikiExecutor{
-		workspace: workspace,
-		db:        db,
-		sessionID: sessionID,
-		router:    router,
+		workspace:  workspace,
+		db:         db,
+		sessionID:  sessionID,
+		router:     router,
+		mode:       mode,
 		onToolRead: onToolRead,
 	}
 }
 
 func (e *ChatWikiExecutor) ListTools(ctx context.Context) ([]llm.ToolDefinition, error) {
-	tools := make([]llm.ToolDefinition, 0, 8)
-	for _, t := range mcp.BuiltinReadonlyToolDefinitions() {
+	tools := make([]llm.ToolDefinition, 0, 12)
+	for _, t := range mcp.BuiltinToolDefinitionsForMode(e.mode) {
 		tools = append(tools, llm.ToolDefinition{
 			Name:        t.Name,
 			Description: t.Description,

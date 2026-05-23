@@ -1244,3 +1244,76 @@ func TestArchiveSessionIncludesReferencedWikiPages(t *testing.T) {
 		t.Fatalf("archive missing referenced pages section: %s", archive)
 	}
 }
+
+func TestCreateSessionWithMode(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions",
+		bytes.NewReader([]byte(`{"title":"Organize Session","mode":"organize"}`)))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create session: %d %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Session struct {
+			ID   string `json:"id"`
+			Mode string `json:"mode"`
+		} `json:"session"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Session.Mode != "organize" {
+		t.Errorf("expected mode 'organize', got %q", resp.Session.Mode)
+	}
+}
+
+func TestPatchSessionMode(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	// Create default session
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions",
+		bytes.NewReader([]byte(`{"title":"Mode Test"}`)))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var created struct {
+		Session struct {
+			ID   string `json:"id"`
+			Mode string `json:"mode"`
+		} `json:"session"`
+	}
+	json.NewDecoder(w.Body).Decode(&created)
+	if created.Session.Mode != "ingest" {
+		t.Errorf("expected default mode 'ingest', got %q", created.Session.Mode)
+	}
+
+	// Patch to qa
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+created.Session.ID,
+		bytes.NewReader([]byte(`{"mode":"qa"}`)))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("patch mode: %d %s", w.Code, w.Body.String())
+	}
+	var patched struct {
+		Session struct {
+			Mode string `json:"mode"`
+		} `json:"session"`
+	}
+	json.NewDecoder(w.Body).Decode(&patched)
+	if patched.Session.Mode != "qa" {
+		t.Errorf("expected mode 'qa' after patch, got %q", patched.Session.Mode)
+	}
+
+	// Patch to invalid mode -> 400
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+created.Session.ID,
+		bytes.NewReader([]byte(`{"mode":"invalid"}`)))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid mode, got %d", w.Code)
+	}
+}

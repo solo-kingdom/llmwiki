@@ -117,6 +117,7 @@ interface AppState {
   sessionMessages: IngestSessionMessage[]
   sessionBusy: boolean
   sessionError: string | null
+  sessionMode: string
 
   sessions: SessionListItem[]
   activeSessionId: string | null
@@ -178,9 +179,10 @@ interface AppState {
   ) => Promise<ProviderInstance | null>
   deleteInstance: (id: string) => Promise<boolean>
   listSessions: () => Promise<void>
-  createSession: (instanceId?: string, model?: string) => Promise<void>
+  createSession: (instanceId?: string, model?: string, mode?: string) => Promise<void>
   switchSession: (id: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
+  switchSessionMode: (mode: string) => Promise<void>
   updateSessionLLM: (
     id: string,
     instanceId: string,
@@ -221,6 +223,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   >([])
   const [sessionBusy, setSessionBusy] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
+  const [sessionMode, setSessionMode] = useState("ingest")
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   const showToast = useCallback((message: string) => {
@@ -433,11 +436,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         const { session } = await api.getIngestSession(sessionId)
         if (session.status === "active") {
+          setSessionMode(session.mode || "ingest")
           await loadSessionMessagesAndWatch(sessionId)
           return
         }
       } catch {
-        // session not found or error — clear stale ID and create new below
         setSessionId(null)
         setActiveSessionId(null)
         localStorage.removeItem(SESSION_STORAGE_KEY)
@@ -449,6 +452,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const { session } = await api.createIngestSession()
       setSessionId(session.id)
       setActiveSessionId(session.id)
+      setSessionMode(session.mode || "ingest")
       localStorage.setItem(SESSION_STORAGE_KEY, session.id)
       setSessionMessages([])
       setSessionError(null)
@@ -460,7 +464,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch (e) {
-      // Clear stale session ID to prevent retry loops
       setSessionId(null)
       setActiveSessionId(null)
       localStorage.removeItem(SESSION_STORAGE_KEY)
@@ -936,8 +939,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const createSession = useCallback(
-    async (instanceId?: string, model?: string) => {
-      const { session } = await api.createIngestSession()
+    async (instanceId?: string, model?: string, mode?: string) => {
+      const { session } = await api.createIngestSession(undefined, mode)
       if (instanceId && model) {
         try {
           await api.updateIngestSession(session.id, { instance_id: instanceId, model })
@@ -947,6 +950,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       setSessionId(session.id)
       setActiveSessionId(session.id)
+      setSessionMode(session.mode || "ingest")
       localStorage.setItem(SESSION_STORAGE_KEY, session.id)
       setSessionMessages([])
       await listSessionsInternal()
@@ -963,8 +967,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await loadSessionMessagesAndWatch(id)
       try {
         const { session } = await api.getIngestSession(id)
+        setSessionMode(session.mode || "ingest")
         if (session.llm_instance_id) {
-          // Find the instance to get its catalog_id for loading models
           const inst = instances.find((i) => i.id === session.llm_instance_id)
           if (inst) {
             await loadModels(inst.catalog_id)
@@ -1001,6 +1005,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (next) {
           setSessionId(next.id)
           setActiveSessionId(next.id)
+          setSessionMode(next.mode || "ingest")
           localStorage.setItem(SESSION_STORAGE_KEY, next.id)
           await loadSessionMessagesAndWatch(next.id)
         } else {
@@ -1009,6 +1014,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const { session } = await api.createIngestSession()
           setSessionId(session.id)
           setActiveSessionId(session.id)
+          setSessionMode(session.mode || "ingest")
           localStorage.setItem(SESSION_STORAGE_KEY, session.id)
           setSessionMessages([])
           if (instanceId && model) {
@@ -1056,6 +1062,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  const switchSessionMode = useCallback(
+    async (mode: string) => {
+      if (!sessionId) return
+      await api.updateSessionMode(sessionId, mode)
+      setSessionMode(mode)
+    },
+    [sessionId],
+  )
+
   return (
     <AppContext.Provider
       value={{
@@ -1073,6 +1088,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sessionMessages,
         sessionBusy,
         sessionError,
+        sessionMode,
         sessions,
         activeSessionId,
         providers,
@@ -1108,6 +1124,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         createSession,
         switchSession,
         deleteSession,
+        switchSessionMode,
         updateSessionLLM,
         updateLastModel: updateLastModelFn,
         toastMessage,

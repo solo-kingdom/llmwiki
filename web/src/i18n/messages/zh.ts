@@ -182,6 +182,9 @@ const zh = {
     "确认删除会话「{title}」？聊天记录将被永久删除，此操作不可撤销。",
   "session.delete_confirm_archived":
     "确认删除已归档会话「{title}」？相关聊天记录将被永久删除，此操作不可撤销。",
+  "session.mode_ingest": "摄入",
+  "session.mode_qa": "问答",
+  "session.mode_organize": "整理",
 
   // Model select
   "model.select_title": "选择模型",

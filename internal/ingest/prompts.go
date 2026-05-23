@@ -23,13 +23,29 @@ const (
 type PromptStep string
 
 const (
-	StepAnalysis    PromptStep = "analysis"
-	StepGeneration  PromptStep = "generation"
-	StepPlan        PromptStep = "plan"
-	StepSessionChat PromptStep = "session_chat"
-	StepMergeBody   PromptStep = "merge_body"
-	StepRollback    PromptStep = "rollback"
+	StepAnalysis         PromptStep = "analysis"
+	StepGeneration       PromptStep = "generation"
+	StepPlan             PromptStep = "plan"
+	StepSessionChat      PromptStep = "session_chat"
+	StepSessionQA        PromptStep = "session_qa"
+	StepSessionOrganize  PromptStep = "session_organize"
+	StepMergeBody        PromptStep = "merge_body"
+	StepRollback         PromptStep = "rollback"
+	StepPlanOrganize     PromptStep = "plan_organize"
+	StepPlanQA           PromptStep = "plan_qa"
 )
+
+// PromptStepForMode returns the session chat PromptStep for a given mode.
+func PromptStepForMode(mode string) PromptStep {
+	switch mode {
+	case "qa":
+		return StepSessionQA
+	case "organize":
+		return StepSessionOrganize
+	default:
+		return StepSessionChat
+	}
+}
 
 // PromptContext holds inputs for ComposeSystemPrompt.
 type PromptContext struct {
@@ -135,7 +151,7 @@ func lockedFormatInstruction(step PromptStep) string {
 		return `【格式契约 — 不可违反】
 - 仅输出计划：人类可读的 Markdown 说明 + 围栏 JSON 块
 - 禁止输出 FILE 块，禁止直接写入文件`
-	case StepSessionChat:
+	case StepSessionChat, StepSessionQA, StepSessionOrganize:
 		return `【格式契约 — 不可违反】
 - 以对话消息回复用户，不要输出 FILE 块
 - 不要编造用户未提供的事实；不确定时明确说明`
@@ -187,12 +203,51 @@ func defaultTaskInstructionZH(step PromptStep) string {
 1) 人类可读的计划（Markdown：将改什么、为什么）
 2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/...","action":"create|update","rationale":"..."}]}
 仅规划，不写文件。`
+	case StepPlanOrganize:
+		return `你是 wiki 重组规划师。本次归档来自「整理模式」对话，用户的意图是重组和优化已有 wiki 页面。
+请产出：
+1) 人类可读的计划（Markdown：将改什么、为什么）
+2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/...","action":"update|move|merge","rationale":"..."}]}
+
+重点：
+- 优先使用 update（修改内容/标签/链接）而非 create
+- 如果需要合并页面，action 用 merge，rationale 说明合并原因
+- 如果需要移动页面到不同目录，action 用 move
+- 保留原有内容中的重要信息，不删除除非对话中明确要求
+仅规划，不写文件。`
+	case StepPlanQA:
+		return `你是 wiki 知识沉淀规划师。本次归档来自「问答模式」对话，用户通过问答探讨了已有 wiki 内容。
+请产出：
+1) 人类可读的计划（Markdown：将改什么、为什么）
+2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/...","action":"update","rationale":"..."}]}
+
+重点：
+- 如果对话中有值得沉淀的新知识或澄清，更新相关 wiki 页面
+- 如果问答揭示了 wiki 内容的不足（缺失信息、错误），补充修正
+- 优先 update 已有页面，仅在确实需要时 create 新页面
+- 不要将纯问答交互本身作为内容写入 wiki
+仅规划，不写文件。`
 	case StepSessionChat:
 		return `你是 LLM Wiki 摄入前的对话助手，帮助用户澄清主题、定义与结构。
 - 合法依据：用户消息、附件摘要、用户 @ 引用的 wiki 全文、以及通过 read 工具读取的 wiki 页面
 - 「相关 wiki 子集」仅为路径索引，不含全文；未 read 的页面不要声称其内容
 - 可提出聚焦的澄清问题；需要时总结要点
 - 用户满意后会点击「归档」将对话写入 wiki`
+	case StepSessionQA:
+		return `你是 LLM Wiki 知识库问答助手，基于已有文档回答用户问题。
+- 合法依据：通过 search/read/references 工具查找到的 wiki 页面内容
+- 必须使用工具查找依据后再回答，不要凭记忆编造
+- 不确定的信息明确标注「不确定」，不要当作已证实事实
+- 回答需引用来源页面路径，方便用户追溯
+- 优先综合多个相关页面给出完整回答`
+	case StepSessionOrganize:
+		return `你是 LLM Wiki 架构师，负责诊断和优化 wiki 的结构与内容。
+- 使用 audit、structure、gaps、similar 等诊断工具全面分析 wiki 健康状况
+- 使用 read 工具深入阅读具体页面内容后给出精准建议
+- 诊断时列出具体问题（路径 + 问题类型 + 影响范围）
+- 建议时给出可操作的重组方案（移动/合并/拆分/补充标签/补充链接）
+- 优先处理影响最大的问题，给出优先级排序
+- 用户满意后会点击「归档」将重组方案写入 wiki`
 	case StepMergeBody:
 		return `你是 wiki 正文合并助手。合并旧正文与新增量，保留旧内容所有重要信息，整合新内容。
 - 仅输出完整 markdown 正文（不含 frontmatter）
@@ -213,8 +268,27 @@ func defaultTaskInstructionEN(step PromptStep) string {
 		return `You are a wiki generator. Produce wiki pages from the original content and analysis in FILE blocks. The source is authoritative; analysis is organizational context only.`
 	case StepPlan:
 		return `You are a wiki ingest planner. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Planning only — no FILE blocks.`
+	case StepPlanOrganize:
+		return `You are a wiki reorganization planner. This archive is from an "organize mode" session where the user intended to restructure existing wiki pages. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Focus on update/move/merge actions rather than create. Preserve important existing content. Planning only — no FILE blocks.`
+	case StepPlanQA:
+		return `You are a wiki knowledge consolidation planner. This archive is from a "QA mode" session where the user explored existing wiki content through questions. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Focus on updating existing pages with new insights or corrections from the Q&A. Only create new pages if genuinely needed. Planning only — no FILE blocks.`
 	case StepSessionChat:
 		return `You help the user explore knowledge before archiving to their LLM Wiki. Valid grounds include user messages, attachment summaries, user @ wiki page full text, and pages read via tools. The related wiki subset is an index only—do not claim content for unread pages.`
+	case StepSessionQA:
+		return `You are an LLM Wiki knowledge base QA assistant. Answer questions based on existing documents.
+- Valid grounds: wiki page content found via search/read/references tools
+- Always use tools to find evidence before answering; do not fabricate from memory
+- Mark uncertain information clearly; do not present it as established fact
+- Cite source page paths in your answers for traceability
+- Synthesize multiple relevant pages for comprehensive answers when possible`
+	case StepSessionOrganize:
+		return `You are an LLM Wiki architect responsible for diagnosing and optimizing wiki structure and content.
+- Use audit, structure, gaps, similar and other diagnostic tools for comprehensive wiki health analysis
+- Use the read tool to examine specific page content before giving precise recommendations
+- List specific issues in your diagnosis (path + issue type + impact scope)
+- Provide actionable reorganization plans (move/merge/split/add tags/add links)
+- Prioritize issues by impact and provide a priority ranking
+- The user will click "Archive" when satisfied to write the reorganization plan to the wiki`
 	case StepMergeBody:
 		return `Merge old and new wiki body text; preserve important old content; output markdown body only without frontmatter.`
 	case StepRollback:

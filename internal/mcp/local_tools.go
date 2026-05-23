@@ -5,37 +5,100 @@ import (
 	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
+	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
-// BuiltinReadonlyToolDefinitions returns local search/read/references tool schemas.
+// Base tool definitions shared across modes.
+
+var searchTool = Tool{
+	Name:        DefaultToolSearch,
+	Description: "Browse or search the knowledge vault. Modes: list, search, references, lint.",
+	InputSchema: map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"mode":  map[string]interface{}{"type": "string", "enum": []string{"list", "search", "references", "lint"}, "default": "list"},
+			"query": map[string]interface{}{"type": "string", "default": ""},
+			"path":  map[string]interface{}{"type": "string", "default": "*"},
+			"limit": map[string]interface{}{"type": "integer", "default": 10},
+		},
+		"required": []string{},
+	},
+}
+
+var readTool = Tool{
+	Name:        DefaultToolRead,
+	Description: "Read a document from the knowledge vault by path or document id.",
+	InputSchema: map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"path": map[string]interface{}{"type": "string", "description": "Path to the document to read"},
+		},
+		"required": []string{"path"},
+	},
+}
+
+var referencesTool = Tool{
+	Name:        "references",
+	Description: "Query the citation and link graph for a document. Returns backlinks (pages linking to this page) and forward references (pages this page links to).",
+	InputSchema: map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"query": map[string]interface{}{"type": "string", "description": "Document ID or path to query references for"},
+		},
+		"required": []string{"query"},
+	},
+}
+
+// BuiltinReadonlyToolDefinitions returns local search/read tool schemas (default ingest mode).
 func BuiltinReadonlyToolDefinitions() []Tool {
-	return []Tool{
-		{
-			Name:        DefaultToolSearch,
-			Description: "Browse or search the knowledge vault. Modes: list, search, references, lint.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"mode":  map[string]interface{}{"type": "string", "enum": []string{"list", "search", "references", "lint"}, "default": "list"},
-					"query": map[string]interface{}{"type": "string", "default": ""},
-					"path":  map[string]interface{}{"type": "string", "default": "*"},
-					"limit": map[string]interface{}{"type": "integer", "default": 10},
-				},
-				"required": []string{},
-			},
-		},
-		{
-			Name:        DefaultToolRead,
-			Description: "Read a document from the knowledge vault by path or document id.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"path": map[string]interface{}{"type": "string", "description": "Path to the document to read"},
-				},
-				"required": []string{"path"},
-			},
-		},
+	return []Tool{searchTool, readTool}
+}
+
+// BuiltinToolDefinitionsForMode returns tool schemas appropriate for the session mode.
+func BuiltinToolDefinitionsForMode(mode string) []Tool {
+	base := []Tool{searchTool, readTool}
+	switch mode {
+	case "qa":
+		return append(base, referencesTool)
+	case "organize":
+		return append(base, referencesTool, auditTool, structureTool, gapsTool, similarTool)
+	default:
+		return base
+	}
+}
+
+// ToolLoopConfigForMode returns tool loop parameters appropriate for the session mode.
+func ToolLoopConfigForMode(mode string) llm.ToolLoopConfig {
+	switch mode {
+	case "qa":
+		return llm.ToolLoopConfig{MaxRounds: 3, MaxToolCallsPerRound: 4}
+	case "organize":
+		return llm.ToolLoopConfig{MaxRounds: 6, MaxToolCallsPerRound: 4}
+	default:
+		return llm.ToolLoopConfig{MaxRounds: 4, MaxToolCallsPerRound: 4}
+	}
+}
+
+// ToolTemperatureForMode returns the LLM temperature appropriate for the session mode.
+func ToolTemperatureForMode(mode string) float64 {
+	switch mode {
+	case "qa":
+		return 0.5
+	case "organize":
+		return 0.6
+	default:
+		return 0.7
+	}
+}
+
+// ToolMaxTokensForMode returns the max output tokens appropriate for the session mode.
+func ToolMaxTokensForMode(mode string) int {
+	switch mode {
+	case "organize":
+		return 3072
+	default:
+		return 2048
 	}
 }
 
@@ -51,6 +114,14 @@ func ExecuteLocalReadonlyTool(workspace string, db *sqlite.DB, name string, args
 		return executeLocalRead(db, args)
 	case "references":
 		return executeLocalReferences(db, args)
+	case "audit":
+		return executeLocalAudit(workspace, db, args)
+	case "structure":
+		return executeLocalStructure(workspace, db, args)
+	case "gaps":
+		return executeLocalGaps(workspace, db, args)
+	case "similar":
+		return executeLocalSimilar(db, args)
 	default:
 		return "", fmt.Errorf("unknown local tool %q", name)
 	}

@@ -92,7 +92,7 @@ type SessionArchiveMessage struct {
 }
 
 // BuildSessionArchiveMarkdown renders a transcript for ingest pipeline input.
-func BuildSessionArchiveMarkdown(sessionID, title string, messages []SessionArchiveMessage, refs []SessionArchiveReference, archivedAt time.Time) string {
+func BuildSessionArchiveMarkdown(sessionID, title, mode string, messages []SessionArchiveMessage, refs []SessionArchiveReference, archivedAt time.Time) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString(fmt.Sprintf("session_id: %s\n", sessionID))
@@ -101,6 +101,9 @@ func BuildSessionArchiveMarkdown(sessionID, title string, messages []SessionArch
 	}
 	b.WriteString(fmt.Sprintf("archived_at: %s\n", archivedAt.UTC().Format(time.RFC3339)))
 	b.WriteString("source: web-ingest-session\n")
+	if mode != "" && mode != "ingest" {
+		b.WriteString(fmt.Sprintf("session_mode: %s\n", mode))
+	}
 	if len(refs) > 0 {
 		data, _ := yaml.Marshal(map[string]interface{}{"referenced_wiki_pages": refs})
 		trimmed := strings.TrimSpace(string(data))
@@ -155,6 +158,21 @@ func ParseReferencedWikiPagesFromArchive(content string) []SessionArchiveReferen
 	return envelope.ReferencedWikiPages
 }
 
+// ParseSessionModeFromArchive extracts session_mode from archive frontmatter.
+func ParseSessionModeFromArchive(content string) string {
+	match := archiveFrontmatterRe.FindStringSubmatch(content)
+	if len(match) < 2 {
+		return ""
+	}
+	var envelope struct {
+		SessionMode string `yaml:"session_mode"`
+	}
+	if err := yaml.Unmarshal([]byte(match[1]), &envelope); err != nil {
+		return ""
+	}
+	return envelope.SessionMode
+}
+
 // FormatReferencedPagesForAnalysis renders analysis context for archived session references.
 func FormatReferencedPagesForAnalysis(docLang string, refs []SessionArchiveReference) string {
 	if len(refs) == 0 {
@@ -165,6 +183,42 @@ func FormatReferencedPagesForAnalysis(docLang string, refs []SessionArchiveRefer
 		b.WriteString("Existing wiki pages referenced during the session (prefer update/merge over create when planning):\n")
 	} else {
 		b.WriteString("会话中引用的已有 wiki 页面（规划时优先 update/merge，而非盲目 create）：\n")
+	}
+	for _, ref := range refs {
+		title := ref.Title
+		if title == "" {
+			title = ref.Path
+		}
+		b.WriteString(fmt.Sprintf("- %s — %s [%s]\n", ref.Path, title, ref.Source))
+	}
+	return b.String()
+}
+
+// FormatReferencedPagesForAnalysisWithMode renders analysis context with mode-specific hints.
+func FormatReferencedPagesForAnalysisWithMode(docLang string, refs []SessionArchiveReference, mode string) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	switch mode {
+	case "organize":
+		if docLang == "en" {
+			b.WriteString("Wiki pages that may need reorganization (focus on update/move/merge):\n")
+		} else {
+			b.WriteString("可能需要重组的 wiki 页面（侧重 update/move/merge）：\n")
+		}
+	case "qa":
+		if docLang == "en" {
+			b.WriteString("Wiki pages discussed during Q&A (update with new insights if needed):\n")
+		} else {
+			b.WriteString("问答中讨论的 wiki 页面（如有新见解可更新）：\n")
+		}
+	default:
+		if docLang == "en" {
+			b.WriteString("Existing wiki pages referenced during the session (prefer update/merge over create when planning):\n")
+		} else {
+			b.WriteString("会话中引用的已有 wiki 页面（规划时优先 update/merge，而非盲目 create）：\n")
+		}
 	}
 	for _, ref := range refs {
 		title := ref.Title

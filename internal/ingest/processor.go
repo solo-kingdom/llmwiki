@@ -46,7 +46,7 @@ func NewJobProcessor(db *sqlite.DB, workspace string) *JobProcessor {
 	return &JobProcessor{
 		db:        db,
 		workspace: workspace,
-		pipeline:  NewPipeline(workspace, nil),
+		pipeline:  NewPipelineWithDB(workspace, db, nil),
 		stop:      make(chan struct{}),
 		runnerID:  newRunnerID(),
 	}

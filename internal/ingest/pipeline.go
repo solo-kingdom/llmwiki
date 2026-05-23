@@ -9,10 +9,12 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
+	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
 type Pipeline struct {
 	workspace   string
+	db          *sqlite.DB // database for local tool execution
 	llmClient   *llm.Client
 	lockMgr     *PageLockManager
 	recorder    JobRecorder
@@ -40,6 +42,21 @@ func NewPipeline(workspace string, llmClient *llm.Client) *Pipeline {
 		llmClient: llmClient,
 		lockMgr:   NewPageLockManager(),
 	}
+}
+
+// NewPipelineWithDB creates a pipeline with database access for local tool execution.
+func NewPipelineWithDB(workspace string, db *sqlite.DB, llmClient *llm.Client) *Pipeline {
+	return &Pipeline{
+		workspace: workspace,
+		db:        db,
+		llmClient: llmClient,
+		lockMgr:   NewPageLockManager(),
+	}
+}
+
+// SetDB sets or updates the database reference for local tool execution.
+func (p *Pipeline) SetDB(db *sqlite.DB) {
+	p.db = db
 }
 
 // SetLLMClient updates the LLM client used for subsequent pipeline runs.
@@ -245,31 +262,67 @@ func (p *Pipeline) cachePath() string {
 	return filepath.Join(p.workspace, ".llmwiki", "cache.json")
 }
 
+// defaultToolLoopConfigForStep returns step-appropriate tool loop limits.
+func defaultToolLoopConfigForStep(step PromptStep) llm.ToolLoopConfig {
+	switch step {
+	case StepAnalysis, StepPlan, StepPlanOrganize, StepPlanQA:
+		return llm.ToolLoopConfig{MaxRounds: 3, MaxToolCallsPerRound: 3}
+	case StepGeneration:
+		return llm.ToolLoopConfig{MaxRounds: 2, MaxToolCallsPerRound: 3}
+	default:
+		return llm.ToolLoopConfig{MaxRounds: 0, MaxToolCallsPerRound: 0}
+	}
+}
+
 func (p *Pipeline) runLLMStep(ctx context.Context, step string, messages []llm.Message, temp float64, maxTok int) (string, error) {
 	RecordLLMRequest(p.recorder, step, p.llmClient.Model(), llmMessagesForRecord(messages), temp, maxTok)
 	start := time.Now()
 
 	cfg := p.toolLoopCfg
 	if cfg.MaxRounds == 0 {
-		cfg = llm.DefaultToolLoopConfig()
+		// Resolve step name to PromptStep for config lookup
+		cfg = defaultToolLoopConfigForStep(promptStepForStepName(step))
 	}
 
-	if p.mcpExecutor != nil && !p.mcpExecutor.LocalOnly() {
-		tools, err := p.mcpExecutor.ListTools(ctx)
-		if err != nil {
-			p.mcpExecutor.localOnly.Store(true)
-		} else if len(tools) > 0 {
-			result, err := llm.RunToolLoop(ctx, p.llmClient, p.mcpExecutor, messages, tools, temp, maxTok, cfg)
+	// Build combined tool executor (local + external MCP) when tools are available
+	if cfg.MaxRounds > 0 {
+		exec := NewPipelineToolExecutor(p.workspace, p.db, p.mcpExecutor)
+		tools, toolsErr := exec.ListTools(ctx)
+		if toolsErr == nil && len(tools) > 0 {
+			result, err := llm.RunToolLoop(ctx, p.llmClient, exec, messages, tools, temp, maxTok, cfg)
 			if err == nil {
 				RecordLLMResponse(p.recorder, step, result, time.Since(start))
 				return result, nil
 			}
+			// Tool loop failed, fall through to stream
 			if p.recorder != nil {
 				p.recorder.Record(step, "warn", "tool loop failed, falling back to stream: "+err.Error(), nil)
 			}
 		}
 	}
 
+	// Legacy: try MCP-only tool loop (preserves old behavior when db is nil)
+	if p.mcpExecutor != nil && !p.mcpExecutor.LocalOnly() {
+		mcpCfg := p.toolLoopCfg
+		if mcpCfg.MaxRounds == 0 {
+			mcpCfg = llm.DefaultToolLoopConfig()
+		}
+		tools, err := p.mcpExecutor.ListTools(ctx)
+		if err != nil {
+			p.mcpExecutor.localOnly.Store(true)
+		} else if len(tools) > 0 {
+			result, err := llm.RunToolLoop(ctx, p.llmClient, p.mcpExecutor, messages, tools, temp, maxTok, mcpCfg)
+			if err == nil {
+				RecordLLMResponse(p.recorder, step, result, time.Since(start))
+				return result, nil
+			}
+			if p.recorder != nil {
+				p.recorder.Record(step, "warn", "MCP tool loop failed, falling back to stream: "+err.Error(), nil)
+			}
+		}
+	}
+
+	// Stream fallback (no tools)
 	ch, err := p.llmClient.StreamChat(ctx, messages, temp, maxTok)
 	if err != nil {
 		return "", err
@@ -287,6 +340,20 @@ func (p *Pipeline) runLLMStep(ctx context.Context, step string, messages []llm.M
 	}
 	RecordLLMResponse(p.recorder, step, result, time.Since(start))
 	return result, nil
+}
+
+// promptStepForStepName maps a step name string to a PromptStep for config lookup.
+func promptStepForStepName(step string) PromptStep {
+	switch step {
+	case "analysis":
+		return StepAnalysis
+	case "generation":
+		return StepGeneration
+	case "plan":
+		return StepPlan
+	default:
+		return ""
+	}
 }
 
 func llmMessagesForRecord(messages []llm.Message) []map[string]string {

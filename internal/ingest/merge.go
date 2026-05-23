@@ -243,7 +243,7 @@ func MergeWikiPage(ctx context.Context, fullPath, newContent string, mc *MergeCo
 		if oldBody == newBody {
 			return "", true, nil
 		}
-		mergedBody, err := mergeBodyLLM(ctx, mc, oldBody, newBody)
+		mergedBody, err := DiffMergeBody(ctx, mc, oldBody, newBody)
 		if err != nil {
 			return "", false, err
 		}
@@ -257,7 +257,7 @@ func MergeWikiPage(ctx context.Context, fullPath, newContent string, mc *MergeCo
 
 	mergedBody := oldBody
 	if oldBody != newBody {
-		mergedBody, err = mergeBodyLLM(ctx, mc, oldBody, newBody)
+		mergedBody, err = DiffMergeBody(ctx, mc, oldBody, newBody)
 		if err != nil {
 			return "", false, err
 		}

@@ -127,6 +127,7 @@ export interface Settings {
   watch_sources: boolean
   activity_logs_max_count?: number
   ingest_job_events_max_count?: number
+  session_message_events_max_count?: number
   mcp_servers_json?: string
   ui_language: string
   doc_language: string
@@ -400,4 +401,18 @@ export interface VCLogEntry {
   timestamp: string
   files_changed: number
   is_rollback: boolean
+}
+
+export interface SessionMessageEvent {
+  id: number
+  message_id: string
+  step: string
+  phase: string
+  message: string
+  payload: string
+  created_at: string
+}
+
+export interface SessionMessageEventsResponse {
+  events: SessionMessageEvent[]
 }

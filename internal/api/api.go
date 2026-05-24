@@ -125,4 +125,12 @@ func getIntQuery(r *http.Request, key string, defaultVal int) int {
 	return n
 }
 
+// truncateDebugString truncates a string to maxBytes for debug payload storage.
+func truncateDebugString(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	return s[:maxBytes] + "…(truncated)"
+}
+
 

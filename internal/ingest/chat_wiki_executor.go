@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
@@ -170,6 +171,7 @@ func RunSessionChatToolLoop(
 	cfg llm.ToolLoopConfig,
 	onEvent ToolEventCallback,
 	mode string,
+	recorder *SessionMessageRecorder,
 ) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("LLM client is nil")
@@ -185,7 +187,19 @@ func RunSessionChatToolLoop(
 	useTools := len(tools) > 0 && executor != nil
 
 	for round := 0; round < cfg.MaxRounds; round++ {
+		stepName := fmt.Sprintf("round_%d", round)
 		toolChoice := mcp.ToolChoiceForMode(mode, round)
+
+		// Record LLM request
+		if recorder != nil {
+			recorder.Record(stepName, "llm_request", stepName+" LLM request", map[string]any{
+				"messages":    messageSummaries(msgs),
+				"tools_count": len(tools),
+				"temperature": temperature,
+				"max_tokens":  maxTokens,
+				"tool_choice": toolChoice,
+			})
+		}
 
 		var result llm.ChatResult
 		var err error
@@ -209,6 +223,17 @@ func RunSessionChatToolLoop(
 				return "", err
 			}
 		}
+
+		// Record LLM response
+		if recorder != nil {
+			recorder.Record(stepName, "llm_response", stepName+" LLM response", map[string]any{
+				"content_preview":  truncateForEvent(result.Content, 500),
+				"content_chars":    len(result.Content),
+				"tool_calls_count": len(result.ToolCalls),
+				"tool_calls":       toolCallSummaries(result.ToolCalls),
+			})
+		}
+
 		if len(result.ToolCalls) == 0 {
 			// organize mode round 0: retry once with a nudge if no tools called
 			if mode == "organize" && round == 0 && useTools {
@@ -239,7 +264,9 @@ func RunSessionChatToolLoop(
 			if onEvent != nil {
 				onEvent("start", tc.Name, truncateForEvent(tc.Arguments, 200))
 			}
+			start := time.Now()
 			out, execErr := executor.Execute(ctx, tc.Name, tc.Arguments)
+			duration := time.Since(start)
 			detail := "ok"
 			if execErr != nil {
 				out = fmt.Sprintf("tool error: %v", execErr)
@@ -250,6 +277,23 @@ func RunSessionChatToolLoop(
 			if onEvent != nil {
 				onEvent("done", tc.Name, detail)
 			}
+
+			// Record tool result
+			if recorder != nil {
+				payload := map[string]any{
+					"tool_name":    tc.Name,
+					"arguments":    truncateForEvent(tc.Arguments, 2000),
+					"result_chars": len(out),
+					"duration_ms":  duration.Milliseconds(),
+				}
+				if execErr != nil {
+					payload["error"] = execErr.Error()
+				} else {
+					payload["result_preview"] = truncateForEvent(out, 2000)
+				}
+				recorder.Record(stepName, "tool_result", tc.Name+" executed", payload)
+			}
+
 			msgs = append(msgs, llm.Message{
 				Role:       "tool",
 				Content:    out,
@@ -259,6 +303,47 @@ func RunSessionChatToolLoop(
 		}
 	}
 	return "", fmt.Errorf("tool loop exceeded max rounds (%d)", cfg.MaxRounds)
+}
+
+// messageSummaries returns lightweight summaries of messages for debug recording.
+func messageSummaries(msgs []llm.Message) []map[string]any {
+	out := make([]map[string]any, len(msgs))
+	for i, m := range msgs {
+		entry := map[string]any{
+			"role":          m.Role,
+			"content_chars": len(m.Content),
+		}
+		if len(m.ToolCalls) > 0 {
+			entry["tool_calls"] = toolCallSummaries(m.ToolCalls)
+		}
+		if m.ToolCallID != "" {
+			entry["tool_call_id"] = m.ToolCallID
+		}
+		if m.Name != "" {
+			entry["name"] = m.Name
+		}
+		// Include content for system and short messages
+		if m.Role == "system" || len(m.Content) <= 500 {
+			entry["content"] = m.Content
+		} else {
+			entry["content_preview"] = truncateForEvent(m.Content, 300)
+		}
+		out[i] = entry
+	}
+	return out
+}
+
+// toolCallSummaries returns lightweight summaries of tool calls.
+func toolCallSummaries(calls []llm.ToolCall) []map[string]any {
+	out := make([]map[string]any, len(calls))
+	for i, tc := range calls {
+		out[i] = map[string]any{
+			"id":        tc.ID,
+			"name":      tc.Name,
+			"arguments": truncateForEvent(tc.Arguments, 300),
+		}
+	}
+	return out
 }
 
 // isBadRequestError checks if the error is an HTTP 400 from the LLM API.

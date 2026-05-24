@@ -113,6 +113,7 @@ func TestOrganizeModeRound0RetryOnNoToolCalls(t *testing.T) {
 		llm.ToolLoopConfig{MaxRounds: 6, MaxToolCallsPerRound: 4},
 		nil,
 		"organize",
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -171,6 +172,7 @@ func TestOrganizeModePassesRequiredToolChoice(t *testing.T) {
 		llm.ToolLoopConfig{MaxRounds: 6, MaxToolCallsPerRound: 4},
 		nil,
 		"organize",
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

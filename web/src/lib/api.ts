@@ -29,6 +29,7 @@ import type {
   ProviderCheckResult,
   MCPServerCheckResult,
   ActivityLog,
+  SessionMessageEventsResponse,
 } from "@/types"
 
 const BASE = ""
@@ -311,6 +312,17 @@ export function appendIngestSessionMessage(
       method: "POST",
       body: JSON.stringify({ content }),
     },
+  )
+}
+
+export function getSessionMessageEvents(
+  sessionId: string,
+  messageId: string,
+  limit = 200,
+): Promise<SessionMessageEventsResponse> {
+  return request<SessionMessageEventsResponse>(
+    `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}` +
+      `/messages/${encodeURIComponent(messageId)}/events?limit=${limit}`,
   )
 }
 

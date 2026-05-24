@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	maxWorkspaceRuleFileLen = 1500
+	maxWorkspaceRuleFileLen = 5000
 	maxRulesSupplementLen   = 2048
 	maxRulePreviewLen       = 500
 )

@@ -9,12 +9,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ModelSelectDialog } from "@/components/ModelSelectDialog"
+import { MessageDebugDialog } from "@/components/MessageDebugDialog"
 import { SessionControls } from "@/components/SessionControls"
 import { WikiMentionPicker } from "@/components/WikiMentionPicker"
 import type { IngestSessionMessage, WikiRefPayload } from "@/types"
 import {
   Archive,
   Bot,
+  Bug,
   CircleOff,
   Copy,
   Cpu,
@@ -49,11 +51,13 @@ function MessageBubble({
   msg,
   onRetry,
   onToggleExclude,
+  onDebug,
   sessionBusy,
 }: {
   msg: IngestSessionMessage
   onRetry: (assistantMessageId: string) => void
   onToggleExclude: (messageId: string) => void
+  onDebug?: (messageId: string) => void
   sessionBusy: boolean
 }) {
   const t = useT()
@@ -182,6 +186,17 @@ function MessageBubble({
                 <Copy className={`size-3.5 ${copied ? "text-green-600" : ""}`} />
               </button>
             )}
+            {!isUser && onDebug && (
+              <button
+                type="button"
+                className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                title={t("chat.debug_prompt")}
+                aria-label={t("chat.debug_prompt")}
+                onClick={() => onDebug(msg.id)}
+              >
+                <Bug className="size-3.5" />
+              </button>
+            )}
             <button
               type="button"
               className={`rounded p-1 transition-colors ${
@@ -243,6 +258,7 @@ export function IngestChat() {
   const [selectedInstanceId, setSelectedInstanceId] = useState("")
   const [selectedModel, setSelectedModel] = useState("")
   const [configLoaded, setConfigLoaded] = useState(false)
+  const [debugMessageId, setDebugMessageId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -459,6 +475,7 @@ export function IngestChat() {
                 msg={m}
                 onRetry={handleRetry}
                 onToggleExclude={toggleMessageExclude}
+                onDebug={(id) => setDebugMessageId(id)}
                 sessionBusy={sessionBusy}
               />
             ))}
@@ -649,6 +666,13 @@ export function IngestChat() {
         lastUsedModel={settings?.last_model}
         onLoadModels={handleLoadModels}
         onConfirm={(instanceId, modelId) => void handleModelConfirm(instanceId, modelId)}
+      />
+
+      <MessageDebugDialog
+        open={!!debugMessageId}
+        onOpenChange={(open) => { if (!open) setDebugMessageId(null) }}
+        sessionId={sessionId}
+        message={debugMessageId ? sessionMessages.find(m => m.id === debugMessageId) ?? null : null}
       />
 
     </div>

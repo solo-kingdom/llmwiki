@@ -457,6 +457,27 @@ func (a *API) streamAssistantReply(
 	)
 	ctx := r.Context()
 
+	// Create debug recorder for this assistant message
+	recorder := ingest.NewSessionMessageRecorder(a.db, assistantMsg.ID)
+
+	// Record system prompt composition
+	if len(msgs) > 0 {
+		systemPrompt := msgs[0].Content
+		recorder.Record("compose", "system_prompt", "System prompt assembled", map[string]any{
+			"system_prompt": truncateDebugString(systemPrompt, 32*1024),
+			"total_chars":   len(systemPrompt),
+			"message_count": len(msgs),
+			"model":         model,
+			"instance_id":   instanceID,
+		})
+		recorder.Record("compose", "messages_snapshot", "Messages assembled for LLM", map[string]any{
+			"total_messages":     len(msgs),
+			"user_content_chars": len(llmUserContent),
+			"wiki_refs_count":    len(wikiRefs),
+			"related_subset":     subsetSection != "",
+		})
+	}
+
 	router := a.sessionChatRouter()
 	onToolRead := func(documentID, relativePath, title string) {
 		ingest.RecordToolReadReference(a.db, session.ID, documentID, relativePath, title)
@@ -478,7 +499,7 @@ func (a *API) streamAssistantReply(
 	cfg := mcp.ToolLoopConfigForMode(session.Mode)
 	temp := mcp.ToolTemperatureForMode(session.Mode)
 	tokens := mcp.ToolMaxTokensForMode(session.Mode)
-	finalText, err := ingest.RunSessionChatToolLoop(ctx, client, executor, msgs, tools, temp, tokens, cfg, toolHandler, session.Mode)
+	finalText, err := ingest.RunSessionChatToolLoop(ctx, client, executor, msgs, tools, temp, tokens, cfg, toolHandler, session.Mode, recorder)
 	if err != nil {
 		log.Printf(
 			"[ingest-session] tool loop failed session=%s instance=%s model=%s: %v; falling back to stream",
@@ -1120,4 +1141,43 @@ func (a *API) DeleteIngestSessionHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+type sessionMessageEventsResponse struct {
+	Events []sqlite.SessionMessageEvent `json:"events"`
+}
+
+func (a *API) GetSessionMessageEvents(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+	messageID := chi.URLParam(r, "messageId")
+	if sessionID == "" || messageID == "" {
+		writeError(w, http.StatusBadRequest, "missing session or message id")
+		return
+	}
+
+	// Verify message belongs to session
+	msg, err := a.db.GetIngestSessionMessage(messageID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if msg == nil {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+	if msg.SessionID != sessionID {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	limit := getIntQuery(r, "limit", 200)
+	events, err := a.db.ListSessionMessageEvents(messageID, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if events == nil {
+		events = []sqlite.SessionMessageEvent{}
+	}
+	writeJSON(w, http.StatusOK, sessionMessageEventsResponse{Events: events})
 }

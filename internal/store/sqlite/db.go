@@ -88,6 +88,9 @@ func (d *DB) Migrate() error {
 	if err := MigrateAddSessionMode(d); err != nil {
 		return err
 	}
+	if err := d.migrateSessionMessageEvents(); err != nil {
+		return err
+	}
 	return d.migrateFTSTrigram()
 }
 

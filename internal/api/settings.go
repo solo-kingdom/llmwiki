@@ -36,7 +36,8 @@ type settingsResponse struct {
 	AutoReindex           string `json:"auto_reindex"`
 	WatchSources          string `json:"watch_sources"`
 	ActivityLogsMaxCount     string `json:"activity_logs_max_count"`
-	IngestJobEventsMaxCount string `json:"ingest_job_events_max_count"`
+	IngestJobEventsMaxCount            string `json:"ingest_job_events_max_count"`
+	SessionMessageEventsMaxCount       string `json:"session_message_events_max_count"`
 	MCPServersJSON          string `json:"mcp_servers_json"`
 	UILanguage       string `json:"ui_language"`
 	DocLanguage      string `json:"doc_language"`
@@ -62,7 +63,8 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		AutoReindex:          all["auto_reindex"],
 		WatchSources:         all["watch_sources"],
 		ActivityLogsMaxCount:      activityLogsMaxCountForResponse(all["activity_logs_max_count"]),
-		IngestJobEventsMaxCount:   jobEventsMaxCountForResponse(all["ingest_job_events_max_count"]),
+		IngestJobEventsMaxCount:         jobEventsMaxCountForResponse(all["ingest_job_events_max_count"]),
+		SessionMessageEventsMaxCount:    sessionMsgEventsMaxCountForResponse(all["session_message_events_max_count"]),
 		MCPServersJSON:            mcpServersJSONForResponse(all["mcp_servers_json"]),
 		UILanguage:      languageForResponse(all["ui_language"]),
 		DocLanguage:     languageForResponse(all["doc_language"]),
@@ -100,6 +102,13 @@ func activityLogsMaxCountForResponse(stored string) string {
 	return stored
 }
 
+func sessionMsgEventsMaxCountForResponse(stored string) string {
+	if strings.TrimSpace(stored) == "" {
+		return strconv.Itoa(sqlite.DefaultSessionMsgEventsMaxCount)
+	}
+	return stored
+}
+
 func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -113,6 +122,7 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"job_instance_id": true, "job_model": true,
 		"activity_logs_max_count":      true,
 		"ingest_job_events_max_count": true,
+		"session_message_events_max_count": true,
 		"mcp_servers_json":            true,
 		"ui_language":      true,
 		"doc_language":     true,
@@ -136,6 +146,12 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if key == "ingest_job_events_max_count" {
 			if _, err := sqlite.ParseJobEventsMaxCount(value); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if key == "session_message_events_max_count" {
+			if _, err := sqlite.ParseSessionMsgEventsMaxCount(value); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}

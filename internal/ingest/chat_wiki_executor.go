@@ -209,6 +209,12 @@ func RunSessionChatToolLoop(
 			result, err = client.Chat(ctx, msgs, nil, temperature, maxTokens)
 		}
 		if err != nil {
+			// Record LLM error to debug events before deciding whether to retry.
+			if recorder != nil {
+				recorder.Record(stepName, "llm_error", stepName+" LLM call failed", map[string]any{
+					"error": err.Error(),
+				})
+			}
 			// Fallback: if tool_choice="required" caused a 400, retry without it
 			if toolChoice != "" && isBadRequestError(err) {
 				if useTools {
@@ -352,6 +358,35 @@ func isBadRequestError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "HTTP 400") || strings.Contains(err.Error(), "bad request")
+}
+
+// StripToolMessages removes tool-role messages and tool_calls from assistant
+// messages, producing a clean conversation history suitable for a plain
+// (non-tool) LLM call. This is used when the tool loop fails and the system
+// falls back to direct streaming — sending tool messages without tool
+// definitions confuses some LLM providers.
+func StripToolMessages(msgs []llm.Message) []llm.Message {
+	var out []llm.Message
+	for _, m := range msgs {
+		switch m.Role {
+		case "tool":
+			// Skip tool-result messages entirely.
+			continue
+		case "assistant":
+			// Keep content, strip tool_calls.
+			if len(m.ToolCalls) > 0 {
+				out = append(out, llm.Message{
+					Role:    m.Role,
+					Content: m.Content,
+				})
+			} else {
+				out = append(out, m)
+			}
+		default:
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func truncateForEvent(s string, max int) string {

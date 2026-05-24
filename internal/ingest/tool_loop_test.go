@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
+	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
 // toolLoopTestServer creates an httptest.Server that simulates LLM responses.
@@ -259,6 +260,124 @@ func (e *stubExecutor) Execute(ctx context.Context, name string, argsJSON string
 
 func (e *stubExecutor) ListTools(ctx context.Context) ([]llm.ToolDefinition, error) {
 	return e.tools, nil
+}
+
+// stubRecorder is an in-memory recorder for testing.
+type stubRecorder struct {
+	events []struct {
+		step    string
+		phase   string
+		message string
+		payload map[string]any
+	}
+}
+
+func (r *stubRecorder) Record(step, phase, message string, payload map[string]any) {
+	r.events = append(r.events, struct {
+		step    string
+		phase   string
+		message string
+		payload map[string]any
+	}{step, phase, message, payload})
+}
+
+func TestToolLoopRecordsErrorOnAPIFailure(t *testing.T) {
+	server := toolLoopTestServer([]func(w http.ResponseWriter, r *http.Request){
+		// Round 0: returns tool call
+		func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, openaiToolCallResponse("tc1", "structure", "{}"))
+		},
+		// Round 1: returns 500 error
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(500)
+			fmt.Fprintf(w, `{"error": {"message": "internal server error"}}`)
+		},
+	})
+	defer server.Close()
+
+	client := llm.NewClient(llm.Config{
+		Provider: "openai",
+		BaseURL:  server.URL,
+		APIKey:   "test",
+		Model:    "test-model",
+	})
+
+	executor := &stubExecutor{
+		tools: []llm.ToolDefinition{
+			{Name: "structure", Description: "Get structure"},
+		},
+	}
+
+	// Use a real recorder backed by an in-memory SQLite DB.
+	db, err := sqlite.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	// Seed a provider so session creation works.
+	_ = db.UpsertProviderInfo([]sqlite.ProviderInfo{
+		{ID: "openai", Name: "OpenAI", APIFormat: "openai"},
+	})
+	_ = db.CreateProviderInstance(&sqlite.ProviderInstance{
+		ID: "inst-test", Name: "Test", CatalogID: "openai", APIKey: "k",
+	})
+	sess := &sqlite.IngestSession{
+		LLMInstanceID: "inst-test",
+		LLMModel:      "test-model",
+		Mode:          "organize",
+	}
+	if err := db.CreateIngestSession(sess); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	msg := &sqlite.IngestSessionMessage{
+		SessionID:    sess.ID,
+		Role:         "assistant",
+		Content:      "",
+		StreamStatus: "streaming",
+		MessageType:  "text",
+	}
+	if err := db.CreateIngestSessionMessage(msg); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+	rec := NewSessionMessageRecorder(db, msg.ID)
+
+	_, err = RunSessionChatToolLoop(
+		context.Background(),
+		client,
+		executor,
+		[]llm.Message{{Role: "user", Content: "test"}},
+		executor.tools,
+		0.6,
+		2048,
+		llm.ToolLoopConfig{MaxRounds: 6, MaxToolCallsPerRound: 4},
+		nil,
+		"organize",
+		rec,
+	)
+	if err == nil {
+		t.Fatal("expected error from tool loop")
+	}
+
+	// Verify llm_error event was recorded in the DB.
+	events, dbErr := db.ListSessionMessageEvents(msg.ID, 100)
+	if dbErr != nil {
+		t.Fatalf("list events: %v", dbErr)
+	}
+	var found bool
+	for _, e := range events {
+		if e.Phase == "llm_error" {
+			found = true
+			if !strings.Contains(e.Payload, "500") {
+				t.Errorf("error payload should mention 500, got: %s", e.Payload)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected llm_error event in DB, events:")
+		for _, e := range events {
+			t.Logf("  step=%s phase=%s payload=%s", e.Step, e.Phase, e.Payload)
+		}
+	}
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {

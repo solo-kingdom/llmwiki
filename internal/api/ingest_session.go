@@ -505,7 +505,11 @@ func (a *API) streamAssistantReply(
 			"[ingest-session] tool loop failed session=%s instance=%s model=%s: %v; falling back to stream",
 			session.ID, instanceID, model, err,
 		)
-		a.streamSessionChatDirect(ctx, w, sendEvent, client, session, instanceID, model, msgs, assistantMsg)
+		recorder.Record("fallback", "tool_loop_failed", "Tool loop failed, falling back to direct stream", map[string]any{
+			"error": err.Error(),
+		})
+		cleaned := ingest.StripToolMessages(msgs)
+		a.streamSessionChatDirect(ctx, w, sendEvent, client, session, instanceID, model, cleaned, assistantMsg)
 		return
 	}
 

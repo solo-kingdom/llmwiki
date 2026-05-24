@@ -219,6 +219,12 @@ func TestMessageToolCallsSerialization(t *testing.T) {
 	if !strings.Contains(s, `"tool_calls"`) {
 		t.Errorf("JSON should contain tool_calls: %s", s)
 	}
+	if !strings.Contains(s, `"type":"function"`) {
+		t.Errorf("JSON should use OpenAI tool_calls format with type:function: %s", s)
+	}
+	if !strings.Contains(s, `"function"`) {
+		t.Errorf("JSON should contain nested function object: %s", s)
+	}
 	if !strings.Contains(s, `"call_1"`) || !strings.Contains(s, `"structure"`) {
 		t.Errorf("JSON should contain tool call details: %s", s)
 	}
@@ -236,6 +242,88 @@ func TestMessageToolCallsSerialization(t *testing.T) {
 	}
 	if parsed.ToolCalls[1].ID != "call_2" || parsed.ToolCalls[1].Name != "audit" {
 		t.Errorf("tool call 1 mismatch: %+v", parsed.ToolCalls[1])
+	}
+}
+
+func TestOrganizeModeRound1SendsOpenAIToolCallsFormat(t *testing.T) {
+	callCount := 0
+	server := toolLoopTestServer([]func(w http.ResponseWriter, r *http.Request){
+		func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			writeJSON(w, openaiToolCallResponse("tc1", "structure", "{}"))
+		},
+		func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			var body struct {
+				Messages []struct {
+					Role      string `json:"role"`
+					ToolCalls []struct {
+						Type     string `json:"type"`
+						Function struct {
+							Name string `json:"name"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode round 1 request: %v", err)
+			}
+			var found bool
+			for _, m := range body.Messages {
+				if m.Role != "assistant" || len(m.ToolCalls) == 0 {
+					continue
+				}
+				tc := m.ToolCalls[0]
+				if tc.Type != "function" {
+					t.Errorf("tool_calls[0].type = %q, want function", tc.Type)
+				}
+				if tc.Function.Name != "structure" {
+					t.Errorf("tool_calls[0].function.name = %q, want structure", tc.Function.Name)
+				}
+				found = true
+			}
+			if !found {
+				t.Fatal("round 1 request missing assistant message with tool_calls")
+			}
+			writeJSON(w, openaiTextResponse("Structure analyzed"))
+		},
+	})
+	defer server.Close()
+
+	client := llm.NewClient(llm.Config{
+		Provider: "openai",
+		BaseURL:  server.URL,
+		APIKey:   "test",
+		Model:    "test-model",
+	})
+
+	executor := &stubExecutor{
+		tools: []llm.ToolDefinition{
+			{Name: "structure", Description: "Get wiki structure"},
+		},
+	}
+
+	result, err := RunSessionChatToolLoop(
+		context.Background(),
+		client,
+		executor,
+		[]llm.Message{{Role: "user", Content: "organize"}},
+		executor.tools,
+		0.6,
+		2048,
+		llm.ToolLoopConfig{MaxRounds: 6, MaxToolCallsPerRound: 4},
+		nil,
+		"organize",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "Structure analyzed" {
+		t.Fatalf("result = %q, want Structure analyzed", result)
+	}
+	if callCount != 2 {
+		t.Fatalf("expected 2 Chat calls, got %d", callCount)
 	}
 }
 

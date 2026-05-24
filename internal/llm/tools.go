@@ -20,6 +20,47 @@ type ToolCall struct {
 	Arguments string
 }
 
+// MarshalJSON serializes ToolCall in OpenAI Chat Completions tool_calls format.
+func (tc ToolCall) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ID       string `json:"id"`
+		Type     string `json:"type"`
+		Function struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"function"`
+	}{
+		ID:   tc.ID,
+		Type: "function",
+		Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{
+			Name:      tc.Name,
+			Arguments: tc.Arguments,
+		},
+	})
+}
+
+// UnmarshalJSON parses OpenAI Chat Completions tool_calls format into ToolCall.
+func (tc *ToolCall) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID       string `json:"id"`
+		Type     string `json:"type"`
+		Function struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	tc.ID = raw.ID
+	tc.Name = raw.Function.Name
+	tc.Arguments = raw.Function.Arguments
+	return nil
+}
+
 // ChatResult is a non-streaming completion result.
 type ChatResult struct {
 	Content   string

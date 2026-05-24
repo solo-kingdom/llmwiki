@@ -321,7 +321,7 @@ func (c *Client) buildChatBody(messages []Message, tools []ToolDefinition, tempe
 			req.Tools = append(req.Tools, ot)
 		}
 		if toolChoice != "" {
-			req.ToolChoice = toolChoice
+			req.ToolChoice = map[string]string{"type": toolChoice}
 		}
 		return json.Marshal(req)
 	}

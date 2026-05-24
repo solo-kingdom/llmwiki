@@ -154,6 +154,7 @@ const en: Record<MessageKey, string> = {
   "chat.replying": "Replying",
   "chat.reply_failed": "Reply failed",
   "chat.reply_incomplete": "Reply incomplete",
+  "chat.tool_loop_fallback": "Tool call failed, retrying with direct reply…",
   "chat.retry": "Retry",
   "chat.no_provider": "Please add a Provider in Settings first",
   "chat.select_model_hint": 'Click "Model" below to select a Provider and Model',

@@ -305,6 +305,8 @@ export interface IngestSessionMessage {
   exclude_from_archive?: boolean
   /** Populated when stream_status is failed (from SSE error or client-side stream failure). */
   error_message?: string
+  /** Client-side warning during streaming (e.g. tool loop fallback). */
+  warning_message?: string
   /** Client-side parsed wiki refs for display. */
   wiki_refs?: WikiRefPayload[]
   /** Client-side tool activity during streaming. */

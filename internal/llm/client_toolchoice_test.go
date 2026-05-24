@@ -26,8 +26,12 @@ func TestBuildChatBodyToolChoiceRequired(t *testing.T) {
 	if !ok {
 		t.Fatal("tool_choice field missing from request body")
 	}
-	if tc != "required" {
-		t.Fatalf("tool_choice = %v, want %q", tc, "required")
+	tcMap, ok := tc.(map[string]interface{})
+	if !ok {
+		t.Fatalf("tool_choice = %v, want map", tc)
+	}
+	if tcMap["type"] != "required" {
+		t.Fatalf("tool_choice.type = %v, want %q", tcMap["type"], "required")
 	}
 }
 
@@ -68,8 +72,12 @@ func TestBuildChatBodyToolChoiceAuto(t *testing.T) {
 	if !ok {
 		t.Fatal("tool_choice field missing from request body")
 	}
-	if tc != "auto" {
-		t.Fatalf("tool_choice = %v, want %q", tc, "auto")
+	tcMap, ok := tc.(map[string]interface{})
+	if !ok {
+		t.Fatalf("tool_choice = %v, want map", tc)
+	}
+	if tcMap["type"] != "auto" {
+		t.Fatalf("tool_choice.type = %v, want %q", tcMap["type"], "auto")
 	}
 }
 

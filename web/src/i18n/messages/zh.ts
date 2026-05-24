@@ -139,6 +139,7 @@ const zh = {
   "chat.replying": "正在回复",
   "chat.reply_failed": "回复失败",
   "chat.reply_incomplete": "回复未完成",
+  "chat.tool_loop_fallback": "工具调用失败，正在尝试直接回复…",
   "chat.retry": "重试",
   "chat.no_provider": "请先在 Settings 添加 Provider",
   "chat.select_model_hint": "请点击下方「模型」选择 Provider 和 Model",

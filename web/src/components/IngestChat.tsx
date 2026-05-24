@@ -128,14 +128,26 @@ function MessageBubble({
                 </div>
               )}
             </div>
-          ) : isStreaming && !hasContent ? (
-            <Loader2
-              className="size-4 animate-spin text-muted-foreground"
-              aria-label={t("chat.replying")}
-            />
           ) : isStreaming ? (
-            <p className="whitespace-pre-wrap">{msg.content}</p>
-          ) : !hasContent && isFailed && errorText ? (
+            <div>
+              {msg.warning_message && (
+                <p className="mb-2 text-xs text-amber-600 dark:text-amber-500">
+                  {msg.warning_message}
+                </p>
+              )}
+              {!hasContent ? (
+                <Loader2
+                  className="size-4 animate-spin text-muted-foreground"
+                  aria-label={t("chat.replying")}
+                />
+              ) : (
+                <p className="whitespace-pre-wrap">{msg.content}</p>
+              )}
+              {msg.tool_status && (
+                <p className="mt-2 text-xs text-muted-foreground">{msg.tool_status}</p>
+              )}
+            </div>
+          ) : isFailed && errorText && msg.stream_status === "failed" ? (
             <p className="whitespace-pre-wrap text-destructive">{errorText}</p>
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none">
@@ -159,7 +171,7 @@ function MessageBubble({
           )}
           {isFailed && (
             <div className="mt-2 space-y-1 border-t border-destructive/20 pt-2">
-              {hasContent && errorText && (
+              {msg.stream_status === "incomplete" && errorText && (
                 <p className="text-xs text-destructive">{errorText}</p>
               )}
               {showRetry && (

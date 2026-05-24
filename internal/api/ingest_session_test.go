@@ -1317,3 +1317,158 @@ func TestPatchSessionMode(t *testing.T) {
 		t.Errorf("expected 400 for invalid mode, got %d", w.Code)
 	}
 }
+
+type sseEvent struct {
+	Type string
+	Data string
+}
+
+func parseSSEEvents(body string) []sseEvent {
+	var out []sseEvent
+	for _, part := range strings.Split(body, "\n\n") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		var ev sseEvent
+		for _, line := range strings.Split(part, "\n") {
+			if strings.HasPrefix(line, "event:") {
+				ev.Type = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			}
+			if strings.HasPrefix(line, "data:") {
+				ev.Data = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			}
+		}
+		if ev.Type != "" || ev.Data != "" {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+func mockToolLoopAndStreamFailHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/chat/completions") {
+			http.NotFound(w, req)
+			return
+		}
+		raw, _ := io.ReadAll(req.Body)
+		var body struct {
+			Stream bool `json:"stream"`
+		}
+		_ = json.Unmarshal(raw, &body)
+		if body.Stream {
+			http.Error(w, `{"error":{"message":"stream fallback failed"}}`, http.StatusBadRequest)
+			return
+		}
+		http.Error(w, `{"error":{"code":"1214","message":"工具类型不能为空"}}`, http.StatusBadRequest)
+	}
+}
+
+func TestStreamSessionToolLoopFailureEmitsWarningAndDone(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+	seedOpenAIProviderForStream(t, api)
+
+	llmSrv := httptest.NewServer(mockToolLoopAndStreamFailHandler())
+	t.Cleanup(llmSrv.Close)
+
+	inst := &sqlite.ProviderInstance{
+		Name:      "Mock OpenAI",
+		CatalogID: "openai",
+		APIKey:    "sk-test",
+		BaseURL:   llmSrv.URL + "/v1",
+	}
+	if err := api.db.CreateProviderInstance(inst); err != nil {
+		t.Fatalf("CreateProviderInstance: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"title":       "Tool Loop Fail",
+		"instance_id": inst.ID,
+		"model":       "gpt-4o",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var createResp sessionResponse
+	if err := json.NewDecoder(w.Body).Decode(&createResp); err != nil {
+		t.Fatal(err)
+	}
+
+	msgBody, _ := json.Marshal(map[string]string{"content": "hello"})
+	streamReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/ingest/sessions/"+createResp.Session.ID+"/messages?stream=1",
+		bytes.NewReader(msgBody),
+	)
+	streamReq.Header.Set("Content-Type", "application/json")
+	streamReq.Header.Set("Accept", "text/event-stream")
+	streamW := httptest.NewRecorder()
+	r.ServeHTTP(streamW, streamReq)
+
+	if streamW.Code != http.StatusOK {
+		t.Fatalf("stream status = %d, body = %s", streamW.Code, streamW.Body.String())
+	}
+
+	events := parseSSEEvents(streamW.Body.String())
+	eventTypes := make([]string, len(events))
+	for i, ev := range events {
+		eventTypes[i] = ev.Type
+	}
+	for _, want := range []string{"warning", "error", "done"} {
+		if !strings.Contains(strings.Join(eventTypes, ","), want) {
+			t.Fatalf("expected SSE event %q, got types: %v", want, eventTypes)
+		}
+	}
+
+	var warningData map[string]string
+	for _, ev := range events {
+		if ev.Type == "warning" {
+			if err := json.Unmarshal([]byte(ev.Data), &warningData); err != nil {
+				t.Fatalf("warning data: %v", err)
+			}
+			break
+		}
+	}
+	if warningData["code"] != "tool_loop_failed" {
+		t.Fatalf("warning code = %q, want tool_loop_failed", warningData["code"])
+	}
+	if !strings.Contains(warningData["message"], "工具类型不能为空") {
+		t.Fatalf("warning message = %q, want tool loop error", warningData["message"])
+	}
+
+	var doneMsg sqlite.IngestSessionMessage
+	for _, ev := range events {
+		if ev.Type == "done" {
+			if err := json.Unmarshal([]byte(ev.Data), &doneMsg); err != nil {
+				t.Fatalf("done data: %v", err)
+			}
+			break
+		}
+	}
+	if doneMsg.StreamStatus != "failed" {
+		t.Fatalf("done stream_status = %q, want failed", doneMsg.StreamStatus)
+	}
+	if doneMsg.Content == "" {
+		t.Fatal("expected failed assistant content in done event")
+	}
+
+	msgs, err := api.db.ListIngestSessionMessages(createResp.Session.ID)
+	if err != nil {
+		t.Fatalf("ListIngestSessionMessages: %v", err)
+	}
+	var assistant *sqlite.IngestSessionMessage
+	for i := range msgs {
+		if msgs[i].Role == "assistant" {
+			assistant = &msgs[i]
+			break
+		}
+	}
+	if assistant == nil {
+		t.Fatal("expected assistant message")
+	}
+	if assistant.StreamStatus != "failed" {
+		t.Fatalf("db stream_status = %q, want failed", assistant.StreamStatus)
+	}
+}

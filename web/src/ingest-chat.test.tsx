@@ -537,6 +537,73 @@ describe("IngestChat", () => {
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument()
   })
 
+  it("shows failed assistant error content from server", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+    const errorText = "bad request (HTTP 400): 工具类型不能为空"
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "trigger fail",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          id: "msg-assistant",
+          session_id: "sess-1",
+          role: "assistant",
+          content: errorText,
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "failed",
+          created_at: "2026-01-01T00:00:01Z",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    expect(await screen.findByText(errorText)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument()
+  })
+
   it("shows retry button for incomplete assistant", async () => {
     const api = await import("@/lib/api")
     localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")

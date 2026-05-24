@@ -7,6 +7,7 @@ import * as api from "@/lib/api"
 
 const mockListIngestSessionMessages = vi.fn()
 const mockGetIngestSession = vi.fn()
+const mockStreamIngest = vi.fn()
 const mockStreamRetry = vi.mocked(api.streamRetryIngestSessionMessage)
 
 vi.mock("@/lib/api", () => ({
@@ -38,7 +39,7 @@ vi.mock("@/lib/api", () => ({
   getIngestSession: (...args: unknown[]) => mockGetIngestSession(...args),
   listIngestSessionMessages: (...args: unknown[]) =>
     mockListIngestSessionMessages(...args),
-  streamIngestSessionMessage: vi.fn(),
+  streamIngestSessionMessage: (...args: unknown[]) => mockStreamIngest(...args),
   streamRetryIngestSessionMessage: vi.fn(),
   uploadIngestSessionAttachment: vi.fn(),
   archiveIngestSession: vi.fn(),
@@ -152,6 +153,116 @@ describe("AppContext streaming recovery", () => {
     },
     10000,
   )
+})
+
+describe("AppContext tool loop stream errors", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    mockGetIngestSession.mockResolvedValue({
+      session: {
+        id: "sess-1",
+        title: "",
+        status: "active",
+        mode: "organize",
+        storage_path: "",
+        llm_instance_id: "inst-1",
+        llm_model: "gpt-4",
+        created_at: "",
+        updated_at: "",
+      },
+    })
+    mockListIngestSessionMessages.mockResolvedValue({ messages: [] })
+  })
+
+  it("shows tool loop fallback warning during streaming", async () => {
+    mockStreamIngest.mockImplementation(async (_sid, _content, onEvent) => {
+      onEvent("assistant_start", { id: "msg-assistant" })
+      onEvent("warning", {
+        code: "tool_loop_failed",
+        message: "bad request (HTTP 400)",
+      })
+    })
+
+    let sendFn: ((content: string) => Promise<void>) | null = null
+    let latestMessages: IngestSessionMessage[] = []
+
+    render(
+      <AppProvider>
+        <Probe
+          onUpdate={(app) => {
+            sendFn = app.sendSessionMessage
+            latestMessages = app.sessionMessages
+          }}
+        />
+      </AppProvider>,
+    )
+
+    await act(async () => {
+      await sendFn!("hello")
+    })
+
+    await waitFor(() => {
+      const assistant = latestMessages.find((m) => m.role === "assistant")
+      expect(assistant?.warning_message).toMatch(/工具调用失败/)
+    })
+  })
+
+  it("preserves failed state when reload still shows streaming", async () => {
+    const streamError = "bad request (HTTP 400): tool type required"
+    mockStreamIngest.mockImplementation(async (_sid, _content, onEvent) => {
+      onEvent("assistant_start", { id: "msg-assistant" })
+      onEvent("error", { message: streamError })
+    })
+    mockListIngestSessionMessages.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "hello",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          id: "msg-assistant",
+          session_id: "sess-1",
+          role: "assistant",
+          content: "",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "streaming",
+          created_at: "2026-01-01T00:00:01Z",
+        },
+      ],
+    })
+
+    let sendFn: ((content: string) => Promise<void>) | null = null
+    let latestMessages: IngestSessionMessage[] = []
+
+    render(
+      <AppProvider>
+        <Probe
+          onUpdate={(app) => {
+            sendFn = app.sendSessionMessage
+            latestMessages = app.sessionMessages
+          }}
+        />
+      </AppProvider>,
+    )
+
+    await act(async () => {
+      await sendFn!("hello")
+    })
+
+    await waitFor(() => {
+      const assistant = latestMessages.find((m) => m.id === "msg-assistant")
+      expect(assistant?.stream_status).toBe("failed")
+      expect(assistant?.error_message).toBe(streamError)
+    })
+  })
 })
 
 describe("AppContext retry session message", () => {

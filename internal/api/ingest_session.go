@@ -505,6 +505,10 @@ func (a *API) streamAssistantReply(
 			"[ingest-session] tool loop failed session=%s instance=%s model=%s: %v; falling back to stream",
 			session.ID, instanceID, model, err,
 		)
+		sendEvent("warning", map[string]string{
+			"code":    "tool_loop_failed",
+			"message": err.Error(),
+		})
 		recorder.Record("fallback", "tool_loop_failed", "Tool loop failed, falling back to direct stream", map[string]any{
 			"error": err.Error(),
 		})
@@ -518,7 +522,10 @@ func (a *API) streamAssistantReply(
 		streamStatus = "failed"
 		lastErr := "LLM returned an empty response"
 		_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, lastErr, streamStatus)
+		assistantMsg.Content = lastErr
+		assistantMsg.StreamStatus = streamStatus
 		sendEvent("error", map[string]string{"message": lastErr})
+		sendEvent("done", assistantMsg)
 		return
 	}
 
@@ -564,7 +571,10 @@ func (a *API) streamSessionChatDirect(
 			session.ID, instanceID, model, err,
 		)
 		_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, err.Error(), "failed")
+		assistantMsg.Content = err.Error()
+		assistantMsg.StreamStatus = "failed"
 		sendEvent("error", map[string]string{"message": err.Error()})
+		sendEvent("done", assistantMsg)
 		activity.LogSession(a.db, "stream_error", session.ID,
 			err.Error(), "failure", "api",
 			map[string]interface{}{"instance_id": instanceID, "model": model})
@@ -633,7 +643,6 @@ func (a *API) streamSessionChatDirect(
 				"instance_id":   instanceID,
 				"model":         model,
 			})
-		return
 	}
 	sendEvent("done", assistantMsg)
 	_ = w

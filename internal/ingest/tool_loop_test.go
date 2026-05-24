@@ -136,8 +136,12 @@ func TestOrganizeModePassesRequiredToolChoice(t *testing.T) {
 			var body map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&body)
 			tc, _ := body["tool_choice"]
-			if tc != "required" {
-				t.Errorf("round 0 should have tool_choice=required, got: %v", tc)
+			tcMap, ok := tc.(map[string]interface{})
+			if !ok {
+				t.Fatalf("round 0 tool_choice should be a map, got: %T %v", tc, tc)
+			}
+			if tcMap["type"] != "required" {
+				t.Errorf("round 0 should have tool_choice.type=required, got: %v", tcMap["type"])
 			}
 			writeJSON(w, openaiToolCallResponse("tc1", "audit", "{}"))
 		},

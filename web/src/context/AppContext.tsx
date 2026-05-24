@@ -56,11 +56,36 @@ function hasStreamingAssistant(messages: IngestSessionMessage[]): boolean {
   )
 }
 
+function terminalStreamRank(
+  status: IngestSessionMessage["stream_status"],
+): number {
+  switch (status) {
+    case "streaming":
+      return 0
+    case "complete":
+      return 1
+    case "incomplete":
+      return 2
+    case "failed":
+      return 3
+    default:
+      return 0
+  }
+}
+
 function enrichSessionMessage(msg: IngestSessionMessage): IngestSessionMessage {
-  return {
+  const enriched: IngestSessionMessage = {
     ...msg,
     wiki_refs: msg.wiki_refs ?? parseWikiRefsJSON(msg.wiki_refs_json),
   }
+  if (
+    enriched.stream_status === "failed" &&
+    enriched.content?.trim() &&
+    !enriched.error_message?.trim()
+  ) {
+    return { ...enriched, error_message: enriched.content.trim() }
+  }
+  return enriched
 }
 
 function enrichSessionMessages(messages: IngestSessionMessage[]): IngestSessionMessage[] {
@@ -71,33 +96,42 @@ function mergeLoadedSessionMessages(
   prev: IngestSessionMessage[],
   loaded: IngestSessionMessage[],
 ): IngestSessionMessage[] {
-  const failedLocal = [...prev]
-    .reverse()
-    .find((m) => m.stream_status === "failed" && m.error_message)
-  if (!failedLocal?.error_message) return enrichSessionMessages(loaded)
-
-  let lastFailedIdx = -1
-  for (let i = loaded.length - 1; i >= 0; i--) {
-    if (
-      loaded[i].role === "assistant" &&
-      loaded[i].stream_status === "failed"
-    ) {
-      lastFailedIdx = i
-      break
-    }
+  if (loaded.length === 0 && prev.length > 0) {
+    return enrichSessionMessages(prev)
   }
-  if (lastFailedIdx < 0) return enrichSessionMessages(loaded)
 
+  const prevById = new Map(prev.map((m) => [m.id, m]))
   return enrichSessionMessages(
-    loaded.map((m, i) =>
-      i === lastFailedIdx
-        ? {
-            ...m,
-            error_message: failedLocal.error_message,
-            content: m.content || failedLocal.error_message || m.content,
-          }
-        : m,
-    ),
+    loaded.map((m) => {
+      const local = prevById.get(m.id)
+      if (!local || local.role !== "assistant") return m
+
+      const localRank = terminalStreamRank(local.stream_status)
+      const loadedRank = terminalStreamRank(m.stream_status)
+      if (localRank > loadedRank) {
+        return {
+          ...m,
+          stream_status: local.stream_status,
+          content: local.content || m.content,
+          error_message: local.error_message ?? m.error_message,
+          warning_message: local.warning_message,
+        }
+      }
+
+      if (local.error_message?.trim()) {
+        return {
+          ...m,
+          error_message: local.error_message,
+          content: m.content || local.error_message || m.content,
+        }
+      }
+
+      if (local.warning_message?.trim()) {
+        return { ...m, warning_message: local.warning_message }
+      }
+
+      return m
+    }),
   )
 }
 
@@ -557,17 +591,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       if (event === "done" && data && typeof data === "object") {
-        const am = data as IngestSessionMessage
+        const am = enrichSessionMessage(data as IngestSessionMessage)
         setSessionMessages((prev) =>
           prev.map((m) => {
             if (!isStreamingAssistant(m.id)) return m
-            if (m.stream_status === "failed") return m
-            return am
+            const errorMsg =
+              m.error_message?.trim() ||
+              am.error_message?.trim() ||
+              ((am.stream_status === "failed" ||
+                am.stream_status === "incomplete") &&
+              am.content?.trim()
+                ? am.content.trim()
+                : undefined)
+            return {
+              ...am,
+              error_message: errorMsg,
+              content: am.content || errorMsg || m.content,
+              warning_message: undefined,
+            }
           }),
         )
       }
       if (event === "error") {
         const reason = streamErrorMessage(data)
+        setSessionError(reason)
         setSessionMessages((prev) =>
           prev.map((m) =>
             isStreamingAssistant(m.id)
@@ -576,7 +623,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   stream_status: "failed",
                   error_message: reason,
                   content: m.content || reason,
+                  warning_message: undefined,
                 }
+              : m,
+          ),
+        )
+      }
+      if (event === "warning" && data && typeof data === "object") {
+        const payload = data as { code?: string; message?: string }
+        const warningMessage =
+          payload.code === "tool_loop_failed"
+            ? translate(getCurrentLang(), "chat.tool_loop_fallback")
+            : payload.message?.trim() ||
+              translate(getCurrentLang(), "chat.tool_loop_fallback")
+        setSessionMessages((prev) =>
+          prev.map((m) =>
+            isStreamingAssistant(m.id)
+              ? { ...m, warning_message: warningMessage, tool_status: null }
               : m,
           ),
         )

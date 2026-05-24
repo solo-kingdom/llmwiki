@@ -166,11 +166,6 @@ interface AppState {
   loadSettings: () => Promise<void>
   saveSettings: (s: Partial<Settings>) => Promise<void>
   refreshIngestJobs: () => Promise<void>
-  submitConversation: (payload: {
-    content: string
-    title?: string
-    source_ref?: string
-  }) => Promise<void>
   submitText: (payload: {
     content: string
     title?: string
@@ -358,14 +353,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const submitConversation = useCallback(
-    async (payload: { content: string; title?: string; source_ref?: string }) => {
-      await api.createConversationIngestJob(payload)
-      await refreshIngestJobs()
-    },
-    [refreshIngestJobs],
-  )
-
   const submitText = useCallback(
     async (payload: {
       content: string
@@ -469,11 +456,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (sessionId) {
       try {
         const { session } = await api.getIngestSession(sessionId)
-        if (session.status === "active") {
-          setSessionMode(session.mode || "ingest")
-          await loadSessionMessagesAndWatch(sessionId)
-          return
-        }
+        setSessionMode(session.mode || "ingest")
+        await loadSessionMessagesAndWatch(sessionId)
+        return
       } catch {
         setSessionId(null)
         setActiveSessionId(null)
@@ -1164,7 +1149,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadSettings,
         saveSettings,
         refreshIngestJobs,
-        submitConversation,
         submitText,
         submitUpload,
         retryIngest,

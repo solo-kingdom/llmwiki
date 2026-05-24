@@ -14,6 +14,7 @@ import type {
   CapabilitiesResponse,
   IngestSession,
   IngestSessionMessage,
+  ActiveReviewSummary,
   ArchiveSessionResponse,
   WikiRefPayload,
   SessionWikiReference,
@@ -288,8 +289,14 @@ export function updateSessionMode(id: string, mode: string): Promise<{ session: 
   )
 }
 
-export function getIngestSession(id: string): Promise<{ session: IngestSession }> {
-  return request<{ session: IngestSession }>(
+export function getIngestSession(id: string): Promise<{
+  session: IngestSession
+  active_review?: ActiveReviewSummary | null
+}> {
+  return request<{
+    session: IngestSession
+    active_review?: ActiveReviewSummary | null
+  }>(
     `/api/v1/ingest/sessions/${encodeURIComponent(id)}`,
   )
 }

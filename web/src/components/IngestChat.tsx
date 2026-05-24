@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 import { useApp } from "@/context/AppContext"
 import { useT } from "@/i18n"
 import { copyTextToClipboard } from "@/lib/clipboard"
@@ -15,6 +14,14 @@ import { MessageDebugDialog } from "@/components/MessageDebugDialog"
 import { MarkdownContent } from "@/components/MarkdownContent"
 import { SessionControls } from "@/components/SessionControls"
 import { WikiMentionPicker } from "@/components/WikiMentionPicker"
+import { ArchiveReviewCard } from "@/components/ArchiveReviewCard"
+import { DirectIngestPanel } from "@/components/DirectIngestPanel"
+import {
+  clearDirectIngestQuery,
+  isDirectIngestRequested,
+  usePathname,
+} from "@/lib/wiki-routes"
+import * as api from "@/lib/api"
 import type { IngestSessionMessage, WikiRefPayload } from "@/types"
 import {
   Archive,
@@ -24,6 +31,7 @@ import {
   Copy,
   Cpu,
   Lightbulb,
+  FileInput,
   Loader2,
   Paperclip,
   RotateCcw,
@@ -260,12 +268,13 @@ export function IngestChat() {
   } = useApp()
 
   const t = useT()
+  const pathname = usePathname()
 
   const [input, setInput] = useState("")
   const [wikiRefs, setWikiRefs] = useState<WikiRefPayload[]>([])
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [archiveTitle, setArchiveTitle] = useState("")
-  const [pendingReviewId, setPendingReviewId] = useState<string | null>(null)
+  const [activeReviewId, setActiveReviewId] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [modelDialogOpen, setModelDialogOpen] = useState(false)
   const [selectedInstanceId, setSelectedInstanceId] = useState("")
@@ -273,6 +282,7 @@ export function IngestChat() {
   const [configLoaded, setConfigLoaded] = useState(false)
   const [debugMessageId, setDebugMessageId] = useState<string | null>(null)
   const [copyAllCopied, setCopyAllCopied] = useState(false)
+  const [directIngestOpen, setDirectIngestOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -311,6 +321,24 @@ export function IngestChat() {
     },
     [],
   )
+
+  useEffect(() => {
+    if (!isDirectIngestRequested(window.location.search)) return
+    setDirectIngestOpen(true)
+    window.history.replaceState(null, "", clearDirectIngestQuery(window.location.search))
+  }, [pathname])
+
+  useEffect(() => {
+    if (!sessionId) {
+      setActiveReviewId(null)
+      return
+    }
+    void api.getIngestSession(sessionId).then(({ active_review }) => {
+      setActiveReviewId(active_review?.review_id ?? null)
+    }).catch(() => {
+      setActiveReviewId(null)
+    })
+  }, [sessionId])
 
   useEffect(() => {
     const el = bottomRef.current
@@ -451,7 +479,7 @@ export function IngestChat() {
   const handleArchive = async () => {
     try {
       const reviewId = await archiveSession(archiveTitle || undefined)
-      setPendingReviewId(reviewId)
+      setActiveReviewId(reviewId)
       showToast(t("chat.archive_review_hint"))
       setArchiveOpen(false)
     } catch {
@@ -515,9 +543,16 @@ export function IngestChat() {
             {sessionMessages.length === 0 && isReady && (
               <div className="py-16 text-center text-muted-foreground">
                 <p className="mb-2 text-lg">{t("chat.start_topic")}</p>
-                <p className="text-sm">
-                  {t("chat.archive_desc")}
-                </p>
+                <p className="mb-4 text-sm">{t("chat.archive_desc")}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="direct-ingest-empty-cta"
+                  onClick={() => setDirectIngestOpen(true)}
+                >
+                  {t("chat.direct_ingest_cta")}
+                </Button>
               </div>
             )}
             {sessionMessages.map((m) => (
@@ -535,21 +570,7 @@ export function IngestChat() {
         </ScrollArea>
       </div>
 
-      {pendingReviewId && (
-        <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm dark:border-green-900 dark:bg-green-950/30">
-          <span>{t("chat.archive_review_ready")}</span>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              navigateTo(workbenchViewHref("review"))
-              setPendingReviewId(null)
-            }}
-          >
-            {t("chat.go_to_review")}
-          </Button>
-        </div>
-      )}
+      {activeReviewId && <ArchiveReviewCard reviewId={activeReviewId} />}
 
       {archiveOpen && (
         <div className="mb-2 space-y-3 rounded-lg border bg-card p-4">
@@ -670,6 +691,16 @@ export function IngestChat() {
             <Archive className="size-3.5" />
             {t("chat.archive")}
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setDirectIngestOpen(true)}
+            title={t("chat.direct_ingest")}
+            data-testid="direct-ingest-open"
+          >
+            <FileInput className="size-3.5" />
+            {t("chat.direct_ingest")}
+          </Button>
           <div className="flex-1" />
           <Button
             size="sm"
@@ -705,6 +736,11 @@ export function IngestChat() {
           </Button>
         </div>
       </div>
+
+      <DirectIngestPanel
+        open={directIngestOpen}
+        onOpenChange={setDirectIngestOpen}
+      />
 
       <ModelSelectDialog
         open={modelDialogOpen}

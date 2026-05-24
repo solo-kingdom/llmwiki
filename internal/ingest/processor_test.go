@@ -1090,3 +1090,57 @@ func TestResolveLLMClientForJobMissingConfig(t *testing.T) {
 		t.Fatalf("error = %q, want configuration hint", err.Error())
 	}
 }
+
+func TestMergeWorktreeJobBranchIntegration(t *testing.T) {
+	if !vcs.IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	if err := db.SetVCEnabled(true); err != nil {
+		t.Fatalf("SetVCEnabled: %v", err)
+	}
+
+	ws := t.TempDir()
+	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
+	os.WriteFile(filepath.Join(ws, "wiki", "index.md"), []byte("# Index\n"), 0o644)
+	repo, err := vcs.InitRepo(ws)
+	if err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	jobID := "review-apply-job"
+	worktreeDir, err := repo.CreateWorktree(jobID)
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	wikiPath := filepath.Join(worktreeDir, "wiki", "applied.md")
+	if err := os.WriteFile(wikiPath, []byte("---\ntitle: Applied\n---\n\nbody\n"), 0o644); err != nil {
+		t.Fatalf("write wiki file: %v", err)
+	}
+	if _, err := repo.CommitInWorktree(worktreeDir, "review apply test"); err != nil {
+		t.Fatalf("CommitInWorktree: %v", err)
+	}
+
+	processor := NewJobProcessor(db, ws)
+	processor.SetGitRepo(repo)
+	sha, err := processor.mergeWorktreeJobBranch(context.Background(), repo, jobID, []string{"wiki/applied.md"}, nil, nil)
+	if err != nil {
+		t.Fatalf("mergeWorktreeJobBranch: %v", err)
+	}
+	if sha == "" {
+		t.Fatal("expected merge commit sha")
+	}
+	if _, err := os.Stat(filepath.Join(ws, "wiki", "applied.md")); err != nil {
+		t.Fatalf("merged file missing on main: %v", err)
+	}
+	if err := repo.RemoveWorktree(jobID); err != nil {
+		t.Fatalf("RemoveWorktree: %v", err)
+	}
+}

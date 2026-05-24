@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { AppProvider } from "@/context/AppContext"
-import { IngestRaw } from "@/components/IngestRaw"
+import { DirectIngestPanel } from "@/components/DirectIngestPanel"
 import * as api from "@/lib/api"
 import type { IngestJob } from "@/types"
 
@@ -38,24 +38,26 @@ function makeJob(id: string): IngestJob {
   }
 }
 
-function renderRaw() {
-  return render(
+function renderPanel(open = true) {
+  const onOpenChange = vi.fn()
+  render(
     <AppProvider>
-      <IngestRaw />
+      <DirectIngestPanel open={open} onOpenChange={onOpenChange} />
     </AppProvider>,
   )
+  return { onOpenChange }
 }
 
-describe("IngestRaw", () => {
+describe("DirectIngestPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(api.listIngestJobs).mockResolvedValue([])
   })
 
   it("disables submit when no files or text blocks", async () => {
-    renderRaw()
-    expect(await screen.findByTestId("ingest-raw-page")).toBeInTheDocument()
-    expect(screen.getByTestId("ingest-raw-submit")).toBeDisabled()
+    renderPanel()
+    expect(await screen.findByTestId("direct-ingest-panel")).toBeInTheDocument()
+    expect(screen.getByTestId("direct-ingest-submit")).toBeDisabled()
     expect(
       screen.getByText("请至少添加一个文件或填写一个非空文本块"),
     ).toBeInTheDocument()
@@ -66,24 +68,24 @@ describe("IngestRaw", () => {
       job: makeJob("text-job-1"),
     })
 
-    renderRaw()
-    await screen.findByTestId("ingest-raw-text-block-0")
+    renderPanel()
+    await screen.findByTestId("direct-ingest-text-block-0")
 
     fireEvent.change(
-      within(screen.getByTestId("ingest-raw-text-block-0")).getByPlaceholderText(
+      within(screen.getByTestId("direct-ingest-text-block-0")).getByPlaceholderText(
         "块标题（可选）",
       ),
       { target: { value: "Intro" } },
     )
     fireEvent.change(
-      within(screen.getByTestId("ingest-raw-text-block-0")).getByPlaceholderText(
+      within(screen.getByTestId("direct-ingest-text-block-0")).getByPlaceholderText(
         "正文（必填，至少一个非空文本块才能提交）",
       ),
       { target: { value: "First block" } },
     )
 
     fireEvent.click(screen.getByRole("button", { name: "新增文本块" }))
-    const secondBlock = await screen.findByTestId("ingest-raw-text-block-1")
+    const secondBlock = await screen.findByTestId("direct-ingest-text-block-1")
     fireEvent.change(
       within(secondBlock).getByPlaceholderText(
         "正文（必填，至少一个非空文本块才能提交）",
@@ -91,7 +93,7 @@ describe("IngestRaw", () => {
       { target: { value: "Second block" } },
     )
 
-    fireEvent.click(screen.getByTestId("ingest-raw-submit"))
+    fireEvent.click(screen.getByTestId("direct-ingest-submit"))
 
     await waitFor(() => {
       expect(api.createTextIngestJob).toHaveBeenCalledWith(
@@ -102,7 +104,7 @@ describe("IngestRaw", () => {
       )
     })
 
-    expect(await screen.findByTestId("ingest-raw-submit-summary")).toHaveTextContent(
+    expect(await screen.findByTestId("direct-ingest-submit-summary")).toHaveTextContent(
       "text-job-1",
     )
   })
@@ -120,21 +122,21 @@ describe("IngestRaw", () => {
       rejected: [],
     })
 
-    renderRaw()
-    const input = await screen.findByTestId("ingest-raw-file-input")
+    renderPanel()
+    const input = await screen.findByTestId("direct-ingest-file-input")
     const file = new File(["hello"], "notes.md", { type: "text/markdown" })
     fireEvent.change(input, { target: { files: [file] } })
 
-    expect(await screen.findByTestId("ingest-raw-file-list")).toHaveTextContent(
+    expect(await screen.findByTestId("direct-ingest-file-list")).toHaveTextContent(
       "notes.md",
     )
 
-    fireEvent.click(screen.getByTestId("ingest-raw-submit"))
+    fireEvent.click(screen.getByTestId("direct-ingest-submit"))
 
     await waitFor(() => {
       expect(api.uploadIngestJobs).toHaveBeenCalled()
     })
-    expect(await screen.findByTestId("ingest-raw-submit-summary")).toHaveTextContent(
+    expect(await screen.findByTestId("direct-ingest-submit-summary")).toHaveTextContent(
       "file-job-1",
     )
   })
@@ -161,15 +163,15 @@ describe("IngestRaw", () => {
       ],
     })
 
-    renderRaw()
-    await screen.findByTestId("ingest-raw-text-block-0")
+    renderPanel()
+    await screen.findByTestId("direct-ingest-text-block-0")
 
     fireEvent.change(
       screen.getByPlaceholderText("正文（必填，至少一个非空文本块才能提交）"),
       { target: { value: "Batch text" } },
     )
 
-    const input = screen.getByTestId("ingest-raw-file-input")
+    const input = screen.getByTestId("direct-ingest-file-input")
     fireEvent.change(input, {
       target: {
         files: [
@@ -179,9 +181,9 @@ describe("IngestRaw", () => {
       },
     })
 
-    fireEvent.click(screen.getByTestId("ingest-raw-submit"))
+    fireEvent.click(screen.getByTestId("direct-ingest-submit"))
 
-    const summary = await screen.findByTestId("ingest-raw-submit-summary")
+    const summary = await screen.findByTestId("direct-ingest-submit-summary")
     expect(summary).toHaveTextContent("text-job-2")
     expect(summary).toHaveTextContent("file-ok")
     expect(summary).toHaveTextContent("bad.exe")

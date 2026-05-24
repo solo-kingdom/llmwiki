@@ -39,11 +39,7 @@ export function TimelinePage() {
     void loadData()
   }, [loadData])
 
-  const loadMore = () => {
-    setLimit((prev) => prev + 50)
-  }
-
-  const handleViewDiff = async (sha: string) => {
+  const handleViewDiff = useCallback(async (sha: string) => {
     setDiffEntry({ sha, diff: "", loading: true })
     try {
       const result = await getVCDiff(sha)
@@ -57,6 +53,17 @@ export function TimelinePage() {
           : { sha, diff: DIFF_LOAD_FAILED_MARKER, loading: false },
       )
     }
+  }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const commit = params.get("commit")?.trim()
+    if (!commit) return
+    void handleViewDiff(commit)
+  }, [handleViewDiff])
+
+  const loadMore = () => {
+    setLimit((prev) => prev + 50)
   }
 
   const handleRollback = async () => {

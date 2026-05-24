@@ -4,12 +4,27 @@ export const PATH_CHANGE_EVENT = "llmwiki:pathchange"
 
 export type WorkbenchView =
   | "chat"
-  | "ingest"
-  | "review"
   | "jobs"
   | "timeline"
   | "logs"
   | "settings"
+
+export const DIRECT_INGEST_QUERY = "directIngest"
+
+export function directIngestHref(): string {
+  return `/?${DIRECT_INGEST_QUERY}=1`
+}
+
+export function isDirectIngestRequested(search: string): boolean {
+  return new URLSearchParams(search).get(DIRECT_INGEST_QUERY) === "1"
+}
+
+export function clearDirectIngestQuery(search: string): string {
+  const params = new URLSearchParams(search)
+  params.delete(DIRECT_INGEST_QUERY)
+  const next = params.toString()
+  return next ? `/?${next}` : "/"
+}
 
 export function isWikiReaderPath(pathname: string): boolean {
   return pathname === "/wiki" || pathname.startsWith("/wiki/")
@@ -35,9 +50,7 @@ export function workbenchHref(): string {
 export function getWorkbenchViewFromPath(pathname: string): WorkbenchView {
   switch (pathname) {
     case "/ingest":
-      return "ingest"
-    case "/review":
-      return "review"
+      return "chat"
     case "/jobs":
       return "jobs"
     case "/settings":
@@ -53,10 +66,6 @@ export function getWorkbenchViewFromPath(pathname: string): WorkbenchView {
 
 export function workbenchViewHref(view: WorkbenchView): string {
   switch (view) {
-    case "ingest":
-      return "/ingest"
-    case "review":
-      return "/review"
     case "jobs":
       return "/jobs"
     case "settings":
@@ -68,6 +77,10 @@ export function workbenchViewHref(view: WorkbenchView): string {
     default:
       return "/"
   }
+}
+
+export function timelineCommitHref(sha: string): string {
+  return `/timeline?commit=${encodeURIComponent(sha)}`
 }
 
 function subscribePath(cb: () => void) {

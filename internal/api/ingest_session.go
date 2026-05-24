@@ -33,7 +33,8 @@ type archiveSessionRequest struct {
 }
 
 type sessionResponse struct {
-	Session *sqlite.IngestSession `json:"session"`
+	Session      *sqlite.IngestSession       `json:"session"`
+	ActiveReview *sqlite.ActiveReviewSummary `json:"active_review,omitempty"`
 }
 
 type messagesResponse struct {
@@ -123,7 +124,14 @@ func (a *API) GetIngestSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, sessionResponse{Session: session})
+	var activeReview *sqlite.ActiveReviewSummary
+	if review, err := a.db.GetLatestIngestReviewBySessionID(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else {
+		activeReview = sqlite.ActiveReviewSummaryFromReview(review)
+	}
+	writeJSON(w, http.StatusOK, sessionResponse{Session: session, ActiveReview: activeReview})
 }
 
 func (a *API) ListIngestSessionMessages(w http.ResponseWriter, r *http.Request) {

@@ -279,6 +279,13 @@ export interface CapabilitiesResponse {
   access_model: string
 }
 
+export interface ActiveReviewSummary {
+  review_id: string
+  status: IngestReview["status"]
+  current_plan_version: number
+  merge_commit_sha?: string
+}
+
 export interface IngestSession {
   id: string
   title: string
@@ -353,6 +360,7 @@ export interface IngestReview {
   current_plan_version: number
   approved_plan_version: number
   final_job_id?: string
+  merge_commit_sha?: string
   created_at: string
   updated_at: string
 }

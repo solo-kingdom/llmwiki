@@ -75,6 +75,21 @@ vi.mock("@/lib/api", () => ({
   createTextIngestJob: vi.fn(),
   uploadIngestJobs: vi.fn(),
   listProviders: vi.fn().mockResolvedValue([]),
+  getIngestReview: vi.fn().mockResolvedValue({
+    id: "review-1",
+    session_id: "sess-1",
+    archive_source_path: "raw/test.md",
+    status: "planning",
+    current_plan_version: 0,
+    approved_plan_version: 0,
+    created_at: "",
+    updated_at: "",
+  }),
+  listIngestReviewPlans: vi.fn().mockResolvedValue([]),
+  getWorkspaceRuleFiles: vi.fn().mockResolvedValue({
+    purpose_preview: "",
+    rules_preview: "",
+  }),
   getVCStatus: vi.fn().mockResolvedValue(mockVCStatus(false)),
   getVCLog: vi.fn().mockResolvedValue([]),
   listActivityLogs: vi.fn().mockResolvedValue({
@@ -94,16 +109,13 @@ describe("App navigation", () => {
     window.history.replaceState(null, "", "/")
   })
 
-  it("defaults to chat and uses button navigation", async () => {
+  it("defaults to ingest chat and uses button navigation", async () => {
     render(<App />)
-    expect(await screen.findByRole("button", { name: "对话" })).toBeInTheDocument()
-    expect(await screen.findByRole("button", { name: "摄入" })).toBeInTheDocument()
+    const nav = await screen.findByRole("navigation")
+    expect(within(nav).getByRole("button", { name: "摄入" })).toBeInTheDocument()
+    expect(within(nav).queryAllByRole("button", { name: "摄入" })).toHaveLength(1)
     expect(screen.getByRole("button", { name: "模型" })).toBeInTheDocument()
     expect(window.location.pathname).toBe("/")
-
-    fireEvent.click(screen.getByRole("button", { name: "摄入" }))
-    expect(await screen.findByTestId("ingest-raw-page")).toBeInTheDocument()
-    expect(window.location.pathname).toBe("/ingest")
 
     fireEvent.click(
       within(screen.getByRole("navigation")).getByRole("button", {
@@ -130,7 +142,8 @@ describe("App navigation", () => {
   it("navigates to wiki reader shell when Wiki link is clicked", async () => {
     window.history.replaceState(null, "", "/")
     render(<App />)
-    await screen.findByRole("button", { name: "对话" })
+    const nav = await screen.findByRole("navigation")
+    expect(within(nav).getByRole("button", { name: "摄入" })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("link", { name: "Wiki" }))
     expect(window.location.pathname).toBe("/wiki")
@@ -155,11 +168,12 @@ describe("App navigation", () => {
     expect(window.location.pathname).toBe("/jobs")
   })
 
-  it("restores ingest view from URL on load", async () => {
+  it("redirects legacy ingest URL to chat and opens direct ingest panel", async () => {
     window.history.replaceState(null, "", "/ingest")
     render(<App />)
-    expect(await screen.findByTestId("ingest-raw-page")).toBeInTheDocument()
-    expect(window.location.pathname).toBe("/ingest")
+    expect(await screen.findByTestId("direct-ingest-panel")).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/")
+    expect(window.location.search).toBe("")
   })
 
   it("restores chat view from root URL on load", async () => {

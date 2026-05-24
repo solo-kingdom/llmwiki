@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { WorkbenchLayout } from "@/components/WorkbenchLayout"
 import { JobsPage } from "@/components/JobsPage"
 import { WikiReaderLayout } from "@/components/WikiReaderLayout"
@@ -34,6 +34,10 @@ vi.mock("@/context/AppContext", () => ({
   }),
 }))
 
+vi.mock("@/components/Sidebar", () => ({
+  Sidebar: () => <div data-testid="sidebar-stub" />,
+}))
+
 vi.mock("@/context/WikiReaderContext", () => ({
   WikiReaderProvider: ({ children }: { children: React.ReactNode }) => children,
   useWikiReader: () => ({
@@ -42,11 +46,13 @@ vi.mock("@/context/WikiReaderContext", () => ({
     publicWikiEnabled: true,
     error: null,
     documents: [],
+    filteredDocuments: [],
     search: vi.fn(),
     searchResults: null,
     searchQuery: "",
     clearSearch: vi.fn(),
     selectDocument: vi.fn(),
+    currentDocId: null,
   }),
 }))
 
@@ -62,8 +68,9 @@ describe("ui_language switching", () => {
       </I18nTestProvider>,
     )
 
-    expect(screen.getByRole("button", { name: "Chat" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Ingest" })).toBeInTheDocument()
+    const nav = screen.getByRole("navigation")
+    expect(within(nav).getByRole("button", { name: "Ingest" })).toBeInTheDocument()
+    expect(within(nav).queryAllByRole("button", { name: "Ingest" })).toHaveLength(1)
     expect(screen.getByRole("button", { name: "Jobs" })).toBeInTheDocument()
     expect(screen.getByRole("navigation").textContent).not.toMatch(CJK_PATTERN)
   })

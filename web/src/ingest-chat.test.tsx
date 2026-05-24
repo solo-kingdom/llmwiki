@@ -67,6 +67,17 @@ vi.mock("@/lib/api", () => ({
   searchDocuments: vi.fn().mockResolvedValue({ results: [] }),
   uploadIngestSessionAttachment: vi.fn(),
   archiveIngestSession: vi.fn(),
+  getIngestReview: vi.fn().mockResolvedValue({
+    id: "review-abc123",
+    session_id: "sess-1",
+    archive_source_path: "raw/test.md",
+    status: "planning",
+    current_plan_version: 0,
+    approved_plan_version: 0,
+    created_at: "",
+    updated_at: "",
+  }),
+  listIngestReviewPlans: vi.fn().mockResolvedValue([]),
   createConversationIngestJob: vi.fn(),
   createTextIngestJob: vi.fn(),
   uploadIngestJobs: vi.fn(),
@@ -922,7 +933,8 @@ describe("IngestChat", () => {
       source_path: "raw/sources/web-ingest/sessions/sess-1",
       session_id: "sess-1",
     })
-    await screen.findByText("归档已提交，请前往审核页查看计划")
+    await screen.findByText("归档已提交，请在下方审阅计划后再写入 wiki")
+    expect(await screen.findByText("归档审阅")).toBeInTheDocument()
   })
 
   it("shows archive success as toast that auto-dismisses after 3 seconds", async () => {
@@ -1001,9 +1013,9 @@ describe("IngestChat", () => {
     fireEvent.click(screen.getByRole("button", { name: /确认归档/ }))
 
     expect(
-      await screen.findByText("归档已提交，请前往审核页查看计划"),
+      await screen.findByText("归档已提交，请在下方审阅计划后再写入 wiki"),
     ).toBeInTheDocument()
-    expect(screen.getByText("去审核")).toBeInTheDocument()
+    expect(await screen.findByText("归档审阅")).toBeInTheDocument()
   })
 
   it("shows archive failure as top toast", async () => {
@@ -1359,5 +1371,147 @@ describe("IngestChat", () => {
     })
     expect(heading.closest(".chat-prose")).toBeTruthy()
     expect(screen.getByText("Still typing")).toBeInTheDocument()
+  })
+
+  it("opens direct ingest panel from composer button", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    fireEvent.click(await screen.findByTestId("direct-ingest-open"))
+    expect(await screen.findByTestId("direct-ingest-panel")).toBeInTheDocument()
+  })
+
+  it("opens direct ingest panel from empty state CTA", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.getIngestSession).mockResolvedValue({
+      session: {
+        id: "sess-1",
+        title: "",
+        status: "active",
+        mode: "chat",
+        storage_path: "",
+        llm_instance_id: "inst-1",
+        llm_model: "gpt-4",
+        created_at: "",
+        updated_at: "",
+      },
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({ messages: [] })
+    vi.mocked(api.listIngestSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: "sess-1",
+          title: "",
+          status: "active",
+          mode: "chat",
+          llm_instance_id: "inst-1",
+          llm_model: "gpt-4",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.listProviderModels).mockResolvedValue([
+      {
+        provider_id: "cat-1",
+        model_id: "gpt-4",
+        name: "GPT-4",
+        family: "GPT-4",
+        context_limit: 128000,
+        output_limit: 16384,
+        cost_input: 2.5,
+        cost_output: 10,
+        reasoning: false,
+        tool_call: true,
+        attachment: true,
+      },
+    ])
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    await screen.findByText("开始一个话题")
+    fireEvent.click(screen.getByTestId("direct-ingest-empty-cta"))
+    expect(await screen.findByTestId("direct-ingest-panel")).toBeInTheDocument()
+  })
+
+  it("opens direct ingest panel when directIngest query is present", async () => {
+    window.history.replaceState(null, "", "/?directIngest=1")
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    expect(await screen.findByTestId("direct-ingest-panel")).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/")
+    expect(window.location.search).toBe("")
   })
 })

@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest"
 import {
+  clearDirectIngestQuery,
+  directIngestHref,
   getWorkbenchViewFromPath,
+  isDirectIngestRequested,
   isWikiGraphPath,
+  timelineCommitHref,
   wikiGraphHref,
   workbenchViewHref,
 } from "@/lib/wiki-routes"
@@ -12,14 +16,23 @@ describe("wiki-routes workbench views", () => {
     expect(workbenchViewHref("chat")).toBe("/")
   })
 
-  it("maps ingest path", () => {
-    expect(getWorkbenchViewFromPath("/ingest")).toBe("ingest")
-    expect(workbenchViewHref("ingest")).toBe("/ingest")
+  it("maps legacy ingest path to chat", () => {
+    expect(getWorkbenchViewFromPath("/ingest")).toBe("chat")
   })
 
-  it("maps review path", () => {
-    expect(getWorkbenchViewFromPath("/review")).toBe("review")
-    expect(workbenchViewHref("review")).toBe("/review")
+  it("maps legacy review path to chat default view", () => {
+    expect(getWorkbenchViewFromPath("/review")).toBe("chat")
+  })
+
+  it("builds direct ingest deep link", () => {
+    expect(directIngestHref()).toBe("/?directIngest=1")
+    expect(isDirectIngestRequested("?directIngest=1")).toBe(true)
+    expect(clearDirectIngestQuery("?directIngest=1&foo=bar")).toBe("/?foo=bar")
+    expect(clearDirectIngestQuery("?directIngest=1")).toBe("/")
+  })
+
+  it("builds timeline commit deep link", () => {
+    expect(timelineCommitHref("abc123")).toBe("/timeline?commit=abc123")
   })
 
   it("maps other workbench paths", () => {

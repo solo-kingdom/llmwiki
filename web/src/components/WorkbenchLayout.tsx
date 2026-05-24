@@ -3,9 +3,7 @@ import { useApp } from "@/context/AppContext"
 import { useT } from "@/i18n"
 import { SettingsPage } from "@/components/SettingsPage"
 import { IngestChat } from "@/components/IngestChat"
-import { IngestRaw } from "@/components/IngestRaw"
 import { JobsPage } from "@/components/JobsPage"
-import { ReviewPage } from "@/components/ReviewPage"
 import { LogsPage } from "@/components/LogsPage"
 import { TimelinePage } from "@/components/TimelinePage"
 import { WarningPopover } from "@/components/WarningPopover"
@@ -14,6 +12,7 @@ import { WorkbenchContentShell } from "@/components/WorkbenchContentShell"
 import { cn } from "@/lib/utils"
 import { getVCStatus } from "@/lib/api"
 import {
+  directIngestHref,
   getWorkbenchViewFromPath,
   navigateTo,
   usePathname,
@@ -26,8 +25,6 @@ import type { MessageKey } from "@/i18n"
 
 const NAV_ITEMS: { id: WorkbenchView; labelKey: MessageKey }[] = [
   { id: "chat", labelKey: "nav.chat" },
-  { id: "ingest", labelKey: "nav.ingest" },
-  { id: "review", labelKey: "nav.review" },
   { id: "jobs", labelKey: "nav.jobs" },
   { id: "timeline", labelKey: "nav.timeline" },
   { id: "logs", labelKey: "nav.logs" },
@@ -39,8 +36,6 @@ const LEGACY_HASH_VIEWS = new Set<string>([
   "settings",
   "timeline",
   "logs",
-  "ingest",
-  "review",
 ])
 
 function NavButton({
@@ -85,13 +80,25 @@ export function WorkbenchLayout() {
     const raw = window.location.hash.replace(/^#/, "")
     if (!raw) return
     if (raw === "ingest") {
-      navigateTo(workbenchViewHref("chat"))
+      navigateTo(directIngestHref())
       return
     }
     if (LEGACY_HASH_VIEWS.has(raw)) {
       navigateTo(workbenchViewHref(raw as WorkbenchView))
     }
   }, [])
+
+  useEffect(() => {
+    if (pathname === "/ingest") {
+      navigateTo(directIngestHref())
+    }
+  }, [pathname])
+
+  useEffect(() => {
+    if (pathname === "/review") {
+      navigateTo(workbenchHref())
+    }
+  }, [pathname])
 
   useEffect(() => {
     if (vcEnabled === null) return
@@ -169,8 +176,6 @@ export function WorkbenchLayout() {
               <IngestChat />
             </div>
           )}
-          {view === "ingest" && <IngestRaw />}
-          {view === "review" && <ReviewPage />}
           {view === "jobs" && <JobsPage />}
           {view === "timeline" && vcEnabled === true && <TimelinePage />}
           {view === "logs" && <LogsPage />}

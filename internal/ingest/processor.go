@@ -410,63 +410,79 @@ func (p *JobProcessor) processJobInWorktree(ctx context.Context, job *sqlite.Ing
 	}
 }
 
+// mergeWorktreeJobBranch merges a completed job branch into main, resolves conflicts,
+// updates the search index, and returns the resulting merge commit SHA.
+func (p *JobProcessor) mergeWorktreeJobBranch(
+	ctx context.Context,
+	repo *vcs.GitRepo,
+	jobID string,
+	files []string,
+	llmClient *llm.Client,
+	rec JobRecorder,
+) (string, error) {
+	result, err := repo.MergeBranch(jobID)
+	if err != nil {
+		_ = repo.AbortMerge()
+		return "", fmt.Errorf("merge failed: %w", err)
+	}
+
+	if len(result.Conflicts) > 0 {
+		mc := &vcs.MergeConflictContext{
+			LLMClient: llmClient,
+			DocLang:   resolveDocLang(p.db),
+		}
+		if err := vcs.ResolveMergeConflicts(ctx, repo, jobID, mc); err != nil {
+			_ = repo.AbortMerge()
+			return "", fmt.Errorf("LLM conflict resolution failed: %w", err)
+		}
+		if rec != nil {
+			rec.Record("merge", "complete",
+				fmt.Sprintf("LLM resolved %d conflict(s)", len(result.Conflicts)),
+				map[string]any{"conflicts": result.Conflicts})
+		}
+	}
+
+	sha, err := repo.LastCommitSHA()
+	if err != nil {
+		return "", err
+	}
+	if sha != "" {
+		_ = p.db.SetVCLastCommit(sha)
+	}
+
+	p.indexGeneratedWikiFiles(files, jobID)
+	return sha, nil
+}
+
 // mergeCompletedJob merges a completed job's worktree branch back to main,
 // handles conflicts with LLM resolution, updates the search index, and
 // marks the job as succeeded.
 func (p *JobProcessor) mergeCompletedJob(ctx context.Context, completed *completedJob) {
 	repo := p.gitRepoIfEnabled()
 	if repo == nil {
-		// VCS was disabled mid-flight, just mark succeeded without merge
 		p.markJobSucceeded(completed.jobID, completed.files)
-		_ = repo.RemoveWorktree(completed.jobID)
 		return
 	}
 
-	// Merge job branch into main
-	result, err := repo.MergeBranch(completed.jobID)
+	llmClient, _ := p.resolveLLMClientForJob(&sqlite.IngestJob{ID: completed.jobID})
+	sha, err := p.mergeWorktreeJobBranch(ctx, repo, completed.jobID, completed.files, llmClient, completed.recorder)
 	if err != nil {
 		log.Printf("merger: merge failed for job %s: %v", completed.jobID, err)
-		_ = repo.AbortMerge()
-		_ = p.failJob(completed.jobID, "merge_failed",
-			fmt.Sprintf("merge failed: %v", err), "", "")
+		errCode := "merge_failed"
+		if strings.Contains(err.Error(), "conflict resolution") {
+			errCode = "merge_conflict"
+		}
+		_ = p.failJob(completed.jobID, errCode, err.Error(), "", "")
 		_ = repo.RemoveWorktree(completed.jobID)
 		return
 	}
 
-	// Resolve conflicts if any
-	if len(result.Conflicts) > 0 {
-		llmClient, _ := p.resolveLLMClientForJob(&sqlite.IngestJob{ID: completed.jobID})
-		mc := &vcs.MergeConflictContext{
-			LLMClient: llmClient,
-			DocLang:   resolveDocLang(p.db),
-		}
-		if err := vcs.ResolveMergeConflicts(ctx, repo, completed.jobID, mc); err != nil {
-			log.Printf("merger: LLM conflict resolution failed for job %s: %v", completed.jobID, err)
-			_ = repo.AbortMerge()
-			_ = p.failJob(completed.jobID, "merge_conflict",
-				fmt.Sprintf("LLM conflict resolution failed: %v", err), "", "")
-			_ = repo.RemoveWorktree(completed.jobID)
-			return
-		}
-		if completed.recorder != nil {
-			completed.recorder.Record("merge", "complete",
-				fmt.Sprintf("LLM resolved %d conflict(s)", len(result.Conflicts)),
-				map[string]any{"conflicts": result.Conflicts})
-		}
+	if sha != "" && completed.recorder != nil {
+		completed.recorder.Record("git_commit", "complete", "merged to main", map[string]any{"sha": sha})
 	}
 
-	// Store last commit SHA
-	if sha, err := repo.LastCommitSHA(); err == nil && sha != "" {
-		_ = p.db.SetVCLastCommit(sha)
-	}
-
-	// Update search index (after merge, so index reflects final state)
-	p.indexGeneratedWikiFiles(completed.files, completed.jobID)
-
-	// Mark job succeeded
 	p.markJobSucceeded(completed.jobID, completed.files)
 
-	// Cleanup worktree
 	if err := repo.RemoveWorktree(completed.jobID); err != nil {
 		log.Printf("merger: cleanup worktree for job %s: %v", completed.jobID, err)
 	}

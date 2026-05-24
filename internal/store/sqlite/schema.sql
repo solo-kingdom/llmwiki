@@ -241,6 +241,7 @@ CREATE TABLE IF NOT EXISTS ingest_reviews (
     current_plan_version INTEGER NOT NULL DEFAULT 0,
     approved_plan_version INTEGER NOT NULL DEFAULT 0,
     final_job_id TEXT NOT NULL DEFAULT '',
+    merge_commit_sha TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );

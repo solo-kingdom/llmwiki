@@ -14,8 +14,32 @@ type IngestReview struct {
 	CurrentPlanVersion  int    `json:"current_plan_version"`
 	ApprovedPlanVersion int    `json:"approved_plan_version"`
 	FinalJobID          string `json:"final_job_id,omitempty"`
+	MergeCommitSHA      string `json:"merge_commit_sha,omitempty"`
 	CreatedAt           string `json:"created_at"`
 	UpdatedAt           string `json:"updated_at"`
+}
+
+// ActiveReviewSummary is a lightweight review snapshot for session detail API.
+type ActiveReviewSummary struct {
+	ReviewID           string `json:"review_id"`
+	Status             string `json:"status"`
+	CurrentPlanVersion int    `json:"current_plan_version"`
+	MergeCommitSHA     string `json:"merge_commit_sha,omitempty"`
+}
+
+func ActiveReviewSummaryFromReview(r *IngestReview) *ActiveReviewSummary {
+	if r == nil || r.ID == "" {
+		return nil
+	}
+	if r.Status == "cancelled" {
+		return nil
+	}
+	return &ActiveReviewSummary{
+		ReviewID:           r.ID,
+		Status:             r.Status,
+		CurrentPlanVersion: r.CurrentPlanVersion,
+		MergeCommitSHA:     r.MergeCommitSHA,
+	}
 }
 
 type IngestReviewMessage struct {
@@ -81,6 +105,7 @@ const ingestReviewSelectColumns = `
 	COALESCE(id, ''), COALESCE(session_id, ''), COALESCE(archive_source_path, ''),
 	COALESCE(status, ''), COALESCE(current_plan_version, 0),
 	COALESCE(approved_plan_version, 0), COALESCE(final_job_id, ''),
+	COALESCE(merge_commit_sha, ''),
 	COALESCE(created_at, ''), COALESCE(updated_at, '')`
 
 func scanIngestReview(scanner interface{ Scan(...interface{}) error }, r *IngestReview) error {
@@ -92,6 +117,7 @@ func scanIngestReview(scanner interface{ Scan(...interface{}) error }, r *Ingest
 		&r.CurrentPlanVersion,
 		&r.ApprovedPlanVersion,
 		&r.FinalJobID,
+		&r.MergeCommitSHA,
 		&r.CreatedAt,
 		&r.UpdatedAt,
 	)
@@ -268,6 +294,14 @@ func (d *DB) SetIngestReviewFinalJob(id, jobID string) error {
 	_, err := d.db.Exec(`
 		UPDATE ingest_reviews SET final_job_id = ?, updated_at = datetime('now') WHERE id = ?`,
 		jobID, id,
+	)
+	return err
+}
+
+func (d *DB) SetIngestReviewMergeCommitSHA(id, sha string) error {
+	_, err := d.db.Exec(`
+		UPDATE ingest_reviews SET merge_commit_sha = ?, updated_at = datetime('now') WHERE id = ?`,
+		sha, id,
 	)
 	return err
 }

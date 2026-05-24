@@ -119,28 +119,69 @@ func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.In
 		return p.failReviewApplyFailed(reviewID, job.ID, "normalize_failed", err)
 	}
 
-	files, err := p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
-	if err != nil {
-		return p.failReviewApplyFailed(reviewID, job.ID, classifyPipelineError(err), err)
-	}
+	repo := p.gitRepoIfEnabled()
+	var files []string
+	var mergeSHA string
+	cleanupWorktree := repo != nil
+	if repo != nil {
+		defer func() {
+			if cleanupWorktree {
+				if err := repo.RemoveWorktree(job.ID); err != nil {
+					log.Printf("review apply: cleanup worktree for job %s: %v", job.ID, err)
+				}
+			}
+		}()
 
-	if repo := p.gitRepoIfEnabled(); repo != nil {
+		worktreeDir, wtErr := repo.CreateWorktree(job.ID)
+		if wtErr != nil {
+			return p.failReviewApplyFailed(reviewID, job.ID, "worktree_failed", wtErr)
+		}
+		_ = worktreeDir
+
+		prevTarget := p.pipeline.targetDir
+		p.pipeline.SetTargetDir(worktreeDir)
+		defer p.pipeline.SetTargetDir(prevTarget)
+
+		files, err = p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
+		if err != nil {
+			return p.failReviewApplyFailed(reviewID, job.ID, classifyPipelineError(err), err)
+		}
+
 		commitMsg := vcs.BuildCommitMessage(
 			filepath.Base(normalized.CanonicalPath),
 			job.ID,
 			string(InputKindReviewApply),
 			string(normalized.Content),
 		)
-		sha, commitErr := repo.AddCommit(commitMsg)
-		if commitErr != nil {
+		if _, commitErr := repo.CommitInWorktree(worktreeDir, commitMsg); commitErr != nil {
 			return p.failReviewApplyFailed(reviewID, job.ID, "commit_failed", commitErr)
 		}
-		if sha != "" {
-			_ = p.db.SetVCLastCommit(sha)
+
+		llmClient, _ := p.resolveLLMClientForReview(review)
+		mergeSHA, err = p.mergeWorktreeJobBranch(ctx, repo, job.ID, files, llmClient, nil)
+		if err != nil {
+			code := "merge_failed"
+			if strings.Contains(err.Error(), "conflict resolution") {
+				code = "merge_conflict"
+			}
+			return p.failReviewApplyFailed(reviewID, job.ID, code, err)
 		}
+
+		cleanupWorktree = false
+		if err := repo.RemoveWorktree(job.ID); err != nil {
+			log.Printf("review apply: cleanup worktree for job %s: %v", job.ID, err)
+		}
+	} else {
+		files, err = p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
+		if err != nil {
+			return p.failReviewApplyFailed(reviewID, job.ID, classifyPipelineError(err), err)
+		}
+		p.indexGeneratedWikiFiles(files, job.ID)
 	}
 
-	p.indexGeneratedWikiFiles(files, job.ID)
+	if mergeSHA != "" {
+		_ = p.db.SetIngestReviewMergeCommitSHA(reviewID, mergeSHA)
+	}
 	_ = p.db.SetIngestReviewFinalJob(reviewID, job.ID)
 
 	summary := fmt.Sprintf("applied %d wiki page(s) from approved plan v%d", len(files), review.ApprovedPlanVersion)

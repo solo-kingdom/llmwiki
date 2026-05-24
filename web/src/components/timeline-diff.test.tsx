@@ -85,4 +85,20 @@ describe("TimelinePage diff loading", () => {
     expect(screen.getByText("(empty diff)")).toBeInTheDocument()
     expect(screen.queryByText("wiki/a.md")).not.toBeInTheDocument()
   })
+
+  it("opens diff dialog from commit query parameter", async () => {
+    window.history.replaceState(null, "", "/timeline?commit=aaa1111")
+    vi.mocked(api.getVCDiff).mockResolvedValue({ sha: entryA.sha, diff: diffA })
+
+    render(
+      <I18nTestProvider lang="en">
+        <TimelinePage />
+      </I18nTestProvider>,
+    )
+
+    await waitFor(() => {
+      expect(api.getVCDiff).toHaveBeenCalledWith("aaa1111")
+    })
+    expect(await screen.findByText("commit A")).toBeInTheDocument()
+  })
 })

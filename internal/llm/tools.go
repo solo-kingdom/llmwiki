@@ -32,6 +32,11 @@ type ToolExecutor interface {
 	ListTools(ctx context.Context) ([]ToolDefinition, error)
 }
 
+// ChatOptions holds optional parameters for Client.Chat.
+type ChatOptions struct {
+	ToolChoice string // "" | "auto" | "required" | "none"
+}
+
 // ToolLoopConfig limits automatic tool-call rounds.
 type ToolLoopConfig struct {
 	MaxRounds              int
@@ -89,7 +94,7 @@ func RunToolLoop(
 		}
 
 		// Append assistant message with tool calls (OpenAI-style)
-		msgs = append(msgs, Message{Role: "assistant", Content: result.Content})
+		msgs = append(msgs, Message{Role: "assistant", Content: result.Content, ToolCalls: result.ToolCalls})
 
 		calls := result.ToolCalls
 		if len(calls) > cfg.MaxToolCallsPerRound {

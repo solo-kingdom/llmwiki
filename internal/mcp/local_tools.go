@@ -102,6 +102,17 @@ func ToolMaxTokensForMode(mode string) int {
 	}
 }
 
+// ToolChoiceForMode returns the tool_choice parameter for the given mode and round.
+// organize mode round 0 forces "required" to ensure at least one tool is called.
+func ToolChoiceForMode(mode string, round int) string {
+	switch {
+	case mode == "organize" && round == 0:
+		return "required"
+	default:
+		return ""
+	}
+}
+
 // ExecuteLocalReadonlyTool runs builtin search or read against the workspace index.
 func ExecuteLocalReadonlyTool(workspace string, db *sqlite.DB, name string, args map[string]interface{}) (string, error) {
 	if db == nil {

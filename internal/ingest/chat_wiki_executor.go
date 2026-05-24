@@ -169,6 +169,7 @@ func RunSessionChatToolLoop(
 	maxTokens int,
 	cfg llm.ToolLoopConfig,
 	onEvent ToolEventCallback,
+	mode string,
 ) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("LLM client is nil")
@@ -184,24 +185,52 @@ func RunSessionChatToolLoop(
 	useTools := len(tools) > 0 && executor != nil
 
 	for round := 0; round < cfg.MaxRounds; round++ {
+		toolChoice := mcp.ToolChoiceForMode(mode, round)
+
 		var result llm.ChatResult
 		var err error
 		if useTools {
-			result, err = client.Chat(ctx, msgs, tools, temperature, maxTokens)
+			result, err = client.Chat(ctx, msgs, tools, temperature, maxTokens, llm.ChatOptions{ToolChoice: toolChoice})
 		} else {
 			result, err = client.Chat(ctx, msgs, nil, temperature, maxTokens)
 		}
 		if err != nil {
-			return "", err
+			// Fallback: if tool_choice="required" caused a 400, retry without it
+			if toolChoice != "" && isBadRequestError(err) {
+				if useTools {
+					result, err = client.Chat(ctx, msgs, tools, temperature, maxTokens)
+				} else {
+					result, err = client.Chat(ctx, msgs, nil, temperature, maxTokens)
+				}
+				if err != nil {
+					return "", err
+				}
+			} else {
+				return "", err
+			}
 		}
 		if len(result.ToolCalls) == 0 {
-			return result.Content, nil
+			// organize mode round 0: retry once with a nudge if no tools called
+			if mode == "organize" && round == 0 && useTools {
+				msgs = append(msgs, llm.Message{Role: "assistant", Content: result.Content})
+				msgs = append(msgs, llm.Message{Role: "user", Content: "请先调用 structure 和 audit 工具来诊断 wiki 的状况，然后再给出建议。"})
+				result2, err2 := client.Chat(ctx, msgs, tools, temperature, maxTokens)
+				if err2 != nil {
+					return result.Content, nil
+				}
+				if len(result2.ToolCalls) == 0 {
+					return result2.Content, nil
+				}
+				result = result2
+			} else {
+				return result.Content, nil
+			}
 		}
 		if !useTools {
 			return result.Content, nil
 		}
 
-		msgs = append(msgs, llm.Message{Role: "assistant", Content: result.Content})
+		msgs = append(msgs, llm.Message{Role: "assistant", Content: result.Content, ToolCalls: result.ToolCalls})
 		calls := result.ToolCalls
 		if len(calls) > cfg.MaxToolCallsPerRound {
 			calls = calls[:cfg.MaxToolCallsPerRound]
@@ -230,6 +259,14 @@ func RunSessionChatToolLoop(
 		}
 	}
 	return "", fmt.Errorf("tool loop exceeded max rounds (%d)", cfg.MaxRounds)
+}
+
+// isBadRequestError checks if the error is an HTTP 400 from the LLM API.
+func isBadRequestError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "HTTP 400") || strings.Contains(err.Error(), "bad request")
 }
 
 func truncateForEvent(s string, max int) string {

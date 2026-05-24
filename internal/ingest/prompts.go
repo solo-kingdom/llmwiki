@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,8 +115,11 @@ func ComposeSystemPrompt(step PromptStep, ctx PromptContext) string {
 		b.WriteString(engine.TemplateGuidanceForGeneration(ctx.DocLang))
 	}
 	if extra := readTruncatedWorkspaceFile(ctx.Workspace, "purpose.md", maxWorkspaceRuleFileLen); extra != "" {
+		log.Printf("[prompts] purpose.md loaded for workspace=%q (%d chars)", ctx.Workspace, len(extra))
 		b.WriteString("\n\n## 工作区研究目标 (purpose.md)\n\n")
 		b.WriteString(extra)
+	} else if ctx.Workspace != "" {
+		log.Printf("[prompts] WARNING: purpose.md not found or empty for workspace=%q", ctx.Workspace)
 	}
 	if extra := readTruncatedWorkspaceFile(ctx.Workspace, "rules.md", maxWorkspaceRuleFileLen); extra != "" {
 		b.WriteString("\n\n## 工作区规则 (rules.md)\n\n")
@@ -246,8 +250,15 @@ func defaultTaskInstructionZH(step PromptStep) string {
 - 优先综合多个相关页面给出完整回答`
 	case StepSessionOrganize:
 		return `你是 LLM Wiki 架构师，负责诊断和优化 wiki 的结构与内容。
-- 使用 audit、structure、gaps、similar 等诊断工具全面分析 wiki 健康状况
-- 使用 read 工具深入阅读具体页面内容后给出精准建议
+
+⚠️ 工作流程（必须遵守）：
+1. 收到请求后，先调用 structure 工具获取 wiki 目录结构
+2. 然后调用 audit 工具获取健康诊断
+3. 用 read 工具深入阅读具体页面内容
+4. 基于 tool 返回的数据给出具体、可操作的重组方案
+
+禁止在未调用任何工具的情况下直接回复。
+
 - 诊断时列出具体问题（路径 + 问题类型 + 影响范围）
 - 建议时给出可操作的重组方案（移动/合并/拆分/补充标签/补充链接）
 - 优先处理影响最大的问题，给出优先级排序
@@ -291,8 +302,15 @@ You can use the read tool to read the current content of existing wiki pages. Fo
 - Synthesize multiple relevant pages for comprehensive answers when possible`
 	case StepSessionOrganize:
 		return `You are an LLM Wiki architect responsible for diagnosing and optimizing wiki structure and content.
-- Use audit, structure, gaps, similar and other diagnostic tools for comprehensive wiki health analysis
-- Use the read tool to examine specific page content before giving precise recommendations
+
+⚠️ Workflow (mandatory):
+1. Upon receiving a request, first call the structure tool to get the wiki directory layout
+2. Then call the audit tool to get a health diagnosis
+3. Use the read tool to examine specific page content in depth
+4. Based on the tool results, provide specific, actionable reorganization recommendations
+
+You MUST NOT reply without calling at least one tool first.
+
 - List specific issues in your diagnosis (path + issue type + impact scope)
 - Provide actionable reorganization plans (move/merge/split/add tags/add links)
 - Prioritize issues by impact and provide a priority ranking

@@ -478,7 +478,7 @@ func (a *API) streamAssistantReply(
 	cfg := mcp.ToolLoopConfigForMode(session.Mode)
 	temp := mcp.ToolTemperatureForMode(session.Mode)
 	tokens := mcp.ToolMaxTokensForMode(session.Mode)
-	finalText, err := ingest.RunSessionChatToolLoop(ctx, client, executor, msgs, tools, temp, tokens, cfg, toolHandler)
+	finalText, err := ingest.RunSessionChatToolLoop(ctx, client, executor, msgs, tools, temp, tokens, cfg, toolHandler, session.Mode)
 	if err != nil {
 		log.Printf(
 			"[ingest-session] tool loop failed session=%s instance=%s model=%s: %v; falling back to stream",

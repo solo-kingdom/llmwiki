@@ -14,10 +14,11 @@ import (
 )
 
 type Message struct {
-	Role       string `json:"role"`
-	Content    string `json:"content,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	Name       string `json:"name,omitempty"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type StreamEvent struct {
@@ -100,12 +101,16 @@ func (c *Client) validateRequest() error {
 }
 
 // Chat performs a non-streaming completion, optionally with tools (OpenAI-compatible).
-func (c *Client) Chat(ctx context.Context, messages []Message, tools []ToolDefinition, temperature float64, maxTokens int) (ChatResult, error) {
+func (c *Client) Chat(ctx context.Context, messages []Message, tools []ToolDefinition, temperature float64, maxTokens int, opts ...ChatOptions) (ChatResult, error) {
 	if err := c.validateRequest(); err != nil {
 		return ChatResult{}, err
 	}
+	var toolChoice string
+	if len(opts) > 0 {
+		toolChoice = opts[0].ToolChoice
+	}
 	url := c.buildURL()
-	body, err := c.buildChatBody(messages, tools, temperature, maxTokens, false)
+	body, err := c.buildChatBody(messages, tools, temperature, maxTokens, false, toolChoice)
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -131,7 +136,7 @@ func (c *Client) StreamChat(ctx context.Context, messages []Message, temperature
 		return nil, err
 	}
 	url := c.buildURL()
-	body, err := c.buildChatBody(messages, nil, temperature, maxTokens, true)
+	body, err := c.buildChatBody(messages, nil, temperature, maxTokens, true, "")
 	if err != nil {
 		return nil, err
 	}
@@ -182,36 +187,104 @@ func (c *Client) setHeaders(req *http.Request) {
 	}
 }
 
-func (c *Client) buildChatBody(messages []Message, tools []ToolDefinition, temperature float64, maxTokens int, stream bool) ([]byte, error) {
+func (c *Client) buildChatBody(messages []Message, tools []ToolDefinition, temperature float64, maxTokens int, stream bool, toolChoice string) ([]byte, error) {
 	switch c.config.Provider {
 	case "anthropic":
+		type anthropicTool struct {
+			Name        string                 `json:"name"`
+			Description string                 `json:"description"`
+			InputSchema map[string]interface{} `json:"input_schema"`
+		}
 		type anthropicReq struct {
-			Model     string    `json:"model"`
-			Messages  []Message `json:"messages"`
-			MaxTokens int       `json:"max_tokens"`
-			Stream    bool      `json:"stream"`
+			Model     string          `json:"model"`
+			System    string          `json:"system,omitempty"`
+			Messages  []Message       `json:"messages"`
+			MaxTokens int             `json:"max_tokens"`
+			Stream    bool            `json:"stream"`
+			Tools     []anthropicTool `json:"tools,omitempty"`
+			ToolChoice interface{}    `json:"tool_choice,omitempty"`
 		}
 		mt := maxTokens
 		if mt <= 0 {
 			mt = 4096
 		}
-		return json.Marshal(anthropicReq{
+
+		// Extract system messages to top-level system field
+		var systemText string
+		var filtered []Message
+		for _, m := range messages {
+			if m.Role == "system" {
+				if systemText != "" {
+					systemText += "\n\n"
+				}
+				systemText += m.Content
+			} else {
+				filtered = append(filtered, m)
+			}
+		}
+
+		// Convert tool messages to Anthropic format
+		anthropicMsgs := convertToAnthropicMessages(filtered)
+
+		req := anthropicReq{
 			Model:     c.config.Model,
-			Messages:  messages,
+			System:    systemText,
+			Messages:  anthropicMsgs,
 			MaxTokens: mt,
 			Stream:    stream,
-		})
-	case "ollama":
-		type ollamaReq struct {
-			Model    string    `json:"model"`
-			Messages []Message `json:"messages"`
-			Stream   bool      `json:"stream"`
 		}
-		return json.Marshal(ollamaReq{
+
+		// Convert tools to Anthropic format
+		for _, t := range tools {
+			at := anthropicTool{
+				Name:        t.Name,
+				Description: t.Description,
+				InputSchema: t.Parameters,
+			}
+			if at.InputSchema == nil {
+				at.InputSchema = map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
+			}
+			req.Tools = append(req.Tools, at)
+		}
+
+		if toolChoice == "required" && len(req.Tools) > 0 {
+			req.ToolChoice = map[string]string{"type": "any"}
+		} else if toolChoice == "auto" && len(req.Tools) > 0 {
+			req.ToolChoice = map[string]string{"type": "auto"}
+		}
+
+		return json.Marshal(req)
+	case "ollama":
+		type ollamaTool struct {
+			Type     string `json:"type"`
+			Function struct {
+				Name        string                 `json:"name"`
+				Description string                 `json:"description"`
+				Parameters  map[string]interface{} `json:"parameters"`
+			} `json:"function"`
+		}
+		type ollamaReq struct {
+			Model    string       `json:"model"`
+			Messages []Message    `json:"messages"`
+			Stream   bool         `json:"stream"`
+			Tools    []ollamaTool `json:"tools,omitempty"`
+		}
+		req := ollamaReq{
 			Model:    c.config.Model,
 			Messages: messages,
 			Stream:   stream,
-		})
+		}
+		for _, t := range tools {
+			ot := ollamaTool{Type: "function"}
+			ot.Function.Name = t.Name
+			ot.Function.Description = t.Description
+			ot.Function.Parameters = t.Parameters
+			if ot.Function.Parameters == nil {
+				ot.Function.Parameters = map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
+			}
+			req.Tools = append(req.Tools, ot)
+		}
+		return json.Marshal(req)
 	default:
 		type openaiTool struct {
 			Type     string `json:"type"`
@@ -228,6 +301,7 @@ func (c *Client) buildChatBody(messages []Message, tools []ToolDefinition, tempe
 			MaxTokens   int          `json:"max_tokens,omitempty"`
 			Stream      bool         `json:"stream"`
 			Tools       []openaiTool `json:"tools,omitempty"`
+			ToolChoice  interface{}  `json:"tool_choice,omitempty"`
 		}
 		req := openaiReq{
 			Model:       c.config.Model,
@@ -246,27 +320,75 @@ func (c *Client) buildChatBody(messages []Message, tools []ToolDefinition, tempe
 			}
 			req.Tools = append(req.Tools, ot)
 		}
+		if toolChoice != "" {
+			req.ToolChoice = toolChoice
+		}
 		return json.Marshal(req)
 	}
 }
 
 func parseChatResponse(data []byte, provider string) (ChatResult, error) {
 	switch provider {
-	case "anthropic", "ollama":
-		var generic struct {
-			Content string `json:"content"`
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
+	case "anthropic":
+		// Anthropic returns content as an array of content blocks
+		var resp struct {
+			Content []struct {
+				Type  string `json:"type"`
+				Text  string `json:"text"`
+				ID    string `json:"id"`
+				Name  string `json:"name"`
+				Input json.RawMessage `json:"input"`
+			} `json:"content"`
 		}
-		if err := json.Unmarshal(data, &generic); err != nil {
+		if err := json.Unmarshal(data, &resp); err != nil {
 			return ChatResult{}, err
 		}
-		text := generic.Content
-		if text == "" {
-			text = generic.Message.Content
+		var textParts []string
+		var toolCalls []ToolCall
+		for _, block := range resp.Content {
+			switch block.Type {
+			case "text":
+				textParts = append(textParts, block.Text)
+			case "tool_use":
+				toolCalls = append(toolCalls, ToolCall{
+					ID:        block.ID,
+					Name:      block.Name,
+					Arguments: string(block.Input),
+				})
+			}
 		}
-		return ChatResult{Content: text}, nil
+		return ChatResult{
+			Content:   strings.Join(textParts, ""),
+			ToolCalls: toolCalls,
+		}, nil
+	case "ollama":
+		var resp struct {
+			Content string `json:"content"`
+			Message struct {
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					Function struct {
+						Name      string `json:"name"`
+						Arguments json.RawMessage `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(data, &resp); err != nil {
+			return ChatResult{}, err
+		}
+		text := resp.Content
+		if text == "" {
+			text = resp.Message.Content
+		}
+		var calls []ToolCall
+		for _, tc := range resp.Message.ToolCalls {
+			calls = append(calls, ToolCall{
+				Name:      tc.Function.Name,
+				Arguments: string(tc.Function.Arguments),
+			})
+		}
+		return ChatResult{Content: text, ToolCalls: calls}, nil
 	default:
 		var resp struct {
 			Choices []struct {
@@ -300,6 +422,91 @@ func parseChatResponse(data []byte, provider string) (ChatResult, error) {
 		}
 		return ChatResult{Content: msg.Content, ToolCalls: calls}, nil
 	}
+}
+
+// convertToAnthropicMessages converts OpenAI-style messages to Anthropic format.
+// Key differences:
+// - tool result messages become user messages with tool_result content blocks
+// - assistant messages with ToolCalls become content arrays with tool_use blocks
+func convertToAnthropicMessages(msgs []Message) []Message {
+	var result []Message
+
+	// Buffer to accumulate consecutive tool results into a single user message
+	var pendingToolResults []json.RawMessage
+
+	flushToolResults := func() {
+		if len(pendingToolResults) == 0 {
+			return
+		}
+		content, _ := json.Marshal(pendingToolResults)
+		result = append(result, Message{
+			Role:    "user",
+			Content: string(content),
+		})
+		pendingToolResults = nil
+	}
+
+	for _, m := range msgs {
+		switch m.Role {
+		case "tool":
+			// Convert to Anthropic tool_result format
+			tr := map[string]interface{}{
+				"type":      "tool_result",
+				"tool_use_id": m.ToolCallID,
+				"content":   m.Content,
+			}
+			data, _ := json.Marshal(tr)
+			pendingToolResults = append(pendingToolResults, data)
+
+		case "assistant":
+			flushToolResults()
+
+			if len(m.ToolCalls) > 0 {
+				// Build Anthropic content array: tool_use blocks + text
+				var contentBlocks []json.RawMessage
+				for _, tc := range m.ToolCalls {
+					var input interface{}
+					if tc.Arguments != "" {
+						_ = json.Unmarshal([]byte(tc.Arguments), &input)
+					}
+					if input == nil {
+						input = map[string]interface{}{}
+					}
+					block := map[string]interface{}{
+						"type":  "tool_use",
+						"id":    tc.ID,
+						"name":  tc.Name,
+						"input": input,
+					}
+					data, _ := json.Marshal(block)
+					contentBlocks = append(contentBlocks, data)
+				}
+				if m.Content != "" {
+					textBlock := map[string]interface{}{
+						"type": "text",
+						"text": m.Content,
+					}
+					data, _ := json.Marshal(textBlock)
+					// Text goes first, then tool_use
+					contentBlocks = append([]json.RawMessage{data}, contentBlocks...)
+				}
+				content, _ := json.Marshal(contentBlocks)
+				result = append(result, Message{
+					Role:    "assistant",
+					Content: string(content),
+				})
+			} else {
+				result = append(result, m)
+			}
+
+		default:
+			flushToolResults()
+			result = append(result, m)
+		}
+	}
+	flushToolResults()
+
+	return result
 }
 
 func classifyError(statusCode int, body string) error {

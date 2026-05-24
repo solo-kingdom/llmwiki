@@ -147,6 +147,10 @@ const en: Record<MessageKey, string> = {
   // IngestChat
   "chat.copied": "Copied",
   "chat.copy": "Copy",
+  "chat.copy_all": "Copy all",
+  "chat.copy_role_user": "User",
+  "chat.copy_role_assistant": "Assistant",
+  "chat.copy_attachment_label": "[Attachment]",
   "chat.replying": "Replying",
   "chat.reply_failed": "Reply failed",
   "chat.reply_incomplete": "Reply incomplete",

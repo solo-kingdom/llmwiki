@@ -261,6 +261,119 @@ describe("IngestChat", () => {
     })
   })
 
+  it("copies all messages when copy-all button is clicked", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "question one",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          id: "msg-assistant",
+          session_id: "sess-1",
+          role: "assistant",
+          content: "answer one",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:01Z",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    expect(await screen.findByText("question one")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "复制全部" }))
+    await waitFor(() => {
+      expect(mockWriteText).toHaveBeenCalledWith(
+        "用户: question one\n\n助手: answer one",
+      )
+    })
+  })
+
+  it("does not render copy-all button when session has no copyable messages", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({ messages: [] })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+    expect(await screen.findByText("开始一个话题")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "复制全部" })).not.toBeInTheDocument()
+  })
+
   it("shows session title on the left and provider/model on the right above input", async () => {
     const api = await import("@/lib/api")
     localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")

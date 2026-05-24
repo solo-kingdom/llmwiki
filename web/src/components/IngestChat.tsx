@@ -5,6 +5,10 @@ import remarkGfm from "remark-gfm"
 import { useApp } from "@/context/AppContext"
 import { useT } from "@/i18n"
 import { copyTextToClipboard } from "@/lib/clipboard"
+import {
+  formatSessionMessagesForCopy,
+  hasCopyableSessionMessages,
+} from "@/lib/format-session-messages"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -259,9 +263,11 @@ export function IngestChat() {
   const [selectedModel, setSelectedModel] = useState("")
   const [configLoaded, setConfigLoaded] = useState(false)
   const [debugMessageId, setDebugMessageId] = useState<string | null>(null)
+  const [copyAllCopied, setCopyAllCopied] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const copyAllTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const initRef = useRef(false)
   useEffect(() => {
@@ -289,6 +295,13 @@ export function IngestChat() {
     loadSettings,
     listSessions,
   ])
+
+  useEffect(
+    () => () => {
+      if (copyAllTimerRef.current) clearTimeout(copyAllTimerRef.current)
+    },
+    [],
+  )
 
   useEffect(() => {
     const el = bottomRef.current
@@ -441,6 +454,21 @@ export function IngestChat() {
   const sendDisabled =
     sessionBusy || textareaDisabled || !input.trim()
   const attachDisabled = sessionBusy || textareaDisabled
+  const showCopyAll = hasCopyableSessionMessages(sessionMessages)
+
+  const handleCopyAll = async () => {
+    const text = formatSessionMessagesForCopy(sessionMessages, {
+      user: t("chat.copy_role_user"),
+      assistant: t("chat.copy_role_assistant"),
+      attachment: t("chat.copy_attachment_label"),
+    })
+    if (!text) return
+    const ok = await copyTextToClipboard(text)
+    if (!ok) return
+    if (copyAllTimerRef.current) clearTimeout(copyAllTimerRef.current)
+    setCopyAllCopied(true)
+    copyAllTimerRef.current = setTimeout(() => setCopyAllCopied(false), 2000)
+  }
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-2">
@@ -448,6 +476,20 @@ export function IngestChat() {
         className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/70 bg-card/70"
         data-testid="ingest-message-panel"
       >
+        {showCopyAll && (
+          <div className="flex shrink-0 items-center justify-end border-b border-border/50 px-2 py-1.5 sm:px-3">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              title={copyAllCopied ? t("chat.copied") : t("chat.copy_all")}
+              aria-label={copyAllCopied ? t("chat.copied") : t("chat.copy_all")}
+              onClick={() => void handleCopyAll()}
+            >
+              <Copy className={`size-3.5 ${copyAllCopied ? "text-green-600" : ""}`} />
+              {copyAllCopied ? t("chat.copied") : t("chat.copy_all")}
+            </button>
+          </div>
+        )}
         <ScrollArea className="min-h-0 flex-1">
           <div className="w-full space-y-4 px-2 py-4 sm:px-3">
             {configLoaded && !isReady && (

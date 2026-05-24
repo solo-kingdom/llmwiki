@@ -132,6 +132,10 @@ const zh = {
   // IngestChat
   "chat.copied": "已复制",
   "chat.copy": "复制",
+  "chat.copy_all": "复制全部",
+  "chat.copy_role_user": "用户",
+  "chat.copy_role_assistant": "助手",
+  "chat.copy_attachment_label": "[附件]",
   "chat.replying": "正在回复",
   "chat.reply_failed": "回复失败",
   "chat.reply_incomplete": "回复未完成",

@@ -2,9 +2,7 @@
 
 ## Purpose
 Define the two-step ingest pipeline: normalization, analysis, generation, caching, merge protection, and session archive handling.
-
 ## Requirements
-
 ### Requirement: Session archive ingest input
 The ingest pipeline SHALL accept `session_archive` input type where normalized content is a frozen session transcript markdown file on disk, including referenced wiki page metadata when present.
 
@@ -136,10 +134,10 @@ When applying LLM-generated FILE blocks to existing wiki pages, the pipeline SHA
 - **THEN** the system SHALL skip merge and overwrite as current behavior
 
 ### Requirement: Review apply worktree execution
-When version control is enabled, review apply SHALL execute file writes in an isolated git worktree and merge results back to main before updating the search index.
+When the workspace has an initialized git repository, review apply SHALL execute file writes in an isolated git worktree and merge results back to main before updating the search index.
 
-#### Scenario: Apply in worktree with VCS enabled
-- **WHEN** a review apply job runs and version control is enabled
+#### Scenario: Apply in worktree with git repo
+- **WHEN** a review apply job runs and workspace has `.git` initialized
 - **THEN** the processor SHALL create a worktree at `.llmwiki/worktrees/<job-id>/` on branch `job/<job-id>`
 - **AND** SHALL run `ApplyFromPlan` targeting the worktree directory
 - **AND** SHALL commit wiki changes in the worktree before merging to main
@@ -154,11 +152,12 @@ When version control is enabled, review apply SHALL execute file writes in an is
 - **WHEN** review apply succeeds or fails after worktree creation
 - **THEN** the processor SHALL remove the worktree and branch
 
-#### Scenario: VCS disabled fallback
-- **WHEN** version control is not enabled
+#### Scenario: No git repo fallback
+- **WHEN** workspace has no `.git` directory (legacy workspace before repair)
 - **THEN** review apply SHALL write directly to the main workspace without worktree
 - **AND** SHALL update the search index after apply completes
 
 #### Scenario: Merge commit recorded on review
 - **WHEN** review apply merges successfully to main
 - **THEN** the system SHALL persist the resulting merge commit SHA on the ingest review record
+

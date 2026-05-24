@@ -10,6 +10,7 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/vcs"
 )
 
 func newInitCmd() *cobra.Command {
@@ -38,6 +39,10 @@ func runInit(dir string) error {
 		return fmt.Errorf("write scaffolds: %w", err)
 	}
 	if err := ingest.WriteWorkspaceScaffoldsIfMissing(abs); err != nil {
+		return err
+	}
+
+	if err := ensureVersionControl(abs); err != nil {
 		return err
 	}
 
@@ -70,5 +75,21 @@ func runInit(dir string) error {
 
 	fmt.Printf("Initialized workspace: %s\n", abs)
 	fmt.Printf("Indexed %d files\n", count)
+	return nil
+}
+
+func ensureVersionControl(dir string) error {
+	if !vcs.IsGitAvailable().Available {
+		return fmt.Errorf("git is not installed. Please install git to initialize version control")
+	}
+
+	repo := vcs.NewGitRepo(dir)
+	if repo.IsInitialized() {
+		return nil
+	}
+
+	if _, err := vcs.InitRepo(dir); err != nil {
+		return fmt.Errorf("initialize version control: %w", err)
+	}
 	return nil
 }

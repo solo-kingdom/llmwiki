@@ -668,12 +668,6 @@ export function getVCStatus(): Promise<VCStatus> {
   return request<VCStatus>("/api/v1/vcs/status")
 }
 
-export function disableVC(): Promise<{ status: string; message: string }> {
-  return request<{ status: string; message: string }>("/api/v1/vcs/disable", {
-    method: "POST",
-  })
-}
-
 export function getVCLog(limit = 50): Promise<VCLogEntry[]> {
   return request<VCLogEntry[]>(`/api/v1/vcs/log?limit=${limit}`)
 }

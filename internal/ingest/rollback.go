@@ -30,7 +30,7 @@ func (p *JobProcessor) processRollbackJob(ctx context.Context, job *sqlite.Inges
 	repo := p.gitRepoIfEnabled()
 	if repo == nil {
 		return p.failJob(job.ID, "rollback_context_missing",
-			"version control is not enabled", "", "")
+			"git repository is not initialized (run llmwiki init to repair)", "", "")
 	}
 
 	// The source_ref field stores the target commit SHA

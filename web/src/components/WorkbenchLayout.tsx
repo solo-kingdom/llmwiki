@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, type ReactNode } from "react"
 import { useApp } from "@/context/AppContext"
 import { useT } from "@/i18n"
 import { SettingsPage } from "@/components/SettingsPage"
@@ -10,9 +10,8 @@ import { WarningPopover } from "@/components/WarningPopover"
 import { AppHeaderBar } from "@/components/AppHeaderBar"
 import { WorkbenchContentShell } from "@/components/WorkbenchContentShell"
 import { cn } from "@/lib/utils"
-import { getVCStatus } from "@/lib/api"
 import {
-  directIngestHref,
+  addContextHref,
   getWorkbenchViewFromPath,
   navigateTo,
   usePathname,
@@ -66,21 +65,14 @@ function NavButton({
 export function WorkbenchLayout() {
   const pathname = usePathname()
   const view = getWorkbenchViewFromPath(pathname)
-  const [vcEnabled, setVcEnabled] = useState<boolean | null>(null)
   const { capabilities } = useApp()
   const t = useT()
-
-  useEffect(() => {
-    getVCStatus()
-      .then((s) => setVcEnabled(s.enabled))
-      .catch(() => setVcEnabled(false))
-  }, [])
 
   useEffect(() => {
     const raw = window.location.hash.replace(/^#/, "")
     if (!raw) return
     if (raw === "ingest") {
-      navigateTo(directIngestHref())
+      navigateTo(addContextHref())
       return
     }
     if (LEGACY_HASH_VIEWS.has(raw)) {
@@ -90,7 +82,7 @@ export function WorkbenchLayout() {
 
   useEffect(() => {
     if (pathname === "/ingest") {
-      navigateTo(directIngestHref())
+      navigateTo(addContextHref())
     }
   }, [pathname])
 
@@ -99,13 +91,6 @@ export function WorkbenchLayout() {
       navigateTo(workbenchHref())
     }
   }, [pathname])
-
-  useEffect(() => {
-    if (vcEnabled === null) return
-    if (view === "timeline" && !vcEnabled) {
-      navigateTo(workbenchHref())
-    }
-  }, [view, vcEnabled])
 
   const missingDeps = useMemo(() => {
     if (!capabilities) return []
@@ -127,9 +112,7 @@ export function WorkbenchLayout() {
           right={
             <>
               <nav className="flex items-center gap-1">
-                {NAV_ITEMS.filter(
-                  (item) => item.id !== "timeline" || vcEnabled === true,
-                ).map((item) =>
+                {NAV_ITEMS.map((item) =>
                   item.id === "chat" ? (
                     <div key={item.id} className="flex items-center gap-1">
                       <NavButton
@@ -177,7 +160,7 @@ export function WorkbenchLayout() {
             </div>
           )}
           {view === "jobs" && <JobsPage />}
-          {view === "timeline" && vcEnabled === true && <TimelinePage />}
+          {view === "timeline" && <TimelinePage />}
           {view === "logs" && <LogsPage />}
           {view === "settings" && <SettingsPage />}
         </main>

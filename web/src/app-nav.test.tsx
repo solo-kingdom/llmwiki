@@ -168,10 +168,10 @@ describe("App navigation", () => {
     expect(window.location.pathname).toBe("/jobs")
   })
 
-  it("redirects legacy ingest URL to chat and opens direct ingest panel", async () => {
+  it("redirects legacy ingest URL to chat and opens context dialog", async () => {
     window.history.replaceState(null, "", "/ingest")
     render(<App />)
-    expect(await screen.findByTestId("direct-ingest-panel")).toBeInTheDocument()
+    expect(await screen.findByTestId("context-input-dialog")).toBeInTheDocument()
     expect(window.location.pathname).toBe("/")
     expect(window.location.search).toBe("")
   })

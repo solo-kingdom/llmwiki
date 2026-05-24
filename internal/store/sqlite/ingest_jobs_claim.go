@@ -23,15 +23,11 @@ func (d *DB) MaxConcurrentJobs() int {
 	return n
 }
 
-// ParallelEnabled reports whether parallel job execution is enabled.
-// Returns true only when both the config flag is set and VCS is enabled
-// (worktree isolation requires git).
+// ParallelEnabled reports whether parallel job execution is enabled via config.
+// Worktree isolation additionally requires an initialized git repo at runtime.
 func (d *DB) ParallelEnabled() bool {
 	val, _ := d.GetConfig("job_parallel_enabled")
-	if val != "true" && val != "1" {
-		return false
-	}
-	return d.GetVCConfig().Enabled
+	return val == "true" || val == "1"
 }
 
 // RecoverStaleRunningJobs requeues running jobs with expired heartbeats.

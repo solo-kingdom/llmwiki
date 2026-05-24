@@ -49,6 +49,26 @@ describe("TimelinePage diff loading", () => {
     vi.mocked(api.getVCLog).mockResolvedValue([entryB, entryA])
   })
 
+  it("shows repair hint when git is not initialized", async () => {
+    vi.mocked(api.getVCStatus).mockResolvedValue({
+      enabled: false,
+      commit_count: 0,
+      git_available: true,
+      git_version: "2.43.0",
+      tracked_dirs: ["wiki/"],
+      excluded_dirs: [".llmwiki/", "raw/", "revert/"],
+    } satisfies VCStatus)
+
+    render(
+      <I18nTestProvider lang="en">
+        <TimelinePage />
+      </I18nTestProvider>,
+    )
+
+    expect(await screen.findByText("Git repository is not initialized.")).toBeInTheDocument()
+    expect(screen.getByText(/llmwiki init/)).toBeInTheDocument()
+  })
+
   it("ignores stale diff response when user switches commits", async () => {
     let resolveA: (value: { sha: string; diff: string }) => void
     const diffAPromise = new Promise<{ sha: string; diff: string }>((resolve) => {

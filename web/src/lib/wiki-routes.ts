@@ -9,21 +9,43 @@ export type WorkbenchView =
   | "logs"
   | "settings"
 
+export const ADD_CONTEXT_QUERY = "addContext"
+/** @deprecated Use ADD_CONTEXT_QUERY; kept for deep-link compatibility */
 export const DIRECT_INGEST_QUERY = "directIngest"
 
+export function addContextHref(): string {
+  return `/?${ADD_CONTEXT_QUERY}=1`
+}
+
+/** @deprecated Use addContextHref */
 export function directIngestHref(): string {
-  return `/?${DIRECT_INGEST_QUERY}=1`
+  return addContextHref()
 }
 
-export function isDirectIngestRequested(search: string): boolean {
-  return new URLSearchParams(search).get(DIRECT_INGEST_QUERY) === "1"
-}
-
-export function clearDirectIngestQuery(search: string): string {
+export function isAddContextRequested(search: string): boolean {
   const params = new URLSearchParams(search)
+  return (
+    params.get(ADD_CONTEXT_QUERY) === "1" ||
+    params.get(DIRECT_INGEST_QUERY) === "1"
+  )
+}
+
+/** @deprecated Use isAddContextRequested */
+export function isDirectIngestRequested(search: string): boolean {
+  return isAddContextRequested(search)
+}
+
+export function clearAddContextQuery(search: string): string {
+  const params = new URLSearchParams(search)
+  params.delete(ADD_CONTEXT_QUERY)
   params.delete(DIRECT_INGEST_QUERY)
   const next = params.toString()
   return next ? `/?${next}` : "/"
+}
+
+/** @deprecated Use clearAddContextQuery */
+export function clearDirectIngestQuery(search: string): string {
+  return clearAddContextQuery(search)
 }
 
 export function isWikiReaderPath(pathname: string): boolean {

@@ -13,7 +13,7 @@ import {
 import type { Settings, VCStatus, ProviderCheckResult, MCPServerCheckResult, WorkspaceRuleFilesPreview } from "@/types"
 import { PageContainer } from "@/components/PageContainer"
 import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff, CheckCircle2, XCircle, Loader2, CircleOff, RefreshCw } from "lucide-react"
-import { initVC, getVCStatus, disableVC, checkProviderInstance, checkAllProviderInstances, checkMCPStatus, getWorkspaceRuleFiles } from "@/lib/api"
+import { getVCStatus, checkProviderInstance, checkAllProviderInstances, checkMCPStatus, getWorkspaceRuleFiles } from "@/lib/api"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 import { useI18n } from "@/i18n"
 
@@ -74,8 +74,6 @@ export function SettingsPage() {
   const [editForm, setEditForm] = useState<EditFormState>({ mode: false })
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>(null)
   const [vcStatus, setVCStatus] = useState<VCStatus | null>(null)
-  const [vcLoading, setVCLoading] = useState(false)
-  const [vcDisableConfirm, setVCDisableConfirm] = useState(false)
   const [mcpJsonError, setMcpJsonError] = useState<string | null>(null)
   const [providerChecks, setProviderChecks] = useState<Record<string, ProviderCheckResult>>({})
   const [providerChecking, setProviderChecking] = useState(false)
@@ -266,31 +264,6 @@ export function SettingsPage() {
         </div>
       </div>
     )
-  }
-
-  const handleVCInit = async () => {
-    setVCLoading(true)
-    try {
-      await initVC()
-      await loadVCStatus()
-    } catch (err) {
-      console.error("VC init failed:", err)
-    } finally {
-      setVCLoading(false)
-    }
-  }
-
-  const handleVCDisable = async () => {
-    setVCLoading(true)
-    try {
-      await disableVC()
-      setVCDisableConfirm(false)
-      await loadVCStatus()
-    } catch (err) {
-      console.error("VC disable failed:", err)
-    } finally {
-      setVCLoading(false)
-    }
   }
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
@@ -1183,7 +1156,7 @@ export function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <GitBranch className="size-4" />
-              Version Control
+              {t("settings.vc.title")}
             </CardTitle>
             <CardDescription>
               {t("settings.vc.desc")}
@@ -1194,66 +1167,34 @@ export function SettingsPage() {
               <div className="space-y-3">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <ShieldOff className="size-4" />
-                  <span>Not Enabled</span>
+                  <span>{t("settings.vc.not_ready")}</span>
                 </div>
-                <Button
-                  size="sm"
-                  onClick={handleVCInit}
-                  disabled={vcLoading || !vcStatus?.git_available}
-                >
-                  {vcLoading ? "Initializing..." : "Enable Version Control"}
-                </Button>
-                {vcStatus && !vcStatus.git_available && (
-                  <p className="text-xs text-amber-600">
-                    Git is not installed. Please install git to enable version control.
-                  </p>
-                )}
+                <p className="text-xs text-muted-foreground">
+                  {t("settings.vc.repair_hint")}
+                </p>
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 text-sm">
                   <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
-                    Active
+                    {t("settings.vc.active")}
                   </span>
                   <span className="text-muted-foreground">
-                    {vcStatus.commit_count} commit{vcStatus.commit_count !== 1 ? "s" : ""}
+                    {t("settings.vc.commits", { count: vcStatus.commit_count })}
                   </span>
                 </div>
                 <div className="text-xs text-muted-foreground space-y-1">
-                  <div>Tracked: <code className="bg-muted px-1 rounded">{vcStatus.tracked_dirs.join(", ")}</code></div>
-                  <div>Excluded: <code className="bg-muted px-1 rounded">{vcStatus.excluded_dirs.join(", ")}</code></div>
+                  <div>{t("settings.vc.tracked")}: <code className="bg-muted px-1 rounded">{vcStatus.tracked_dirs.join(", ")}</code></div>
+                  <div>{t("settings.vc.excluded")}: <code className="bg-muted px-1 rounded">{vcStatus.excluded_dirs.join(", ")}</code></div>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => navigateTo(workbenchViewHref("timeline"))}
-                  >
-                    <History className="size-3.5 mr-1" />
-                    View History
-                  </Button>
-                  {!vcDisableConfirm ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setVCDisableConfirm(true)}
-                    >
-                      Disable
-                    </Button>
-                  ) : (
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="text-muted-foreground">
-                        {t("settings.vc.disable_note")}
-                      </span>
-                      <Button size="sm" variant="destructive" onClick={handleVCDisable} disabled={vcLoading}>
-                        {vcLoading ? "Disabling..." : "Confirm Disable"}
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setVCDisableConfirm(false)}>
-                        Cancel
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigateTo(workbenchViewHref("timeline"))}
+                >
+                  <History className="size-3.5 mr-1" />
+                  {t("settings.vc.view_history")}
+                </Button>
               </div>
             )}
           </CardContent>

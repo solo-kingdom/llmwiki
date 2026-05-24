@@ -15,10 +15,10 @@ import { MarkdownContent } from "@/components/MarkdownContent"
 import { SessionControls } from "@/components/SessionControls"
 import { WikiMentionPicker } from "@/components/WikiMentionPicker"
 import { ArchiveReviewCard } from "@/components/ArchiveReviewCard"
-import { DirectIngestPanel } from "@/components/DirectIngestPanel"
+import { ContextInputDialog } from "@/components/ContextInputDialog"
 import {
-  clearDirectIngestQuery,
-  isDirectIngestRequested,
+  clearAddContextQuery,
+  isAddContextRequested,
   usePathname,
 } from "@/lib/wiki-routes"
 import * as api from "@/lib/api"
@@ -31,7 +31,7 @@ import {
   Copy,
   Cpu,
   Lightbulb,
-  FileInput,
+  FileText,
   Loader2,
   Paperclip,
   RotateCcw,
@@ -282,7 +282,7 @@ export function IngestChat() {
   const [configLoaded, setConfigLoaded] = useState(false)
   const [debugMessageId, setDebugMessageId] = useState<string | null>(null)
   const [copyAllCopied, setCopyAllCopied] = useState(false)
-  const [directIngestOpen, setDirectIngestOpen] = useState(false)
+  const [contextInputOpen, setContextInputOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -323,9 +323,9 @@ export function IngestChat() {
   )
 
   useEffect(() => {
-    if (!isDirectIngestRequested(window.location.search)) return
-    setDirectIngestOpen(true)
-    window.history.replaceState(null, "", clearDirectIngestQuery(window.location.search))
+    if (!isAddContextRequested(window.location.search)) return
+    setContextInputOpen(true)
+    window.history.replaceState(null, "", clearAddContextQuery(window.location.search))
   }, [pathname])
 
   useEffect(() => {
@@ -490,6 +490,7 @@ export function IngestChat() {
   const textareaDisabled = !sessionId || !isReady
   const sendDisabled =
     sessionBusy || textareaDisabled || !input.trim()
+  const contextDisabled = !sessionId
   const attachDisabled = sessionBusy || textareaDisabled
   const showCopyAll = hasCopyableSessionMessages(sessionMessages)
 
@@ -540,7 +541,7 @@ export function IngestChat() {
                 </p>
               </div>
             )}
-            {sessionMessages.length === 0 && isReady && (
+            {sessionMessages.length === 0 && configLoaded && (
               <div className="py-16 text-center text-muted-foreground">
                 <p className="mb-2 text-lg">{t("chat.start_topic")}</p>
                 <p className="mb-4 text-sm">{t("chat.archive_desc")}</p>
@@ -548,10 +549,11 @@ export function IngestChat() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  data-testid="direct-ingest-empty-cta"
-                  onClick={() => setDirectIngestOpen(true)}
+                  data-testid="context-input-empty-cta"
+                  disabled={contextDisabled}
+                  onClick={() => setContextInputOpen(true)}
                 >
-                  {t("chat.direct_ingest_cta")}
+                  {t("chat.context.cta")}
                 </Button>
               </div>
             )}
@@ -691,17 +693,18 @@ export function IngestChat() {
             <Archive className="size-3.5" />
             {t("chat.archive")}
           </Button>
+          <div className="flex-1" />
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setDirectIngestOpen(true)}
-            title={t("chat.direct_ingest")}
-            data-testid="direct-ingest-open"
+            disabled={contextDisabled}
+            onClick={() => setContextInputOpen(true)}
+            title={t("chat.context.button")}
+            data-testid="context-input-open"
           >
-            <FileInput className="size-3.5" />
-            {t("chat.direct_ingest")}
+            <FileText className="size-3.5" />
+            {t("chat.context.button")}
           </Button>
-          <div className="flex-1" />
           <Button
             size="sm"
             variant="outline"
@@ -737,9 +740,9 @@ export function IngestChat() {
         </div>
       </div>
 
-      <DirectIngestPanel
-        open={directIngestOpen}
-        onOpenChange={setDirectIngestOpen}
+      <ContextInputDialog
+        open={contextInputOpen}
+        onOpenChange={setContextInputOpen}
       />
 
       <ModelSelectDialog

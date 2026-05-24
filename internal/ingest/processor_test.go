@@ -556,11 +556,6 @@ func TestProcessorWithGitCommit(t *testing.T) {
 	// Create a source file
 	sourceContent := []byte("# Test\nHello world")
 	os.WriteFile(filepath.Join(ws, "raw", "sources", "web-ingest", "test.md"), sourceContent, 0o644)
-
-	if err := db.SetVCEnabled(true); err != nil {
-		t.Fatalf("SetVCEnabled: %v", err)
-	}
-
 	processor := NewJobProcessor(db, ws)
 	processor.SetGitRepo(repo)
 
@@ -642,22 +637,15 @@ func TestGitRepoIfEnabled(t *testing.T) {
 
 	processor := NewJobProcessor(db, ws)
 
-	if repo := processor.gitRepoIfEnabled(); repo != nil {
-		t.Error("expected nil when vc_enabled is false")
-	}
-
-	if err := db.SetVCEnabled(true); err != nil {
-		t.Fatalf("SetVCEnabled: %v", err)
-	}
 	if repo := processor.gitRepoIfEnabled(); repo == nil {
-		t.Error("expected non-nil when vc_enabled and .git exist")
+		t.Error("expected non-nil when .git exists")
 	}
 
-	if err := db.SetVCEnabled(false); err != nil {
-		t.Fatalf("SetVCEnabled(false): %v", err)
-	}
-	if repo := processor.gitRepoIfEnabled(); repo != nil {
-		t.Error("expected nil after disabling vc")
+	wsNoGit := t.TempDir()
+	os.MkdirAll(filepath.Join(wsNoGit, "wiki"), 0o755)
+	processorNoGit := NewJobProcessor(db, wsNoGit)
+	if repo := processorNoGit.gitRepoIfEnabled(); repo != nil {
+		t.Error("expected nil when .git is missing")
 	}
 }
 
@@ -714,29 +702,16 @@ func TestParallelEnabled(t *testing.T) {
 
 	processor := NewJobProcessor(db, ws)
 
-	// Default: parallel not enabled (vc_enabled not set)
-	if processor.parallelEnabled() {
-		t.Error("expected parallel disabled without vc_enabled")
-	}
-
-	// Enable VCS
-	if err := db.SetVCEnabled(true); err != nil {
-		t.Fatalf("SetVCEnabled: %v", err)
-	}
-
-	// Still not enabled: job_parallel_enabled not set defaults to false
-	// (ParallelEnabled checks both the flag AND VCS enabled)
 	if processor.parallelEnabled() {
 		t.Error("expected parallel disabled without job_parallel_enabled")
 	}
 
-	// Enable parallel
 	if err := db.SetConfig("job_parallel_enabled", "true"); err != nil {
 		t.Fatalf("SetConfig: %v", err)
 	}
 
 	if !processor.parallelEnabled() {
-		t.Error("expected parallel enabled with both flags set")
+		t.Error("expected parallel enabled with git repo and job_parallel_enabled")
 	}
 }
 
@@ -822,11 +797,6 @@ func TestWorktreeCleanupOnStartup(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
-
-	// Enable VCS so cleanup runs
-	if err := db.SetVCEnabled(true); err != nil {
-		t.Fatalf("SetVCEnabled: %v", err)
-	}
 
 	ws := t.TempDir()
 	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
@@ -1103,9 +1073,6 @@ func TestMergeWorktreeJobBranchIntegration(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
-	if err := db.SetVCEnabled(true); err != nil {
-		t.Fatalf("SetVCEnabled: %v", err)
-	}
 
 	ws := t.TempDir()
 	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)

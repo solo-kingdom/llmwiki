@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest"
 import {
+  addContextHref,
+  clearAddContextQuery,
   clearDirectIngestQuery,
   directIngestHref,
   getWorkbenchViewFromPath,
+  isAddContextRequested,
   isDirectIngestRequested,
   isWikiGraphPath,
   timelineCommitHref,
@@ -24,11 +27,18 @@ describe("wiki-routes workbench views", () => {
     expect(getWorkbenchViewFromPath("/review")).toBe("chat")
   })
 
-  it("builds direct ingest deep link", () => {
-    expect(directIngestHref()).toBe("/?directIngest=1")
+  it("builds add context deep link", () => {
+    expect(addContextHref()).toBe("/?addContext=1")
+    expect(isAddContextRequested("?addContext=1")).toBe(true)
+    expect(clearAddContextQuery("?addContext=1&foo=bar")).toBe("/?foo=bar")
+    expect(clearAddContextQuery("?addContext=1")).toBe("/")
+  })
+
+  it("accepts legacy directIngest query as add context", () => {
+    expect(isAddContextRequested("?directIngest=1")).toBe(true)
     expect(isDirectIngestRequested("?directIngest=1")).toBe(true)
+    expect(directIngestHref()).toBe("/?addContext=1")
     expect(clearDirectIngestQuery("?directIngest=1&foo=bar")).toBe("/?foo=bar")
-    expect(clearDirectIngestQuery("?directIngest=1")).toBe("/")
   })
 
   it("builds timeline commit deep link", () => {

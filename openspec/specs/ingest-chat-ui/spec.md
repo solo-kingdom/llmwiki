@@ -4,7 +4,7 @@
 Define the Ingest Chat web UI: composer, message rendering, attachments, archive flow, and wiki-aware interaction affordances.
 ## Requirements
 ### Requirement: Chat-first Ingest layout
-The Ingest page SHALL present a chat interface as the primary interaction: scrollable message list, bottom composer, attachment affordances, and a primary **归档** action. Session management and model configuration actions SHALL be positioned close to the chat workflow: session switch/create entry and model selection entry SHALL be accessible from the chat interaction area without requiring a persistent wide left sidebar. Direct raw ingest (batch files and text blocks) SHALL be accessible from the composer toolbar via DirectIngestPanel without leaving Chat.
+The Ingest page SHALL present a chat interface as the primary interaction: scrollable message list, bottom composer, attachment affordances, and a primary **归档** action. Session management and model configuration actions SHALL be positioned close to the chat workflow: session switch/create entry and model selection entry SHALL be accessible from the chat interaction area without requiring a persistent wide left sidebar. Ready-made plain text materials SHALL be addable via the context append dialog without leaving Chat.
 
 #### Scenario: Default chat view
 - **WHEN** user opens the Ingest entry
@@ -13,7 +13,7 @@ The Ingest page SHALL present a chat interface as the primary interaction: scrol
 #### Scenario: Empty session prompt
 - **WHEN** no messages exist in the active session
 - **THEN** page SHALL show centered hint encouraging user to describe a topic or attach files
-- **AND** SHALL offer a direct ingest affordance for users with ready-made materials
+- **AND** SHALL offer a context-append affordance for users with ready-made plain text materials
 
 #### Scenario: Send message
 - **WHEN** user types text and clicks **发送** or presses Enter (without Shift)
@@ -213,36 +213,41 @@ The Ingest Chat message panel SHALL provide a **copy all** action that copies th
 - **WHEN** copy-all succeeds
 - **THEN** UI SHALL show brief copied feedback on the copy-all control (consistent with single-message copy behavior)
 
-### Requirement: Direct ingest panel in Chat
-The Ingest Chat UI SHALL provide a direct ingest workflow for batch file upload and multi-block text submission without requiring an LLM session conversation. This workflow SHALL be accessible from within Chat via a sheet or dialog panel (DirectIngestPanel), not as a separate workbench page.
+### Requirement: Context append dialog in Chat
+The Ingest Chat UI SHALL provide a context-only text input workflow for adding ready-made plain text to the active session without triggering an LLM reply. This workflow SHALL be accessible via a dialog opened from the composer toolbar, positioned immediately to the left of the attachment control.
 
-#### Scenario: Open direct ingest from composer
-- **WHEN** user clicks the direct ingest control in the chat composer toolbar
-- **THEN** UI SHALL open DirectIngestPanel as a sheet or dialog overlay
-- **AND** the panel SHALL NOT navigate away from the Chat view
+#### Scenario: Open context dialog from composer
+- **WHEN** user clicks the add-context control in the chat composer toolbar
+- **THEN** UI SHALL open a dialog overlay for multi-block plain text input
+- **AND** the dialog SHALL NOT navigate away from the Chat view
 
-#### Scenario: Direct ingest panel supports files and text blocks
-- **WHEN** DirectIngestPanel is open
-- **THEN** UI SHALL allow multi-file selection or drag-and-drop upload
-- **AND** SHALL allow one or more text blocks with optional per-block titles
-- **AND** SHALL allow optional batch title and source fields
+#### Scenario: Context dialog supports multi-block text
+- **WHEN** the context input dialog is open
+- **THEN** UI SHALL allow one or more text blocks with optional per-block titles
+- **AND** SHALL require at least one non-empty text block before submit is enabled
 
-#### Scenario: Direct ingest submits to pipeline APIs
-- **WHEN** user submits direct ingest with valid files and/or non-empty text blocks
-- **THEN** UI SHALL call existing `submitText` and/or `submitUpload` APIs (not session message APIs)
-- **AND** SHALL display a submission summary with accepted and rejected job counts
+#### Scenario: Context append does not trigger LLM
+- **WHEN** user submits valid text blocks from the context dialog
+- **THEN** UI SHALL call the non-streaming session message append API
+- **AND** SHALL NOT start an assistant streaming reply
+- **AND** SHALL append the persisted user message to the message list
 
-#### Scenario: View jobs after direct ingest
-- **WHEN** direct ingest submission completes with at least one accepted job
-- **THEN** UI SHALL offer a control to navigate to the Jobs view
+#### Scenario: Context append enables archive
+- **WHEN** context append succeeds and the session had no prior persisted user messages
+- **THEN** the **归档** control SHALL become enabled (subject to other existing archive guards)
 
-#### Scenario: Direct ingest empty state CTA
+#### Scenario: Context append without provider
+- **WHEN** no provider instance or model is configured for the session
+- **THEN** the add-context control and dialog submit SHALL remain usable
+- **AND** send and archive controls SHALL continue to follow existing provider readiness rules
+
+#### Scenario: Context empty state CTA
 - **WHEN** the active session has no messages and the user is ready to start
-- **THEN** the empty state SHALL show a secondary affordance to open DirectIngestPanel for raw material submission
+- **THEN** the empty state SHALL show a secondary affordance to open the context input dialog for ready-made plain text
 - **AND** SHALL retain the primary hint encouraging conversational ingest
 
-#### Scenario: Direct ingest distinct from session attachment
-- **WHEN** user attaches files via the composer attachment control
-- **THEN** UI SHALL continue to use the session attachment API
-- **AND** SHALL NOT treat composer attachments as direct ingest pipeline submissions
+#### Scenario: Plain text files use attachment
+- **WHEN** user has a plain text file (e.g. `.txt` or `.md`) to add as material
+- **THEN** UI SHALL direct them to the composer attachment control (not the context dialog file upload)
+- **AND** attachment behavior SHALL remain the existing session attachment API with LLM summary
 

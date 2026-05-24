@@ -4,13 +4,19 @@ A personal knowledge workspace powered by LLMs. LLM Wiki incrementally builds an
 
 Single Go binary with embedded React web UI, REST API, and MCP (Model Context Protocol) server.
 
+## Prerequisites
+
+- Go 1.21+
+- Node.js 18+ (for building the web UI)
+- **git CLI** (required for `llmwiki init`, which bootstraps version control for the workspace)
+
 ## Quick Start
 
 ```bash
 # Build (requires Go 1.21+ and Node.js 18+)
 make build
 
-# Initialize a workspace
+# Initialize a workspace (requires git CLI)
 ./llmwiki init ~/research
 
 # Start the server
@@ -29,7 +35,7 @@ make dev
 
 | Command | Description |
 |---------|-------------|
-| `llmwiki init <dir>` | Initialize a workspace directory with scaffold files and SQLite index |
+| `llmwiki init <dir>` | Initialize a workspace with scaffold files, git repo (wiki/ only), and SQLite index |
 | `llmwiki serve [dir]` | Start HTTP API server with embedded web UI |
 | `llmwiki reindex [dir]` | Force full rebuild of the SQLite index from filesystem |
 | `llmwiki mcp [dir]` | Run MCP JSON-RPC 2.0 server on stdin/stdout (legacy local mode) |
@@ -115,12 +121,14 @@ After `llmwiki init ~/research`:
 
 ### Web-first Ingest Workflow
 
-The Web UI separates two ingestion entry points:
+The Web UI provides a unified ingest workflow through **Chat** (`/`):
 
-- **Chat** (`/`): explore a topic with the assistant across multiple turns, then archive the session into the wiki when ready
-- **Ingest** (`/ingest`): submit raw materials directly — upload multiple files and/or paste multiple text blocks, then click **直接归档** without a chat session
+- **Conversational ingest**: explore a topic with the assistant across multiple turns, then archive the session into the wiki when ready (with review gate)
+- **Context materials**: paste plain text via **Add context** (no AI reply), or upload plain text files via **Attachment**; then click **Archive** to submit through the same review flow
 
-Both paths enqueue standard ingest jobs observable from **Jobs**:
+Legacy `/ingest` redirects to Chat and opens the context dialog.
+
+External integrations (browser extension, API) may still use direct job APIs (`POST /api/v1/ingest/jobs/text`, file upload). Observable from **Jobs**:
 
 - **Text ingest**: pasted or composed markdown/plain text
 - **File upload ingest**: one or multiple files with accepted/rejected feedback

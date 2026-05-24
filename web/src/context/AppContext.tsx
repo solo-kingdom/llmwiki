@@ -181,6 +181,7 @@ interface AppState {
   loadCapabilities: () => Promise<void>
 
   ensureIngestSession: () => Promise<void>
+  appendContextMessage: (content: string) => Promise<void>
   sendSessionMessage: (content: string, wikiRefs?: WikiRefPayload[]) => Promise<void>
   retrySessionMessage: (assistantMessageId: string) => Promise<void>
   cancelStream: () => void
@@ -631,6 +632,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     },
     [],
+  )
+
+  const appendContextMessage = useCallback(
+    async (content: string) => {
+      if (!sessionId) return
+      const trimmed = content.trim()
+      if (!trimmed) return
+
+      setSessionError(null)
+      const tempId = `temp-user-${Date.now()}`
+      const tempUser: IngestSessionMessage = {
+        id: tempId,
+        session_id: sessionId,
+        role: "user",
+        content: trimmed,
+        message_type: "text",
+        attachment_id: "",
+        stream_status: "complete",
+        created_at: new Date().toISOString(),
+      }
+      setSessionMessages((prev) => [...prev, tempUser])
+
+      try {
+        const { message } = await api.appendIngestSessionMessage(sessionId, trimmed)
+        const persisted = enrichSessionMessage(message)
+        setSessionMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? persisted : m)),
+        )
+      } catch (e) {
+        setSessionMessages((prev) => prev.filter((m) => m.id !== tempId))
+        setSessionError((e as Error).message)
+        throw e
+      }
+    },
+    [sessionId],
   )
 
   const sendSessionMessage = useCallback(
@@ -1155,6 +1191,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         cancelIngest,
         loadCapabilities,
         ensureIngestSession,
+        appendContextMessage,
         sendSessionMessage,
         retrySessionMessage,
         cancelStream,

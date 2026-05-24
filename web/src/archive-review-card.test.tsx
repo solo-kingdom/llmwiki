@@ -90,7 +90,7 @@ describe("ArchiveReviewCard", () => {
       </I18nTestProvider>,
     )
 
-    expect(await screen.findByText("未启用版本控制，无法查看 diff")).toBeInTheDocument()
+    expect(await screen.findByText(/git 仓库未初始化/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "查看变更" })).not.toBeInTheDocument()
   })
 })

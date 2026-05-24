@@ -62,6 +62,7 @@ vi.mock("@/lib/api", () => ({
     },
   }),
   listIngestSessionMessages: vi.fn().mockResolvedValue({ messages: [] }),
+  appendIngestSessionMessage: vi.fn(),
   streamIngestSessionMessage: vi.fn().mockResolvedValue(undefined),
   streamRetryIngestSessionMessage: vi.fn().mockResolvedValue(undefined),
   searchDocuments: vi.fn().mockResolvedValue({ results: [] }),
@@ -1373,7 +1374,7 @@ describe("IngestChat", () => {
     expect(screen.getByText("Still typing")).toBeInTheDocument()
   })
 
-  it("opens direct ingest panel from composer button", async () => {
+  it("opens context dialog from composer button", async () => {
     const api = await import("@/lib/api")
     localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
     vi.mocked(api.listProviderInstances).mockResolvedValue({
@@ -1411,11 +1412,11 @@ describe("IngestChat", () => {
       </AppProvider>,
     )
 
-    fireEvent.click(await screen.findByTestId("direct-ingest-open"))
-    expect(await screen.findByTestId("direct-ingest-panel")).toBeInTheDocument()
+    fireEvent.click(await screen.findByTestId("context-input-open"))
+    expect(await screen.findByTestId("context-input-dialog")).toBeInTheDocument()
   })
 
-  it("opens direct ingest panel from empty state CTA", async () => {
+  it("opens context dialog from empty state CTA", async () => {
     const api = await import("@/lib/api")
     localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
     vi.mocked(api.getIngestSession).mockResolvedValue({
@@ -1497,11 +1498,25 @@ describe("IngestChat", () => {
     )
 
     await screen.findByText("开始一个话题")
-    fireEvent.click(screen.getByTestId("direct-ingest-empty-cta"))
-    expect(await screen.findByTestId("direct-ingest-panel")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("context-input-empty-cta"))
+    expect(await screen.findByTestId("context-input-dialog")).toBeInTheDocument()
   })
 
-  it("opens direct ingest panel when directIngest query is present", async () => {
+  it("opens context dialog when addContext query is present", async () => {
+    window.history.replaceState(null, "", "/?addContext=1")
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    expect(await screen.findByTestId("context-input-dialog")).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/")
+    expect(window.location.search).toBe("")
+  })
+
+  it("opens context dialog for legacy directIngest query", async () => {
     window.history.replaceState(null, "", "/?directIngest=1")
 
     render(
@@ -1510,8 +1525,6 @@ describe("IngestChat", () => {
       </AppProvider>,
     )
 
-    expect(await screen.findByTestId("direct-ingest-panel")).toBeInTheDocument()
-    expect(window.location.pathname).toBe("/")
-    expect(window.location.search).toBe("")
+    expect(await screen.findByTestId("context-input-dialog")).toBeInTheDocument()
   })
 })

@@ -175,7 +175,6 @@ func (s *Server) Start() error {
 		// Version Control
 		r.Post("/vcs/init", s.api.VCSInit)
 		r.Get("/vcs/status", s.api.VCSStatus)
-		r.Post("/vcs/disable", s.api.VCSDisable)
 		r.Get("/vcs/log", s.api.VCSLog)
 		r.Get("/vcs/diff/{sha}", s.api.VCSDiff)
 

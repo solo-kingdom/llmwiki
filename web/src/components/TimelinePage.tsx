@@ -3,8 +3,7 @@ import { PageContainer } from "@/components/PageContainer"
 import { Button } from "@/components/ui/button"
 import { getVCStatus, getVCLog, getVCDiff, createRollback } from "@/lib/api"
 import type { VCStatus, VCLogEntry } from "@/types"
-import { GitBranch, Clock, FileText, RotateCcw, Eye, ChevronDown, Settings, AlertTriangle } from "lucide-react"
-import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
+import { GitBranch, Clock, FileText, RotateCcw, Eye, ChevronDown, AlertTriangle } from "lucide-react"
 import { CommitDiffDialog, DIFF_LOAD_FAILED_MARKER } from "@/components/CommitDiffDialog"
 import { formatGitCommitTimestamp } from "@/lib/format-timestamp"
 import { useT } from "@/i18n"
@@ -95,15 +94,8 @@ export function TimelinePage() {
       <PageContainer>
         <div className="flex flex-col items-center justify-center py-12 space-y-4">
           <GitBranch className="size-12 text-muted-foreground" />
-          <p className="text-muted-foreground">{t("timeline.disabled")}</p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigateTo(workbenchViewHref("settings"))}
-          >
-            <Settings className="size-3.5 mr-1" />
-            {t("timeline.go_settings")}
-          </Button>
+          <p className="text-muted-foreground text-center max-w-md">{t("timeline.no_git")}</p>
+          <p className="text-xs text-muted-foreground text-center max-w-md">{t("timeline.repair_hint")}</p>
         </div>
       </PageContainer>
     )

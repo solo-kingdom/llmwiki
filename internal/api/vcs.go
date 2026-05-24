@@ -74,12 +74,6 @@ func (a *API) VCSInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enable version control in config
-	if err := a.db.SetVCEnabled(true); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to set vc_enabled: %v", err))
-		return
-	}
-
 	count, _ := repo.CommitCount()
 	sha, _ := repo.Log(1)
 
@@ -105,19 +99,18 @@ func (a *API) VCSInit(w http.ResponseWriter, r *http.Request) {
 // VCSStatus handles GET /api/v1/vcs/status
 func (a *API) VCSStatus(w http.ResponseWriter, r *http.Request) {
 	avail := vcs.IsGitAvailable()
-	vcConfig := a.db.GetVCConfig()
 
 	status := VCStatus{
-		Enabled:      vcConfig.Enabled,
 		GitAvailable: avail.Available,
 		GitVersion:   avail.Version,
 		TrackedDirs:  []string{"wiki/"},
 		ExcludedDirs: []string{".llmwiki/", "raw/", "revert/"},
 	}
 
-	if a.workspace != "" && vcConfig.Enabled {
+	if a.workspace != "" {
 		repo := vcs.NewGitRepo(a.workspace)
 		if repo.IsInitialized() {
+			status.Enabled = true
 			count, err := repo.CommitCount()
 			if err == nil {
 				status.CommitCount = count
@@ -126,27 +119,6 @@ func (a *API) VCSStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, status)
-}
-
-// VCSDisable handles POST /api/v1/vcs/disable
-func (a *API) VCSDisable(w http.ResponseWriter, r *http.Request) {
-	if err := a.db.SetVCEnabled(false); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to disable version control: %v", err))
-		return
-	}
-
-	activity.Record(a.db, activity.Entry{
-		Level:    "info",
-		Category: "vcs",
-		Action:   "disable",
-		Message:  "已禁用版本控制",
-		Status:   "success",
-		Source:   "api",
-	})
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status":  "disabled",
-		"message": "Version control disabled. Git history is preserved.",
-	})
 }
 
 // VCSLog handles GET /api/v1/vcs/log
@@ -229,10 +201,10 @@ func (a *API) VCSRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify version control is enabled
+	// Verify git repository exists
 	repo := vcs.NewGitRepo(a.workspace)
 	if !repo.IsInitialized() {
-		writeError(w, http.StatusBadRequest, "version control is not enabled")
+		writeError(w, http.StatusBadRequest, "git repository is not initialized")
 		return
 	}
 

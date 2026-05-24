@@ -1,4 +1,9 @@
-## ADDED Requirements
+# workspace-management Specification
+
+## Purpose
+Define workspace initialization, scaffolding, reindex, file watching, and related directory structure requirements.
+
+## Requirements
 
 ### Requirement: Workspace initialization
 The system SHALL initialize a workspace directory with the required structure upon `llmwiki init <dir>`. The structure SHALL include:
@@ -8,6 +13,7 @@ The system SHALL initialize a workspace directory with the required structure up
 - Application data: `.llmwiki/`, `.llmwiki/cache/`
 - Version control helper: `revert/`
 - Obsidian compatibility: `.obsidian/`
+- Git repository: `.git/` (initialized by `llmwiki init`, tracking `wiki/` only)
 
 Scaffold files (created only if missing):
 
@@ -21,6 +27,8 @@ Scaffold files (created only if missing):
 #### Scenario: Fresh workspace creation
 - **WHEN** user runs `llmwiki init ~/research` on a non-existent directory
 - **THEN** the system creates all required directories and scaffold files listed above
+- **AND** initializes a git repository with `.gitignore` excluding `.llmwiki/`, `raw/`, `revert/`
+- **AND** creates an initial commit containing `wiki/` scaffold files
 - **AND** creates `~/research/.llmwiki/index.db` with the full schema
 - **AND** runs initial reindex including `wiki/index.md` generation
 
@@ -28,12 +36,31 @@ Scaffold files (created only if missing):
 - **WHEN** user runs `llmwiki init` on a workspace that already has `.llmwiki/index.db`
 - **THEN** the system SHALL ensure all required directories exist
 - **AND** SHALL create any missing scaffold files without overwriting existing files
+- **AND** SHALL ensure git repository exists (init if missing, skip if present)
 - **AND** SHALL NOT recreate or reset the database
 - **AND** SHALL print a message indicating the workspace was already initialized
 
 #### Scenario: Scaffold not overwritten
 - **WHEN** user runs `llmwiki init` and `purpose.md` already exists with user-edited content
 - **THEN** the system SHALL NOT modify `purpose.md`
+
+#### Scenario: Git unavailable on init
+- **WHEN** user runs `llmwiki init` and git CLI is not available on the system
+- **THEN** the system SHALL fail with a clear error message indicating git is required
+- **AND** SHALL NOT create a partial workspace without version control
+
+### Requirement: Version control bootstrap on init
+The system SHALL initialize version control as part of every `llmwiki init` execution, including repair runs on existing workspaces.
+
+#### Scenario: Idempotent git init
+- **WHEN** `llmwiki init` runs and `.git` already exists in the workspace
+- **THEN** the system SHALL NOT re-initialize git
+- **AND** SHALL preserve existing git history
+
+#### Scenario: Git init after scaffolds
+- **WHEN** `llmwiki init` runs on a fresh workspace
+- **THEN** git initialization SHALL occur after scaffold files are written
+- **AND** before database creation and reindex
 
 ### Requirement: rules.md scaffold
 The system SHALL provide a default `rules.md` at the workspace root describing content fidelity, citation expectations, and domain constraints placeholders in Chinese.
@@ -118,7 +145,7 @@ The system SHALL ensure sources created through Web ingest are discoverable and 
 
 <!-- Added by change: v1-architecture-constraints -->
 
-## Constraints from v1-architecture-constraints
+<!-- Constraints from v1-architecture-constraints -->
 
 ### Requirement: File-first truth persistence
 Business truth data SHALL be persisted to filesystem artifacts as canonical source of truth.
@@ -147,8 +174,6 @@ The capability SHALL include documented extension points for future higher-fidel
 #### Scenario: Roadmap visibility
 - **WHEN** operators review source processing documentation
 - **THEN** they can identify planned enhancement path beyond first-release baseline tiers
-
-## ADDED Requirements
 
 ### Requirement: Workspace 初始化预留 revert 目录
 系统在 workspace 初始化时 SHALL 创建 `revert/` 目录结构。

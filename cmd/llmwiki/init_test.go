@@ -8,6 +8,7 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/vcs"
 )
 
 func TestInitCreatesFullDirectoryStructure(t *testing.T) {
@@ -193,5 +194,68 @@ func TestInitIndexesWikiIndexInDatabase(t *testing.T) {
 	}
 	if doc == nil {
 		t.Fatal("expected wiki/index.md in database after init")
+	}
+}
+
+func TestInitCreatesGitRepository(t *testing.T) {
+	if !vcs.IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	ws := t.TempDir()
+	if err := runInit(ws); err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+
+	gitDir := filepath.Join(ws, ".git")
+	if info, err := os.Stat(gitDir); err != nil {
+		t.Fatalf("missing .git after init: %v", err)
+	} else if !info.IsDir() {
+		t.Fatal(".git is not a directory")
+	}
+
+	repo := vcs.NewGitRepo(ws)
+	count, err := repo.CommitCount()
+	if err != nil {
+		t.Fatalf("CommitCount: %v", err)
+	}
+	if count < 1 {
+		t.Errorf("expected at least 1 commit after init, got %d", count)
+	}
+}
+
+func TestInitRepairAddsGitRepository(t *testing.T) {
+	if !vcs.IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	ws := t.TempDir()
+	if err := runInit(ws); err != nil {
+		t.Fatalf("first runInit: %v", err)
+	}
+
+	if err := os.RemoveAll(filepath.Join(ws, ".git")); err != nil {
+		t.Fatalf("RemoveAll .git: %v", err)
+	}
+
+	if err := runInit(ws); err != nil {
+		t.Fatalf("repair runInit: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(ws, ".git")); err != nil {
+		t.Fatalf("repair should recreate .git: %v", err)
+	}
+}
+
+func TestEnsureVersionControlRequiresGit(t *testing.T) {
+	if vcs.IsGitAvailable().Available {
+		t.Skip("git is available; cannot test missing-git path without isolation")
+	}
+
+	ws := t.TempDir()
+	if err := ensureVersionControl(ws); err == nil {
+		t.Fatal("expected error when git is unavailable")
+	} else if !strings.Contains(err.Error(), "git is not installed") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

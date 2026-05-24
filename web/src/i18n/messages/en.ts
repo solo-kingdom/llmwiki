@@ -143,14 +143,16 @@ const en: Record<MessageKey, string> = {
     "Automatically watch data source directory for file changes",
 
   "settings.vc.title": "Version Control",
-  "settings.vc.enabled": "Version control enabled",
-  "settings.vc.enable": "Enable version control",
-  "settings.vc.disable": "Disable version control",
-  "settings.vc.disable_note":
-    "Disabling keeps the .git directory but stops auto-commits",
+  "settings.vc.not_ready": "Not ready",
+  "settings.vc.repair_hint":
+    "Run llmwiki init in the workspace directory to bootstrap git version control.",
+  "settings.vc.active": "Active",
+  "settings.vc.commits": "{count} commit(s)",
+  "settings.vc.tracked": "Tracked",
+  "settings.vc.excluded": "Excluded",
   "settings.vc.view_history": "View history",
   "settings.vc.desc":
-    "Manage wiki version history, view change diffs, and roll back",
+    "View wiki version history, change diffs, and rollbacks",
 
   // IngestChat
   "chat.copied": "Copied",
@@ -169,8 +171,20 @@ const en: Record<MessageKey, string> = {
   "chat.start_topic": "Start a topic",
   "chat.archive_desc":
     'Have a multi-turn conversation to clarify, then click "Archive" to save to wiki',
-  "chat.direct_ingest": "Direct archive",
-  "chat.direct_ingest_cta": "Archive ready-made materials",
+  "chat.context.button": "Add context",
+  "chat.context.cta": "Add context materials",
+  "chat.context.title": "Add context",
+  "chat.context.desc":
+    "Paste plain text as archive context without triggering an AI reply. For plain text files, use the attachment control.",
+  "chat.context.text_blocks": "Text blocks",
+  "chat.context.add_block": "Add text block",
+  "chat.context.block_title_optional": "Block title (optional)",
+  "chat.context.block_content_required":
+    "Content (required; at least one non-empty text block)",
+  "chat.context.delete_block": "Delete text block",
+  "chat.context.submit": "Add to session",
+  "chat.context.submit_hint": "Add at least one non-empty text block",
+  "chat.context.added": "Context added",
   "chat.select_model_start": "Select a Provider and Model to start...",
   "chat.input_placeholder": "Type a message… (Shift+Enter for new line)",
   "chat.model": "Model",
@@ -186,7 +200,8 @@ const en: Record<MessageKey, string> = {
   "chat.review.card_title": "Archive review",
   "chat.review.confirm_apply": "Confirm and apply",
   "chat.review.view_diff": "View changes",
-  "chat.review.no_diff": "Version control is off — diff unavailable",
+  "chat.review.no_diff":
+    "Git repository is not initialized — diff unavailable. Run llmwiki init to repair.",
   "chat.review.apply_success": "Wiki pages updated successfully.",
   "chat.delete_session": "Delete session",
   "chat.new_session": "New session",
@@ -245,33 +260,6 @@ const en: Record<MessageKey, string> = {
   "ingest.text": "Text",
   "ingest.upload_accepted": "✓ {count} accepted",
   "ingest.upload_rejected": "{count} rejected: {details}",
-
-  // Direct ingest panel
-  "ingest.direct.title": "Direct archive materials",
-  "ingest.direct.desc":
-    "Upload files or paste text blocks and submit archive jobs without a chat session.",
-  "ingest.direct.files": "Files",
-  "ingest.direct.file_drop_hint": "Drop files here, or click to select multiple files",
-  "ingest.direct.select_files": "Select files",
-  "ingest.direct.remove_file": "Remove {name}",
-  "ingest.direct.text_blocks": "Text blocks",
-  "ingest.direct.add_block": "Add text block",
-  "ingest.direct.block_title_optional": "Block title (optional)",
-  "ingest.direct.block_content_required":
-    "Content (required; at least one non-empty text block to submit)",
-  "ingest.direct.delete_block": "Delete text block",
-  "ingest.direct.batch_info": "Batch info (optional)",
-  "ingest.direct.batch_title": "Batch title",
-  "ingest.direct.source": "Source",
-  "ingest.direct.submit": "Archive directly",
-  "ingest.direct.submit_hint": "Add at least one file or one non-empty text block",
-  "ingest.direct.success_count": "{count} task(s) succeeded",
-  "ingest.direct.text_job": " (text job: {id})",
-  "ingest.direct.file_jobs": "file job: {ids}",
-  "ingest.direct.failed_count": "{count} failed:",
-  "ingest.direct.failed_text": " text - {error};",
-  "ingest.direct.view_jobs": "View Jobs",
-  "ingest.direct.batch_upload": "(batch upload)",
 
   // Text ingest dialog
   "ingest.text.title": "Text ingest",
@@ -377,8 +365,9 @@ const en: Record<MessageKey, string> = {
 
   // Timeline
   "timeline.loading": "Loading timeline...",
-  "timeline.disabled": "Version control is not enabled.",
-  "timeline.go_settings": "Go to Settings",
+  "timeline.no_git": "Git repository is not initialized.",
+  "timeline.repair_hint":
+    "Run llmwiki init in the workspace directory to bootstrap version control.",
   "timeline.title": "Timeline",
   "timeline.commits": "{count} commit(s)",
   "timeline.no_history": "No history yet",

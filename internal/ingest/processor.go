@@ -29,7 +29,7 @@ type JobProcessor struct {
 	db        *sqlite.DB
 	workspace string
 	pipeline  *Pipeline
-	gitRepo   *vcs.GitRepo // nil if version control is not enabled
+	gitRepo   *vcs.GitRepo // nil when workspace has no .git repository
 	indexer   *engine.WorkspaceFileIndexer
 	stop      chan struct{}
 	runnerID  string
@@ -75,12 +75,8 @@ func (p *JobProcessor) SetGitRepo(repo *vcs.GitRepo) {
 	p.gitRepo = repo
 }
 
-// gitRepoIfEnabled returns a GitRepo when version control is enabled in config
-// and the workspace has an initialized .git directory.
+// gitRepoIfEnabled returns a GitRepo when the workspace has an initialized .git directory.
 func (p *JobProcessor) gitRepoIfEnabled() *vcs.GitRepo {
-	if !p.db.GetVCConfig().Enabled {
-		return nil
-	}
 	if p.gitRepo != nil {
 		return p.gitRepo
 	}

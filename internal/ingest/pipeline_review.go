@@ -157,6 +157,6 @@ func (p *Pipeline) generateFromPlan(ctx context.Context, name, content, analysis
 		p.lockMgr.Lock(path)
 		p.lockMgr.Unlock(path)
 	}
-	return ApplyWikiBlocks(ctx, p.workspace, blocks, p.applyWikiBlocksOpts())
+	return ApplyWikiBlocks(ctx, p.effectiveWorkspace(), blocks, p.applyWikiBlocksOpts())
 }
 

@@ -14,6 +14,7 @@ import (
 
 type Pipeline struct {
 	workspace   string
+	targetDir   string // optional: when set, wiki/ reads and writes go to this directory instead of workspace
 	db          *sqlite.DB // database for local tool execution
 	llmClient   *llm.Client
 	lockMgr     *PageLockManager
@@ -101,6 +102,30 @@ func (p *Pipeline) SetRulesSupplement(s string) {
 // SetForceOverwrite skips merge protection and overwrites existing wiki pages.
 func (p *Pipeline) SetForceOverwrite(force bool) {
 	p.forceOverwrite = force
+}
+
+// SetTargetDir sets an alternative directory for wiki/ reads and writes.
+// When set, wiki files are read from and written to targetDir/wiki/ instead
+// of the main workspace. This is used for worktree-based parallel execution.
+func (p *Pipeline) SetTargetDir(dir string) {
+	p.targetDir = dir
+}
+
+// wikiDir returns the directory where wiki files are read from and written to.
+func (p *Pipeline) wikiDir() string {
+	if p.targetDir != "" {
+		return filepath.Join(p.targetDir, "wiki")
+	}
+	return filepath.Join(p.workspace, "wiki")
+}
+
+// effectiveWorkspace returns the directory that should be used for file operations.
+// In worktree mode, this returns the targetDir; otherwise the main workspace.
+func (p *Pipeline) effectiveWorkspace() string {
+	if p.targetDir != "" {
+		return p.targetDir
+	}
+	return p.workspace
 }
 
 func (p *Pipeline) applyWikiBlocksOpts() *ApplyWikiBlocksOpts {
@@ -255,7 +280,7 @@ func (p *Pipeline) generate(ctx context.Context, name, content, analysis string)
 		p.lockMgr.Unlock(path)
 	}
 
-	return ApplyWikiBlocks(ctx, p.workspace, blocks, p.applyWikiBlocksOpts())
+	return ApplyWikiBlocks(ctx, p.effectiveWorkspace(), blocks, p.applyWikiBlocksOpts())
 }
 
 func (p *Pipeline) cachePath() string {

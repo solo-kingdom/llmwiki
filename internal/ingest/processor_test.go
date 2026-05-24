@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -688,6 +689,200 @@ func TestProcessorSetGitRepo(t *testing.T) {
 	processor.SetGitRepo(nil)
 	if processor.gitRepo != nil {
 		t.Error("expected nil gitRepo after setting nil")
+	}
+}
+
+func TestParallelEnabled(t *testing.T) {
+	if !vcs.IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	ws := t.TempDir()
+	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
+	os.WriteFile(filepath.Join(ws, "wiki", "index.md"), []byte("# Index"), 0o644)
+	if _, err := vcs.InitRepo(ws); err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	processor := NewJobProcessor(db, ws)
+
+	// Default: parallel not enabled (vc_enabled not set)
+	if processor.parallelEnabled() {
+		t.Error("expected parallel disabled without vc_enabled")
+	}
+
+	// Enable VCS
+	if err := db.SetVCEnabled(true); err != nil {
+		t.Fatalf("SetVCEnabled: %v", err)
+	}
+
+	// Still not enabled: job_parallel_enabled not set defaults to false
+	// (ParallelEnabled checks both the flag AND VCS enabled)
+	if processor.parallelEnabled() {
+		t.Error("expected parallel disabled without job_parallel_enabled")
+	}
+
+	// Enable parallel
+	if err := db.SetConfig("job_parallel_enabled", "true"); err != nil {
+		t.Fatalf("SetConfig: %v", err)
+	}
+
+	if !processor.parallelEnabled() {
+		t.Error("expected parallel enabled with both flags set")
+	}
+}
+
+func TestConcurrentJobClaiming(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Set max concurrent to 2
+	if err := db.SetConfig("job_max_concurrent", "2"); err != nil {
+		t.Fatalf("SetConfig: %v", err)
+	}
+
+	// Create 3 queued jobs
+	for i := 0; i < 3; i++ {
+		job := &sqlite.IngestJob{
+			InputType:  "text",
+			SourcePath: fmt.Sprintf("raw/sources/web-ingest/test%d.md", i),
+			SourceRef:  "text",
+			Status:     "queued",
+			MaxRetries: 3,
+		}
+		if err := db.CreateIngestJob(job); err != nil {
+			t.Fatalf("CreateIngestJob %d: %v", i, err)
+		}
+	}
+
+	ws := t.TempDir()
+	processor := NewJobProcessor(db, ws)
+
+	// Claim first two
+	job1, err := processor.ClaimNextQueuedJob(context.Background())
+	if err != nil {
+		t.Fatalf("Claim 1: %v", err)
+	}
+	if job1 == nil {
+		t.Fatal("expected job1")
+	}
+
+	job2, err := processor.ClaimNextQueuedJob(context.Background())
+	if err != nil {
+		t.Fatalf("Claim 2: %v", err)
+	}
+	if job2 == nil {
+		t.Fatal("expected job2")
+	}
+
+	// Third should fail (max 2 concurrent)
+	job3, err := processor.ClaimNextQueuedJob(context.Background())
+	if err != nil {
+		t.Fatalf("Claim 3: %v", err)
+	}
+	if job3 != nil {
+		t.Error("expected nil when max concurrent reached")
+	}
+
+	// Complete job1, now job3 should be claimable
+	db.ClearIngestJobLease(job1.ID)
+	_, _ = db.DB().Exec(`UPDATE ingest_jobs SET status = 'succeeded', runner_id = '', heartbeat_at = '' WHERE id = ?`, job1.ID)
+
+	job3, err = processor.ClaimNextQueuedJob(context.Background())
+	if err != nil {
+		t.Fatalf("Claim 3 after release: %v", err)
+	}
+	if job3 == nil {
+		t.Fatal("expected job3 after releasing job1")
+	}
+}
+
+func TestWorktreeCleanupOnStartup(t *testing.T) {
+	if !vcs.IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Enable VCS so cleanup runs
+	if err := db.SetVCEnabled(true); err != nil {
+		t.Fatalf("SetVCEnabled: %v", err)
+	}
+
+	ws := t.TempDir()
+	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
+	os.WriteFile(filepath.Join(ws, "wiki", "index.md"), []byte("# Index"), 0o644)
+	repo, err := vcs.InitRepo(ws)
+	if err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	// Create a stale worktree (simulate crashed job)
+	_, err = repo.CreateWorktree("stale-job-123")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+
+	// Verify worktree exists
+	wtBase := filepath.Join(ws, ".llmwiki", "worktrees")
+	entries, _ := os.ReadDir(wtBase)
+	if len(entries) == 0 {
+		t.Fatal("expected at least one stale worktree")
+	}
+
+	// Start processor - should clean up stale worktrees
+	processor := NewJobProcessor(db, ws)
+	processor.SetGitRepo(repo)
+	processor.recoverStaleJobs()
+
+	// Verify worktree was cleaned up
+	entries, _ = os.ReadDir(wtBase)
+	for _, e := range entries {
+		if e.Name() == "stale-job-123" {
+			t.Error("expected stale worktree to be cleaned up")
+		}
+	}
+}
+
+func TestProcessAllSerialFallback(t *testing.T) {
+	if !vcs.IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Do NOT enable parallel mode
+	ws := t.TempDir()
+	processor := NewJobProcessor(db, ws)
+
+	// ProcessAll should work in serial mode
+	if err := processor.ProcessAll(context.Background()); err != nil {
+		t.Fatalf("ProcessAll: %v", err)
 	}
 }
 

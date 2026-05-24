@@ -356,3 +356,336 @@ func TestIsInitialized(t *testing.T) {
 		t.Error("expected initialized after InitRepo")
 	}
 }
+
+func TestCreateWorktree(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	// Put a file in wiki/ so git tracks it
+	os.WriteFile(filepath.Join(dir, "wiki", "index.md"), []byte("# Index"), 0o644)
+	repo, err := InitRepo(dir)
+	if err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	// Create a worktree
+	wtDir, err := repo.CreateWorktree("test-job-1")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	if wtDir == "" {
+		t.Fatal("expected non-empty worktree dir")
+	}
+
+	// Verify worktree directory exists
+	if _, err := os.Stat(wtDir); os.IsNotExist(err) {
+		t.Fatalf("worktree dir %s does not exist", wtDir)
+	}
+
+	// Verify wiki/ exists in worktree
+	if _, err := os.Stat(filepath.Join(wtDir, "wiki")); os.IsNotExist(err) {
+		t.Error("expected wiki/ directory in worktree")
+	}
+
+	// Cleanup
+	if err := repo.RemoveWorktree("test-job-1"); err != nil {
+		t.Fatalf("RemoveWorktree: %v", err)
+	}
+
+	// Verify worktree removed
+	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
+		t.Error("expected worktree dir to be removed")
+	}
+}
+
+func TestCommitInWorktree(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	os.WriteFile(filepath.Join(dir, "wiki", "index.md"), []byte("# Index"), 0o644)
+	repo, _ := InitRepo(dir)
+
+	wtDir, err := repo.CreateWorktree("test-commit-wt")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	defer repo.RemoveWorktree("test-commit-wt")
+
+	// Write a file in the worktree
+	wikiFile := filepath.Join(wtDir, "wiki", "newpage.md")
+	if err := os.MkdirAll(filepath.Dir(wikiFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wikiFile, []byte("# New Page\nContent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit in worktree
+	sha, err := repo.CommitInWorktree(wtDir, "test: worktree commit")
+	if err != nil {
+		t.Fatalf("CommitInWorktree: %v", err)
+	}
+	if sha == "" {
+		t.Error("expected non-empty SHA")
+	}
+}
+
+func TestMergeBranch(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	os.WriteFile(filepath.Join(dir, "wiki", "index.md"), []byte("# Index"), 0o644)
+	repo, _ := InitRepo(dir)
+
+	// Create worktree, write new file, commit
+	wtDir, err := repo.CreateWorktree("test-merge")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	defer repo.RemoveWorktree("test-merge")
+
+	os.WriteFile(filepath.Join(wtDir, "wiki", "merged.md"), []byte("# Merged"), 0o644)
+	repo.CommitInWorktree(wtDir, "test: merge this")
+
+	// Merge back
+	result, err := repo.MergeBranch("test-merge")
+	if err != nil {
+		t.Fatalf("MergeBranch: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Conflicts) != 0 {
+		t.Errorf("expected no conflicts, got %v", result.Conflicts)
+	}
+
+	// Verify file exists in main (merge auto-commits)
+	content, err := os.ReadFile(filepath.Join(dir, "wiki", "merged.md"))
+	if err != nil {
+		t.Fatalf("merged file should exist: %v", err)
+	}
+	if string(content) != "# Merged" {
+		t.Errorf("merged content = %q, want %q", string(content), "# Merged")
+	}
+}
+
+func TestMergeBranchWithConflict(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	os.WriteFile(filepath.Join(dir, "wiki", "conflict.md"), []byte("original"), 0o644)
+	repo, _ := InitRepo(dir)
+
+	// Modify in main after worktree creation point
+	// First create worktree from current HEAD
+	wtDir, err := repo.CreateWorktree("test-conflict")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	defer repo.RemoveWorktree("test-conflict")
+
+	// Modify same file in main
+	os.WriteFile(filepath.Join(dir, "wiki", "conflict.md"), []byte("main version"), 0o644)
+	repo.AddCommit(BuildCommitMessage("main.md", "j-main", "upload", "main"))
+
+	// Modify in worktree
+	os.WriteFile(filepath.Join(wtDir, "wiki", "conflict.md"), []byte("branch version"), 0o644)
+	repo.CommitInWorktree(wtDir, "test: conflicting change")
+
+	// Merge should detect conflict
+	result, err := repo.MergeBranch("test-conflict")
+	if err != nil {
+		t.Fatalf("MergeBranch: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Conflicts) == 0 {
+		t.Error("expected conflicts")
+	}
+	// Verify it's the file we expect
+	found := false
+	for _, c := range result.Conflicts {
+		if c == "wiki/conflict.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected wiki/conflict.md in conflicts, got %v", result.Conflicts)
+	}
+
+	// Abort the merge to clean up
+	if err := repo.AbortMerge(); err != nil {
+		t.Logf("AbortMerge: %v (may be ok)", err)
+	}
+}
+
+func TestGetConflictContent(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	os.WriteFile(filepath.Join(dir, "wiki", "both.md"), []byte("original"), 0o644)
+	repo, _ := InitRepo(dir)
+
+	// Create worktree, then modify in both branches
+	wtDir, err := repo.CreateWorktree("test-content")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	defer repo.RemoveWorktree("test-content")
+
+	// Modify in main
+	os.WriteFile(filepath.Join(dir, "wiki", "both.md"), []byte("main content"), 0o644)
+	repo.AddCommit(BuildCommitMessage("both.md", "j-main", "upload", "main"))
+
+	// Modify in worktree
+	os.WriteFile(filepath.Join(wtDir, "wiki", "both.md"), []byte("branch content"), 0o644)
+	repo.CommitInWorktree(wtDir, "test: different content")
+
+	// Start merge
+	result, err := repo.MergeBranch("test-content")
+	if err != nil {
+		t.Fatalf("MergeBranch: %v", err)
+	}
+	if len(result.Conflicts) == 0 {
+		t.Fatal("expected conflicts")
+	}
+
+	// Get conflict content using stage syntax
+	ours, theirs, err := repo.GetConflictContent("test-content", "wiki/both.md")
+	if err != nil {
+		t.Fatalf("GetConflictContent: %v", err)
+	}
+
+	t.Logf("ours=%q, theirs=%q", ours, theirs)
+
+	// At minimum one should be non-empty if conflict exists
+	if ours == "" && theirs == "" {
+		t.Error("expected at least one non-empty content for conflicting file")
+	}
+
+	// Abort to clean up
+	repo.AbortMerge()
+}
+
+func TestResolveAndCommit(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	os.WriteFile(filepath.Join(dir, "wiki", "resolve.md"), []byte("original"), 0o644)
+	repo, _ := InitRepo(dir)
+
+	// Create worktree, modify in both branches
+	wtDir, err := repo.CreateWorktree("test-resolve")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	defer repo.RemoveWorktree("test-resolve")
+
+	// Modify in main
+	os.WriteFile(filepath.Join(dir, "wiki", "resolve.md"), []byte("main version"), 0o644)
+	repo.AddCommit(BuildCommitMessage("resolve.md", "j-main", "upload", "main"))
+
+	// Modify in worktree
+	os.WriteFile(filepath.Join(wtDir, "wiki", "resolve.md"), []byte("branch version"), 0o644)
+	repo.CommitInWorktree(wtDir, "test: conflicting")
+
+	// Merge (will conflict)
+	result, err := repo.MergeBranch("test-resolve")
+	if err != nil {
+		t.Fatalf("MergeBranch: %v", err)
+	}
+	if len(result.Conflicts) == 0 {
+		t.Fatal("expected conflicts")
+	}
+
+	// Resolve
+	resolved := map[string]string{
+		"wiki/resolve.md": "resolved content\n",
+	}
+	if err := repo.ResolveAndCommit("test-resolve", resolved, "merge: resolved conflict"); err != nil {
+		t.Fatalf("ResolveAndCommit: %v", err)
+	}
+
+	// Verify resolved content
+	content, err := os.ReadFile(filepath.Join(dir, "wiki", "resolve.md"))
+	if err != nil {
+		t.Fatalf("file should exist: %v", err)
+	}
+	if string(content) != "resolved content\n" {
+		t.Errorf("content = %q, want %q", string(content), "resolved content\n")
+	}
+}
+
+func TestListStaleWorktrees(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	repo, _ := InitRepo(dir)
+
+	// No worktrees initially
+	ids, err := repo.ListStaleWorktrees()
+	if err != nil {
+		t.Fatalf("ListStaleWorktrees: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("expected 0 stale worktrees, got %d", len(ids))
+	}
+
+	// Create a worktree
+	repo.CreateWorktree("stale-1")
+	defer repo.RemoveWorktree("stale-1")
+
+	ids, err = repo.ListStaleWorktrees()
+	if err != nil {
+		t.Fatalf("ListStaleWorktrees: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "stale-1" {
+		t.Errorf("expected [stale-1], got %v", ids)
+	}
+}
+
+func TestRecreateWorktreeAfterFailed(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	repo, _ := InitRepo(dir)
+
+	// Create worktree
+	wtDir, err := repo.CreateWorktree("retry-job")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	if _, err := os.Stat(wtDir); os.IsNotExist(err) {
+		t.Fatal("worktree should exist")
+	}
+
+	// Don't clean up properly (simulate crash) - just leave it
+	// Now try to create again - should succeed by cleaning up first
+	wtDir2, err := repo.CreateWorktree("retry-job")
+	if err != nil {
+		t.Fatalf("CreateWorktree (retry): %v", err)
+	}
+	if wtDir2 != wtDir {
+		t.Errorf("wtDir2 = %q, want %q", wtDir2, wtDir)
+	}
+
+	// Clean up
+	repo.RemoveWorktree("retry-job")
+}

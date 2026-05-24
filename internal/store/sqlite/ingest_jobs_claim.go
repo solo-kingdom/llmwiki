@@ -3,7 +3,36 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 )
+
+// DefaultMaxConcurrentJobs is the default maximum number of concurrently running jobs.
+const DefaultMaxConcurrentJobs = 3
+
+// MaxConcurrentJobs returns the maximum number of concurrently running jobs
+// from the app_config table, defaulting to DefaultMaxConcurrentJobs.
+func (d *DB) MaxConcurrentJobs() int {
+	val, err := d.GetConfig("job_max_concurrent")
+	if err != nil || val == "" {
+		return DefaultMaxConcurrentJobs
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n < 1 {
+		return DefaultMaxConcurrentJobs
+	}
+	return n
+}
+
+// ParallelEnabled reports whether parallel job execution is enabled.
+// Returns true only when both the config flag is set and VCS is enabled
+// (worktree isolation requires git).
+func (d *DB) ParallelEnabled() bool {
+	val, _ := d.GetConfig("job_parallel_enabled")
+	if val != "true" && val != "1" {
+		return false
+	}
+	return d.GetVCConfig().Enabled
+}
 
 // RecoverStaleRunningJobs requeues running jobs with expired heartbeats.
 // Returns IDs of recovered jobs.
@@ -57,6 +86,10 @@ func (d *DB) RecoverStaleRunningJobs() ([]string, error) {
 
 // ClaimNextIngestJob atomically recovers stale jobs and claims the oldest queued job.
 func (d *DB) ClaimNextIngestJob(runnerID string) (*IngestJob, error) {
+	// Read concurrency limit BEFORE opening transaction to avoid deadlock
+	// (SetMaxOpenConns(1) means we can't query the same DB inside a tx).
+	maxConcurrent := d.MaxConcurrentJobs()
+
 	tx, err := d.db.Begin()
 	if err != nil {
 		return nil, err
@@ -89,7 +122,7 @@ func (d *DB) ClaimNextIngestJob(runnerID string) (*IngestJob, error) {
 	if err != nil {
 		return nil, fmt.Errorf("count active running: %w", err)
 	}
-	if active > 0 {
+	if active >= maxConcurrent {
 		return nil, nil
 	}
 

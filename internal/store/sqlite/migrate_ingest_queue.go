@@ -22,8 +22,18 @@ func (d *DB) migrateIngestQueue() error {
 			created_at TEXT DEFAULT (datetime('now'))
 		);
 		CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON ingest_job_events(job_id, id DESC);
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_ingest_one_running ON ingest_jobs(status) WHERE status = 'running';
 	`)
+	if err != nil {
+		return err
+	}
+
+	// Drop the old unique index that limited running jobs to 1.
+	// Parallel execution now uses application-level concurrency control.
+	return d.dropIndexIgnoreMissing("idx_ingest_one_running")
+}
+
+func (d *DB) dropIndexIgnoreMissing(name string) error {
+	_, err := d.db.Exec("DROP INDEX IF EXISTS " + name)
 	return err
 }
 

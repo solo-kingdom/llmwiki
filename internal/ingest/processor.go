@@ -22,6 +22,9 @@ import (
 
 // JobProcessor polls the database for queued ingest jobs and runs them
 // through the two-step LLM pipeline (analysis → generation).
+//
+// When parallel execution is enabled (VCS + git worktree), jobs run concurrently
+// in isolated worktrees and merge back serially. Otherwise, jobs run serially.
 type JobProcessor struct {
 	db        *sqlite.DB
 	workspace string
@@ -30,6 +33,20 @@ type JobProcessor struct {
 	indexer   *engine.WorkspaceFileIndexer
 	stop      chan struct{}
 	runnerID  string
+
+	// Parallel execution
+	mergeQueue chan *completedJob
+	workers    sync.WaitGroup
+}
+
+// completedJob represents a job that has finished pipeline execution in a worktree
+// and is ready to be merged back to main.
+type completedJob struct {
+	jobID       string
+	worktreeDir string
+	files       []string
+	normalized  *NormalizedSource
+	recorder    JobRecorder
 }
 
 func newRunnerID() string {
@@ -80,11 +97,28 @@ func (p *JobProcessor) SetFileIndexer(indexer *engine.WorkspaceFileIndexer) {
 }
 
 // Start begins the background processing loop. It polls every pollInterval.
+// When parallel execution is enabled (VCS + git), launches a worker pool and merge queue.
+// Otherwise falls back to serial single-goroutine processing.
 func (p *JobProcessor) Start(pollInterval time.Duration) {
 	if pollInterval <= 0 {
 		pollInterval = 3 * time.Second
 	}
 	p.recoverStaleJobs()
+
+	if p.parallelEnabled() {
+		p.startParallel(pollInterval)
+	} else {
+		p.startSerial(pollInterval)
+	}
+}
+
+// parallelEnabled reports whether parallel worktree-based execution should be used.
+func (p *JobProcessor) parallelEnabled() bool {
+	return p.db.ParallelEnabled() && p.gitRepoIfEnabled() != nil
+}
+
+// startSerial launches a single goroutine that processes jobs one at a time.
+func (p *JobProcessor) startSerial(pollInterval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
@@ -101,9 +135,74 @@ func (p *JobProcessor) Start(pollInterval time.Duration) {
 	}()
 }
 
-// Stop signals the processor to stop.
+// startParallel launches N worker goroutines and a merge queue goroutine.
+func (p *JobProcessor) startParallel(pollInterval time.Duration) {
+	maxWorkers := p.db.MaxConcurrentJobs()
+	p.mergeQueue = make(chan *completedJob, maxWorkers)
+
+	// Start merger goroutine (serial merge back to main)
+	p.workers.Add(1)
+	go func() {
+		defer p.workers.Done()
+		p.mergerLoop()
+	}()
+
+	// Start worker goroutines
+	for i := 0; i < maxWorkers; i++ {
+		p.workers.Add(1)
+		go func(workerID int) {
+			defer p.workers.Done()
+			p.workerLoop(pollInterval, workerID)
+		}(i)
+	}
+
+	log.Printf("ingest processor: parallel mode enabled (%d workers)", maxWorkers)
+}
+
+// workerLoop polls for jobs and executes them in worktrees.
+func (p *JobProcessor) workerLoop(pollInterval time.Duration, workerID int) {
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.stop:
+			return
+		case <-ticker.C:
+			job, err := p.claimNextJob()
+			if err != nil {
+				log.Printf("worker %d: claim error: %v", workerID, err)
+				continue
+			}
+			if job == nil {
+				continue // no queued jobs
+			}
+
+			p.processJobInWorktree(context.Background(), job, workerID)
+		}
+	}
+}
+
+// mergerLoop processes completed jobs from the merge queue, merging them
+// back to main and updating the search index.
+func (p *JobProcessor) mergerLoop() {
+	for {
+		select {
+		case <-p.stop:
+			return
+		case completed := <-p.mergeQueue:
+			if completed == nil {
+				return
+			}
+			p.mergeCompletedJob(context.Background(), completed)
+		}
+	}
+}
+
+// Stop signals the processor to stop and waits for workers to finish.
 func (p *JobProcessor) Stop() {
 	close(p.stop)
+	p.workers.Wait()
 }
 
 // ProcessAll runs all queued jobs synchronously (useful for tests).
@@ -199,21 +298,194 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 
 	p.indexGeneratedWikiFiles(files, job.ID)
 
-	// Mark job succeeded with result summary
+	// Mark job succeeded
+	p.markJobSucceeded(job.ID, files)
+
+	return nil
+}
+
+// processJobInWorktree runs a job in an isolated git worktree.
+// After the pipeline completes, it commits to the job branch and sends
+// the result to the merge queue.
+func (p *JobProcessor) processJobInWorktree(ctx context.Context, job *sqlite.IngestJob, workerID int) {
+	repo := p.gitRepoIfEnabled()
+	if repo == nil {
+		// VCS disabled during execution, fall back to serial path
+		p.processNext(ctx)
+		return
+	}
+
+	stopHeartbeat := p.startHeartbeat(job.ID)
+	defer stopHeartbeat()
+
+	rec := NewSQLiteJobRecorder(p.db, job.ID)
+	defer p.db.ClearIngestJobLease(job.ID)
+
+	// Create worktree
+	worktreeDir, err := repo.CreateWorktree(job.ID)
+	if err != nil {
+		log.Printf("worker %d: create worktree for job %s: %v", workerID, job.ID, err)
+		_ = p.failJob(job.ID, "worktree_failed",
+			fmt.Sprintf("failed to create worktree: %v", err), "", "")
+		return
+	}
+
+	// Ensure cleanup on error
+	cleanup := true
+	defer func() {
+		if cleanup {
+			if err := repo.RemoveWorktree(job.ID); err != nil {
+				log.Printf("worker %d: cleanup worktree for job %s: %v", workerID, job.ID, err)
+			}
+		}
+	}()
+
+	// Normalize source
+	normalized, err := NormalizeJobSource(p.workspace, job.InputType, job.SourcePath, job.SourceRef)
+	if err != nil {
+		_ = p.failJob(job.ID, "normalize_failed",
+			fmt.Sprintf("normalization failed: %v", err), "", "")
+		return
+	}
+
+	// Create a per-job pipeline pointing to the worktree
+	jobPipeline := NewPipelineWithDB(worktreeDir, p.db, nil)
+	jobPipeline.SetJobRecorder(rec)
+	jobPipeline.SetTargetDir(worktreeDir)
+
+	// Prepare LLM client and settings
+	client, err := p.resolveLLMClientForJob(job)
+	if err != nil {
+		_ = p.failJob(job.ID, "llm_config_invalid", err.Error(), "", remediationForCode("llm_config_invalid"))
+		return
+	}
+	jobPipeline.SetLLMClient(client)
+	docLang := resolveDocLang(p.db)
+	jobPipeline.SetDocLanguage(docLang)
+	jobPipeline.SetRulesSupplement(ResolveRulesSupplement(p.db))
+
+	// Attach MCP router
+	raw, _ := p.db.GetConfig("mcp_servers_json")
+	if reg, regErr := mcp.NewRegistry(raw); regErr == nil {
+		router := mcp.NewRouter(reg, &mcpRecorderAdapter{jobRec: rec, db: p.db})
+		jobPipeline.SetMCPRouter(router)
+		defer jobPipeline.SetMCPRouter(nil)
+	}
+
+	// Run pipeline
+	files, err := jobPipeline.IngestNormalized(ctx, normalized)
+	if err != nil {
+		errCode := classifyPipelineError(err)
+		_ = p.failJob(job.ID, errCode, err.Error(), "", remediationForCode(errCode))
+		return
+	}
+
+	// Commit in worktree
+	commitMsg := vcs.BuildCommitMessage(
+		filepath.Base(normalized.CanonicalPath),
+		job.ID,
+		job.InputType,
+		string(normalized.Content),
+	)
+	sha, err := repo.CommitInWorktree(worktreeDir, commitMsg)
+	if err != nil {
+		rec.Record("git_commit", "error", err.Error(), map[string]any{"message": commitMsg})
+		_ = p.failJob(job.ID, "commit_failed",
+			fmt.Sprintf("worktree commit failed: %v", err), "", "")
+		return
+	}
+	rec.Record("git_commit", "complete", "worktree commit succeeded", map[string]any{
+		"sha":     sha,
+		"message": commitMsg,
+	})
+
+	// Submit to merge queue (cleanup will happen in merger)
+	cleanup = false
+	p.mergeQueue <- &completedJob{
+		jobID:       job.ID,
+		worktreeDir: worktreeDir,
+		files:       files,
+		normalized:  normalized,
+		recorder:    rec,
+	}
+}
+
+// mergeCompletedJob merges a completed job's worktree branch back to main,
+// handles conflicts with LLM resolution, updates the search index, and
+// marks the job as succeeded.
+func (p *JobProcessor) mergeCompletedJob(ctx context.Context, completed *completedJob) {
+	repo := p.gitRepoIfEnabled()
+	if repo == nil {
+		// VCS was disabled mid-flight, just mark succeeded without merge
+		p.markJobSucceeded(completed.jobID, completed.files)
+		_ = repo.RemoveWorktree(completed.jobID)
+		return
+	}
+
+	// Merge job branch into main
+	result, err := repo.MergeBranch(completed.jobID)
+	if err != nil {
+		log.Printf("merger: merge failed for job %s: %v", completed.jobID, err)
+		_ = repo.AbortMerge()
+		_ = p.failJob(completed.jobID, "merge_failed",
+			fmt.Sprintf("merge failed: %v", err), "", "")
+		_ = repo.RemoveWorktree(completed.jobID)
+		return
+	}
+
+	// Resolve conflicts if any
+	if len(result.Conflicts) > 0 {
+		llmClient, _ := p.resolveLLMClientForJob(&sqlite.IngestJob{ID: completed.jobID})
+		mc := &vcs.MergeConflictContext{
+			LLMClient: llmClient,
+			DocLang:   resolveDocLang(p.db),
+		}
+		if err := vcs.ResolveMergeConflicts(ctx, repo, completed.jobID, mc); err != nil {
+			log.Printf("merger: LLM conflict resolution failed for job %s: %v", completed.jobID, err)
+			_ = repo.AbortMerge()
+			_ = p.failJob(completed.jobID, "merge_conflict",
+				fmt.Sprintf("LLM conflict resolution failed: %v", err), "", "")
+			_ = repo.RemoveWorktree(completed.jobID)
+			return
+		}
+		if completed.recorder != nil {
+			completed.recorder.Record("merge", "complete",
+				fmt.Sprintf("LLM resolved %d conflict(s)", len(result.Conflicts)),
+				map[string]any{"conflicts": result.Conflicts})
+		}
+	}
+
+	// Store last commit SHA
+	if sha, err := repo.LastCommitSHA(); err == nil && sha != "" {
+		_ = p.db.SetVCLastCommit(sha)
+	}
+
+	// Update search index (after merge, so index reflects final state)
+	p.indexGeneratedWikiFiles(completed.files, completed.jobID)
+
+	// Mark job succeeded
+	p.markJobSucceeded(completed.jobID, completed.files)
+
+	// Cleanup worktree
+	if err := repo.RemoveWorktree(completed.jobID); err != nil {
+		log.Printf("merger: cleanup worktree for job %s: %v", completed.jobID, err)
+	}
+}
+
+// markJobSucceeded marks a job as succeeded with a result summary.
+func (p *JobProcessor) markJobSucceeded(jobID string, files []string) {
 	summary := fmt.Sprintf("generated %d wiki page(s)", len(files))
 	if _, updateErr := p.db.DB().Exec(`
 		UPDATE ingest_jobs
 		SET status = 'succeeded', result_summary = ?,
 		    runner_id = '', heartbeat_at = '', updated_at = datetime('now')
-		WHERE id = ?`, summary, job.ID); updateErr != nil {
-		log.Printf("processor: failed to mark job %s succeeded: %v", job.ID, updateErr)
+		WHERE id = ?`, summary, jobID); updateErr != nil {
+		log.Printf("processor: failed to mark job %s succeeded: %v", jobID, updateErr)
 	}
-	if updated, _ := p.db.GetIngestJob(job.ID); updated != nil {
+	if updated, _ := p.db.GetIngestJob(jobID); updated != nil {
 		activity.LogIngestJob(p.db, updated, "succeeded", "processor")
 		p.logSessionArchiveOutcome(updated, "archive_succeeded", "success")
 	}
-
-	return nil
 }
 
 // retryCommitOnly retries only the git commit for a job that previously failed at the commit stage.
@@ -251,6 +523,7 @@ func (p *JobProcessor) retryCommitOnly(job *sqlite.IngestJob) error {
 }
 
 func (p *JobProcessor) recoverStaleJobs() {
+	// Recover stale running jobs (heartbeat expired)
 	ids, err := p.db.RecoverStaleRunningJobs()
 	if err != nil {
 		log.Printf("ingest processor: recover stale: %v", err)
@@ -261,6 +534,55 @@ func (p *JobProcessor) recoverStaleJobs() {
 		rec.Record("system", "stale_recovered", "job requeued after heartbeat timeout", map[string]any{
 			"threshold_seconds": sqlite.StaleHeartbeatSeconds,
 		})
+	}
+
+	// Clean up residual worktrees from crashed jobs
+	p.cleanupStaleWorktrees()
+}
+
+// cleanupStaleWorktrees removes worktree directories left behind by crashed processes.
+func (p *JobProcessor) cleanupStaleWorktrees() {
+	repo := p.gitRepoIfEnabled()
+	if repo == nil {
+		return
+	}
+
+	staleIDs, err := repo.ListStaleWorktrees()
+	if err != nil {
+		log.Printf("ingest processor: list stale worktrees: %v", err)
+		return
+	}
+	if len(staleIDs) == 0 {
+		return
+	}
+
+	for _, jobID := range staleIDs {
+		// Check if the job is still running with a valid heartbeat
+		job, err := p.db.GetIngestJob(jobID)
+		if err != nil {
+			log.Printf("ingest processor: check stale worktree job %s: %v", jobID, err)
+			// Can't look up job, clean up worktree anyway
+		}
+
+		// If job exists and is running, recover it first
+		if job != nil && job.Status == "running" {
+			// Force recover: clear runner, set to queued
+			_, _ = p.db.DB().Exec(`
+				UPDATE ingest_jobs SET
+					status = 'queued',
+					error = '', error_code = '', error_message = '',
+					runner_id = '', heartbeat_at = '',
+					updated_at = datetime('now')
+				WHERE id = ? AND status = 'running'`, jobID)
+			log.Printf("ingest processor: recovered stale running job %s with residual worktree", jobID)
+		}
+
+		// Remove the worktree and branch (orphaned or recovered)
+		if err := repo.RemoveWorktree(jobID); err != nil {
+			log.Printf("ingest processor: cleanup worktree %s: %v", jobID, err)
+		} else {
+			log.Printf("ingest processor: cleaned up residual worktree for job %s", jobID)
+		}
 	}
 }
 

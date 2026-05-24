@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
 import { useApp } from "@/context/AppContext"
 import { useT } from "@/i18n"
 import { copyTextToClipboard } from "@/lib/clipboard"
@@ -14,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ModelSelectDialog } from "@/components/ModelSelectDialog"
 import { MessageDebugDialog } from "@/components/MessageDebugDialog"
+import { MarkdownContent } from "@/components/MarkdownContent"
 import { SessionControls } from "@/components/SessionControls"
 import { WikiMentionPicker } from "@/components/WikiMentionPicker"
 import type { IngestSessionMessage, WikiRefPayload } from "@/types"
@@ -141,7 +140,7 @@ function MessageBubble({
                   aria-label={t("chat.replying")}
                 />
               ) : (
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+                <MarkdownContent variant="chat" content={msg.content} />
               )}
               {msg.tool_status && (
                 <p className="mt-2 text-xs text-muted-foreground">{msg.tool_status}</p>
@@ -150,7 +149,7 @@ function MessageBubble({
           ) : isFailed && errorText && msg.stream_status === "failed" ? (
             <p className="whitespace-pre-wrap text-destructive">{errorText}</p>
           ) : (
-            <div className="prose prose-sm dark:prose-invert max-w-none">
+            <div>
               {msg.tool_status && (
                 <p className="mb-2 text-xs text-muted-foreground">{msg.tool_status}</p>
               )}
@@ -164,9 +163,7 @@ function MessageBubble({
                   </ul>
                 </details>
               )}
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {msg.content}
-              </ReactMarkdown>
+              <MarkdownContent variant="chat" content={msg.content} />
             </div>
           )}
           {isFailed && (

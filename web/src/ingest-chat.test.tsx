@@ -1240,4 +1240,124 @@ describe("IngestChat", () => {
     expect(screen.getByText("wiki/concepts/beta.md")).toBeInTheDocument()
     expect(screen.getByText("正在读取 wiki/concepts/beta.md…")).toBeInTheDocument()
   })
+
+  it("renders completed assistant markdown with chat-prose styling", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-assistant",
+          session_id: "sess-1",
+          role: "assistant",
+          content: "## Summary\n\n- item one",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    const heading = await screen.findByRole("heading", {
+      level: 2,
+      name: "Summary",
+    })
+    expect(heading.closest(".chat-prose")).toBeTruthy()
+    expect(screen.getByText("item one")).toBeInTheDocument()
+  })
+
+  it("renders streaming assistant content as markdown", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-assistant",
+          session_id: "sess-1",
+          role: "assistant",
+          content: "## Partial\n\nStill typing",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "streaming",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    const heading = await screen.findByRole("heading", {
+      level: 2,
+      name: "Partial",
+    })
+    expect(heading.closest(".chat-prose")).toBeTruthy()
+    expect(screen.getByText("Still typing")).toBeInTheDocument()
+  })
 })

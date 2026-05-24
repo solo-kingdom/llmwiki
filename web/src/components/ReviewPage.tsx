@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
 import { useT } from "@/i18n"
+import { MarkdownContent } from "@/components/MarkdownContent"
 import type { MessageKey } from "@/i18n"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 import * as api from "@/lib/api"
@@ -223,11 +222,10 @@ export function ReviewPage() {
 
             <ScrollArea className="min-h-0 flex-1 px-4 py-3">
               {activePlan ? (
-                <div className="prose prose-sm dark:prose-invert max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {activePlan.plan_markdown}
-                  </ReactMarkdown>
-                </div>
+                <MarkdownContent
+                  variant="reader"
+                  content={activePlan.plan_markdown}
+                />
               ) : (
                 <p className="text-sm text-muted-foreground">{t("review.no_plan")}</p>
               )}

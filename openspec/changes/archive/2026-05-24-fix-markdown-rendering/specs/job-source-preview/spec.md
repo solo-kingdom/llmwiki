@@ -1,9 +1,4 @@
-# job-source-preview Specification
-
-## Purpose
-Define job source file preview behavior in the Jobs UI modal.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Job 源文件预览
 系统 SHALL 提供 job 关联源文件的预览功能，支持用户在模态框中查看原始文件内容。Markdown 文本预览 SHALL 使用与 Wiki 阅读器一致的 wiki-prose 样式（含 GFM 与代码块语法高亮）。

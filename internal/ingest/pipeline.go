@@ -293,7 +293,7 @@ func defaultToolLoopConfigForStep(step PromptStep) llm.ToolLoopConfig {
 	case StepAnalysis, StepPlan, StepPlanOrganize, StepPlanQA:
 		return llm.ToolLoopConfig{MaxRounds: 3, MaxToolCallsPerRound: 3}
 	case StepGeneration:
-		return llm.ToolLoopConfig{MaxRounds: 2, MaxToolCallsPerRound: 3}
+		return llm.ToolLoopConfig{MaxRounds: 4, MaxToolCallsPerRound: 3}
 	default:
 		return llm.ToolLoopConfig{MaxRounds: 0, MaxToolCallsPerRound: 0}
 	}

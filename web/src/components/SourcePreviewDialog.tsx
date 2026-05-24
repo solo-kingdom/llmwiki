@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react"
 import { Dialog } from "@base-ui/react/dialog"
 import { X, Loader2 } from "lucide-react"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
 import { getSourceContent, getSourceUrl } from "@/lib/api"
+import { MarkdownContent } from "@/components/MarkdownContent"
 
 const previewableTextExts = new Set([".md", ".txt"])
 const previewableImageExts = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"])
@@ -112,11 +111,7 @@ export function SourcePreviewDialog({
             )}
 
             {!loading && !error && textContent !== null && (
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {textContent}
-                </ReactMarkdown>
-              </div>
+              <MarkdownContent variant="reader" content={textContent} />
             )}
           </div>
         </Dialog.Popup>

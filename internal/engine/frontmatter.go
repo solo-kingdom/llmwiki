@@ -46,7 +46,7 @@ func ValidateFrontmatter(relPath string, fm Frontmatter, subdir string) []LintIs
 		return issues
 	}
 
-	expected, ok := dirToPageType[subdir]
+	expected, ok := WikiSubdirPageTypes[subdir]
 	if !ok {
 		return issues
 	}

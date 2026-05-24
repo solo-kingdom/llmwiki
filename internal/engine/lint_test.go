@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +122,61 @@ func TestValidateFrontmatter(t *testing.T) {
 	issues = ValidateFrontmatter("wiki/entities/x.md", Frontmatter{Type: "concept"}, "entities")
 	if len(issues) < 2 {
 		t.Fatalf("expected missing + mismatch issues: %v", issues)
+	}
+}
+
+func TestLintMisplacedTopLevelPage(t *testing.T) {
+	root := t.TempDir()
+	writeWikiFile(t, root, "wiki/dsp.md", `---
+title: DSP
+type: entity
+date: "2024-01-01"
+---
+# DSP`)
+
+	report, err := LintWorkspace(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, issue := range report.Issues {
+		if issue.Code == LintCodeMisplacedWikiPage && issue.Path == "wiki/dsp.md" {
+			found = true
+			if !strings.Contains(issue.Message, "wiki/entities/") {
+				t.Fatalf("expected suggested dir in message: %q", issue.Message)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected misplaced_wiki_page issue, got %#v", report.Issues)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "wiki", "dsp.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# DSP") {
+		t.Fatal("misplaced page should not be modified by lint")
+	}
+}
+
+func TestLintExcludesTemplatesFromOrphanChecks(t *testing.T) {
+	root := t.TempDir()
+	writeWikiFile(t, root, "wiki/templates/entity.md", `---
+title: Template
+type: entity
+date: "2024-01-01"
+---
+# Template`)
+
+	report, err := LintWorkspace(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range report.Issues {
+		if issue.Path == "wiki/templates/entity.md" && issue.Code == LintCodeOrphanPage {
+			t.Fatalf("template should not be orphan-checked: %#v", issue)
+		}
 	}
 }
 

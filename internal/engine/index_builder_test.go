@@ -106,6 +106,37 @@ date: "2024-01-01"
 	}
 }
 
+func TestIndexBuilderExcludesTemplatesAndMisplacedPages(t *testing.T) {
+	ws := t.TempDir()
+	writePage(t, ws, "wiki/templates/entity.md", `---
+title: Template
+---
+# Template`)
+	writePage(t, ws, "wiki/dsp.md", `---
+title: DSP
+---
+# DSP`)
+	writePage(t, ws, "wiki/entities/page.md", `---
+title: Real Page
+---
+# Page`)
+
+	b := NewIndexBuilder(ws)
+	content, err := b.BuildIndex()
+	if err != nil {
+		t.Fatalf("BuildIndex: %v", err)
+	}
+	if strings.Contains(content, "templates/entity") || strings.Contains(content, "[[templates/") {
+		t.Error("template should not appear in index entries")
+	}
+	if strings.Contains(content, "dsp") {
+		t.Error("misplaced top-level page should not appear in index entries")
+	}
+	if !strings.Contains(content, "[[entities/page|Real Page]]") {
+		t.Error("expected typed page in index")
+	}
+}
+
 func TestIndexBuilderExcludesNavPages(t *testing.T) {
 	ws := t.TempDir()
 	writePage(t, ws, "wiki/overview.md", `---

@@ -220,7 +220,7 @@ func TestApplyWikiBlocksMergePreservesLockedFields(t *testing.T) {
 func TestApplyWikiBlocksIdenticalContentSkipsWrite(t *testing.T) {
 	ws := t.TempDir()
 	content := "---\ntitle: T\ntype: entity\ndate: 2024-01-01\n---\n# Same\n"
-	path := filepath.Join(ws, "wiki", "skip.md")
+	path := filepath.Join(ws, "wiki", "entities", "skip.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestApplyWikiBlocksIdenticalContentSkipsWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blocks := map[string]string{"wiki/skip.md": content}
+	blocks := map[string]string{"wiki/entities/skip.md": content}
 	opts := &ApplyWikiBlocksOpts{
 		Merge: &MergeContext{LLMClient: newMergeLLMClient(t, "should not be called")},
 	}

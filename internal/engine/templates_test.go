@@ -83,9 +83,10 @@ func TestQueryTemplateSections(t *testing.T) {
 func TestTemplateGuidanceForGeneration(t *testing.T) {
 	zh := TemplateGuidanceForGeneration("zh")
 	for _, want := range []string{
-		"页面类型与必需章节",
-		"wiki/entities/",
+		"页面类型、必需章节与允许目录",
+		"entity → wiki/entities/",
 		"概述、关键事实、相关概念、来源",
+		"不得写入 wiki/ 顶层",
 		"wiki/templates/",
 	} {
 		if !strings.Contains(zh, want) {
@@ -95,9 +96,10 @@ func TestTemplateGuidanceForGeneration(t *testing.T) {
 
 	en := TemplateGuidanceForGeneration("en")
 	for _, want := range []string{
-		"Page types and required sections",
-		"wiki/entities/",
+		"Page types, required sections, and allowed directories",
+		"entity → wiki/entities/",
 		"Overview, Key Facts, Related Concepts, Sources",
+		"MUST NOT be written as top-level wiki/*.md",
 		"wiki/templates/",
 	} {
 		if !strings.Contains(en, want) {

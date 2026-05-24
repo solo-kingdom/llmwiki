@@ -27,7 +27,7 @@ func TestProcessorIndexesWrittenWikiFiles(t *testing.T) {
 	longBody := "UniqueIngestIndexToken98765 appears in this paragraph. " +
 		strings.Repeat("Additional indexing filler text for chunk token minimum. ", 20)
 	blocks := map[string]string{
-		"wiki/searchable-ingest.md": "# Searchable\n\n" + longBody + "\n",
+		"wiki/entities/searchable-ingest.md": "# Searchable\n\n" + longBody + "\n",
 	}
 	paths, err := ApplyWikiBlocks(context.Background(), ws, blocks, nil)
 	if err != nil {
@@ -68,7 +68,7 @@ func TestProcessorIndexesWrittenWikiFiles(t *testing.T) {
 func TestPipelineFileBlocksWritePaths(t *testing.T) {
 	ws := t.TempDir()
 
-	output := "---FILE: wiki/from-pipeline.md\n# From Pipeline\n\nPipelineWriteToken555.\n---END FILE---"
+	output := "---FILE: wiki/entities/from-pipeline.md\n# From Pipeline\n\nPipelineWriteToken555.\n---END FILE---"
 	blocks := parseFileBlocksWithContent(output)
 	paths, err := ApplyWikiBlocks(context.Background(), ws, blocks, nil)
 	if err != nil {
@@ -77,7 +77,7 @@ func TestPipelineFileBlocksWritePaths(t *testing.T) {
 	if len(paths) != 1 {
 		t.Fatalf("paths = %v", paths)
 	}
-	if _, err := os.Stat(filepath.Join(ws, "wiki", "from-pipeline.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(ws, "wiki", "entities", "from-pipeline.md")); err != nil {
 		t.Fatalf("expected file on disk: %v", err)
 	}
 }

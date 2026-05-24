@@ -11,14 +11,52 @@ func TestComposeSystemPromptGenerationTemplateGuidance(t *testing.T) {
 	ctx := PromptContext{Workspace: t.TempDir(), DocLang: "zh"}
 	out := ComposeSystemPrompt(StepGeneration, ctx)
 	for _, want := range []string{
-		"页面类型与必需章节",
-		"概述、关键事实、相关概念、来源",
-		"定义、核心要点、相关实体、来源",
+		"页面类型、必需章节与允许目录",
+		"entity → wiki/entities/",
+		"concept → wiki/concepts/",
+		"不得写入 wiki/ 顶层",
 		"wiki/templates/",
+		"中文",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("generation prompt missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestComposeSystemPromptGenerationEnglish(t *testing.T) {
+	ctx := PromptContext{Workspace: t.TempDir(), DocLang: "en"}
+	out := ComposeSystemPrompt(StepGeneration, ctx)
+	for _, want := range []string{
+		"entity → wiki/entities/",
+		"MUST NOT be written as top-level wiki/*.md",
+		"English",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("generation prompt missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestComposeSystemPromptPlanAndOrganizeLanguage(t *testing.T) {
+	zhOrganize := ComposeSystemPrompt(StepSessionOrganize, PromptContext{Workspace: t.TempDir(), DocLang: "zh"})
+	if !strings.Contains(zhOrganize, "架构师") {
+		t.Fatalf("expected Chinese organize prompt: %s", zhOrganize)
+	}
+
+	enPlan := ComposeSystemPrompt(StepPlanOrganize, PromptContext{Workspace: t.TempDir(), DocLang: "en"})
+	if !strings.Contains(enPlan, "reorganization planner") {
+		t.Fatalf("expected English organize plan prompt: %s", enPlan)
+	}
+
+	zhRollback := ComposeSystemPrompt(StepRollback, PromptContext{Workspace: t.TempDir(), DocLang: "zh"})
+	if !strings.Contains(zhRollback, "回滚助手") || !strings.Contains(zhRollback, "中文") {
+		t.Fatalf("expected Chinese rollback prompt: %s", zhRollback)
+	}
+
+	enMerge := ComposeSystemPrompt(StepMergeBody, PromptContext{Workspace: t.TempDir(), DocLang: "en"})
+	if !strings.Contains(enMerge, "Merge old and new wiki body text") || !strings.Contains(enMerge, "English") {
+		t.Fatalf("expected English merge prompt: %s", enMerge)
 	}
 }
 

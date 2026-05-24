@@ -155,7 +155,9 @@ func executeLocalAudit(workspace string, db *sqlite.DB, args map[string]interfac
 					if focus != "all" {
 						switch focus {
 						case "structure":
-							if issue.Code != engine.LintCodeOrphanPage && issue.Code != engine.LintCodeTypeDirMismatch {
+							if issue.Code != engine.LintCodeOrphanPage &&
+								issue.Code != engine.LintCodeTypeDirMismatch &&
+								issue.Code != engine.LintCodeMisplacedWikiPage {
 								continue
 							}
 						case "links":
@@ -204,6 +206,12 @@ func executeLocalStructure(workspace string, db *sqlite.DB, _ map[string]interfa
 		return "", err
 	}
 	wikiDocs := filterBySourceKind(docs, "wiki")
+	contentCount := 0
+	for _, d := range wikiDocs {
+		if !engine.IsWikiSystemPath(d.RelativePath) {
+			contentCount++
+		}
+	}
 
 	// Build directory tree with counts
 	dirPages := make(map[string][]sqlite.Document)
@@ -218,24 +226,51 @@ func executeLocalStructure(workspace string, db *sqlite.DB, _ map[string]interfa
 
 	var sb strings.Builder
 	sb.WriteString("# Wiki 目录结构\n\n")
-	sb.WriteString(fmt.Sprintf("总计 %d 个 wiki 页面\n\n", len(wikiDocs)))
+	sb.WriteString(fmt.Sprintf("总计 %d 个 wiki 文档（%d 个业务内容页）\n\n", len(wikiDocs), contentCount))
 
-	// Root-level pages
+	reserved := []sqlite.Document{}
+	misplaced := []sqlite.Document{}
 	if rootPages, ok := dirPages[""]; ok {
 		for _, d := range rootPages {
+			switch engine.ClassifyWikiPath(d.RelativePath) {
+			case engine.WikiPathReservedTopLevel:
+				reserved = append(reserved, d)
+			case engine.WikiPathMisplaced:
+				misplaced = append(misplaced, d)
+			default:
+				reserved = append(reserved, d)
+			}
+		}
+	}
+
+	if len(reserved) > 0 {
+		sb.WriteString("## 顶层系统页面\n\n")
+		for _, d := range reserved {
 			title := d.Title
 			if title == "" {
 				title = d.Filename
 			}
-			sb.WriteString(fmt.Sprintf("├── %s\n", title))
+			sb.WriteString(fmt.Sprintf("- %s (`%s`)\n", title, d.RelativePath))
 		}
+		sb.WriteString("\n")
+	}
+
+	if len(misplaced) > 0 {
+		sb.WriteString(fmt.Sprintf("## 待整理页面 (%d)\n\n", len(misplaced)))
+		for _, d := range misplaced {
+			title := d.Title
+			if title == "" {
+				title = d.Filename
+			}
+			sb.WriteString(fmt.Sprintf("- %s — `%s`（应移入 typed 子目录）\n", title, d.RelativePath))
+		}
+		sb.WriteString("\n")
 	}
 
 	// Known typed directories
-	typedDirs := []string{"entities", "concepts", "sources", "synthesis", "comparisons", "queries"}
 	shownDirs := make(map[string]bool)
 
-	for _, dir := range typedDirs {
+	for _, dir := range engine.TypedWikiSubdirs {
 		pages := dirPages[dir]
 		shownDirs[dir] = true
 		sb.WriteString(fmt.Sprintf("├── %s/ (%d 页)\n", dir, len(pages)))
@@ -256,6 +291,22 @@ func executeLocalStructure(workspace string, db *sqlite.DB, _ map[string]interfa
 		}
 		if len(pages) == 0 {
 			sb.WriteString("│   (空目录)\n")
+		}
+	}
+
+	if templatePages := dirPages["templates"]; len(templatePages) > 0 {
+		shownDirs["templates"] = true
+		sb.WriteString(fmt.Sprintf("├── templates/ (%d 个系统模板)\n", len(templatePages)))
+		for i, d := range templatePages {
+			title := d.Title
+			if title == "" {
+				title = d.Filename
+			}
+			prefix := "│   ├── "
+			if i == len(templatePages)-1 {
+				prefix = "│   └── "
+			}
+			sb.WriteString(fmt.Sprintf("%s%s (系统模板)\n", prefix, title))
 		}
 	}
 

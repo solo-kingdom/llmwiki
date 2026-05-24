@@ -22,6 +22,7 @@ const (
 	LintCodeOrphanPage          = "orphan_page"
 	LintCodeMissingFrontmatter  = "missing_frontmatter"
 	LintCodeTypeDirMismatch     = "type_dir_mismatch"
+	LintCodeMisplacedWikiPage   = "misplaced_wiki_page"
 	LintCodeLogFormatInvalid    = "log_format_invalid"
 	LintCodeLogDateDecreasing   = "log_date_decreasing"
 )
@@ -47,16 +48,6 @@ type LintReport struct {
 	Issues    []LintIssue `json:"issues"`
 	Stats     LintStats   `json:"stats"`
 	CheckedAt time.Time   `json:"checked_at"`
-}
-
-// dirToPageType maps wiki subdirectory to expected frontmatter type.
-var dirToPageType = map[string]string{
-	"entities":    "entity",
-	"concepts":    "concept",
-	"sources":     "source",
-	"synthesis":   "synthesis",
-	"comparisons": "comparison",
-	"queries":     "query",
 }
 
 var wikiDoubleBracketRe = regexp.MustCompile(`\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]`)
@@ -91,6 +82,15 @@ func LintWorkspace(workspace string) (*LintReport, error) {
 		if page.inTypedSubdir {
 			fm := ParseFrontmatter(text)
 			report.Issues = append(report.Issues, ValidateFrontmatter(page.relPath, fm, page.subdir)...)
+		}
+		if page.isMisplaced {
+			fm := ParseFrontmatter(text)
+			report.Issues = append(report.Issues, LintIssue{
+				Severity: LintSeverityWarning,
+				Code:     LintCodeMisplacedWikiPage,
+				Path:     page.relPath,
+				Message:  MisplacedWikiPageMessage(page.relPath, fm.Type),
+			})
 		}
 
 		targets := extractLinkTargets(text, page.relPath)
@@ -151,6 +151,8 @@ type wikiPage struct {
 	absPath       string
 	subdir        string
 	inTypedSubdir bool
+	isSystem      bool
+	isMisplaced   bool
 }
 
 func collectWikiPages(workspace string) ([]wikiPage, error) {
@@ -177,21 +179,15 @@ func collectWikiPages(workspace string) ([]wikiPage, error) {
 		}
 		rel = filepath.ToSlash(rel)
 
-		subdir := ""
-		inTyped := false
-		parts := strings.Split(strings.TrimPrefix(rel, "wiki/"), "/")
-		if len(parts) >= 2 {
-			subdir = parts[0]
-			if _, ok := dirToPageType[subdir]; ok {
-				inTyped = true
-			}
-		}
-
+		subdir := WikiSubdirFromPath(rel)
+		kind := ClassifyWikiPath(rel)
 		pages = append(pages, wikiPage{
 			relPath:       rel,
 			absPath:       path,
 			subdir:        subdir,
-			inTypedSubdir: inTyped,
+			inTypedSubdir: kind == WikiPathTypedContent,
+			isSystem:      kind == WikiPathSystem,
+			isMisplaced:   kind == WikiPathMisplaced,
 		})
 		return nil
 	})
@@ -351,6 +347,9 @@ func isExternalOrAssetLink(href string) bool {
 
 func isOrphanExcluded(relPath string) bool {
 	relPath = filepath.ToSlash(relPath)
+	if IsWikiSystemPath(relPath) {
+		return true
+	}
 	switch relPath {
 	case "wiki/index.md", "wiki/log.md", "wiki/overview.md":
 		return true
@@ -366,7 +365,13 @@ func isOrphanExcluded(relPath string) bool {
 }
 
 func computeLintStats(workspace string, pages []wikiPage) LintStats {
-	stats := LintStats{PageCount: len(pages)}
+	stats := LintStats{}
+	for _, page := range pages {
+		if page.isSystem {
+			continue
+		}
+		stats.PageCount++
+	}
 
 	sourcesDir := filepath.Join(workspace, "raw", "sources")
 	entries, err := os.ReadDir(sourcesDir)

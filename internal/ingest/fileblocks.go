@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/solo-kingdom/llmwiki/internal/engine"
 )
 
 var fileBlockRe = regexp.MustCompile(`(?s)---FILE:\s*(.+?)\n(.*?)---END FILE---`)
@@ -56,6 +58,10 @@ func ApplyWikiBlocks(ctx context.Context, workspace string, blocks map[string]st
 				log.Printf("ApplyWikiBlocks: failed to delete %s: %v", path, err)
 			}
 			continue
+		}
+
+		if err := engine.ValidateWikiWritePath(path); err != nil {
+			return nil, err
 		}
 
 		writeContent := content

@@ -60,7 +60,7 @@ func (m *mockLLMClient) StreamChatCustom(analyzeResp, generateResp string, analy
 func newMockLLMClient() *mockLLMClient {
 	return &mockLLMClient{
 		analyzeResp:  "Mock analysis of the document",
-		generateResp: "---FILE: wiki/generated.md\n# Generated\nContent here.\n---END FILE---",
+		generateResp: "---FILE: wiki/entities/generated.md\n# Generated\nContent here.\n---END FILE---",
 	}
 }
 

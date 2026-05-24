@@ -94,13 +94,13 @@ func TestIngestNormalizedCacheHitSkipsLLM(t *testing.T) {
 		Content:       content,
 	}
 
-	writeWikiFile(t, ws, "wiki/cached.md", "# Cached")
+	writeWikiFile(t, ws, "wiki/entities/cached.md", "# Cached")
 	hash := contentSHA256(content)
 	seedCacheEntry(t, ws, cacheKeyForNormalized(source), &CacheEntry{
 		SourceName:    "test.md",
 		SHA256:        hash,
 		ContentSHA256: hash,
-		WrittenFiles:  []string{"wiki/cached.md"},
+		WrittenFiles:  []string{"wiki/entities/cached.md"},
 	})
 
 	client, calls, _ := newCountingLLMClient(t, "should not be called")
@@ -110,8 +110,8 @@ func TestIngestNormalizedCacheHitSkipsLLM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IngestNormalized: %v", err)
 	}
-	if len(files) != 1 || files[0] != "wiki/cached.md" {
-		t.Fatalf("files = %v, want [wiki/cached.md]", files)
+	if len(files) != 1 || files[0] != "wiki/entities/cached.md" {
+		t.Fatalf("files = %v, want [wiki/entities/cached.md]", files)
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("LLM call count = %d, want 0", calls.Load())
@@ -130,16 +130,16 @@ func TestIngestNormalizedCacheMissOnContentChange(t *testing.T) {
 	}
 
 	oldHash := contentSHA256(oldContent)
-	writeWikiFile(t, ws, "wiki/stale.md", "# Stale")
+	writeWikiFile(t, ws, "wiki/entities/stale.md", "# Stale")
 	oldKey := source.CanonicalPath + "|" + oldHash
 	seedCacheEntry(t, ws, oldKey, &CacheEntry{
 		SourceName:    "test.md",
 		SHA256:        oldHash,
 		ContentSHA256: oldHash,
-		WrittenFiles:  []string{"wiki/stale.md"},
+		WrittenFiles:  []string{"wiki/entities/stale.md"},
 	})
 
-	generateResp := "---FILE: wiki/generated.md\n# Generated\nFresh content.\n---END FILE---"
+	generateResp := "---FILE: wiki/entities/generated.md\n# Generated\nFresh content.\n---END FILE---"
 	client, calls, _ := newCountingLLMClient(t, "analysis result", generateResp)
 	pipeline := NewPipeline(ws, client)
 
@@ -147,8 +147,8 @@ func TestIngestNormalizedCacheMissOnContentChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IngestNormalized: %v", err)
 	}
-	if len(files) != 1 || files[0] != "wiki/generated.md" {
-		t.Fatalf("files = %v, want [wiki/generated.md]", files)
+	if len(files) != 1 || files[0] != "wiki/entities/generated.md" {
+		t.Fatalf("files = %v, want [wiki/entities/generated.md]", files)
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("LLM call count = %d, want 2 (analysis + generation)", calls.Load())
@@ -171,10 +171,10 @@ func TestIngestNormalizedCacheMissWhenWrittenFilesMissing(t *testing.T) {
 		SourceName:    "test.md",
 		SHA256:        hash,
 		ContentSHA256: hash,
-		WrittenFiles:  []string{"wiki/missing.md"},
+		WrittenFiles:  []string{"wiki/entities/missing.md"},
 	})
 
-	generateResp := "---FILE: wiki/regenerated.md\n# Regenerated\nContent.\n---END FILE---"
+	generateResp := "---FILE: wiki/entities/regenerated.md\n# Regenerated\nContent.\n---END FILE---"
 	client, calls, _ := newCountingLLMClient(t, "analysis result", generateResp)
 	pipeline := NewPipeline(ws, client)
 
@@ -182,8 +182,8 @@ func TestIngestNormalizedCacheMissWhenWrittenFilesMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IngestNormalized: %v", err)
 	}
-	if len(files) != 1 || files[0] != "wiki/regenerated.md" {
-		t.Fatalf("files = %v, want [wiki/regenerated.md]", files)
+	if len(files) != 1 || files[0] != "wiki/entities/regenerated.md" {
+		t.Fatalf("files = %v, want [wiki/entities/regenerated.md]", files)
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("LLM call count = %d, want 2", calls.Load())
@@ -202,11 +202,11 @@ func TestLegacyCacheLookupByAbsPath(t *testing.T) {
 	}
 
 	hash := contentSHA256(content)
-	writeWikiFile(t, ws, "wiki/legacy.md", "# Legacy Wiki")
+	writeWikiFile(t, ws, "wiki/entities/legacy.md", "# Legacy Wiki")
 	seedCacheEntry(t, ws, sourcePath, &CacheEntry{
 		SourceName:   "legacy.md",
 		SHA256:       hash,
-		WrittenFiles: []string{"wiki/legacy.md"},
+		WrittenFiles: []string{"wiki/entities/legacy.md"},
 	})
 
 	client, calls, _ := newCountingLLMClient(t, "should not be called")
@@ -216,8 +216,8 @@ func TestLegacyCacheLookupByAbsPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	if len(files) != 1 || files[0] != "wiki/legacy.md" {
-		t.Fatalf("files = %v, want [wiki/legacy.md]", files)
+	if len(files) != 1 || files[0] != "wiki/entities/legacy.md" {
+		t.Fatalf("files = %v, want [wiki/entities/legacy.md]", files)
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("LLM call count = %d, want 0", calls.Load())
@@ -235,13 +235,13 @@ func TestCacheHitRecordsEvent(t *testing.T) {
 		Content:       content,
 	}
 
-	writeWikiFile(t, ws, "wiki/cached.md", "# Cached")
+	writeWikiFile(t, ws, "wiki/entities/cached.md", "# Cached")
 	hash := contentSHA256(content)
 	seedCacheEntry(t, ws, cacheKeyForNormalized(source), &CacheEntry{
 		SourceName:    "test.md",
 		SHA256:        hash,
 		ContentSHA256: hash,
-		WrittenFiles:  []string{"wiki/cached.md"},
+		WrittenFiles:  []string{"wiki/entities/cached.md"},
 	})
 
 	rec := &mockJobRecorder{}
@@ -321,13 +321,13 @@ func setupProcessorCacheHitTest(t *testing.T, inputType, sourcePath, sourceRef s
 		normalized.Kind = InputKindText
 	}
 
-	writeWikiFile(t, ws, "wiki/cached-job.md", "# Cached Job")
+	writeWikiFile(t, ws, "wiki/entities/cached-job.md", "# Cached Job")
 	hash := contentSHA256(content)
 	seedCacheEntry(t, ws, cacheKeyForNormalized(normalized), &CacheEntry{
 		SourceName:    filepath.Base(sourcePath),
 		SHA256:        hash,
 		ContentSHA256: hash,
-		WrittenFiles:  []string{"wiki/cached-job.md"},
+		WrittenFiles:  []string{"wiki/entities/cached-job.md"},
 	})
 
 	client, calls, baseURL := newCountingLLMClient(t, "should not be called")
@@ -427,13 +427,13 @@ func TestProcessorCacheHitSessionArchiveJob(t *testing.T) {
 		SourceRef:     "session:" + session.ID,
 		Content:       content,
 	}
-	writeWikiFile(t, ws, "wiki/cached-job.md", "# Cached Job")
+	writeWikiFile(t, ws, "wiki/entities/cached-job.md", "# Cached Job")
 	hash := contentSHA256(content)
 	seedCacheEntry(t, ws, cacheKeyForNormalized(normalized), &CacheEntry{
 		SourceName:    "archive.md",
 		SHA256:        hash,
 		ContentSHA256: hash,
-		WrittenFiles:  []string{"wiki/cached-job.md"},
+		WrittenFiles:  []string{"wiki/entities/cached-job.md"},
 	})
 
 	processor := NewJobProcessor(db, ws)
@@ -467,7 +467,7 @@ func TestSaveCacheUsesNewKeyFormat(t *testing.T) {
 		Content:       []byte("# Save\nContent"),
 	}
 
-	generateResp := "---FILE: wiki/saved.md\n# Saved\nContent.\n---END FILE---"
+	generateResp := "---FILE: wiki/entities/saved.md\n# Saved\nContent.\n---END FILE---"
 	client, _, _ := newCountingLLMClient(t, "analysis", generateResp)
 	pipeline := NewPipeline(ws, client)
 

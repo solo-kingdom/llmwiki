@@ -159,23 +159,25 @@ tags: []
 // TemplateGuidanceForGeneration returns page-type section requirements for the generation step.
 func TemplateGuidanceForGeneration(docLang string) string {
 	if docLang == "en" {
-		return `Page types and required sections:
-- entity (wiki/entities/): Overview, Key Facts, Related Concepts, Sources
-- concept (wiki/concepts/): Definition, Key Points, Related Entities, Sources
-- source (wiki/sources/): Summary, Key Points, Related Entities/Concepts
-- synthesis (wiki/synthesis/): Question/Purpose, Analysis, References, Next Steps
-- comparison (wiki/comparisons/): Comparison Dimensions, Similarities and Differences, Conclusion
-- query (wiki/queries/): Question, Answer, References
+		return `Page types, required sections, and allowed directories:
+- entity → wiki/entities/: Overview, Key Facts, Related Concepts, Sources
+- concept → wiki/concepts/: Definition, Key Points, Related Entities, Sources
+- source → wiki/sources/: Summary, Key Points, Related Entities/Concepts
+- synthesis → wiki/synthesis/: Question/Purpose, Analysis, References, Next Steps
+- comparison → wiki/comparisons/: Comparison Dimensions, Similarities and Differences, Conclusion
+- query → wiki/queries/: Question, Answer, References
 
+Business pages MUST NOT be written as top-level wiki/*.md files. Only wiki/overview.md, wiki/index.md, and wiki/log.md may live at the wiki root.
 Use the corresponding template file under wiki/templates/ as the structural reference.`
 	}
-	return `页面类型与必需章节：
-- entity (wiki/entities/): 概述、关键事实、相关概念、来源
-- concept (wiki/concepts/): 定义、核心要点、相关实体、来源
-- source (wiki/sources/): 摘要、关键观点、相关实体/概念
-- synthesis (wiki/synthesis/): 问题/目的、分析、引用、后续
-- comparison (wiki/comparisons/): 对比维度、异同、结论
-- query (wiki/queries/): 问题、回答、引用
+	return `页面类型、必需章节与允许目录：
+- entity → wiki/entities/：概述、关键事实、相关概念、来源
+- concept → wiki/concepts/：定义、核心要点、相关实体、来源
+- source → wiki/sources/：摘要、关键观点、相关实体/概念
+- synthesis → wiki/synthesis/：问题/目的、分析、引用、后续
+- comparison → wiki/comparisons/：对比维度、异同、结论
+- query → wiki/queries/：问题、回答、引用
 
+业务知识页不得写入 wiki/ 顶层（仅允许 wiki/overview.md、wiki/index.md、wiki/log.md）。
 参考 wiki/templates/ 下对应模板文件结构。`
 }

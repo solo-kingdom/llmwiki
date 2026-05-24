@@ -11,6 +11,7 @@ func TestWikiPageType(t *testing.T) {
 		{"wiki/concepts/bar.md", "concept"},
 		{"wiki/sources/s.md", "source"},
 		{"wiki/other.md", "page"},
+		{"wiki/templates/entity.md", "template"},
 	}
 	for _, tc := range tests {
 		if got := WikiPageType(tc.path); got != tc.want {

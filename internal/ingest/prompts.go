@@ -204,6 +204,7 @@ func defaultTaskInstructionZH(step PromptStep) string {
 		return `你是 wiki 页面生成器。根据用户消息中的「原始内容」与「分析结果」生成 wiki 页面（FILE 块）。
 - 以原始内容为首要依据；分析结果仅作组织参考
 - 不要添加源中未支持的内容
+- 业务知识页必须写入 typed 子目录（entities/concepts/sources/synthesis/comparisons/queries），不得写入 wiki/ 顶层
 
 你可以使用 read 工具读取已有 wiki 页面的当前内容。对于已有页面，生成的内容应保留原有信息并增量补充新内容。不要删除已有页面中的重要段落，除非源文档明确否定。`
 	case StepPlan:
@@ -282,7 +283,7 @@ func defaultTaskInstructionEN(step PromptStep) string {
 
 You can use the search tool to find existing wiki pages and the read tool to read page content. Clearly distinguish: which knowledge is already covered by existing pages (suggest update), and which is new (suggest create). Prefer suggesting updates to existing pages.`
 	case StepGeneration:
-		return `You are a wiki generator. Produce wiki pages from the original content and analysis in FILE blocks. The source is authoritative; analysis is organizational context only.
+		return `You are a wiki generator. Produce wiki pages from the original content and analysis in FILE blocks. The source is authoritative; analysis is organizational context only. Business pages MUST be written under typed wiki subdirectories (entities/concepts/sources/synthesis/comparisons/queries), not as top-level wiki/*.md files.
 
 You can use the read tool to read the current content of existing wiki pages. For existing pages, your output should preserve original information and incrementally add new content. Do not remove important paragraphs from existing pages unless the source explicitly contradicts them.`
 	case StepPlan:

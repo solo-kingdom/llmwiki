@@ -87,7 +87,7 @@ type ToolLoopConfig struct {
 // DefaultToolLoopConfig returns safe defaults from the design doc.
 func DefaultToolLoopConfig() ToolLoopConfig {
 	return ToolLoopConfig{
-		MaxRounds:            6,
+		MaxRounds:            12,
 		MaxToolCallsPerRound: 4,
 	}
 }

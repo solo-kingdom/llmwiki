@@ -397,3 +397,73 @@ func TestLanguageForResponse(t *testing.T) {
 		}
 	}
 }
+
+func TestGetSettingsDefaultToolLoopLimits(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.SessionToolLoopMaxRoundsOrganize != "12" {
+		t.Errorf("organize max rounds = %q, want 12", resp.SessionToolLoopMaxRoundsOrganize)
+	}
+	if resp.SessionToolLoopMaxCallsPerRound != "4" {
+		t.Errorf("max calls per round = %q, want 4", resp.SessionToolLoopMaxCallsPerRound)
+	}
+}
+
+func TestUpdateSettingsToolLoopLimits(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"session_tool_loop_max_rounds_organize": "16",
+		"session_tool_loop_max_calls_per_round":  "8",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.SessionToolLoopMaxRoundsOrganize != "16" {
+		t.Errorf("organize max rounds = %q, want 16", resp.SessionToolLoopMaxRoundsOrganize)
+	}
+	if resp.SessionToolLoopMaxCallsPerRound != "8" {
+		t.Errorf("max calls per round = %q, want 8", resp.SessionToolLoopMaxCallsPerRound)
+	}
+}
+
+func TestUpdateSettingsToolLoopLimitsValidation(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"session_tool_loop_max_rounds_organize": "99",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d; body=%s", w.Code, w.Body.String())
+	}
+}

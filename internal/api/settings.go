@@ -41,7 +41,11 @@ type settingsResponse struct {
 	MCPServersJSON          string `json:"mcp_servers_json"`
 	UILanguage       string `json:"ui_language"`
 	DocLanguage      string `json:"doc_language"`
-	RulesSupplement  string `json:"rules_supplement"`
+	RulesSupplement                    string `json:"rules_supplement"`
+	SessionToolLoopMaxRoundsIngest     string `json:"session_tool_loop_max_rounds_ingest"`
+	SessionToolLoopMaxRoundsQA         string `json:"session_tool_loop_max_rounds_qa"`
+	SessionToolLoopMaxRoundsOrganize   string `json:"session_tool_loop_max_rounds_organize"`
+	SessionToolLoopMaxCallsPerRound    string `json:"session_tool_loop_max_calls_per_round"`
 }
 
 func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +72,11 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		MCPServersJSON:            mcpServersJSONForResponse(all["mcp_servers_json"]),
 		UILanguage:      languageForResponse(all["ui_language"]),
 		DocLanguage:     languageForResponse(all["doc_language"]),
-		RulesSupplement: all["rules_supplement"],
+		RulesSupplement:                  all["rules_supplement"],
+		SessionToolLoopMaxRoundsIngest:   mcp.SessionToolLoopMaxRoundsForResponse(all[mcp.ConfigSessionToolLoopMaxRoundsIngest], "ingest"),
+		SessionToolLoopMaxRoundsQA:       mcp.SessionToolLoopMaxRoundsForResponse(all[mcp.ConfigSessionToolLoopMaxRoundsQA], "qa"),
+		SessionToolLoopMaxRoundsOrganize: mcp.SessionToolLoopMaxRoundsForResponse(all[mcp.ConfigSessionToolLoopMaxRoundsOrganize], "organize"),
+		SessionToolLoopMaxCallsPerRound:  mcp.SessionToolLoopMaxCallsForResponse(all[mcp.ConfigSessionToolLoopMaxCallsPerRound]),
 	})
 }
 
@@ -127,6 +135,10 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"ui_language":      true,
 		"doc_language":     true,
 		"rules_supplement": true,
+		mcp.ConfigSessionToolLoopMaxRoundsIngest:   true,
+		mcp.ConfigSessionToolLoopMaxRoundsQA:       true,
+		mcp.ConfigSessionToolLoopMaxRoundsOrganize: true,
+		mcp.ConfigSessionToolLoopMaxCallsPerRound:  true,
 	}
 
 	for key, raw := range req {
@@ -172,6 +184,20 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if key == "rules_supplement" {
 			if err := validateRulesSupplement(value); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if key == mcp.ConfigSessionToolLoopMaxRoundsIngest ||
+			key == mcp.ConfigSessionToolLoopMaxRoundsQA ||
+			key == mcp.ConfigSessionToolLoopMaxRoundsOrganize {
+			if _, err := mcp.ParseToolLoopMaxRounds(value); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if key == mcp.ConfigSessionToolLoopMaxCallsPerRound {
+			if _, err := mcp.ParseToolLoopMaxCallsPerRound(value); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}

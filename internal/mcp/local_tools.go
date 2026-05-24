@@ -72,11 +72,11 @@ func BuiltinToolDefinitionsForMode(mode string) []Tool {
 func ToolLoopConfigForMode(mode string) llm.ToolLoopConfig {
 	switch mode {
 	case "qa":
-		return llm.ToolLoopConfig{MaxRounds: 3, MaxToolCallsPerRound: 4}
-	case "organize":
 		return llm.ToolLoopConfig{MaxRounds: 6, MaxToolCallsPerRound: 4}
+	case "organize":
+		return llm.ToolLoopConfig{MaxRounds: 12, MaxToolCallsPerRound: 4}
 	default:
-		return llm.ToolLoopConfig{MaxRounds: 4, MaxToolCallsPerRound: 4}
+		return llm.ToolLoopConfig{MaxRounds: 8, MaxToolCallsPerRound: 4}
 	}
 }
 

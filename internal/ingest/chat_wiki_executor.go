@@ -177,7 +177,7 @@ func RunSessionChatToolLoop(
 		return "", fmt.Errorf("LLM client is nil")
 	}
 	if cfg.MaxRounds <= 0 {
-		cfg = llm.ToolLoopConfig{MaxRounds: 4, MaxToolCallsPerRound: 4}
+		cfg = llm.ToolLoopConfig{MaxRounds: 8, MaxToolCallsPerRound: 4}
 	}
 	if cfg.MaxToolCallsPerRound <= 0 {
 		cfg.MaxToolCallsPerRound = 4

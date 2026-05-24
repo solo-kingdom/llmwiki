@@ -89,6 +89,15 @@ const zh = {
   "settings.jobs.fallback_current": "当前回退",
   "settings.jobs.no_model_selected": "尚未在对话中选择 Provider 和 Model",
 
+  "settings.tool_loop.title": "对话工具循环",
+  "settings.tool_loop.desc": "控制 Chat Session 中 LLM 多轮工具调用的上限，超出后会报错或降级",
+  "settings.tool_loop.max_rounds_ingest": "摄入模式最大轮次",
+  "settings.tool_loop.max_rounds_qa": "问答模式最大轮次",
+  "settings.tool_loop.max_rounds_organize": "整理模式最大轮次",
+  "settings.tool_loop.max_calls_per_round": "每轮最大工具调用次数",
+  "settings.tool_loop.max_rounds_hint": "范围 1–32",
+  "settings.tool_loop.max_calls_hint": "范围 1–16",
+
   "settings.mcp.title": "MCP 服务器",
   "settings.mcp.desc": "全局 MCP 客户端配置（JSON 格式）",
   "settings.mcp.check_connection": "检查连接",

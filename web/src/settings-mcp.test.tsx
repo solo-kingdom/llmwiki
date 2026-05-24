@@ -32,6 +32,10 @@ vi.mock("@/lib/api", () => ({
   checkAllProviderInstances: vi.fn().mockResolvedValue({ instances: [] }),
   checkProviderInstance: vi.fn(),
   checkMCPStatus: vi.fn().mockResolvedValue({ servers: [] }),
+  getWorkspaceRuleFiles: vi.fn().mockResolvedValue({
+    purpose_preview: "",
+    rules_preview: "",
+  }),
 }))
 
 describe("SettingsPage MCP JSON", () => {
@@ -105,6 +109,14 @@ describe("SettingsPage MCP JSON", () => {
         mcp_servers_json: valid,
       })
     })
+  })
+
+  it("renders tool loop settings with defaults", () => {
+    render(<SettingsPage />)
+    expect(
+      (screen.getByTestId("tool-loop-max-rounds-organize") as HTMLInputElement)
+        .value,
+    ).toBe("12")
   })
 
   it("runs MCP status check", async () => {

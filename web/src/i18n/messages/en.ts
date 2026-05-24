@@ -92,6 +92,15 @@ const en: Record<MessageKey, string> = {
   "settings.jobs.fallback_current": "Current fallback",
   "settings.jobs.no_model_selected": "No Provider and Model selected in chat yet",
 
+  "settings.tool_loop.title": "Chat Tool Loop",
+  "settings.tool_loop.desc": "Limits multi-round tool calling in chat sessions; exceeding the limit triggers an error or fallback",
+  "settings.tool_loop.max_rounds_ingest": "Ingest mode max rounds",
+  "settings.tool_loop.max_rounds_qa": "Q&A mode max rounds",
+  "settings.tool_loop.max_rounds_organize": "Organize mode max rounds",
+  "settings.tool_loop.max_calls_per_round": "Max tool calls per round",
+  "settings.tool_loop.max_rounds_hint": "Range 1–32",
+  "settings.tool_loop.max_calls_hint": "Range 1–16",
+
   "settings.mcp.title": "MCP Servers",
   "settings.mcp.desc": "Global MCP client configuration (JSON format)",
   "settings.mcp.check_connection": "Check connection",

@@ -132,6 +132,10 @@ export interface Settings {
   ui_language: string
   doc_language: string
   rules_supplement?: string
+  session_tool_loop_max_rounds_ingest?: number
+  session_tool_loop_max_rounds_qa?: number
+  session_tool_loop_max_rounds_organize?: number
+  session_tool_loop_max_calls_per_round?: number
 }
 
 export interface WorkspaceRuleFilesPreview {

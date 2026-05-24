@@ -882,6 +882,117 @@ export function SettingsPage() {
 
         <Card>
           <CardHeader>
+            <CardTitle>{t("settings.tool_loop.title")}</CardTitle>
+            <CardDescription>{t("settings.tool_loop.desc")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium">
+                  {t("settings.tool_loop.max_rounds_ingest")}
+                </label>
+                <p className="text-xs text-muted-foreground mb-1">
+                  {t("settings.tool_loop.max_rounds_hint")}
+                </p>
+                <Input
+                  type="number"
+                  min={1}
+                  max={32}
+                  data-testid="tool-loop-max-rounds-ingest"
+                  value={
+                    mergedForm.session_tool_loop_max_rounds_ingest ??
+                    (Number(settings?.session_tool_loop_max_rounds_ingest) || 8)
+                  }
+                  onChange={(e) =>
+                    set(
+                      "session_tool_loop_max_rounds_ingest",
+                      parseInt(e.target.value, 10) || 8,
+                    )
+                  }
+                  className="mt-1 max-w-xs"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">
+                  {t("settings.tool_loop.max_rounds_qa")}
+                </label>
+                <p className="text-xs text-muted-foreground mb-1">
+                  {t("settings.tool_loop.max_rounds_hint")}
+                </p>
+                <Input
+                  type="number"
+                  min={1}
+                  max={32}
+                  data-testid="tool-loop-max-rounds-qa"
+                  value={
+                    mergedForm.session_tool_loop_max_rounds_qa ??
+                    (Number(settings?.session_tool_loop_max_rounds_qa) || 6)
+                  }
+                  onChange={(e) =>
+                    set(
+                      "session_tool_loop_max_rounds_qa",
+                      parseInt(e.target.value, 10) || 6,
+                    )
+                  }
+                  className="mt-1 max-w-xs"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">
+                  {t("settings.tool_loop.max_rounds_organize")}
+                </label>
+                <p className="text-xs text-muted-foreground mb-1">
+                  {t("settings.tool_loop.max_rounds_hint")}
+                </p>
+                <Input
+                  type="number"
+                  min={1}
+                  max={32}
+                  data-testid="tool-loop-max-rounds-organize"
+                  value={
+                    mergedForm.session_tool_loop_max_rounds_organize ??
+                    (Number(settings?.session_tool_loop_max_rounds_organize) || 12)
+                  }
+                  onChange={(e) =>
+                    set(
+                      "session_tool_loop_max_rounds_organize",
+                      parseInt(e.target.value, 10) || 12,
+                    )
+                  }
+                  className="mt-1 max-w-xs"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">
+                  {t("settings.tool_loop.max_calls_per_round")}
+                </label>
+                <p className="text-xs text-muted-foreground mb-1">
+                  {t("settings.tool_loop.max_calls_hint")}
+                </p>
+                <Input
+                  type="number"
+                  min={1}
+                  max={16}
+                  data-testid="tool-loop-max-calls-per-round"
+                  value={
+                    mergedForm.session_tool_loop_max_calls_per_round ??
+                    (Number(settings?.session_tool_loop_max_calls_per_round) || 4)
+                  }
+                  onChange={(e) =>
+                    set(
+                      "session_tool_loop_max_calls_per_round",
+                      parseInt(e.target.value, 10) || 4,
+                    )
+                  }
+                  className="mt-1 max-w-xs"
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <div className="flex items-center justify-between gap-4">
               <div>
                 <CardTitle>MCP Servers</CardTitle>

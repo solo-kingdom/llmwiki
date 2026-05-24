@@ -496,7 +496,7 @@ func (a *API) streamAssistantReply(
 		})
 	}
 
-	cfg := mcp.ToolLoopConfigForMode(session.Mode)
+	cfg := mcp.ToolLoopConfigForModeFromStore(session.Mode, a.db)
 	temp := mcp.ToolTemperatureForMode(session.Mode)
 	tokens := mcp.ToolMaxTokensForMode(session.Mode)
 	finalText, err := ingest.RunSessionChatToolLoop(ctx, client, executor, msgs, tools, temp, tokens, cfg, toolHandler, session.Mode, recorder)

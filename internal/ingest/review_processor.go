@@ -144,7 +144,11 @@ func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.In
 
 		files, err = p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
 		if err != nil {
-			return p.failReviewApplyFailed(reviewID, job.ID, classifyPipelineError(err), err)
+			code := classifyPipelineError(err)
+			return p.failReviewApplyFailed(reviewID, job.ID, code, err)
+		}
+		if len(files) == 0 {
+			return p.failReviewApplyFailed(reviewID, job.ID, "no_wiki_files_written", errNoWikiFilesWritten)
 		}
 
 		commitMsg := vcs.BuildCommitMessage(
@@ -174,7 +178,11 @@ func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.In
 	} else {
 		files, err = p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
 		if err != nil {
-			return p.failReviewApplyFailed(reviewID, job.ID, classifyPipelineError(err), err)
+			code := classifyPipelineError(err)
+			return p.failReviewApplyFailed(reviewID, job.ID, code, err)
+		}
+		if len(files) == 0 {
+			return p.failReviewApplyFailed(reviewID, job.ID, "no_wiki_files_written", errNoWikiFilesWritten)
 		}
 		p.indexGeneratedWikiFiles(files, job.ID)
 	}

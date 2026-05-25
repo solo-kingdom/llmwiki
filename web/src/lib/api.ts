@@ -228,6 +228,12 @@ export function listIngestJobs(limit = 50): Promise<IngestJob[]> {
   return request<IngestJob[]>(`/api/v1/ingest/jobs/?limit=${limit}`)
 }
 
+export function getIngestJob(id: string): Promise<IngestJobResponse> {
+  return request<IngestJobResponse>(
+    `/api/v1/ingest/jobs/${encodeURIComponent(id)}`,
+  )
+}
+
 export function getIngestJobEvents(
   id: string,
   limit = 500,

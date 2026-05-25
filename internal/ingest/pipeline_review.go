@@ -153,6 +153,15 @@ func (p *Pipeline) generateFromPlan(ctx context.Context, name, content, analysis
 	}
 
 	blocks := parseFileBlocksWithContent(result)
+	blocks, adjustments, normErr := normalizeWikiFileBlocks(blocks)
+	if normErr != nil {
+		return nil, normErr
+	}
+	if len(adjustments) > 0 && p.recorder != nil {
+		p.recorder.Record("apply_files", "warn", "normalized FILE paths", map[string]any{
+			"adjustments": adjustments,
+		})
+	}
 	for path := range blocks {
 		p.lockMgr.Lock(path)
 		p.lockMgr.Unlock(path)

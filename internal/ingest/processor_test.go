@@ -108,6 +108,7 @@ func TestClassifyPipelineError(t *testing.T) {
 		{errors.New("unsupported format: binary"), "unsupported_format"},
 		{errors.New("analysis: something went wrong"), "analysis_failed"},
 		{errors.New("generation: out of tokens"), "generation_failed"},
+		{errNoWikiFilesWritten, "no_wiki_files_written"},
 		{errors.New("send request: Post \"/chat/completions\": unsupported protocol scheme \"\""), "llm_config_invalid"},
 		{errors.New("provider base URL is not configured"), "llm_config_invalid"},
 		{errors.New("unknown error"), "pipeline_error"},
@@ -134,6 +135,7 @@ func TestRemediationForCode(t *testing.T) {
 		{"unsupported_format", "convert the file to a supported format before uploading"},
 		{"analysis_failed", "the LLM pipeline encountered an error; check the job error message and server logs"},
 		{"generation_failed", "the LLM pipeline encountered an error; check the job error message and server logs"},
+		{"no_wiki_files_written", "the model produced FILE blocks but none were written; replan or check job logs for invalid paths"},
 		{"pipeline_error", ""},
 		{"unknown", ""},
 	}

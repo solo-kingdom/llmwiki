@@ -184,6 +184,9 @@ const zh = {
   "chat.review.view_diff": "查看变更",
   "chat.review.no_diff": "git 仓库未初始化，无法查看 diff。请运行 llmwiki init 补全版本控制。",
   "chat.review.apply_success": "Wiki 页面已成功更新。",
+  "chat.review.apply_success_count": "已成功写入 {count} 个 wiki 页面。",
+  "chat.review.apply_failed_zero_pages":
+    "归档执行未写入任何 wiki 页面。请重新规划或查看任务日志中的路径与错误信息。",
   "chat.delete_session": "删除会话",
   "chat.new_session": "新建会话",
   "chat.archive_requires_user": "至少需要一条用户消息",

@@ -4,11 +4,11 @@ import { MarkdownContent } from "@/components/MarkdownContent"
 import type { MessageKey } from "@/i18n"
 import { navigateTo, timelineCommitHref } from "@/lib/wiki-routes"
 import * as api from "@/lib/api"
-import type { IngestReview, IngestReviewPlan } from "@/types"
+import type { IngestJob, IngestReview, IngestReviewPlan } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { CheckCircle2, Eye, Loader2, RefreshCw } from "lucide-react"
+import { AlertCircle, CheckCircle2, Eye, Loader2, RefreshCw } from "lucide-react"
 
 const REVIEW_STATUS_LABEL_KEYS = {
   planning: "review.status.planning",
@@ -28,6 +28,25 @@ function reviewStatusLabel(
   return t(REVIEW_STATUS_LABEL_KEYS[status])
 }
 
+function parseAppliedPageCount(summary: string): number | null {
+  const m = summary.match(/applied\s+(\d+)\s+wiki\s+page/i)
+  if (m) return Number.parseInt(m[1], 10)
+  const zh = summary.match(/写入了\s*(\d+)\s*个/)
+  if (zh) return Number.parseInt(zh[1], 10)
+  return null
+}
+
+function isZeroPageApplyFailure(review: IngestReview, job: IngestJob | null): boolean {
+  if (review.status === "failed") {
+    return job?.error_code === "no_wiki_files_written"
+  }
+  if (review.status === "succeeded" && job?.result_summary) {
+    const n = parseAppliedPageCount(job.result_summary)
+    return n === 0
+  }
+  return false
+}
+
 interface ArchiveReviewCardProps {
   reviewId: string
 }
@@ -35,6 +54,7 @@ interface ArchiveReviewCardProps {
 export function ArchiveReviewCard({ reviewId }: ArchiveReviewCardProps) {
   const t = useT()
   const [review, setReview] = useState<IngestReview | null>(null)
+  const [applyJob, setApplyJob] = useState<IngestJob | null>(null)
   const [plans, setPlans] = useState<IngestReviewPlan[]>([])
   const [planVersion, setPlanVersion] = useState<number | null>(null)
   const [feedback, setFeedback] = useState("")
@@ -45,6 +65,16 @@ export function ArchiveReviewCard({ reviewId }: ArchiveReviewCardProps) {
     try {
       const r = await api.getIngestReview(reviewId)
       setReview(r)
+      if (r.final_job_id) {
+        try {
+          const { job } = await api.getIngestJob(r.final_job_id)
+          setApplyJob(job)
+        } catch {
+          setApplyJob(null)
+        }
+      } else {
+        setApplyJob(null)
+      }
       return r
     } catch (e) {
       setError((e as Error).message)
@@ -87,6 +117,12 @@ export function ArchiveReviewCard({ reviewId }: ArchiveReviewCardProps) {
     () => plans.find((p) => p.version === planVersion) ?? plans[plans.length - 1],
     [plans, planVersion],
   )
+
+  const zeroPageFailure = review ? isZeroPageApplyFailure(review, applyJob) : false
+  const appliedCount =
+    applyJob?.result_summary != null ? parseAppliedPageCount(applyJob.result_summary) : null
+  const showApplySuccess =
+    review?.status === "succeeded" && !zeroPageFailure && (appliedCount == null || appliedCount > 0)
 
   const canFeedback =
     review?.status === "ready_for_review" || review?.status === "failed"
@@ -157,8 +193,11 @@ export function ArchiveReviewCard({ reviewId }: ArchiveReviewCardProps) {
           {reviewStatusLabel(review.status, t)}
         </span>
         {isWorking && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
-        {review.status === "succeeded" && (
+        {showApplySuccess && (
           <CheckCircle2 className="size-4 text-green-600" />
+        )}
+        {(review.status === "failed" || zeroPageFailure) && (
+          <AlertCircle className="size-4 text-destructive" />
         )}
       </div>
 
@@ -186,9 +225,22 @@ export function ArchiveReviewCard({ reviewId }: ArchiveReviewCardProps) {
         )}
       </div>
 
-      {review.status === "succeeded" && (
+      {zeroPageFailure && (
+        <div className="border-t px-3 py-2 text-sm text-destructive" role="alert">
+          <p>{t("chat.review.apply_failed_zero_pages")}</p>
+          {applyJob?.remediation ? (
+            <p className="mt-1 text-xs text-muted-foreground">{applyJob.remediation}</p>
+          ) : null}
+        </div>
+      )}
+
+      {showApplySuccess && (
         <div className="border-t px-3 py-2 text-sm">
-          <p className="text-muted-foreground">{t("chat.review.apply_success")}</p>
+          <p className="text-muted-foreground">
+            {appliedCount != null && appliedCount > 0
+              ? t("chat.review.apply_success_count", { count: appliedCount })
+              : t("chat.review.apply_success")}
+          </p>
           {review.merge_commit_sha ? (
             <Button
               size="sm"
@@ -210,6 +262,11 @@ export function ArchiveReviewCard({ reviewId }: ArchiveReviewCardProps) {
           {error && (
             <p className="text-sm text-destructive" role="alert">
               {error}
+            </p>
+          )}
+          {review.status === "failed" && !zeroPageFailure && applyJob?.error_message && (
+            <p className="text-sm text-destructive" role="alert">
+              {applyJob.error_message}
             </p>
           )}
           {canFeedback && (

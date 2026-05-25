@@ -147,6 +147,7 @@ func lockedFormatInstruction(step PromptStep) string {
 - 输出 wiki 文件必须使用 FILE 块：---FILE: 相对路径
 （markdown 正文）
 ---END FILE---
+- FILE 路径必须以 wiki/ 开头，例如 wiki/entities/Page.md（禁止使用 entity/Page.md 等简写）
 - 回复必须以 ---FILE: 开头，不要任何前言、解释或 markdown 代码围栏包裹整段输出
 - 需要删除文件时：---FILE: path
 ---DELETE---
@@ -210,13 +211,13 @@ func defaultTaskInstructionZH(step PromptStep) string {
 	case StepPlan:
 		return `你是 wiki 摄入规划师。请产出：
 1) 人类可读的计划（Markdown：将改什么、为什么）
-2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/...","action":"create|update","rationale":"..."}]}
+2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/entities/Example.md","action":"create|update","rationale":"..."}]}
 仅规划，不写文件。`
 	case StepPlanOrganize:
 		return `你是 wiki 重组规划师。本次归档来自「整理模式」对话，用户的意图是重组和优化已有 wiki 页面。
 请产出：
 1) 人类可读的计划（Markdown：将改什么、为什么）
-2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/...","action":"update|move|merge","rationale":"..."}]}
+2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/entities/Example.md","action":"update|move|merge","rationale":"..."}]}
 
 重点：
 - 优先使用 update（修改内容/标签/链接）而非 create
@@ -228,7 +229,7 @@ func defaultTaskInstructionZH(step PromptStep) string {
 		return `你是 wiki 知识沉淀规划师。本次归档来自「问答模式」对话，用户通过问答探讨了已有 wiki 内容。
 请产出：
 1) 人类可读的计划（Markdown：将改什么、为什么）
-2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/...","action":"update","rationale":"..."}]}
+2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/concepts/Example.md","action":"update","rationale":"..."}]}
 
 重点：
 - 如果对话中有值得沉淀的新知识或澄清，更新相关 wiki 页面

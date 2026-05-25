@@ -14,11 +14,12 @@ import (
 )
 
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Role              string     `json:"role"`
+	Content           string     `json:"content,omitempty"`
+	ReasoningContent  string     `json:"reasoning_content,omitempty"`
+	ToolCallID        string     `json:"tool_call_id,omitempty"`
+	Name              string     `json:"name,omitempty"`
+	ToolCalls         []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type StreamEvent struct {
@@ -393,7 +394,8 @@ func parseChatResponse(data []byte, provider string) (ChatResult, error) {
 		var resp struct {
 			Choices []struct {
 				Message struct {
-					Content   string `json:"content"`
+					Content          string `json:"content"`
+					ReasoningContent string `json:"reasoning_content"`
 					ToolCalls []struct {
 						ID       string `json:"id"`
 						Type     string `json:"type"`
@@ -420,7 +422,11 @@ func parseChatResponse(data []byte, provider string) (ChatResult, error) {
 				Arguments: tc.Function.Arguments,
 			})
 		}
-		return ChatResult{Content: msg.Content, ToolCalls: calls}, nil
+		return ChatResult{
+			Content:          msg.Content,
+			ReasoningContent: msg.ReasoningContent,
+			ToolCalls:        calls,
+		}, nil
 	}
 }
 

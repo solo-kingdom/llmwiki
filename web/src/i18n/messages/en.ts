@@ -203,6 +203,9 @@ const en: Record<MessageKey, string> = {
   "chat.review.no_diff":
     "Git repository is not initialized — diff unavailable. Run llmwiki init to repair.",
   "chat.review.apply_success": "Wiki pages updated successfully.",
+  "chat.review.apply_success_count": "Successfully wrote {count} wiki page(s).",
+  "chat.review.apply_failed_zero_pages":
+    "Archive apply wrote no wiki pages. Replan or check the job log for path and validation errors.",
   "chat.delete_session": "Delete session",
   "chat.new_session": "New session",
   "chat.archive_requires_user": "At least one user message is required",

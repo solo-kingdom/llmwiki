@@ -6,7 +6,7 @@ Define centralized prompt composition for ingest-related LLM steps, including wo
 ## Requirements
 
 ### Requirement: Centralized prompt composition
-The system SHALL build LLM system prompts for ingest-related steps through a single composer that concatenates segments in a fixed priority order.
+The system SHALL build LLM system prompts for ingest-related steps through a single composer that concatenates segments in a fixed priority order. The composer SHALL include the active `doc_language` language instruction for generation, planning, rollback, merge, and session archive flows that create or reshape wiki text.
 
 #### Scenario: Locked segments cannot be overridden
 - **WHEN** `ComposeSystemPrompt` is called for any step
@@ -28,6 +28,10 @@ The system SHALL build LLM system prompts for ingest-related steps through a sin
 #### Scenario: Settings supplement append
 - **WHEN** `rules_supplement` in `app_config` is non-empty
 - **THEN** the composer SHALL append it after `prompts.yaml` append content and before `doc_language` language instruction
+
+#### Scenario: Document language instruction last
+- **WHEN** `ComposeSystemPrompt` is called with `doc_language=zh` or `doc_language=en`
+- **THEN** the prompt SHALL include the matching document language instruction after workspace rules and settings supplements
 
 ### Requirement: Chinese default step templates
 For `doc_language=zh`, default (non-user) task instructions in composed prompts SHALL be written in Chinese.
@@ -68,3 +72,19 @@ For `session_chat`, default task instructions in composed prompts SHALL define w
 #### Scenario: English session chat defaults
 - **WHEN** `ComposeSystemPrompt(session_chat, ctx)` runs with `doc_language=en`
 - **THEN** the default task portion SHALL express the same wiki grounding rules in English
+
+### Requirement: Document language enforcement for wiki text
+The system SHALL use `doc_language` as the default language for generated wiki text, including ingest generation, session archive planning, organize planning, rollback regeneration, and merge-body output.
+
+#### Scenario: Chinese document language
+- **WHEN** a wiki-generating step runs with `doc_language=zh`
+- **THEN** generated page titles, descriptions, headings, body text, and planning summaries SHALL default to Simplified Chinese
+
+#### Scenario: English document language
+- **WHEN** a wiki-generating step runs with `doc_language=en`
+- **THEN** generated page titles, descriptions, headings, body text, and planning summaries SHALL default to English
+
+#### Scenario: Source terminology preserved
+- **WHEN** source material contains domain terms in another language
+- **THEN** the generated wiki text SHALL preserve those terms when needed as quoted names or parenthetical terms
+- **AND** the surrounding explanatory prose SHALL still follow `doc_language`

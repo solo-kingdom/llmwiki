@@ -63,8 +63,9 @@ func (tc *ToolCall) UnmarshalJSON(data []byte) error {
 
 // ChatResult is a non-streaming completion result.
 type ChatResult struct {
-	Content   string
-	ToolCalls []ToolCall
+	Content          string
+	ReasoningContent string
+	ToolCalls        []ToolCall
 }
 
 // ToolExecutor runs a tool by name and returns text for the model.
@@ -134,13 +135,18 @@ func RunToolLoop(
 			return result.Content, nil
 		}
 
-		// Append assistant message with tool calls (OpenAI-style)
-		msgs = append(msgs, Message{Role: "assistant", Content: result.Content, ToolCalls: result.ToolCalls})
-
 		calls := result.ToolCalls
 		if len(calls) > cfg.MaxToolCallsPerRound {
 			calls = calls[:cfg.MaxToolCallsPerRound]
 		}
+
+		// Append assistant message with only tool calls we will execute (OpenAI pairing).
+		msgs = append(msgs, Message{
+			Role:             "assistant",
+			Content:          result.Content,
+			ReasoningContent: result.ReasoningContent,
+			ToolCalls:        calls,
+		})
 		for _, tc := range calls {
 			var args map[string]interface{}
 			if tc.Arguments != "" {

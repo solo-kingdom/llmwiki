@@ -243,7 +243,11 @@ func RunSessionChatToolLoop(
 		if len(result.ToolCalls) == 0 {
 			// organize mode round 0: retry once with a nudge if no tools called
 			if mode == "organize" && round == 0 && useTools {
-				msgs = append(msgs, llm.Message{Role: "assistant", Content: result.Content})
+				msgs = append(msgs, llm.Message{
+					Role:             "assistant",
+					Content:          result.Content,
+					ReasoningContent: result.ReasoningContent,
+				})
 				msgs = append(msgs, llm.Message{Role: "user", Content: "请先调用 structure 和 audit 工具来诊断 wiki 的状况，然后再给出建议。"})
 				result2, err2 := client.Chat(ctx, msgs, tools, temperature, maxTokens)
 				if err2 != nil {
@@ -261,11 +265,17 @@ func RunSessionChatToolLoop(
 			return result.Content, nil
 		}
 
-		msgs = append(msgs, llm.Message{Role: "assistant", Content: result.Content, ToolCalls: result.ToolCalls})
 		calls := result.ToolCalls
 		if len(calls) > cfg.MaxToolCallsPerRound {
 			calls = calls[:cfg.MaxToolCallsPerRound]
 		}
+
+		msgs = append(msgs, llm.Message{
+			Role:             "assistant",
+			Content:          result.Content,
+			ReasoningContent: result.ReasoningContent,
+			ToolCalls:        calls,
+		})
 		for _, tc := range calls {
 			if onEvent != nil {
 				onEvent("start", tc.Name, truncateForEvent(tc.Arguments, 200))

@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -780,6 +781,8 @@ func classifyPipelineError(err error) string {
 		return "analysis_failed"
 	case strings.Contains(msg, "generation:") || strings.Contains(msg, "generate"):
 		return "generation_failed"
+	case errors.Is(err, errNoWikiFilesWritten) || strings.Contains(msg, "no wiki files written"):
+		return "no_wiki_files_written"
 	default:
 		return "pipeline_error"
 	}
@@ -799,6 +802,8 @@ func remediationForCode(code string) string {
 		return "convert the file to a supported format before uploading"
 	case "analysis_failed", "generation_failed":
 		return "the LLM pipeline encountered an error; check the job error message and server logs"
+	case "no_wiki_files_written":
+		return "the model produced FILE blocks but none were written; replan or check job logs for invalid paths"
 	default:
 		return ""
 	}

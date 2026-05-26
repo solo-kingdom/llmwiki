@@ -6,8 +6,21 @@ const zh = {
   "nav.timeline": "时间线",
   "nav.graph": "图谱",
   "nav.logs": "日志",
+  "nav.help": "帮助",
   "nav.settings": "设置",
   "nav.wiki": "Wiki",
+
+  // Help page
+  "help.title": "帮助",
+  "help.toc.label": "目录",
+  "help.toc.quick_start": "快速开始",
+  "help.toc.core_concepts": "核心理念",
+  "help.toc.workspace": "工作区结构",
+  "help.toc.wiki_organization": "Wiki 组织",
+  "help.toc.web_ui": "Web UI",
+  "help.toc.cli": "CLI",
+  "help.toc.mcp": "MCP",
+  "help.toc.faq": "常见问题",
 
   // Graph
   "graph.title": "知识图谱",

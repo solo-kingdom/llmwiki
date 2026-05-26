@@ -50,6 +50,8 @@ describe("wiki-routes workbench views", () => {
     expect(getWorkbenchViewFromPath("/settings")).toBe("settings")
     expect(getWorkbenchViewFromPath("/timeline")).toBe("timeline")
     expect(getWorkbenchViewFromPath("/logs")).toBe("logs")
+    expect(getWorkbenchViewFromPath("/help")).toBe("help")
+    expect(workbenchViewHref("help")).toBe("/help")
     expect(getWorkbenchViewFromPath("/graph")).toBe("chat")
   })
 })

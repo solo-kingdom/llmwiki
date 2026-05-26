@@ -8,8 +8,21 @@ const en: Record<MessageKey, string> = {
   "nav.timeline": "Timeline",
   "nav.graph": "Graph",
   "nav.logs": "Logs",
+  "nav.help": "Help",
   "nav.settings": "Settings",
   "nav.wiki": "Wiki",
+
+  // Help page
+  "help.title": "Help",
+  "help.toc.label": "Contents",
+  "help.toc.quick_start": "Quick Start",
+  "help.toc.core_concepts": "Core Concepts",
+  "help.toc.workspace": "Workspace",
+  "help.toc.wiki_organization": "Wiki Organization",
+  "help.toc.web_ui": "Web UI",
+  "help.toc.cli": "CLI",
+  "help.toc.mcp": "MCP",
+  "help.toc.faq": "FAQ",
 
   // Graph
   "graph.title": "Knowledge Graph",

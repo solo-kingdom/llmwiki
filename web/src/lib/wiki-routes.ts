@@ -7,6 +7,7 @@ export type WorkbenchView =
   | "jobs"
   | "timeline"
   | "logs"
+  | "help"
   | "settings"
 
 export const ADD_CONTEXT_QUERY = "addContext"
@@ -81,6 +82,8 @@ export function getWorkbenchViewFromPath(pathname: string): WorkbenchView {
       return "timeline"
     case "/logs":
       return "logs"
+    case "/help":
+      return "help"
     default:
       return "chat"
   }
@@ -96,6 +99,8 @@ export function workbenchViewHref(view: WorkbenchView): string {
       return "/timeline"
     case "logs":
       return "/logs"
+    case "help":
+      return "/help"
     default:
       return "/"
   }

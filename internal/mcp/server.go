@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"sync"
 )
@@ -116,6 +117,35 @@ func (s *Server) Run() error {
 	}
 }
 
+func NewHTTPHandler(server *Server) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"jsonrpc":"2.0","error":{"code":-32600,"message":"Method not allowed"}}`, http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req JSONRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(JSONRPCResponse{
+				JSONRPC: "2.0",
+				Error:   &JSONRPCError{Code: -32700, Message: "Parse error"},
+			})
+			return
+		}
+
+		resp := server.handleRequest(&req)
+		if resp == nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+}
+
 func (s *Server) handleRequest(req *JSONRPCRequest) *JSONRPCResponse {
 	switch req.Method {
 	case "initialize":
@@ -149,6 +179,11 @@ func (s *Server) handleInitialize(req *JSONRPCRequest) *JSONRPCResponse {
 				"version": "0.1.0",
 			},
 			"instructions": s.instructions,
+			"_meta": map[string]interface{}{
+				"accessModel":    "rpc-first",
+				"transport":      "http-post",
+				"compatibility":  "First release focuses on RPC access via HTTP POST. Direct Claude Desktop stdio connection is not required.",
+			},
 		},
 	}
 }

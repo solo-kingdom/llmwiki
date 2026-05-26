@@ -28,10 +28,13 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	conn, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_foreign_keys=on")
+	conn, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_foreign_keys=on&_busy_timeout=10000")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
+	// SQLite allows one writer at a time; serialize through a single connection.
+	conn.SetMaxOpenConns(1)
+	conn.SetMaxIdleConns(1)
 
 	// Enable WAL mode and foreign keys
 	if _, err := conn.Exec("PRAGMA journal_mode=WAL"); err != nil {
@@ -41,6 +44,10 @@ func Open(dbPath string) (*DB, error) {
 	if _, err := conn.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
+	if _, err := conn.Exec("PRAGMA busy_timeout=10000"); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("enable busy timeout: %w", err)
 	}
 
 	d := &DB{db: conn}
@@ -66,8 +73,28 @@ func (d *DB) DB() *sql.DB {
 
 // Migrate runs the schema migration.
 func (d *DB) Migrate() error {
-	_, err := d.db.Exec(schemaSQL)
-	return err
+	if _, err := d.db.Exec(schemaSQL); err != nil {
+		return err
+	}
+	if err := d.migrateIngestQueue(); err != nil {
+		return err
+	}
+	if err := d.migrateSessionReferences(); err != nil {
+		return err
+	}
+	if err := d.migrateMessageExclude(); err != nil {
+		return err
+	}
+	if err := MigrateAddSessionMode(d); err != nil {
+		return err
+	}
+	if err := d.migrateSessionMessageEvents(); err != nil {
+		return err
+	}
+	if err := d.migrateReviewMergeCommit(); err != nil {
+		return err
+	}
+	return d.migrateFTSTrigram()
 }
 
 // Ensure embed is used

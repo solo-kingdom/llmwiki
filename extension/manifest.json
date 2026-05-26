@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "LLM Wiki Web Clipper",
+  "version": "0.1.0",
+  "description": "剪藏网页正文为 Markdown 并提交到 LLM Wiki",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "剪藏到 LLM Wiki"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "type": "module",
+      "run_at": "document_idle"
+    }
+  ]
+}

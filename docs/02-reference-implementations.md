@@ -1,19 +1,23 @@
 # 参考实现分析
 
-## 两个实现概览
+> 另见: [LLM-Wiki-Skilled 详细分析](reference/llm-wiki-skilled.md) · [OmegaWiki 详细分析](reference/omegawiki.md) · [Wiki 目录组织深度分析](../docs/12-wiki-directory-organization.md)
+
+## 四个实现概览
 
 ```
 Karpathy LLM Wiki 模式
         │
-    ┌───┴───┐
-    ▼       ▼
-lucasastorian/llmwiki          nashsu/llm_wiki
-├─ Python (FastAPI)            ├─ Rust (Tauri v2)
-├─ Web + MCP 工具               ├─ 桌面应用
-├─ SQLite + FTS5               ├─ 文件系统 + LanceDB
-├─ 定位: Claude 的 Wiki 后端    ├─ 定位: 独立知识管理应用
-└─ 核心: VaultFS 抽象           └─ 核心: 知识图谱 + 社区发现
+    ┌───┼───┬───┐
+    ▼   ▼   ▼   ▼
+llm_wiki    LLM-Wiki-Skilled    llmwiki             OmegaWiki
+(桌面应用)   (Agent Skills)      (Web 平台)          (研究平台)
+├─ Rust     ├─ 纯约定           ├─ Python/Next.js   ├─ Claude Code Skills
+├─ Tauri v2 ├─ OpenCode Agents  ├─ FastAPI          ├─ 26 个 /command
+├─ 知识图谱  ├─ 最小框架          ├─ MCP 工具          ├─ 9 种实体类型
+└─ GUI      └─ Git 原生          └─ SQLite + FTS5    └─ YAML 契约
 ```
+
+以下详细分析两个桌面/Web 导向的实现。LLM-Wiki-Skilled 和 OmegaWiki 的完整分析见独立文档。
 
 ---
 

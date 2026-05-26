@@ -43,8 +43,13 @@ func NewReferenceParser(docs []DocIndexEntry) *ReferenceParser {
 		rp.docsByBase[base] = d.ID
 
 		// Store wiki paths
-		if strings.HasPrefix(d.Path, "/wiki/") {
-			relative := strings.TrimPrefix(d.Path+d.Filename, "/wiki/")
+		if strings.HasPrefix(d.Path, "/wiki") {
+			relative := strings.TrimPrefix(d.Path, "/wiki")
+			relative = strings.TrimPrefix(relative, "/")
+			if relative != "" && !strings.HasSuffix(relative, "/") {
+				relative += "/"
+			}
+			relative += d.Filename
 			rp.docsByWikiPath[strings.ToLower(relative)] = d.ID
 		}
 	}
@@ -78,7 +83,7 @@ func (rp *ReferenceParser) ParseReferences(content, docPath string) []Reference 
 }
 
 // citationRe matches footnote citations.
-var citationRe = regexp.MustCompile(`\[\^\d+\]:\s*(.+)$`)
+var citationRe = regexp.MustCompile(`(?m)\[\^\d+\]:\s*(.+)$`)
 
 func (rp *ReferenceParser) parseCitations(content string) []Reference {
 	var refs []Reference
@@ -110,7 +115,8 @@ func (rp *ReferenceParser) parseCitations(content string) []Reference {
 }
 
 // wikiLinkRe matches markdown links: [text](href)
-var wikiLinkRe = regexp.MustCompile(`(?<!!)\[(?:[^\]]*)\]\(([^)]+)\)`)
+// Note: We filter image links (prefixed with !) in the parsing logic.
+var wikiLinkRe = regexp.MustCompile(`(!?)\[([^\]]*)\]\(([^)]+)\)`)
 
 func (rp *ReferenceParser) parseWikiLinks(content, docPath string) []Reference {
 	// Determine the wiki-relative directory of the source doc
@@ -128,17 +134,23 @@ func (rp *ReferenceParser) parseWikiLinks(content, docPath string) []Reference {
 	var refs []Reference
 	matches := wikiLinkRe.FindAllStringSubmatch(content, -1)
 	for _, match := range matches {
-		if len(match) < 2 {
+		if len(match) < 4 {
 			continue
 		}
-		href := match[1]
+		prefix := match[1] // "!" for images, "" for links
+		href := match[3]
+
+		// Skip image links
+		if prefix == "!" {
+			continue
+		}
 
 		// Skip external links
 		if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") ||
 			strings.HasPrefix(href, "#") || strings.HasPrefix(href, "mailto:") {
 			continue
 		}
-		// Skip image links
+		// Skip image file links
 		for _, ext := range []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"} {
 			if strings.HasSuffix(strings.ToLower(href), ext) {
 				continue

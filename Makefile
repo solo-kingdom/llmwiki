@@ -1,7 +1,7 @@
-.PHONY: build run test lint clean build-web build-go
+.PHONY: build run test lint clean install build-web build-go build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64
 
 # Binary name
-BINARY := llmwiki
+BINARY := lwiki
 
 # Go parameters
 GOCMD := go
@@ -56,11 +56,35 @@ lint:
 tidy:
 	$(GOMOD) tidy
 
+## Cross-compilation targets
+build-linux-amd64:
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINARY)-linux-amd64 ./cmd/llmwiki/
+
+build-linux-arm64:
+	GOOS=linux GOARCH=arm64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINARY)-linux-arm64 ./cmd/llmwiki/
+
+build-darwin-amd64:
+	GOOS=darwin GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINARY)-darwin-amd64 ./cmd/llmwiki/
+
+build-darwin-arm64:
+	GOOS=darwin GOARCH=arm64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINARY)-darwin-arm64 ./cmd/llmwiki/
+
 ## Clean
 clean:
-	rm -f $(BINARY)
+	rm -f $(BINARY) $(BINARY)-linux-amd64 $(BINARY)-linux-arm64 $(BINARY)-darwin-amd64 $(BINARY)-darwin-arm64
 	rm -f coverage.out coverage.html
 	rm -rf $(WEB_BUILD)
+
+## Install
+PREFIX ?= $(HOME)/.local
+
+install: build
+	install -d $(PREFIX)/bin
+	install -m 755 $(BINARY) $(PREFIX)/bin/$(BINARY)
+
+## Uninstall
+uninstall:
+	rm -f $(PREFIX)/bin/$(BINARY)
 
 ## Help
 help:
@@ -75,3 +99,5 @@ help:
 	@echo "  lint        - Run golangci-lint"
 	@echo "  tidy        - Tidy Go modules"
 	@echo "  clean       - Remove build artifacts"
+	@echo "  install     - Install binary to PREFIX/bin (default: ~/.local/bin)"
+	@echo "  uninstall   - Remove installed binary"

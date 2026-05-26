@@ -32,9 +32,16 @@ go.work.sum
 
 # Web frontend
 web/node_modules/
-web/dist/
+web/dist/*
+!web/dist/.gitkeep
+
+# Chrome extension
+extension/node_modules/
+extension/dist/
 
 # Build output
-llmwiki
+/llmwiki
 *.test
 coverage.*
+
+/lwiki

@@ -1,0 +1,24 @@
+{
+  "name": "llmwiki-web-clipper",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "turndown": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.320",
+    "@types/node": "^24.12.3",
+    "@types/turndown": "^5.0.5",
+    "jsdom": "^26.1.0",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4"
+  }
+}

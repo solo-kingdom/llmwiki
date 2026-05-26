@@ -168,3 +168,40 @@ func (d *DB) PropagateStaleness(docID string) error {
 		) AND stale_since IS NULL`, docID)
 	return err
 }
+
+// RefEdge represents a reference edge for bulk operations.
+type RefEdge struct {
+	SourceID string
+	TargetID string
+	RefType  string
+	Page     *int
+}
+
+// ReplaceReferencesInTx atomically replaces all references for a source document.
+// Deletes old references and inserts new ones within a single transaction.
+func (d *DB) ReplaceReferencesInTx(sourceDocID string, edges []RefEdge) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete old references
+	if _, err := tx.Exec("DELETE FROM document_references WHERE source_document_id = ?", sourceDocID); err != nil {
+		return fmt.Errorf("delete old refs: %w", err)
+	}
+
+	// Insert new references using INSERT OR REPLACE for idempotency
+	for _, e := range edges {
+		_, err := tx.Exec(`
+			INSERT OR REPLACE INTO document_references
+			(source_document_id, target_document_id, reference_type, page)
+			VALUES (?, ?, ?, ?)`,
+			e.SourceID, e.TargetID, e.RefType, e.Page)
+		if err != nil {
+			return fmt.Errorf("insert ref (%s → %s, %s): %w", e.SourceID, e.TargetID, e.RefType, err)
+		}
+	}
+
+	return tx.Commit()
+}

@@ -1,10 +1,10 @@
-// Package watcher provides filesystem monitoring for LLM Wiki.
 package watcher
 
 import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -12,7 +12,6 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// ChangeType indicates the type of filesystem change.
 type ChangeType int
 
 const (
@@ -21,19 +20,23 @@ const (
 	ChangeDeleted
 )
 
-// Change represents a detected filesystem change.
 type Change struct {
 	Path string
 	Type ChangeType
 }
 
-// ChangeHandler is a callback for processing detected changes.
 type ChangeHandler func(changes []Change)
 
-// Watcher monitors a workspace directory for file changes.
+type Indexer interface {
+	IndexFile(relPath string) error
+	UpdateFile(relPath string) error
+	RemoveFile(relPath string) error
+}
+
 type Watcher struct {
 	workspace  string
 	handler    ChangeHandler
+	indexer    Indexer
 	watcher    *fsnotify.Watcher
 	written    map[string]time.Time
 	cooldown   time.Duration
@@ -44,7 +47,6 @@ type Watcher struct {
 	running    bool
 }
 
-// New creates a new file watcher.
 func New(workspace string, handler ChangeHandler) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -65,32 +67,32 @@ func New(workspace string, handler ChangeHandler) (*Watcher, error) {
 			"__pycache__":  true,
 			".venv":       true,
 			"venv":        true,
+			"revert":      true,
 		},
 		done: make(chan struct{}),
 	}, nil
 }
 
-// MarkWritten records a path as recently written by the app itself,
-// preventing the watcher from triggering a re-index loop.
+func (w *Watcher) SetIndexer(indexer Indexer) {
+	w.indexer = indexer
+}
+
 func (w *Watcher) MarkWritten(path string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.written[path] = time.Now()
 }
 
-// Start begins watching the workspace.
 func (w *Watcher) Start() error {
 	if w.running {
 		return nil
 	}
 	w.running = true
 
-	// Watch workspace recursively
 	if err := w.watcher.Add(w.workspace); err != nil {
 		return err
 	}
 
-	// Add specific subdirectories if they exist
 	for _, sub := range []string{"raw/sources", "wiki"} {
 		path := filepath.Join(w.workspace, sub)
 		if dirExists(path) {
@@ -99,11 +101,15 @@ func (w *Watcher) Start() error {
 	}
 
 	go w.loop()
+
+	if runtime.GOOS == "linux" {
+		go w.periodicRescan()
+	}
+
 	log.Printf("File watcher started on: %s", w.workspace)
 	return nil
 }
 
-// Stop stops watching and cleans up.
 func (w *Watcher) Stop() {
 	if !w.running {
 		return
@@ -111,6 +117,41 @@ func (w *Watcher) Stop() {
 	close(w.done)
 	w.watcher.Close()
 	w.running = false
+}
+
+func (w *Watcher) ProcessChanges(changes []Change) {
+	if w.indexer == nil {
+		if w.handler != nil {
+			w.handler(changes)
+		}
+		return
+	}
+
+	for _, change := range changes {
+		rel, err := filepath.Rel(w.workspace, change.Path)
+		if err != nil {
+			continue
+		}
+
+		switch change.Type {
+		case ChangeCreated:
+			if err := w.indexer.IndexFile(rel); err != nil {
+				log.Printf("IndexFile error for %s: %v", rel, err)
+			}
+		case ChangeModified:
+			if err := w.indexer.UpdateFile(rel); err != nil {
+				log.Printf("UpdateFile error for %s: %v", rel, err)
+			}
+		case ChangeDeleted:
+			if err := w.indexer.RemoveFile(rel); err != nil {
+				log.Printf("RemoveFile error for %s: %v", rel, err)
+			}
+		}
+	}
+
+	if w.handler != nil {
+		w.handler(changes)
+	}
 }
 
 func (w *Watcher) loop() {
@@ -151,15 +192,91 @@ func (w *Watcher) loop() {
 				changes = append(changes, Change{Path: path, Type: ct})
 			}
 			pending = make(map[string]ChangeType)
-			if w.handler != nil {
-				w.handler(changes)
-			}
+			w.ProcessChanges(changes)
 		}
 	}
 }
 
+func (w *Watcher) periodicRescan() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	fileMtimes := make(map[string]time.Time)
+	w.scanDir(fileMtimes)
+
+	for {
+		select {
+		case <-w.done:
+			return
+		case <-ticker.C:
+			w.scanDir(fileMtimes)
+		}
+	}
+}
+
+func (w *Watcher) scanDir(known map[string]time.Time) {
+	current := make(map[string]time.Time)
+
+	filepath.Walk(w.workspace, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			name := info.Name()
+			if name != "" && (w.ignoreDirs[name] || strings.HasPrefix(name, ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(info.Name(), ".") {
+			return nil
+		}
+
+		rel, err := filepath.Rel(w.workspace, path)
+		if err != nil {
+			return nil
+		}
+		current[rel] = info.ModTime()
+		return nil
+	})
+
+	if w.indexer == nil {
+		for rel := range current {
+			known[rel] = current[rel]
+		}
+		return
+	}
+
+	for rel, mtime := range current {
+		prev, exists := known[rel]
+		if !exists {
+			if err := w.indexer.IndexFile(rel); err != nil {
+				log.Printf("Rescan IndexFile %s: %v", rel, err)
+			}
+		} else if mtime.After(prev) {
+			if err := w.indexer.UpdateFile(rel); err != nil {
+				log.Printf("Rescan UpdateFile %s: %v", rel, err)
+			}
+		}
+	}
+
+	for rel := range known {
+		if _, exists := current[rel]; !exists {
+			if err := w.indexer.RemoveFile(rel); err != nil {
+				log.Printf("Rescan RemoveFile %s: %v", rel, err)
+			}
+		}
+	}
+
+	for k := range known {
+		delete(known, k)
+	}
+	for k, v := range current {
+		known[k] = v
+	}
+}
+
 func (w *Watcher) shouldIgnore(path string) bool {
-	// Check self-write cooldown
 	w.mu.Lock()
 	ts, ok := w.written[path]
 	if ok && time.Since(ts) < w.cooldown {
@@ -168,7 +285,6 @@ func (w *Watcher) shouldIgnore(path string) bool {
 	}
 	w.mu.Unlock()
 
-	// Check ignored directories
 	rel, err := filepath.Rel(w.workspace, path)
 	if err != nil {
 		return true

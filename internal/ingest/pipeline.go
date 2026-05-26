@@ -1,147 +1,411 @@
-// Package ingest provides the ingest pipeline for LLM Wiki.
 package ingest
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
+	"github.com/solo-kingdom/llmwiki/internal/mcp"
+	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
-// Pipeline orchestrates the two-step ingest process.
 type Pipeline struct {
-	workspace string
-	llmClient *llm.Client
+	workspace   string
+	targetDir   string // optional: when set, wiki/ reads and writes go to this directory instead of workspace
+	db          *sqlite.DB // database for local tool execution
+	llmClient   *llm.Client
+	lockMgr     *PageLockManager
+	recorder    JobRecorder
+	mcpExecutor *pipelineMCPExecutor
+	toolLoopCfg llm.ToolLoopConfig
+	docLang          string // "zh" or "en", controls generation language
+	rulesSupplement  string
+	forceOverwrite   bool
 }
 
-// CacheEntry represents a cached ingest result.
 type CacheEntry struct {
-	SourceName  string
-	SHA256      string
-	WrittenFiles []string
+	SourceName    string   `json:"source_name"`
+	SHA256        string   `json:"sha256"`
+	ContentSHA256 string   `json:"content_sha256,omitempty"`
+	WrittenFiles  []string `json:"written_files"`
 }
 
-// NewPipeline creates a new ingest pipeline.
+type cacheFile struct {
+	Entries map[string]*CacheEntry `json:"entries"`
+}
+
 func NewPipeline(workspace string, llmClient *llm.Client) *Pipeline {
 	return &Pipeline{
 		workspace: workspace,
 		llmClient: llmClient,
+		lockMgr:   NewPageLockManager(),
 	}
 }
 
-// Ingest processes a source file through the two-step pipeline.
-func (p *Pipeline) Ingest(ctx context.Context, sourcePath string) ([]string, error) {
-	// Step 0: Check SHA256 cache
-	cached, err := p.checkCache(sourcePath)
-	if err == nil && cached != nil {
-		return cached.WrittenFiles, nil
+// NewPipelineWithDB creates a pipeline with database access for local tool execution.
+func NewPipelineWithDB(workspace string, db *sqlite.DB, llmClient *llm.Client) *Pipeline {
+	return &Pipeline{
+		workspace: workspace,
+		db:        db,
+		llmClient: llmClient,
+		lockMgr:   NewPageLockManager(),
 	}
+}
 
-	// Step 0.5: Read source content
+// SetDB sets or updates the database reference for local tool execution.
+func (p *Pipeline) SetDB(db *sqlite.DB) {
+	p.db = db
+}
+
+// SetLLMClient updates the LLM client used for subsequent pipeline runs.
+func (p *Pipeline) SetLLMClient(client *llm.Client) {
+	p.llmClient = client
+}
+
+// SetJobRecorder sets the recorder for the current job execution.
+func (p *Pipeline) SetJobRecorder(rec JobRecorder) {
+	p.recorder = rec
+}
+
+// Recorder returns the active job recorder, if any.
+func (p *Pipeline) Recorder() JobRecorder {
+	return p.recorder
+}
+
+// SetMCPRouter attaches an MCP tool router for job tool-call loops.
+func (p *Pipeline) SetMCPRouter(router *mcp.Router) {
+	if router == nil || !router.HasJobServers() {
+		p.mcpExecutor = nil
+		return
+	}
+	p.mcpExecutor = newPipelineMCPExecutor(router)
+}
+
+// SetToolLoopConfig overrides default tool-loop limits.
+func (p *Pipeline) SetToolLoopConfig(cfg llm.ToolLoopConfig) {
+	p.toolLoopCfg = cfg
+}
+
+// SetDocLanguage sets the document output language for generation prompts.
+func (p *Pipeline) SetDocLanguage(lang string) {
+	p.docLang = lang
+}
+
+// SetRulesSupplement sets append-only rules from Settings (rules_supplement).
+func (p *Pipeline) SetRulesSupplement(s string) {
+	p.rulesSupplement = s
+}
+
+// SetForceOverwrite skips merge protection and overwrites existing wiki pages.
+func (p *Pipeline) SetForceOverwrite(force bool) {
+	p.forceOverwrite = force
+}
+
+// SetTargetDir sets an alternative directory for wiki/ reads and writes.
+// When set, wiki files are read from and written to targetDir/wiki/ instead
+// of the main workspace. This is used for worktree-based parallel execution.
+func (p *Pipeline) SetTargetDir(dir string) {
+	p.targetDir = dir
+}
+
+// wikiDir returns the directory where wiki files are read from and written to.
+func (p *Pipeline) wikiDir() string {
+	if p.targetDir != "" {
+		return filepath.Join(p.targetDir, "wiki")
+	}
+	return filepath.Join(p.workspace, "wiki")
+}
+
+// effectiveWorkspace returns the directory that should be used for file operations.
+// In worktree mode, this returns the targetDir; otherwise the main workspace.
+func (p *Pipeline) effectiveWorkspace() string {
+	if p.targetDir != "" {
+		return p.targetDir
+	}
+	return p.workspace
+}
+
+func (p *Pipeline) applyWikiBlocksOpts() *ApplyWikiBlocksOpts {
+	return &ApplyWikiBlocksOpts{
+		ForceOverwrite: p.forceOverwrite,
+		Merge: &MergeContext{
+			LLMClient: p.llmClient,
+			DocLang:   p.docLang,
+			Recorder:  p.recorder,
+		},
+	}
+}
+
+func (p *Pipeline) promptCtx() PromptContext {
+	return PromptContext{
+		Workspace:       p.workspace,
+		DocLang:         p.docLang,
+		RulesSupplement: p.rulesSupplement,
+	}
+}
+
+func (p *Pipeline) Ingest(ctx context.Context, sourcePath string) ([]string, error) {
 	content, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return nil, fmt.Errorf("read source: %w", err)
 	}
 
-	// Step 1: Analysis
-	analysis, err := p.analyze(ctx, filepath.Base(sourcePath), string(content))
+	normalized, err := NormalizeUpload(filepath.Base(sourcePath), content, "file")
 	if err != nil {
+		return nil, fmt.Errorf("normalize: %w", err)
+	}
+
+	absPath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		absPath = sourcePath
+	}
+
+	return p.ingestNormalized(ctx, normalized, []string{absPath})
+}
+
+func (p *Pipeline) IngestNormalized(ctx context.Context, source *NormalizedSource) ([]string, error) {
+	return p.ingestNormalized(ctx, source, nil)
+}
+
+func (p *Pipeline) ingestNormalized(ctx context.Context, source *NormalizedSource, legacyKeys []string) ([]string, error) {
+	if source == nil {
+		return nil, fmt.Errorf("normalized source is nil")
+	}
+	if p.llmClient == nil {
+		return nil, fmt.Errorf("LLM client not configured")
+	}
+
+	name := filepath.Base(source.CanonicalPath)
+	content := string(source.Content)
+
+	if p.recorder != nil {
+		p.recorder.Record("normalize", "complete", "source normalized", map[string]any{
+			"canonical_path": source.CanonicalPath,
+			"input_type":     string(source.Kind),
+		})
+	}
+
+	if cached, err := p.lookupCacheForSource(source, legacyKeys); err == nil && cached != nil {
+		if p.recorder != nil {
+			p.recorder.Record("cache", "hit", "cache hit", map[string]any{
+				"canonical_path": source.CanonicalPath,
+				"paths_written":  cached.WrittenFiles,
+			})
+		}
+		return cached.WrittenFiles, nil
+	}
+
+	analysis, err := p.analyze(ctx, name, content)
+	if err != nil {
+		if p.recorder != nil {
+			p.recorder.Record("analysis", "error", err.Error(), nil)
+		}
 		return nil, fmt.Errorf("analysis: %w", err)
 	}
 	_ = analysis
 
-	// Step 2: Generation
-	files, err := p.generate(ctx, filepath.Base(sourcePath), string(content), analysis)
+	files, err := p.generate(ctx, name, content, analysis)
 	if err != nil {
+		if p.recorder != nil {
+			p.recorder.Record("generation", "error", err.Error(), nil)
+		}
 		return nil, fmt.Errorf("generation: %w", err)
 	}
 
-	// Step 3: Write files and save cache
-	p.saveCache(sourcePath, files)
+	if p.recorder != nil {
+		p.recorder.Record("apply_files", "complete", "wiki files applied", map[string]any{
+			"paths_written": files,
+		})
+	}
+
+	p.saveCacheForSource(source, files)
 
 	return files, nil
 }
 
+func (p *Pipeline) LockManager() *PageLockManager {
+	return p.lockMgr
+}
+
 func (p *Pipeline) analyze(ctx context.Context, name, content string) (string, error) {
-	messages := []llm.Message{
-		{Role: "system", Content: "You are a knowledge analyst. Analyze the provided source document. Identify key entities, concepts, arguments, and connections."},
-		{Role: "user", Content: fmt.Sprintf("Analyze this source: **%s**\n\n---\n\n%s", name, content)},
-	}
-
-	ch, err := p.llmClient.StreamChat(ctx, messages, 0.1, 4096)
-	if err != nil {
-		return "", err
-	}
-
-	var result string
-	for event := range ch {
-		if event.Type == "token" {
-			result += event.Content
-		} else if event.Type == "error" {
-			return "", event.Error
+	systemMsg := ComposeSystemPrompt(StepAnalysis, p.promptCtx())
+	userBody := fmt.Sprintf("源文件：**%s**\n\n---\n\n%s", name, content)
+	if refs := ParseReferencedWikiPagesFromArchive(content); len(refs) > 0 {
+		if note := FormatReferencedPagesForAnalysis(p.docLang, refs); note != "" {
+			userBody = note + "\n\n" + userBody
 		}
 	}
-	return result, nil
+	messages := []llm.Message{
+		{Role: "system", Content: systemMsg},
+		{Role: "user", Content: userBody},
+	}
+
+	const temp = 0.1
+	const maxTok = 4096
+	return p.runLLMStep(ctx, "analysis", messages, temp, maxTok)
 }
 
 func (p *Pipeline) generate(ctx context.Context, name, content, analysis string) ([]string, error) {
-	prompt := fmt.Sprintf(`Source: **%s**
+	prompt := fmt.Sprintf(`源文件：**%s**
 
-Analysis (context only):
+分析（仅供参考）：
 %s
 
-Original Content:
+原始内容：
 %s
 
-Generate wiki pages in FILE block format.`, name, analysis, content)
+请按 FILE 块格式生成 wiki 页面。`, name, analysis, content)
+
+	systemMsg := ComposeSystemPrompt(StepGeneration, p.promptCtx())
 
 	messages := []llm.Message{
-		{Role: "system", Content: "You are a wiki generator. Output FILE blocks: ---FILE: path\ncontent\n---END FILE---"},
+		{Role: "system", Content: systemMsg},
 		{Role: "user", Content: prompt},
 	}
 
-	ch, err := p.llmClient.StreamChat(ctx, messages, 0.1, 8192)
+	const temp = 0.1
+	const maxTok = 8192
+	result, err := p.runLLMStep(ctx, "generation", messages, temp, maxTok)
 	if err != nil {
 		return nil, err
 	}
 
+	blocks := parseFileBlocksWithContent(result)
+	blocks, adjustments, normErr := normalizeWikiFileBlocks(blocks)
+	if normErr != nil {
+		return nil, normErr
+	}
+	if len(adjustments) > 0 && p.recorder != nil {
+		p.recorder.Record("apply_files", "warn", "normalized FILE paths", map[string]any{
+			"adjustments": adjustments,
+		})
+	}
+
+	for path := range blocks {
+		p.lockMgr.Lock(path)
+		p.lockMgr.Unlock(path)
+	}
+
+	return ApplyWikiBlocks(ctx, p.effectiveWorkspace(), blocks, p.applyWikiBlocksOpts())
+}
+
+func (p *Pipeline) cachePath() string {
+	return filepath.Join(p.workspace, ".llmwiki", "cache.json")
+}
+
+// defaultToolLoopConfigForStep returns step-appropriate tool loop limits.
+func defaultToolLoopConfigForStep(step PromptStep) llm.ToolLoopConfig {
+	switch step {
+	case StepAnalysis, StepPlan, StepPlanOrganize, StepPlanQA:
+		return llm.ToolLoopConfig{MaxRounds: 3, MaxToolCallsPerRound: 3}
+	case StepGeneration:
+		return llm.ToolLoopConfig{MaxRounds: 4, MaxToolCallsPerRound: 3}
+	default:
+		return llm.ToolLoopConfig{MaxRounds: 0, MaxToolCallsPerRound: 0}
+	}
+}
+
+func (p *Pipeline) runLLMStep(ctx context.Context, step string, messages []llm.Message, temp float64, maxTok int) (string, error) {
+	RecordLLMRequest(p.recorder, step, p.llmClient.Model(), llmMessagesForRecord(messages), temp, maxTok)
+	start := time.Now()
+
+	cfg := p.toolLoopCfg
+	if cfg.MaxRounds == 0 {
+		// Resolve step name to PromptStep for config lookup
+		cfg = defaultToolLoopConfigForStep(promptStepForStepName(step))
+	}
+
+	// Build combined tool executor (local + external MCP) when tools are available
+	if cfg.MaxRounds > 0 {
+		exec := NewPipelineToolExecutor(p.workspace, p.db, p.mcpExecutor)
+		tools, toolsErr := exec.ListTools(ctx)
+		if toolsErr == nil && len(tools) > 0 {
+			result, err := llm.RunToolLoop(ctx, p.llmClient, exec, messages, tools, temp, maxTok, cfg)
+			if err == nil {
+				RecordLLMResponse(p.recorder, step, result, time.Since(start))
+				return result, nil
+			}
+			// Tool loop failed, fall through to stream
+			if p.recorder != nil {
+				p.recorder.Record(step, "warn", "tool loop failed, falling back to stream: "+err.Error(), nil)
+			}
+		}
+	}
+
+	// Legacy: try MCP-only tool loop (preserves old behavior when db is nil)
+	if p.mcpExecutor != nil && !p.mcpExecutor.LocalOnly() {
+		mcpCfg := p.toolLoopCfg
+		if mcpCfg.MaxRounds == 0 {
+			mcpCfg = llm.DefaultToolLoopConfig()
+		}
+		tools, err := p.mcpExecutor.ListTools(ctx)
+		if err != nil {
+			p.mcpExecutor.localOnly.Store(true)
+		} else if len(tools) > 0 {
+			result, err := llm.RunToolLoop(ctx, p.llmClient, p.mcpExecutor, messages, tools, temp, maxTok, mcpCfg)
+			if err == nil {
+				RecordLLMResponse(p.recorder, step, result, time.Since(start))
+				return result, nil
+			}
+			if p.recorder != nil {
+				p.recorder.Record(step, "warn", "MCP tool loop failed, falling back to stream: "+err.Error(), nil)
+			}
+		}
+	}
+
+	// Stream fallback (no tools)
+	ch, err := p.llmClient.StreamChat(ctx, messages, temp, maxTok)
+	if err != nil {
+		return "", err
+	}
 	var result string
 	for event := range ch {
 		if event.Type == "token" {
 			result += event.Content
 		} else if event.Type == "error" {
-			return nil, event.Error
+			if p.recorder != nil {
+				p.recorder.Record(step, "error", event.Error.Error(), nil)
+			}
+			return "", event.Error
 		}
 	}
-
-	// Parse FILE blocks and write
-	blocks := parseFileBlocks(result)
-	return blocks, nil
+	RecordLLMResponse(p.recorder, step, result, time.Since(start))
+	return result, nil
 }
 
-func (p *Pipeline) checkCache(sourcePath string) (*CacheEntry, error) {
-	// Stub: SHA256 cache not yet implemented
-	return nil, fmt.Errorf("not cached")
-}
-
-func (p *Pipeline) saveCache(sourcePath string, files []string) {
-	// Stub: cache save not yet implemented
-}
-
-func computeSHA256(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
+// promptStepForStepName maps a step name string to a PromptStep for config lookup.
+func promptStepForStepName(step string) PromptStep {
+	switch step {
+	case "analysis":
+		return StepAnalysis
+	case "generation":
+		return StepGeneration
+	case "plan":
+		return StepPlan
+	default:
+		return ""
 	}
-	h := sha256.Sum256(data)
-	return fmt.Sprintf("%x", h), nil
 }
 
-// parseFileBlocks extracts FILE blocks from LLM output.
-func parseFileBlocks(output string) []string {
-	// Stub: FILE block parsing not yet implemented
-	return nil
+func llmMessagesForRecord(messages []llm.Message) []map[string]string {
+	out := make([]map[string]string, len(messages))
+	for i, m := range messages {
+		out[i] = map[string]string{"role": m.Role, "content": m.Content}
+	}
+	return out
+}
+
+// languageInstructionForPipeline builds a language constraint prompt fragment.
+func languageInstructionForPipeline(lang string) string {
+	switch lang {
+	case "zh":
+		return "重要：你必须使用中文撰写所有文档正文。英文术语可以用括号注释，但不允许英文大段正文主导。文档标题、段落、说明文字必须使用中文。"
+	case "en":
+		return "Important: You must write all document content in English. Technical terms may include brief annotations, but no large blocks of non-English text in the main body. Titles, paragraphs, and descriptions must be in English."
+	default:
+		return ""
+	}
 }

@@ -1,0 +1,133 @@
+:root {
+  color-scheme: light dark;
+  font-family:
+    "PingFang SC",
+    "Microsoft YaHei",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #0f172a;
+    color: #e2e8f0;
+  }
+}
+
+.popup {
+  padding: 16px;
+}
+
+.popup__header h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.popup__subtitle {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.popup__section {
+  margin-top: 16px;
+}
+
+.popup__label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.popup__input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+}
+
+@media (prefers-color-scheme: dark) {
+  .popup__input {
+    border-color: #334155;
+    background: #1e293b;
+  }
+}
+
+.popup__button {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.popup__button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.popup__button--primary {
+  background: #2563eb;
+  color: #fff;
+}
+
+.popup__button--secondary {
+  background: transparent;
+  border: 1px solid #cbd5e1;
+  color: inherit;
+}
+
+@media (prefers-color-scheme: dark) {
+  .popup__button--secondary {
+    border-color: #334155;
+  }
+}
+
+.popup__status {
+  min-height: 20px;
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+.popup__status--success {
+  color: #15803d;
+}
+
+.popup__status--error {
+  color: #b91c1c;
+}
+
+.popup__status--loading {
+  color: #64748b;
+}
+
+@media (prefers-color-scheme: dark) {
+  .popup__status--success {
+    color: #4ade80;
+  }
+
+  .popup__status--error {
+    color: #f87171;
+  }
+}

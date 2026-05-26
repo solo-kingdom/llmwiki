@@ -1,0 +1,124 @@
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { TimelinePage } from "@/components/TimelinePage"
+import * as api from "@/lib/api"
+import type { VCLogEntry, VCStatus } from "@/types"
+import { I18nTestProvider } from "@/test/i18n"
+
+const diffA = `diff --git a/wiki/a.md b/wiki/a.md
+--- a/wiki/a.md
++++ b/wiki/a.md
+@@ -1 +1 @@
+-old
++new
+`
+
+const entryA: VCLogEntry = {
+  sha: "aaa1111",
+  subject: "commit A",
+  timestamp: "2026-01-01 00:00:00 +0000",
+  files_changed: 1,
+  is_rollback: false,
+}
+
+const entryB: VCLogEntry = {
+  sha: "bbb2222",
+  subject: "commit B",
+  timestamp: "2026-01-02 00:00:00 +0000",
+  files_changed: 0,
+  is_rollback: false,
+}
+
+vi.mock("@/lib/api", () => ({
+  getVCStatus: vi.fn(),
+  getVCLog: vi.fn(),
+  getVCDiff: vi.fn(),
+  createRollback: vi.fn(),
+}))
+
+describe("TimelinePage diff loading", () => {
+  beforeEach(() => {
+    vi.mocked(api.getVCStatus).mockResolvedValue({
+      enabled: true,
+      commit_count: 2,
+      git_available: true,
+      git_version: "2.43.0",
+      tracked_dirs: ["wiki"],
+      excluded_dirs: [],
+    } satisfies VCStatus)
+    vi.mocked(api.getVCLog).mockResolvedValue([entryB, entryA])
+  })
+
+  it("shows repair hint when git is not initialized", async () => {
+    vi.mocked(api.getVCStatus).mockResolvedValue({
+      enabled: false,
+      commit_count: 0,
+      git_available: true,
+      git_version: "2.43.0",
+      tracked_dirs: ["wiki/"],
+      excluded_dirs: [".llmwiki/", "raw/", "revert/"],
+    } satisfies VCStatus)
+
+    render(
+      <I18nTestProvider lang="en">
+        <TimelinePage />
+      </I18nTestProvider>,
+    )
+
+    expect(await screen.findByText("Git repository is not initialized.")).toBeInTheDocument()
+    expect(screen.getByText(/llmwiki init/)).toBeInTheDocument()
+  })
+
+  it("ignores stale diff response when user switches commits", async () => {
+    let resolveA: (value: { sha: string; diff: string }) => void
+    const diffAPromise = new Promise<{ sha: string; diff: string }>((resolve) => {
+      resolveA = resolve
+    })
+
+    vi.mocked(api.getVCDiff).mockImplementation((sha) => {
+      if (sha === entryA.sha) return diffAPromise
+      return Promise.resolve({ sha: entryB.sha, diff: "" })
+    })
+
+    render(
+      <I18nTestProvider lang="en">
+        <TimelinePage />
+      </I18nTestProvider>,
+    )
+
+    await screen.findByText("commit A")
+
+    const rowA = screen.getByText("commit A").closest(".border") as HTMLElement
+    const rowB = screen.getByText("commit B").closest(".border") as HTMLElement
+
+    fireEvent.click(within(rowA).getByRole("button", { name: /Diff/i }))
+    fireEvent.click(within(rowB).getByRole("button", { name: /Diff/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText("(empty diff)")).toBeInTheDocument()
+    })
+
+    resolveA!({ sha: entryA.sha, diff: diffA })
+
+    await new Promise((r) => setTimeout(r, 30))
+
+    expect(screen.getByText("(empty diff)")).toBeInTheDocument()
+    expect(screen.queryByText("wiki/a.md")).not.toBeInTheDocument()
+  })
+
+  it("opens diff dialog from commit query parameter", async () => {
+    window.history.replaceState(null, "", "/timeline?commit=aaa1111")
+    vi.mocked(api.getVCDiff).mockResolvedValue({ sha: entryA.sha, diff: diffA })
+
+    render(
+      <I18nTestProvider lang="en">
+        <TimelinePage />
+      </I18nTestProvider>,
+    )
+
+    await waitFor(() => {
+      expect(api.getVCDiff).toHaveBeenCalledWith("aaa1111")
+    })
+    expect(await screen.findByText("commit A")).toBeInTheDocument()
+  })
+})

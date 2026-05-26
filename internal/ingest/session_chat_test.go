@@ -1,0 +1,65 @@
+package ingest
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+)
+
+func TestAssembleIngestChatMessagesSkipsFailedAssistant(t *testing.T) {
+	history := []sqlite.IngestSessionMessage{
+		{Role: "user", Content: "first", StreamStatus: "complete"},
+		{Role: "assistant", Content: "error text", StreamStatus: "failed"},
+		{Role: "user", Content: "second", StreamStatus: "complete"},
+	}
+	msgs := AssembleIngestChatMessages(history, "third", "zh", "", "", "", StepSessionChat)
+	roles := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == "system" {
+			continue
+		}
+		roles = append(roles, m.Role+":"+m.Content)
+	}
+	want := []string{"user:first", "user:second", "user:third"}
+	if len(roles) != len(want) {
+		t.Fatalf("got %d messages %v, want %v", len(roles), roles, want)
+	}
+	for i, w := range want {
+		if roles[i] != w {
+			t.Fatalf("roles[%d] = %q, want %q", i, roles[i], w)
+		}
+	}
+}
+
+func TestAssembleIngestChatMessagesLanguageInstruction(t *testing.T) {
+	history := []sqlite.IngestSessionMessage{}
+	msgs := AssembleIngestChatMessages(history, "", "zh", "", "", "", StepSessionChat)
+	if len(msgs) < 1 || msgs[0].Role != "system" {
+		t.Fatal("expected system message")
+	}
+	for _, want := range []string{"中文", "内容忠实性", "对话助手"} {
+		if !strings.Contains(msgs[0].Content, want) {
+			t.Errorf("system prompt for zh should contain %q, got: %s", want, msgs[0].Content)
+		}
+	}
+
+	msgsEN := AssembleIngestChatMessages(history, "", "en", "", "", "", StepSessionChat)
+	if !strings.Contains(msgsEN[0].Content, "English") {
+		t.Errorf("system prompt for en should contain English instruction, got: %s", msgsEN[0].Content)
+	}
+}
+
+func TestAttachmentSummaryPromptLanguage(t *testing.T) {
+	promptZH := AttachmentSummaryPrompt("test.pdf", "some content", "zh")
+	for _, want := range []string{"用户上传", "中文", "不要补充"} {
+		if !strings.Contains(promptZH, want) {
+			t.Errorf("zh prompt should contain %q, got: %s", want, promptZH)
+		}
+	}
+
+	promptEN := AttachmentSummaryPrompt("test.pdf", "some content", "en")
+	if !strings.Contains(promptEN, "English") {
+		t.Errorf("en prompt should mention English, got: %s", promptEN)
+	}
+}

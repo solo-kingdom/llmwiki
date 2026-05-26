@@ -1,0 +1,182 @@
+{
+  "openai": {
+    "id": "openai",
+    "name": "OpenAI",
+    "env": ["OPENAI_API_KEY"],
+    "api_base": "https://api.openai.com/v1",
+    "api_format": "openai",
+    "models": {
+      "gpt-4o": {"id":"gpt-4o","name":"GPT-4o","context_limit":128000,"output_limit":16384,"reasoning":true,"tool_call":true,"attachment":true},
+      "gpt-4o-mini": {"id":"gpt-4o-mini","name":"GPT-4o Mini","context_limit":128000,"output_limit":16384,"reasoning":false,"tool_call":true,"attachment":true},
+      "o1": {"id":"o1","name":"o1","context_limit":200000,"output_limit":100000,"reasoning":true,"tool_call":true,"attachment":true},
+      "o3-mini": {"id":"o3-mini","name":"o3-mini","context_limit":200000,"output_limit":100000,"reasoning":true,"tool_call":true,"attachment":true},
+      "gpt-4.1": {"id":"gpt-4.1","name":"GPT-4.1","context_limit":1047576,"output_limit":32768,"reasoning":true,"tool_call":true,"attachment":true},
+      "gpt-4.1-mini": {"id":"gpt-4.1-mini","name":"GPT-4.1 Mini","context_limit":1047576,"output_limit":32768,"reasoning":true,"tool_call":true,"attachment":true}
+    }
+  },
+  "anthropic": {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "env": ["ANTHROPIC_API_KEY"],
+    "api_base": "https://api.anthropic.com",
+    "api_format": "anthropic",
+    "models": {
+      "claude-sonnet-4-0": {"id":"claude-sonnet-4-0","name":"Claude Sonnet 4","context_limit":200000,"output_limit":64000,"reasoning":true,"tool_call":true,"attachment":true},
+      "claude-3.5-sonnet": {"id":"claude-3-5-sonnet-20241022","name":"Claude 3.5 Sonnet","context_limit":200000,"output_limit":8192,"reasoning":false,"tool_call":true,"attachment":true},
+      "claude-haiku-4-5": {"id":"claude-haiku-4-5","name":"Claude Haiku 4.5","context_limit":200000,"output_limit":8192,"reasoning":true,"tool_call":true,"attachment":true},
+      "claude-opus-4-0": {"id":"claude-opus-4-0","name":"Claude Opus 4","context_limit":200000,"output_limit":32000,"reasoning":true,"tool_call":true,"attachment":true}
+    }
+  },
+  "ollama": {
+    "id": "ollama",
+    "name": "Ollama",
+    "env": [],
+    "api_base": "http://localhost:11434",
+    "api_format": "ollama",
+    "models": {
+      "llama3.1": {"id":"llama3.1","name":"Llama 3.1","context_limit":128000,"output_limit":4096,"reasoning":false,"tool_call":true,"attachment":true},
+      "qwen2.5": {"id":"qwen2.5","name":"Qwen 2.5","context_limit":131072,"output_limit":8192,"reasoning":false,"tool_call":true,"attachment":true},
+      "deepseek-r1": {"id":"deepseek-r1","name":"DeepSeek R1","context_limit":131072,"output_limit":8192,"reasoning":true,"tool_call":false,"attachment":false}
+    }
+  },
+  "groq": {
+    "id": "groq",
+    "name": "Groq",
+    "env": ["GROQ_API_KEY"],
+    "api_base": "https://api.groq.com/openai/v1",
+    "api_format": "openai",
+    "models": {
+      "llama-3.3-70b": {"id":"llama-3.3-70b-versatile","name":"Llama 3.3 70B","context_limit":128000,"output_limit":32768,"reasoning":false,"tool_call":true,"attachment":true},
+      "mixtral-8x7b": {"id":"mixtral-8x7b-32768","name":"Mixtral 8x7B","context_limit":32768,"output_limit":32768,"reasoning":false,"tool_call":true,"attachment":false}
+    }
+  },
+  "deepseek": {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "env": ["DEEPSEEK_API_KEY"],
+    "api_base": "https://api.deepseek.com/v1",
+    "api_format": "openai",
+    "models": {
+      "deepseek-chat": {"id":"deepseek-chat","name":"DeepSeek Chat","context_limit":128000,"output_limit":8192,"reasoning":false,"tool_call":true,"attachment":true},
+      "deepseek-reasoner": {"id":"deepseek-reasoner","name":"DeepSeek Reasoner","context_limit":128000,"output_limit":8192,"reasoning":true,"tool_call":false,"attachment":false}
+    }
+  },
+  "mistral": {
+    "id": "mistral",
+    "name": "Mistral",
+    "env": ["MISTRAL_API_KEY"],
+    "api_base": "https://api.mistral.ai/v1",
+    "api_format": "openai",
+    "models": {
+      "mistral-large": {"id":"mistral-large-latest","name":"Mistral Large","context_limit":128000,"output_limit":8192,"reasoning":false,"tool_call":true,"attachment":true},
+      "codestral": {"id":"codestral-latest","name":"Codestral","context_limit":256000,"output_limit":8192,"reasoning":false,"tool_call":true,"attachment":false}
+    }
+  },
+  "openrouter": {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "env": ["OPENROUTER_API_KEY"],
+    "api_base": "https://openrouter.ai/api/v1",
+    "api_format": "openai",
+    "models": {}
+  },
+  "together": {
+    "id": "together",
+    "name": "Together AI",
+    "env": ["TOGETHER_API_KEY"],
+    "api_base": "https://api.together.xyz/v1",
+    "api_format": "openai",
+    "models": {}
+  },
+  "fireworks-ai": {
+    "id": "fireworks-ai",
+    "name": "Fireworks AI",
+    "env": ["FIREWORKS_API_KEY"],
+    "api_base": "https://api.fireworks.ai/inference/v1",
+    "api_format": "openai",
+    "models": {}
+  },
+  "xai": {
+    "id": "xai",
+    "name": "xAI (Grok)",
+    "env": ["XAI_API_KEY"],
+    "api_base": "https://api.x.ai/v1",
+    "api_format": "openai",
+    "models": {
+      "grok-3": {"id":"grok-3","name":"Grok 3","context_limit":131072,"output_limit":16384,"reasoning":true,"tool_call":true,"attachment":true}
+    }
+  },
+  "google": {
+    "id": "google",
+    "name": "Google (Gemini)",
+    "env": ["GOOGLE_API_KEY"],
+    "api_base": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "api_format": "openai",
+    "models": {
+      "gemini-2.5-pro": {"id":"gemini-2.5-pro","name":"Gemini 2.5 Pro","context_limit":1048576,"output_limit":65536,"reasoning":true,"tool_call":true,"attachment":true},
+      "gemini-2.5-flash": {"id":"gemini-2.5-flash","name":"Gemini 2.5 Flash","context_limit":1048576,"output_limit":65536,"reasoning":true,"tool_call":true,"attachment":true}
+    }
+  },
+  "perplexity": {
+    "id": "perplexity",
+    "name": "Perplexity",
+    "env": ["PERPLEXITY_API_KEY"],
+    "api_base": "https://api.perplexity.ai",
+    "api_format": "openai",
+    "models": {}
+  },
+  "siliconflow": {
+    "id": "siliconflow",
+    "name": "SiliconFlow",
+    "env": ["SILICONFLOW_API_KEY"],
+    "api_base": "https://api.siliconflow.cn/v1",
+    "api_format": "openai",
+    "models": {}
+  },
+  "deepinfra": {
+    "id": "deepinfra",
+    "name": "DeepInfra",
+    "env": ["DEEPINFRA_API_KEY"],
+    "api_base": "https://api.deepinfra.com/v1/openai",
+    "api_format": "openai",
+    "models": {}
+  },
+  "cerebras": {
+    "id": "cerebras",
+    "name": "Cerebras",
+    "env": ["CEREBRAS_API_KEY"],
+    "api_base": "https://api.cerebras.ai/v1",
+    "api_format": "openai",
+    "models": {}
+  },
+  "novita-ai": {
+    "id": "novita-ai",
+    "name": "Novita AI",
+    "env": ["NOVITA_API_KEY"],
+    "api_base": "https://api.novita.ai/v3/openai",
+    "api_format": "openai",
+    "models": {}
+  },
+  "github-copilot": {
+    "id": "github-copilot",
+    "name": "GitHub Copilot",
+    "env": ["GITHUB_TOKEN"],
+    "api_base": "https://api.githubcopilot.com",
+    "api_format": "openai",
+    "models": {}
+  },
+  "amazon-bedrock": {
+    "id": "amazon-bedrock",
+    "name": "Amazon Bedrock",
+    "env": ["AWS_ACCESS_KEY_ID"],
+    "api_format": "openai",
+    "models": {}
+  },
+  "azure": {
+    "id": "azure",
+    "name": "Azure OpenAI",
+    "env": ["AZURE_API_KEY"],
+    "api_format": "openai",
+    "models": {}
+  }
+}

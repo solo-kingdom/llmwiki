@@ -1,0 +1,469 @@
+package api
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+)
+
+func setupSettingsRoutes(api *API, r chi.Router) {
+	r.Get("/api/v1/settings", api.GetSettings)
+	r.Put("/api/v1/settings", api.UpdateSettings)
+	r.Put("/api/v1/settings/last-model", api.UpdateLastModel)
+}
+
+func TestGetSettingsEmpty(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.LastInstanceID != "" {
+		t.Errorf("expected empty last_instance_id, got %q", resp.LastInstanceID)
+	}
+}
+
+func TestUpdateSettingsAllowedKeys(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"temperature":   "0.7",
+		"max_tokens":    "4096",
+		"chunk_size":    "512",
+		"chunk_overlap": "64",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp.Temperature != "0.7" {
+		t.Errorf("temperature = %q, want 0.7", resp.Temperature)
+	}
+	if resp.MaxTokens != "4096" {
+		t.Errorf("max_tokens = %q, want 4096", resp.MaxTokens)
+	}
+}
+
+func TestUpdateSettingsIgnoresDisallowedKeys(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"temperature": "0.5",
+		"evil_key":    "should be ignored",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	// evil_key should not be stored
+	val, _ := api.db.GetConfig("evil_key")
+	if val != "" {
+		t.Error("expected evil_key to be ignored")
+	}
+}
+
+func TestUpdateLastModel(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"instance_id": "inst_abc12345",
+		"model":       "gpt-4o",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings/last-model", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["last_instance_id"] != "inst_abc12345" {
+		t.Errorf("last_instance_id = %q, want inst_abc12345", resp["last_instance_id"])
+	}
+	if resp["last_model"] != "gpt-4o" {
+		t.Errorf("last_model = %q, want gpt-4o", resp["last_model"])
+	}
+
+	// Verify persisted
+	instID, _ := api.db.GetConfig("last_instance_id")
+	if instID != "inst_abc12345" {
+		t.Errorf("persisted instance_id = %q, want inst_abc12345", instID)
+	}
+	m, _ := api.db.GetConfig("last_model")
+	if m != "gpt-4o" {
+		t.Errorf("persisted model = %q, want gpt-4o", m)
+	}
+}
+
+func TestUpdateSettingsJobLLM(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"job_instance_id": "inst_job12345",
+		"job_model":       "claude-3-opus",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.JobInstanceID != "inst_job12345" {
+		t.Errorf("job_instance_id = %q, want inst_job12345", resp.JobInstanceID)
+	}
+	if resp.JobModel != "claude-3-opus" {
+		t.Errorf("job_model = %q, want claude-3-opus", resp.JobModel)
+	}
+
+	instID, _ := api.db.GetConfig("job_instance_id")
+	if instID != "inst_job12345" {
+		t.Errorf("persisted job_instance_id = %q, want inst_job12345", instID)
+	}
+}
+
+func TestUpdateSettingsClearJobLLM(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	api.db.SetConfig("job_instance_id", "inst_old12345")
+	api.db.SetConfig("job_model", "gpt-4o")
+
+	body, _ := json.Marshal(map[string]string{
+		"job_instance_id": "",
+		"job_model":       "",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.JobInstanceID != "" {
+		t.Errorf("job_instance_id = %q, want empty", resp.JobInstanceID)
+	}
+	if resp.JobModel != "" {
+		t.Errorf("job_model = %q, want empty", resp.JobModel)
+	}
+}
+
+func TestUpdateLastModelMissingFields(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"instance_id": "inst_abc12345",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings/last-model", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestMaskKey(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"short", "****"},
+		{"sk-test-api-key-12345678", "sk-t**************"},
+		{"123456789", "1235****"},
+	}
+	for _, tt := range tests {
+		got := maskKey(tt.input)
+		if tt.input == "" || len(tt.input) <= 8 {
+			if got != tt.want {
+				t.Errorf("maskKey(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		} else {
+			if got == tt.input {
+				t.Errorf("maskKey(%q) should mask the key", tt.input)
+			}
+			if got[:4] != tt.input[:4] {
+				t.Errorf("maskKey(%q) prefix should be %q, got %q", tt.input, tt.input[:4], got[:4])
+			}
+		}
+	}
+}
+
+func TestGetSettingsDefaultLanguage(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.UILanguage != "zh" {
+		t.Errorf("expected default ui_language 'zh', got %q", resp.UILanguage)
+	}
+	if resp.DocLanguage != "zh" {
+		t.Errorf("expected default doc_language 'zh', got %q", resp.DocLanguage)
+	}
+}
+
+func TestUpdateSettingsLanguageValid(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"ui_language":  "en",
+		"doc_language": "en",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.UILanguage != "en" {
+		t.Errorf("ui_language = %q, want 'en'", resp.UILanguage)
+	}
+	if resp.DocLanguage != "en" {
+		t.Errorf("doc_language = %q, want 'en'", resp.DocLanguage)
+	}
+
+	// Verify persisted
+	uiLang, _ := api.db.GetConfig("ui_language")
+	if uiLang != "en" {
+		t.Errorf("persisted ui_language = %q, want 'en'", uiLang)
+	}
+	docLang, _ := api.db.GetConfig("doc_language")
+	if docLang != "en" {
+		t.Errorf("persisted doc_language = %q, want 'en'", docLang)
+	}
+}
+
+func TestUpdateSettingsLanguageInvalid(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"ui_language": "fr",
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid language, got %d; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateSettingsRulesSupplement(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"rules_supplement": "本 wiki 仅收录论文结论",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+	var resp settingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.RulesSupplement != "本 wiki 仅收录论文结论" {
+		t.Errorf("rules_supplement = %q", resp.RulesSupplement)
+	}
+}
+
+func TestUpdateSettingsRulesSupplementTooLong(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	long := strings.Repeat("x", 2049)
+	body, _ := json.Marshal(map[string]string{"rules_supplement": long})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestIsValidLanguage(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"zh", true},
+		{"en", true},
+		{"", false},
+		{"fr", false},
+		{"ZH", false},
+		{"EN", false},
+	}
+	for _, tt := range tests {
+		got := isValidLanguage(tt.input)
+		if got != tt.want {
+			t.Errorf("isValidLanguage(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestLanguageForResponse(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"zh", "zh"},
+		{"en", "en"},
+		{"", "zh"},
+		{"fr", "zh"},
+		{"invalid", "zh"},
+	}
+	for _, tt := range tests {
+		got := languageForResponse(tt.input)
+		if got != tt.want {
+			t.Errorf("languageForResponse(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestGetSettingsDefaultToolLoopLimits(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.SessionToolLoopMaxRoundsOrganize != "12" {
+		t.Errorf("organize max rounds = %q, want 12", resp.SessionToolLoopMaxRoundsOrganize)
+	}
+	if resp.SessionToolLoopMaxCallsPerRound != "4" {
+		t.Errorf("max calls per round = %q, want 4", resp.SessionToolLoopMaxCallsPerRound)
+	}
+}
+
+func TestUpdateSettingsToolLoopLimits(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"session_tool_loop_max_rounds_organize": "16",
+		"session_tool_loop_max_calls_per_round":  "8",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body=%s", w.Code, w.Body.String())
+	}
+
+	var resp settingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.SessionToolLoopMaxRoundsOrganize != "16" {
+		t.Errorf("organize max rounds = %q, want 16", resp.SessionToolLoopMaxRoundsOrganize)
+	}
+	if resp.SessionToolLoopMaxCallsPerRound != "8" {
+		t.Errorf("max calls per round = %q, want 8", resp.SessionToolLoopMaxCallsPerRound)
+	}
+}
+
+func TestUpdateSettingsToolLoopLimitsValidation(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	body, _ := json.Marshal(map[string]string{
+		"session_tool_loop_max_rounds_organize": "99",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d; body=%s", w.Code, w.Body.String())
+	}
+}

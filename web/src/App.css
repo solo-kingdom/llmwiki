@@ -294,6 +294,16 @@
   padding-left: 1.125rem;
 }
 
+/* Wikilink broken link style */
+.wiki-prose .wikilink-broken,
+.chat-prose .wikilink-broken {
+  color: var(--muted-foreground);
+  text-decoration: underline wavy;
+  text-decoration-color: var(--muted-foreground);
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
 /* Commit diff viewer (react-diff-view) */
 .commit-diff-view {
   --diff-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;

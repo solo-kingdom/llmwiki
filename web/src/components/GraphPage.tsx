@@ -58,7 +58,11 @@ export function GraphPage() {
   const forceData = useMemo<ForceGraphData | null>(() => {
     if (!graphData || isGraphEmpty(graphData)) return null
     return {
-      nodes: graphData.nodes.map((n) => ({ ...n })),
+      nodes: graphData.nodes.map((n) => ({
+        ...n,
+        x: (Math.random() - 0.5) * 400,
+        y: (Math.random() - 0.5) * 400,
+      })),
       links: graphData.edges.map((e) => ({ ...e })),
     }
   }, [graphData])
@@ -67,11 +71,6 @@ export function GraphPage() {
     if (node.document_id) {
       navigateTo(wikiReaderHref(node.document_id))
     }
-  }, [])
-
-  const d3ForceSetup = useCallback((force: d3ForceFn) => {
-    force("charge")?.strength(-120)?.distanceMax(300)
-    force("link")?.distance(50)
   }, [])
 
   const nodeCanvasObject = useCallback(
@@ -143,9 +142,19 @@ export function GraphPage() {
               linkDirectionalArrowLength={3.5}
               linkDirectionalArrowRelPos={1}
               onNodeClick={(node) => handleNodeClick(node as ForceNode)}
+              onEngineInit={(fg) => {
+                const charge = fg.d3Force("charge")
+                if (charge) {
+                  charge.strength(-120)
+                  charge.distanceMax(300)
+                }
+                const link = fg.d3Force("link")
+                if (link) {
+                  link.distance(50)
+                }
+              }}
               d3AlphaDecay={0.02}
               d3VelocityDecay={0.3}
-              d3Force={d3ForceSetup}
               warmupTicks={30}
               cooldownTicks={150}
             />
@@ -155,6 +164,3 @@ export function GraphPage() {
     </div>
   )
 }
-
-// Type helper for d3Force callback parameter.
-type d3ForceFn = (name: string) => { strength?: (s: number) => unknown; distance?: (d: number) => unknown; distanceMax?: (d: number) => unknown } | undefined

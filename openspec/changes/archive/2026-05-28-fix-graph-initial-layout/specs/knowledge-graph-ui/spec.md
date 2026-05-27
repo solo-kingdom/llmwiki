@@ -1,27 +1,4 @@
-## Requirements
-
-### Requirement: Knowledge graph API
-The system SHALL expose `GET /api/v1/graph` returning wiki page nodes and reference edges, with optional `limit` query parameter to cap result size.
-
-#### Scenario: Graph data fetch (no limit)
-- **WHEN** client calls `GET /api/v1/graph` without limit parameter
-- **THEN** response SHALL include at most 300 nodes sorted by `link_count` descending, and only edges between the returned nodes
-- **AND** each node SHALL include id, document_id, title, type, link_count
-- **AND** each edge SHALL include source, target, type
-
-#### Scenario: Graph data fetch with custom limit
-- **WHEN** client calls `GET /api/v1/graph?limit=100`
-- **THEN** response SHALL include at most 100 nodes sorted by `link_count` descending, and only edges between the returned nodes
-
-#### Scenario: Graph data fetch with limit exceeding total nodes
-- **WHEN** client calls `GET /api/v1/graph?limit=99999` and the workspace has 50 nodes
-- **THEN** response SHALL include all 50 nodes and all edges between them
-
-#### Scenario: Response includes truncation metadata
-- **WHEN** the total number of wiki nodes exceeds the requested limit
-- **THEN** response SHALL include a `truncated: true` field and `total_nodes` count
-- **WHEN** the total number of wiki nodes is within the limit
-- **THEN** response SHALL include `truncated: false` and `total_nodes` count
+## MODIFIED Requirements
 
 ### Requirement: Knowledge graph Web UI
 The Web UI SHALL provide a graph visualization view for browsing wiki page relationships within the Wiki reader shell, with correct layout constraints and force simulation parameters.

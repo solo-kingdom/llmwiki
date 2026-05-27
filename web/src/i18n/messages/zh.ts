@@ -26,6 +26,7 @@ const zh = {
   "graph.title": "知识图谱",
   "graph.loading": "加载图谱中…",
   "graph.empty": "暂无足够页面生成图谱",
+  "graph.truncated_hint": "显示前 {count} 个枢纽节点（共 {total} 个）",
 
   // WorkbenchLayout
   "app.title": "LLMWiki",

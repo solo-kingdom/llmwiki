@@ -58,6 +58,8 @@ const mockGraph = {
       type: "links_to",
     },
   ],
+  total_nodes: 2,
+  truncated: false,
 }
 
 function renderGraphPage() {
@@ -71,11 +73,6 @@ function renderGraphPage() {
 describe("GraphPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock)
   })
 
   it("shows loading then renders graph from API", async () => {
@@ -99,6 +96,8 @@ describe("GraphPage", () => {
         },
       ],
       edges: [],
+      total_nodes: 1,
+      truncated: false,
     })
     renderGraphPage()
 
@@ -119,5 +118,34 @@ describe("GraphPage", () => {
       expect(window.location.pathname).toBe("/wiki")
       expect(window.location.search).toContain("doc=doc-a")
     })
+  })
+
+  it("shows truncation hint when truncated is true", async () => {
+    vi.mocked(api.getKnowledgeGraph).mockResolvedValue({
+      ...mockGraph,
+      total_nodes: 500,
+      truncated: true,
+    })
+    renderGraphPage()
+
+    expect(
+      await screen.findByText("显示前 2 个枢纽节点（共 500 个）"),
+    ).toBeInTheDocument()
+  })
+
+  it("does not show truncation hint when not truncated", async () => {
+    vi.mocked(api.getKnowledgeGraph).mockResolvedValue(mockGraph)
+    renderGraphPage()
+
+    await screen.findByTestId("mock-force-graph")
+    expect(screen.queryByText(/枢纽节点/)).not.toBeInTheDocument()
+  })
+
+  it("calls getKnowledgeGraph with limit parameter", async () => {
+    vi.mocked(api.getKnowledgeGraph).mockResolvedValue(mockGraph)
+    renderGraphPage()
+
+    await screen.findByTestId("mock-force-graph")
+    expect(api.getKnowledgeGraph).toHaveBeenCalledWith({ limit: 300 })
   })
 })

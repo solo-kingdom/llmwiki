@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Knowledge graph API
 The system SHALL expose `GET /api/v1/graph` returning wiki page nodes and reference edges, with optional `limit` query parameter to cap result size.

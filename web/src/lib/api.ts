@@ -180,8 +180,11 @@ export function getStalePages(): Promise<StalePage[]> {
   return request<StalePage[]>("/api/v1/graph/stale")
 }
 
-export function getKnowledgeGraph(): Promise<KnowledgeGraphResponse> {
-  return request<KnowledgeGraphResponse>("/api/v1/graph")
+export function getKnowledgeGraph(params?: { limit?: number }): Promise<KnowledgeGraphResponse> {
+  const qs = new URLSearchParams()
+  if (params?.limit) qs.set("limit", String(params.limit))
+  const query = qs.toString()
+  return request<KnowledgeGraphResponse>("/api/v1/graph" + (query ? `?${query}` : ""))
 }
 
 export function healthCheck(): Promise<{ status: string }> {

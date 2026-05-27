@@ -28,6 +28,7 @@ const en: Record<MessageKey, string> = {
   "graph.title": "Knowledge Graph",
   "graph.loading": "Loading graph…",
   "graph.empty": "Not enough linked pages to build a graph",
+  "graph.truncated_hint": "Showing top {count} hub nodes ({total} total)",
 
   // WorkbenchLayout
   "app.title": "LLMWiki",

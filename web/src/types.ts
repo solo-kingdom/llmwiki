@@ -184,6 +184,8 @@ export interface GraphEdge {
 export interface KnowledgeGraphResponse {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  total_nodes: number
+  truncated: boolean
 }
 
 export interface StalePage {

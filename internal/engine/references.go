@@ -132,6 +132,8 @@ func (rp *ReferenceParser) parseWikiLinks(content, docPath string) []Reference {
 	}
 
 	var refs []Reference
+
+	// Parse markdown-style links: [text](href)
 	matches := wikiLinkRe.FindAllStringSubmatch(content, -1)
 	for _, match := range matches {
 		if len(match) < 4 {
@@ -168,6 +170,27 @@ func (rp *ReferenceParser) parseWikiLinks(content, docPath string) []Reference {
 			Page:       nil,
 		})
 	}
+
+	// Parse Obsidian-style double-bracket wikilinks: [[target]] or [[target|display]]
+	bracketMatches := wikiDoubleBracketRe.FindAllStringSubmatch(content, -1)
+	for _, match := range bracketMatches {
+		if len(match) < 2 {
+			continue
+		}
+		target := strings.TrimSpace(match[1])
+
+		resolved := rp.resolveWikiPath(target, wikiRel)
+		if resolved == "" {
+			continue
+		}
+
+		refs = append(refs, Reference{
+			TargetPath: resolved,
+			RefType:    "links_to",
+			Page:       nil,
+		})
+	}
+
 	return refs
 }
 

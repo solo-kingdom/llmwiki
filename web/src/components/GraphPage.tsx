@@ -1,5 +1,4 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { PageContainer } from "@/components/PageContainer"
 import { getKnowledgeGraph } from "@/lib/api"
 import { useT } from "@/i18n"
 import { navigateTo, wikiReaderHref } from "@/lib/wiki-routes"
@@ -36,13 +35,12 @@ export function GraphPage() {
   const [graphData, setGraphData] = useState<KnowledgeGraphResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [dimensions, setDimensions] = useState({ width: 640, height: 480 })
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    getKnowledgeGraph()
+    getKnowledgeGraph({ limit: 300 })
       .then((data) => {
         if (!cancelled) setGraphData(data)
       })
@@ -56,26 +54,6 @@ export function GraphPage() {
       cancelled = true
     }
   }, [])
-
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el || typeof ResizeObserver === "undefined") {
-      return
-    }
-
-    const update = () => {
-      const rect = el.getBoundingClientRect()
-      setDimensions({
-        width: Math.max(320, Math.floor(rect.width)),
-        height: Math.max(320, Math.floor(rect.height)),
-      })
-    }
-
-    update()
-    const observer = new ResizeObserver(update)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [loading, graphData])
 
   const forceData = useMemo<ForceGraphData | null>(() => {
     if (!graphData || isGraphEmpty(graphData)) return null
@@ -91,30 +69,44 @@ export function GraphPage() {
     }
   }, [])
 
+  const d3ForceSetup = useCallback((force: d3ForceFn) => {
+    force("charge")?.strength(-120)?.distanceMax(300)
+    force("link")?.distance(50)
+  }, [])
+
   const nodeCanvasObject = useCallback(
     (node: ForceNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const label = node.title || node.id
-      const fontSize = Math.max(10, 12 / globalScale)
-      const radius = Math.max(4, Math.min(10, 4 + (node.link_count || 0)))
       const color = TYPE_COLORS[node.type] ?? TYPE_COLORS.page
+      const radius = Math.max(5, Math.min(14, 5 + (node.link_count || 0)))
 
       ctx.beginPath()
       ctx.arc(node.x ?? 0, node.y ?? 0, radius, 0, 2 * Math.PI, false)
       ctx.fillStyle = color
       ctx.fill()
 
-      ctx.font = `${fontSize}px sans-serif`
-      ctx.textAlign = "center"
-      ctx.textBaseline = "top"
-      ctx.fillStyle = "#64748b"
-      ctx.fillText(label, node.x ?? 0, (node.y ?? 0) + radius + 2)
+      if (globalScale >= 0.4) {
+        const fontSize = Math.min(14, Math.max(6, 12 / globalScale))
+        ctx.font = `${fontSize}px sans-serif`
+        ctx.textAlign = "center"
+        ctx.textBaseline = "top"
+        ctx.fillStyle = "#64748b"
+        ctx.fillText(label, node.x ?? 0, (node.y ?? 0) + radius + 2)
+      }
     },
     [],
   )
 
   return (
-    <PageContainer className="flex min-h-0 flex-1 flex-col">
-      <h1 className="mb-4 text-xl font-semibold">{t("graph.title")}</h1>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="mb-2 flex items-center gap-3">
+        <h1 className="text-xl font-semibold">{t("graph.title")}</h1>
+        {graphData?.truncated && (
+          <span className="text-xs text-muted-foreground">
+            {t("graph.truncated_hint", { count: graphData.nodes.length, total: graphData.total_nodes })}
+          </span>
+        )}
+      </div>
       {loading && (
         <p className="text-sm text-muted-foreground">{t("graph.loading")}</p>
       )}
@@ -135,15 +127,13 @@ export function GraphPage() {
           <Suspense fallback={<p className="p-4 text-sm text-muted-foreground">{t("graph.loading")}</p>}>
             <ForceGraph2D
               graphData={forceData}
-              width={dimensions.width}
-              height={dimensions.height}
               nodeLabel={(n) => (n as ForceNode).title || (n as ForceNode).id}
               nodeCanvasObject={(node, ctx, globalScale) =>
                 nodeCanvasObject(node as ForceNode, ctx, globalScale)
               }
               nodePointerAreaPaint={(node, color, ctx) => {
                 const n = node as ForceNode
-                const radius = Math.max(4, Math.min(10, 4 + (n.link_count || 0)))
+                const radius = Math.max(5, Math.min(14, 5 + (n.link_count || 0)))
                 ctx.fillStyle = color
                 ctx.beginPath()
                 ctx.arc(n.x ?? 0, n.y ?? 0, radius + 2, 0, 2 * Math.PI, false)
@@ -153,11 +143,18 @@ export function GraphPage() {
               linkDirectionalArrowLength={3.5}
               linkDirectionalArrowRelPos={1}
               onNodeClick={(node) => handleNodeClick(node as ForceNode)}
-              cooldownTicks={80}
+              d3AlphaDecay={0.02}
+              d3VelocityDecay={0.3}
+              d3Force={d3ForceSetup}
+              warmupTicks={30}
+              cooldownTicks={150}
             />
           </Suspense>
         </div>
       )}
-    </PageContainer>
+    </div>
   )
 }
+
+// Type helper for d3Force callback parameter.
+type d3ForceFn = (name: string) => { strength?: (s: number) => unknown; distance?: (d: number) => unknown; distanceMax?: (d: number) => unknown } | undefined

@@ -85,7 +85,7 @@ func (e *PipelineToolExecutor) Execute(ctx context.Context, name string, argsJSO
 // isLocalReadonlyTool reports whether a tool name should be handled locally.
 func isLocalReadonlyTool(name string) bool {
 	switch strings.ToLower(name) {
-	case mcp.DefaultToolSearch, mcp.DefaultToolRead:
+	case mcp.DefaultToolSearch, mcp.DefaultToolRead, mcp.DefaultToolWebFetch:
 		return true
 	default:
 		return false

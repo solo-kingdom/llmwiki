@@ -52,12 +52,12 @@ var referencesTool = Tool{
 
 // BuiltinReadonlyToolDefinitions returns local search/read tool schemas (default ingest mode).
 func BuiltinReadonlyToolDefinitions() []Tool {
-	return []Tool{searchTool, readTool}
+	return []Tool{searchTool, readTool, webFetchTool}
 }
 
 // BuiltinToolDefinitionsForMode returns tool schemas appropriate for the session mode.
 func BuiltinToolDefinitionsForMode(mode string) []Tool {
-	base := []Tool{searchTool, readTool}
+	base := []Tool{searchTool, readTool, webFetchTool}
 	switch mode {
 	case "qa":
 		return append(base, referencesTool)
@@ -115,23 +115,43 @@ func ToolChoiceForMode(mode string, round int) string {
 
 // ExecuteLocalReadonlyTool runs builtin search or read against the workspace index.
 func ExecuteLocalReadonlyTool(workspace string, db *sqlite.DB, name string, args map[string]interface{}) (string, error) {
-	if db == nil {
-		return "Error: database not connected", nil
-	}
 	switch strings.ToLower(strings.TrimSpace(name)) {
+	case DefaultToolWebFetch:
+		return executeWebFetch(workspace, args)
 	case DefaultToolSearch:
+		if db == nil {
+			return "Error: database not connected", nil
+		}
 		return executeLocalSearch(workspace, db, args)
 	case DefaultToolRead:
+		if db == nil {
+			return "Error: database not connected", nil
+		}
 		return executeLocalRead(db, args)
 	case "references":
+		if db == nil {
+			return "Error: database not connected", nil
+		}
 		return executeLocalReferences(db, args)
 	case "audit":
+		if db == nil {
+			return "Error: database not connected", nil
+		}
 		return executeLocalAudit(workspace, db, args)
 	case "structure":
+		if db == nil {
+			return "Error: database not connected", nil
+		}
 		return executeLocalStructure(workspace, db, args)
 	case "gaps":
+		if db == nil {
+			return "Error: database not connected", nil
+		}
 		return executeLocalGaps(workspace, db, args)
 	case "similar":
+		if db == nil {
+			return "Error: database not connected", nil
+		}
 		return executeLocalSimilar(db, args)
 	default:
 		return "", fmt.Errorf("unknown local tool %q", name)

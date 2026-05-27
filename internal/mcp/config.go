@@ -12,6 +12,7 @@ const (
 	DefaultFallbackMode   = "local_only"
 	DefaultToolSearch     = "search"
 	DefaultToolRead       = "read"
+	DefaultToolWebFetch   = "web_fetch"
 	MinTimeoutMS          = 1000
 	MaxTimeoutMS          = 300000
 	DefaultTimeoutMS      = 15000

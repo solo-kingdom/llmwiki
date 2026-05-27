@@ -56,10 +56,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export function listDocuments(params?: {
   source_kind?: string
   types?: string[]
+  exclude_hidden?: boolean
 }): Promise<DocumentListItem[]> {
   const q = new URLSearchParams()
   if (params?.source_kind) q.set("source_kind", params.source_kind)
   for (const t of params?.types ?? []) q.append("types", t)
+  if (params?.exclude_hidden) q.set("exclude_hidden", "true")
   const qs = q.toString()
   return request<DocumentListItem[]>(
     `/api/v1/documents/${qs ? `?${qs}` : ""}`,

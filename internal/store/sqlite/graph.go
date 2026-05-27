@@ -29,12 +29,16 @@ type GraphData struct {
 }
 
 // BuildKnowledgeGraph returns wiki page nodes and links_to edges for visualization.
+// Hidden wiki subdirectories (templates, sources) are excluded from both nodes and edges.
 func (d *DB) BuildKnowledgeGraph() (*GraphData, error) {
+	hiddenExclude := "AND NOT (" + hiddenSubdirsWhere("d.relative_path") + ") "
+
 	rows, err := d.db.Query(`
 		SELECT d.id, d.relative_path, d.title
 		FROM documents d
 		WHERE d.source_kind = 'wiki' AND d.status != 'failed' AND d.relative_path != ''
-		ORDER BY d.relative_path`)
+		` + hiddenExclude +
+		`ORDER BY d.relative_path`)
 	if err != nil {
 		return nil, fmt.Errorf("list wiki documents: %w", err)
 	}
@@ -68,6 +72,8 @@ func (d *DB) BuildKnowledgeGraph() (*GraphData, error) {
 		  AND src.status != 'failed' AND tgt.status != 'failed'
 		  AND src.source_kind = 'wiki' AND tgt.source_kind = 'wiki'
 		  AND src.relative_path != '' AND tgt.relative_path != ''
+		  AND NOT (` + hiddenSubdirsWhere("src.relative_path") + `)
+		  AND NOT (` + hiddenSubdirsWhere("tgt.relative_path") + `)
 		ORDER BY src.relative_path, tgt.relative_path`)
 	if err != nil {
 		return nil, fmt.Errorf("list graph edges: %w", err)

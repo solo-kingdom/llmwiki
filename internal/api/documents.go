@@ -34,8 +34,9 @@ type bulkDeleteRequest struct {
 
 func (a *API) ListDocuments(w http.ResponseWriter, r *http.Request) {
 	filter := sqlite.ListDocumentsFilter{
-		SourceKind: r.URL.Query().Get("source_kind"),
-		PageTypes:  r.URL.Query()["type"],
+		SourceKind:    r.URL.Query().Get("source_kind"),
+		PageTypes:     r.URL.Query()["type"],
+		ExcludeHidden: r.URL.Query().Get("exclude_hidden") == "true",
 	}
 	if len(r.URL.Query()["types"]) > 0 {
 		filter.PageTypes = r.URL.Query()["types"]

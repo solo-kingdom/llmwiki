@@ -87,7 +87,7 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
   const refreshDocuments = useCallback(() => {
     const loader = usePublicApi
       ? api.listPublicDocuments
-      : () => api.listDocuments({ source_kind: "wiki" })
+      : () => api.listDocuments({ source_kind: "wiki", exclude_hidden: true })
     loader()
       .then(setDocuments)
       .catch((e) => setError((e as Error).message))

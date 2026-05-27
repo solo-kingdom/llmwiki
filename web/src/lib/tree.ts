@@ -1,10 +1,22 @@
 import type { DocumentListItem, TreeNode } from "@/types"
 
+/**
+ * Strips the leading "wiki/" segment from a doc path so the tree root
+ * starts at the typed subdirectory level (entities/, concepts/, …)
+ * instead of the redundant wiki/ wrapper.
+ */
+function stripWikiPrefix(path: string): string {
+  const stripped = path.replace(/^\/?wiki\//, "")
+  // If the entire path was just "wiki" or "/wiki", return empty
+  return stripped === path && !path.includes("/") ? "" : stripped
+}
+
 export function buildTree(docs: DocumentListItem[]): TreeNode[] {
   const root: TreeNode[] = []
 
   for (const doc of docs) {
-    const parts = doc.path ? doc.path.split("/").filter(Boolean) : []
+    const normalizedPath = stripWikiPrefix(doc.path || "")
+    const parts = normalizedPath ? normalizedPath.split("/").filter(Boolean) : []
     let nodes = root
 
     for (let i = 0; i < parts.length; i++) {
@@ -24,7 +36,7 @@ export function buildTree(docs: DocumentListItem[]): TreeNode[] {
 
     nodes.push({
       name: doc.filename,
-      path: doc.path ? `${doc.path}/${doc.filename}` : doc.filename,
+      path: normalizedPath ? `${normalizedPath}/${doc.filename}` : doc.filename,
       isFolder: false,
       children: [],
       doc,

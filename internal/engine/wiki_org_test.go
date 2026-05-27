@@ -63,3 +63,26 @@ func TestWikiPageTypeUsesClassification(t *testing.T) {
 		t.Fatalf("WikiPageType misplaced = %q", got)
 	}
 }
+
+func TestIsHiddenWikiSubdir(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"wiki/templates/entity.md", true},
+		{"wiki/templates/concept.md", true},
+		{"wiki/sources/paper.md", true},
+		{"wiki/entities/foo.md", false},
+		{"wiki/concepts/bar.md", false},
+		{"wiki/synthesis/analysis.md", false},
+		{"wiki/comparisons/compare.md", false},
+		{"wiki/queries/question.md", false},
+		{"wiki/overview.md", false},
+		{"raw/sources/file.pdf", false},
+	}
+	for _, tc := range tests {
+		if got := IsHiddenWikiSubdir(tc.path); got != tc.want {
+			t.Errorf("IsHiddenWikiSubdir(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}

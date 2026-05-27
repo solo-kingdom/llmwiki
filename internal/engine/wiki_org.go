@@ -38,6 +38,14 @@ var WikiSystemSubdirs = map[string]struct{}{
 	"templates": {},
 }
 
+// WikiHiddenSubdirs lists wiki subdirectories hidden from user-facing display APIs.
+// Documents under these directories remain in the database for internal use (MCP, ingest,
+// reindex, lint) but are excluded from listing, search, and knowledge graph queries.
+var WikiHiddenSubdirs = map[string]struct{}{
+	"templates": {},
+	"sources":   {},
+}
+
 // TypedWikiSubdirs lists business content subdirectories in stable order.
 var TypedWikiSubdirs = []string{
 	"entities",
@@ -112,6 +120,14 @@ func IsTypedContentWikiPage(relPath string) bool {
 // IsMisplacedWikiPage reports whether relPath is a top-level business wiki page.
 func IsMisplacedWikiPage(relPath string) bool {
 	return ClassifyWikiPath(relPath) == WikiPathMisplaced
+}
+
+// IsHiddenWikiSubdir reports whether relPath is under a wiki subdirectory that should
+// be hidden from user-facing display (listing, search, knowledge graph).
+func IsHiddenWikiSubdir(relPath string) bool {
+	subdir := WikiSubdirFromPath(relPath)
+	_, ok := WikiHiddenSubdirs[subdir]
+	return ok
 }
 
 // WikiSubdirFromPath returns the first subdirectory under wiki/ when present.

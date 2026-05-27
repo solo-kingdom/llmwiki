@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 )
@@ -244,8 +246,9 @@ func (d *DB) ArchiveDocuments(ids []string) (int64, error) {
 
 // ListDocumentsFilter optionally restricts listed documents.
 type ListDocumentsFilter struct {
-	SourceKind string
-	PageTypes  []string
+	SourceKind    string
+	PageTypes     []string
+	ExcludeHidden bool
 }
 
 // ListDocuments returns all non-failed documents.
@@ -263,6 +266,9 @@ func (d *DB) ListDocumentsFiltered(f ListDocumentsFilter) ([]Document, error) {
 	if f.SourceKind != "" {
 		sqlStr += "AND source_kind = ? "
 		args = append(args, f.SourceKind)
+	}
+	if f.ExcludeHidden {
+		sqlStr += "AND NOT (" + hiddenSubdirsWhere("relative_path") + ") "
 	}
 	sqlStr += "ORDER BY path, filename"
 
@@ -296,6 +302,17 @@ func matchPageType(doc Document, types []string) bool {
 		}
 	}
 	return false
+}
+
+// hiddenSubdirsWhere returns a SQL WHERE fragment that matches documents under
+// any wiki hidden subdirectory. The column parameter should be "relative_path" or
+// "d.relative_path" depending on query context.
+func hiddenSubdirsWhere(col string) string {
+	var parts []string
+	for subdir := range engine.WikiHiddenSubdirs {
+		parts = append(parts, fmt.Sprintf("%s LIKE 'wiki/%s/%%'", col, subdir))
+	}
+	return strings.Join(parts, " OR ")
 }
 
 // PageTypeForDocument returns the wiki page type for a document row.

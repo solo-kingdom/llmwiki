@@ -110,4 +110,41 @@ describe("remarkWikiLink", () => {
     expect(result).toContain("after")
     expect(result).toContain("/d/doc-1")
   })
+
+  it("resolves wikilink with spaces via slug normalization", async () => {
+    const slugDocs = makeDocs([
+      { id: "doc-adam", filename: "adam-foroughi.md", path: "/wiki/entities" },
+    ])
+    const result = await processMarkdown(
+      "Founded by [[Adam Foroughi]].",
+      slugDocs,
+    )
+    expect(result).toContain("/d/doc-adam")
+    expect(result).toContain("Adam Foroughi")
+    expect(result).not.toContain("wikilink-broken")
+  })
+
+  it("resolves wikilink via title index fallback", async () => {
+    const titleDocs = makeDocs([
+      { id: "doc-1", filename: "special-char.md", path: "/wiki/entities", title: "Special Character" },
+    ])
+    const result = await processMarkdown(
+      "See [[Special Character]] for details.",
+      titleDocs,
+    )
+    expect(result).toContain("/d/doc-1")
+    expect(result).not.toContain("wikilink-broken")
+  })
+
+  it("resolves wikilink with multiple consecutive spaces via slug normalization", async () => {
+    const slugDocs = makeDocs([
+      { id: "doc-long", filename: "some-long-name.md", path: "/wiki/entities" },
+    ])
+    const result = await processMarkdown(
+      "See [[Some  Long   Name]] here.",
+      slugDocs,
+    )
+    expect(result).toContain("/d/doc-long")
+    expect(result).not.toContain("wikilink-broken")
+  })
 })

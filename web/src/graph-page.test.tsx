@@ -4,6 +4,8 @@ import { GraphPage } from "@/components/GraphPage"
 import * as api from "@/lib/api"
 import { I18nProvider } from "@/i18n"
 
+const mockSelectDocument = vi.fn()
+
 vi.mock("react-force-graph-2d", () => ({
   default: ({
     onNodeClick,
@@ -33,6 +35,12 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getKnowledgeGraph: vi.fn(),
   }
 })
+
+vi.mock("@/context/WikiReaderContext", () => ({
+  useWikiReader: () => ({
+    selectDocument: mockSelectDocument,
+  }),
+}))
 
 const mockGraph = {
   nodes: [
@@ -106,17 +114,15 @@ describe("GraphPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("navigates to wiki reader when node is clicked", async () => {
+  it("calls selectDocument when node is clicked", async () => {
     vi.mocked(api.getKnowledgeGraph).mockResolvedValue(mockGraph)
-    window.history.replaceState(null, "", "/wiki/graph")
     renderGraphPage()
 
     const pageA = await screen.findByRole("button", { name: "Page A" })
     fireEvent.click(pageA)
 
     await waitFor(() => {
-      expect(window.location.pathname).toBe("/wiki")
-      expect(window.location.search).toContain("doc=doc-a")
+      expect(mockSelectDocument).toHaveBeenCalledWith("doc-a")
     })
   })
 

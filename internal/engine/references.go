@@ -16,9 +16,10 @@ type Reference struct {
 // ReferenceParser extracts citations and wiki links from markdown content.
 type ReferenceParser struct {
 	// Index of documents for resolution
-	docsByFilename  map[string]string // lowercase filename → doc ID
+	docsByFilename  map[string]string // lowercase filename → doc ID (also includes title→id)
 	docsByBase      map[string]string // lowercase basename (no ext) → doc ID
 	docsByWikiPath  map[string]string // lowercase wiki-relative path → doc ID
+	docsBySlug      map[string]string // slugified wiki-relative path → doc ID
 }
 
 // NewReferenceParser creates a parser with the given document index.
@@ -28,6 +29,7 @@ func NewReferenceParser(docs []DocIndexEntry) *ReferenceParser {
 		docsByFilename: make(map[string]string),
 		docsByBase:     make(map[string]string),
 		docsByWikiPath: make(map[string]string),
+		docsBySlug:     make(map[string]string),
 	}
 	for _, d := range docs {
 		fnLower := strings.ToLower(d.Filename)
@@ -50,7 +52,39 @@ func NewReferenceParser(docs []DocIndexEntry) *ReferenceParser {
 				relative += "/"
 			}
 			relative += d.Filename
-			rp.docsByWikiPath[strings.ToLower(relative)] = d.ID
+			key := strings.ToLower(relative)
+			rp.docsByWikiPath[key] = d.ID
+
+			// Build slug index (first-write-wins)
+			slug := slugify(key)
+			if slug != "" {
+				if _, exists := rp.docsBySlug[slug]; !exists {
+					rp.docsBySlug[slug] = d.ID
+				}
+			}
+			// Add basename slug (with and without extension)
+			lastSlash := strings.LastIndex(key, "/")
+			basePart := key
+			if lastSlash >= 0 {
+				basePart = key[lastSlash+1:]
+			}
+			baseSlug := slugify(basePart)
+			if baseSlug != "" {
+				if _, exists := rp.docsBySlug[baseSlug]; !exists {
+					rp.docsBySlug[baseSlug] = d.ID
+				}
+			}
+			// Add basename without extension slug
+			dotIdx := strings.LastIndex(baseSlug, ".")
+			baseNoExt := baseSlug
+			if dotIdx > 0 {
+				baseNoExt = baseSlug[:dotIdx]
+			}
+			if baseNoExt != "" && baseNoExt != baseSlug {
+				if _, exists := rp.docsBySlug[baseNoExt]; !exists {
+					rp.docsBySlug[baseNoExt] = d.ID
+				}
+			}
 		}
 	}
 	return rp
@@ -194,10 +228,12 @@ func (rp *ReferenceParser) parseWikiLinks(content, docPath string) []Reference {
 	return refs
 }
 
-// resolveWikiPath resolves a wiki link target using three fallback strategies:
+// resolveWikiPath resolves a wiki link target using five fallback strategies:
 // 1. Exact match in wikiPath index
 // 2. Append .md and retry
 // 3. Match by basename only
+// 4. Slug normalization match
+// 5. Title/filename/base index match
 func (rp *ReferenceParser) resolveWikiPath(href, wikiRel string) string {
 	// Resolve relative paths
 	resolved := href
@@ -249,7 +285,55 @@ func (rp *ReferenceParser) resolveWikiPath(href, wikiRel string) string {
 		}
 	}
 
+	// Strategy 4: slug normalization match
+	slugified := slugify(resolvedLower)
+	if slugified != "" {
+		if id, ok := rp.docsBySlug[slugified]; ok {
+			return id
+		}
+		// Try slugified + ".md"
+		if id, ok := rp.docsBySlug[slugified+".md"]; ok {
+			return id
+		}
+		// Try slugified basename
+		slugBase := slugified
+		if idx := strings.LastIndex(slugBase, "/"); idx >= 0 {
+			slugBase = slugBase[idx+1:]
+		}
+		if slugBase != slugified {
+			if id, ok := rp.docsBySlug[slugBase]; ok {
+				return id
+			}
+			if id, ok := rp.docsBySlug[slugBase+".md"]; ok {
+				return id
+			}
+		}
+	}
+
+	// Strategy 5: title/filename/base index match
+	if id, ok := rp.docsByFilename[resolvedLower]; ok {
+		return id
+	}
+	if id, ok := rp.docsByBase[resolvedLower]; ok {
+		return id
+	}
+
 	return ""
+}
+
+// slugify normalizes a string for fuzzy matching:
+// lowercase → spaces to hyphens → collapse consecutive hyphens → trim edges.
+func slugify(s string) string {
+	s = strings.ToLower(s)
+	// Replace spaces with hyphens
+	s = strings.ReplaceAll(s, " ", "-")
+	// Collapse consecutive hyphens
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	// Trim leading/trailing hyphens
+	s = strings.Trim(s, "-")
+	return s
 }
 
 // stripExtension removes the file extension from a filename.

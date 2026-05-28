@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { getKnowledgeGraph } from "@/lib/api"
 import { useT } from "@/i18n"
-import { navigateTo, wikiReaderHref } from "@/lib/wiki-routes"
+import { useWikiReader } from "@/context/WikiReaderContext"
 import type { GraphEdge, GraphNode, KnowledgeGraphResponse } from "@/types"
+import type { ForceGraphMethods } from "react-force-graph-2d"
 
 const ForceGraph2D = lazy(() => import("react-force-graph-2d"))
 
@@ -31,7 +32,9 @@ function isGraphEmpty(data: KnowledgeGraphResponse): boolean {
 
 export function GraphPage() {
   const t = useT()
+  const { selectDocument } = useWikiReader()
   const containerRef = useRef<HTMLDivElement>(null)
+  const fgRef = useRef<ForceGraphMethods>(undefined)
   const [graphData, setGraphData] = useState<KnowledgeGraphResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -69,9 +72,9 @@ export function GraphPage() {
 
   const handleNodeClick = useCallback((node: ForceNode) => {
     if (node.document_id) {
-      navigateTo(wikiReaderHref(node.document_id))
+      selectDocument(node.document_id)
     }
-  }, [])
+  }, [selectDocument])
 
   const nodeCanvasObject = useCallback(
     (node: ForceNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
@@ -95,6 +98,20 @@ export function GraphPage() {
     },
     [],
   )
+
+  useEffect(() => {
+    const fg = fgRef.current
+    if (!fg) return
+    const charge = fg.d3Force("charge")
+    if (charge) {
+      charge.strength(-120)
+      charge.distanceMax(300)
+    }
+    const link = fg.d3Force("link")
+    if (link) {
+      link.distance(50)
+    }
+  }, [forceData])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -141,18 +158,8 @@ export function GraphPage() {
               linkColor={() => "#cbd5e1"}
               linkDirectionalArrowLength={3.5}
               linkDirectionalArrowRelPos={1}
+              ref={fgRef}
               onNodeClick={(node) => handleNodeClick(node as ForceNode)}
-              onEngineInit={(fg) => {
-                const charge = fg.d3Force("charge")
-                if (charge) {
-                  charge.strength(-120)
-                  charge.distanceMax(300)
-                }
-                const link = fg.d3Force("link")
-                if (link) {
-                  link.distance(50)
-                }
-              }}
               d3AlphaDecay={0.02}
               d3VelocityDecay={0.3}
               warmupTicks={30}

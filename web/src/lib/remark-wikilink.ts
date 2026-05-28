@@ -8,33 +8,42 @@ import type { DocumentListItem } from "@/types"
  */
 const WIKILINK_RE = /\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]/g
 
-/**
- * Strips file extension from a filename, matching backend's stripExtension().
- */
-function stripExtension(name: string): string {
-  const exts = [
-    ".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls",
-    ".csv", ".html", ".htm", ".md", ".txt",
-  ]
-  for (const ext of exts) {
-    if (name.endsWith(ext)) return name.slice(0, -ext.length)
-  }
-  const idx = name.lastIndexOf(".")
-  if (idx > 0) return name.slice(0, idx)
-  return name
+/** Resolution indexes built from the document list. */
+interface ResolutionIndexes {
+  docsByWikiPath: Map<string, string>
+  slugIndex: Map<string, string>
+  titleToId: Map<string, string>
 }
 
 /**
- * Resolve a wiki link target to a document ID using the same three-strategy
- * approach as the backend's resolveWikiPath() in internal/engine/references.go:
+ * Slugify a string for normalized matching:
+ *  1. Lowercase
+ *  2. Spaces → hyphens
+ *  3. Collapse consecutive hyphens
+ *  4. Trim leading/trailing hyphens
+ */
+function slugify(str: string): string {
+  return str
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+}
+
+/**
+ * Resolve a wiki link target to a document ID using a five-strategy
+ * approach matching the backend's resolveWikiPath():
  *  1. Exact match in wikiPath index
  *  2. Append .md and retry
  *  3. Match by basename only
+ *  4. Slug normalization match
+ *  5. Title index match
  */
 function resolveWikiPath(
   href: string,
-  docsByWikiPath: Map<string, string>,
+  indexes: ResolutionIndexes,
 ): string {
+  const { docsByWikiPath, slugIndex, titleToId } = indexes
   const lower = href.toLowerCase()
 
   // Strategy 1: exact match
@@ -59,17 +68,46 @@ function resolveWikiPath(
     }
   }
 
+  // Strategy 4: slug normalization match
+  const slugified = slugify(lower)
+  if (slugified) {
+    const slugMatch = slugIndex.get(slugified)
+    if (slugMatch) return slugMatch
+
+    // Also try slugified + ".md"
+    const slugMd = slugIndex.get(slugified + ".md")
+    if (slugMd) return slugMd
+
+    // Also try slugified basename
+    let slugBase = slugified
+    const sIdx = slugBase.lastIndexOf("/")
+    if (sIdx >= 0) slugBase = slugBase.slice(sIdx + 1)
+    if (slugBase !== slugified) {
+      const slugBaseMatch = slugIndex.get(slugBase)
+      if (slugBaseMatch) return slugBaseMatch
+      const slugBaseMd = slugIndex.get(slugBase + ".md")
+      if (slugBaseMd) return slugBaseMd
+    }
+  }
+
+  // Strategy 5: title index match
+  const titleMatch = titleToId.get(lower)
+  if (titleMatch) return titleMatch
+
   return ""
 }
 
 /**
- * Build a wikiPath index from a document list, matching backend's
+ * Build resolution indexes from a document list, matching backend's
  * NewReferenceParser() logic in internal/engine/references.go.
  */
-function buildWikiPathIndex(
+function buildResolutionIndexes(
   documents: DocumentListItem[],
-): Map<string, string> {
-  const index = new Map<string, string>()
+): ResolutionIndexes {
+  const docsByWikiPath = new Map<string, string>()
+  const slugIndex = new Map<string, string>()
+  const titleToId = new Map<string, string>()
+
   for (const doc of documents) {
     if (doc.path && doc.path.startsWith("/wiki")) {
       let relative = doc.path.startsWith("/wiki/")
@@ -82,10 +120,40 @@ function buildWikiPathIndex(
         relative += "/"
       }
       relative += doc.filename
-      index.set(relative.toLowerCase(), doc.id)
+      const key = relative.toLowerCase()
+      docsByWikiPath.set(key, doc.id)
+
+      // Build slug index (first-write-wins)
+      // Add full path slug
+      const slug = slugify(key)
+      if (slug && !slugIndex.has(slug)) {
+        slugIndex.set(slug, doc.id)
+      }
+      // Add basename slug (with and without extension)
+      const lastSlash = key.lastIndexOf("/")
+      const basePart = lastSlash >= 0 ? key.slice(lastSlash + 1) : key
+      const baseSlug = slugify(basePart)
+      if (baseSlug && !slugIndex.has(baseSlug)) {
+        slugIndex.set(baseSlug, doc.id)
+      }
+      // Add basename without extension slug
+      const dotIdx = baseSlug.lastIndexOf(".")
+      const baseNoExt = dotIdx > 0 ? baseSlug.slice(0, dotIdx) : baseSlug
+      if (baseNoExt && baseNoExt !== baseSlug && !slugIndex.has(baseNoExt)) {
+        slugIndex.set(baseNoExt, doc.id)
+      }
+    }
+
+    // Build title index (first-write-wins)
+    if (doc.title) {
+      const titleKey = doc.title.toLowerCase()
+      if (!titleToId.has(titleKey)) {
+        titleToId.set(titleKey, doc.id)
+      }
     }
   }
-  return index
+
+  return { docsByWikiPath, slugIndex, titleToId }
 }
 
 /**
@@ -97,11 +165,11 @@ function buildWikiPathIndex(
 export function createRemarkWikiLink(
   documents: DocumentListItem[],
 ): Plugin<[], Root> {
-  const docsByWikiPath = buildWikiPathIndex(documents)
+  const indexes = buildResolutionIndexes(documents)
 
   return function remarkWikiLink() {
     return (tree: Root) => {
-      visitTextNodes(tree, docsByWikiPath)
+      visitTextNodes(tree, indexes)
     }
   }
 }
@@ -112,15 +180,16 @@ export function createRemarkWikiLink(
  */
 function visitTextNodes(
   node: Root | RootContent,
-  docsByWikiPath: Map<string, string>,
+  indexes: ResolutionIndexes,
 ): void {
   if (!("children" in node) || !Array.isArray(node.children)) return
 
-  // Skip code-related nodes
+  // Skip code-related nodes (cast to avoid narrow type inference)
+  const nodeType = (node as { type: string }).type
   if (
-    node.type === "code" ||
-    node.type === "inlineCode" ||
-    node.type === "link"
+    nodeType === "code" ||
+    nodeType === "inlineCode" ||
+    nodeType === "link"
   ) {
     return
   }
@@ -136,11 +205,11 @@ function visitTextNodes(
       }
 
       // Split text around [[...]] patterns and create link/html nodes
-      const parts = splitByWikilinks(text, docsByWikiPath)
+      const parts = splitByWikilinks(text, indexes)
       newChildren.push(...parts)
     } else {
       // Recurse into children
-      visitTextNodes(child, docsByWikiPath)
+      visitTextNodes(child, indexes)
       newChildren.push(child)
     }
   }
@@ -155,7 +224,7 @@ function visitTextNodes(
  */
 function splitByWikilinks(
   text: string,
-  docsByWikiPath: Map<string, string>,
+  indexes: ResolutionIndexes,
 ): RootContent[] {
   const result: RootContent[] = []
   let lastIndex = 0
@@ -176,7 +245,7 @@ function splitByWikilinks(
     const pipeMatch = fullMatch.match(/^\[\[[^\]|]+\|([^\]]*)\]\]$/)
     const displayText = pipeMatch ? pipeMatch[1] : target
 
-    const resolved = resolveWikiPath(target, docsByWikiPath)
+    const resolved = resolveWikiPath(target, indexes)
 
     if (resolved) {
       // Valid link → create a markdown link node

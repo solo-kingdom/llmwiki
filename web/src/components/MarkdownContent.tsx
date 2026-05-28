@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm"
 import rehypeHighlight from "rehype-highlight"
 import { cn } from "@/lib/utils"
 import { createRemarkWikiLink } from "@/lib/remark-wikilink"
+import type { PluggableList } from "unified"
 import type { DocumentListItem } from "@/types"
 import "highlight.js/styles/github.css"
 
@@ -35,8 +36,8 @@ export function MarkdownContent({
 }: MarkdownContentProps) {
   const proseClass = variant === "chat" ? "chat-prose" : "wiki-prose"
 
-  const remarkPlugins = useMemo(() => {
-    const plugins = [remarkGfm]
+  const remarkPlugins = useMemo<PluggableList>(() => {
+    const plugins: PluggableList = [remarkGfm]
     if (documents && documents.length > 0) {
       plugins.push(createRemarkWikiLink(documents))
     }

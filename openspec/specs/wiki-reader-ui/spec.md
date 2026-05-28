@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Independent Wiki reader
-The system SHALL provide a Wiki reader experience that is visually and semantically distinct from the management workbench.
+The system SHALL provide a Wiki reader experience that is visually and semantically distinct from the management workbench. The Wiki reader SHALL render `[[wikilink]]` syntax as clickable links that navigate to referenced documents.
 
 #### Scenario: User opens Wiki reader URL
 - **WHEN** the user opens `/wiki`
@@ -18,6 +18,14 @@ The system SHALL provide a Wiki reader experience that is visually and semantica
 #### Scenario: Reader header exposes search
 - **WHEN** the user views the Wiki reader on any viewport size
 - **THEN** the reader header SHALL expose a search affordance that opens the Wiki search modal (see `wiki-search-modal` capability)
+
+#### Scenario: Wikilink renders as clickable link
+- **WHEN** the user views a wiki document containing `[[attention]]` in the Wiki reader
+- **THEN** the system SHALL render it as a clickable link that navigates to the referenced document
+
+#### Scenario: Broken wikilink displays with distinct style
+- **WHEN** the user views a wiki document containing `[[nonexistent]]` that does not resolve to any document
+- **THEN** the system SHALL render it with a `wikilink-broken` CSS class for visual distinction
 
 ### Requirement: Wiki-only document scope
 The Wiki reader SHALL load and display only documents with `source_kind=wiki`. Raw source files and other non-wiki documents SHALL NOT appear in the reader sidebar tree or entity list.

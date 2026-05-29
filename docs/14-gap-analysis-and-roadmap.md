@@ -88,72 +88,40 @@
 
 ---
 
-### P0-4: SHA256 缓存未覆盖 job-based 摄入
+### P0-4: SHA256 缓存未覆盖 job-based 摄入 ✅ 已实现
 
-**影响**:
-- `Ingest()`（文件直接摄入）有完整的 SHA256 缓存检查，命中则跳过 LLM pipeline
-- `IngestNormalized()`（job-based 摄入，是 Web UI / API 的主要入口）**不做缓存检查**
-- 用户重试失败的 job 或重新提交相同的 normalized 内容时，会重复消耗 LLM token
+> **状态（2026-05-28）**: `internal/ingest/cache.go` 实现了 `cacheKeyForNormalized()` 和 `lookupCacheForSource()`，`IngestNormalized()` 入口已有完整的 content SHA256 缓存检查。缓存 key 为 `(canonicalPath, contentSHA256)`，命中后跳过 LLM pipeline，附带 `writtenFilesExist()` 校验确保缓存完整性。
 
-**根因**:
-`internal/ingest/pipeline.go` 中，`Ingest()` 在第 72-76 行调用 `checkCache()`，但 `IngestNormalized()` 直接从第 98 行开始执行 pipeline，无缓存逻辑。两种入口的缓存策略不一致。
+**原始问题描述**:
+`Ingest()`（文件直接摄入）有 SHA256 缓存，但 `IngestNormalized()`（Web UI / API 主要入口）未做缓存检查，导致重复提交相同内容时重复消耗 LLM token。
 
-**推荐修复方案**:
-在 `IngestNormalized()` 中也加入 SHA256 计算和缓存检查。由于 `IngestNormalized()` 接收的是 `NormalizedContent` 结构体（文本内容），而非文件路径，需要计算内容的 SHA256（而非文件哈希）。缓存 key 为 `(sourcePath, contentSHA256)`。
-
-**涉及模块**: `internal/ingest/pipeline.go`
+**涉及模块**: `internal/ingest/cache.go`, `internal/ingest/pipeline.go`
 
 ---
 
 ## 二、P1：Wiki 质量必要（4 项）
 
-### P1-1: Lint / Wiki 健康检查缺失
+### P1-1: Lint / Wiki 健康检查缺失 ✅ 已实现（阶段 1）
 
-**影响**:
-- 用户无法系统性发现 Wiki 中的问题：页面间矛盾、孤立页面（无入链）、死链、缺失交叉引用
-- Karpathy 原始概念明确将 Lint 作为三大核心操作之一
-- 随着 Wiki 增长，问题会累积但不可见
+> **状态（2026-05-28）**: `internal/engine/lint.go` 实现了完整的机械性健康检查（阶段 1），通过 MCP `search` 工具 lint 模式和 Local tools 暴露。已实现检查项：
+> - 死链检测（`dead_link`）：解析 `[[wikilinks]]` 和 `[text](path)` 链接，多策略解析目标路径
+> - 孤立页面检测（`orphan_page`）：无入链的 wiki 页面（排除系统页和 source 摘要页）
+> - Frontmatter type-vs-directory 一致性验证（`type_dir_mismatch`、`missing_frontmatter`）
+> - 错位页面检测（`misplaced_wiki_page`）：非 typed 子目录下的业务页面
+> - 日志格式验证（`log_format_invalid`、`log_date_decreasing`）：`engine/log_validator.go`
+> - Wiki 统计（页数/源数/最后更新日期）
+>
+> 尚未实现（阶段 2/3）：矛盾检测（需 LLM）、陈旧声明检测、缺失交叉引用检测。
 
-**当前状态**:
-项目中有 `engine/dataaudit.go` 提供数据结构审计（区分 FileTruth/DBDerived/DBCached），但这是数据架构审计而非 Wiki 内容检查。没有矛盾检测、断链检查等。
-
-**推荐修复方案**（分阶段）:
-
-*阶段 1 (最小可行)*:
-- 死链检测：解析所有 wiki 页面的 `[[wikilinks]]`，检查目标文件是否存在
-- 孤立页面检测：查找无入链的页面
-- Frontmatter type-vs-directory 一致性验证
-
-*阶段 2*:
-- 陈旧声明检测（利用已有的 `stale_since` 数据）
-- 缺失交叉引用检测（被提及但无专门页面的概念）
-
-*阶段 3*:
-- 矛盾检测（需要 LLM 参与，成本高）
-
-**涉及模块**: `internal/engine/`（新增 `lint.go`）, `cmd/llmwiki/`（新增 `lint` 子命令）
+**涉及模块**: `internal/engine/lint.go`, `internal/engine/log_validator.go`, `internal/engine/frontmatter.go`
 
 ---
 
-### P1-2: Frontmatter 一致性验证缺失
+### P1-2: Frontmatter 一致性验证缺失 ✅ 已实现
 
-**影响**:
-- Wiki 页面的 `type` 字段可能与文件所在目录不一致（如 `wiki/entities/` 下的页面 type 为 `concept`）
-- 搜索结果和索引可能因此产生错误分类
-- LLM-Wiki-Skilled 的 `lint_schema.py` 和 OmegaWiki 的 `tools/lint.py` 都实现了此验证
+> **状态（2026-05-28）**: `internal/engine/frontmatter.go` 的 `ValidateFrontmatter()` 函数实现了完整的一致性验证，集成到 `LintWorkspace()` 流程中。验证：`type` 字段与文件所在目录匹配、必需字段（`title`、`type`、`date`）存在性检查、YAML 格式有效性。
 
-**当前状态**:
-`engine/frontmatter.go` 可以解析 YAML frontmatter（提取 title/date/tags/description），但不验证字段值的一致性。
-
-**推荐修复方案**:
-在 `engine/frontmatter.go` 中添加验证逻辑：
-- `type` 字段必须与文件所在目录匹配（`entities/` → `entity`, `concepts/` → `concept`, 等）
-- 必需字段检查：`title`、`date`、`type` 是否存在
-- 可选：日期格式验证（ISO 8601）
-
-将此验证集成到 `llmwiki lint` 命令和 reindex 流程中。
-
-**涉及模块**: `internal/engine/frontmatter.go`（新增验证函数）, `cmd/llmwiki/lint.go`（新增）
+**涉及模块**: `internal/engine/frontmatter.go`（`ValidateFrontmatter` 函数）, `internal/engine/lint.go`（集成调用）
 
 ---
 
@@ -214,13 +182,17 @@
 
 ---
 
-### P2-2: 页面模板缺失
+### P2-2: 页面模板缺失 ✅ 已实现
 
-**影响**: LLM 创建新页面时无结构化参考，可能导致不同摄入产出的页面格式不一致。
+> **状态（2026-05-28）**: `internal/engine/templates.go` 定义了 6 种页面模板（entity/concept/source/synthesis/comparison/query），`llmwiki init` 时通过 `WikiPageTemplateFiles()` 写入 `wiki/templates/`。模板包含 frontmatter 示例、必需章节注释和占位内容。生成 prompt 中通过 `engine.TemplateGuidanceForGeneration()` 引导 LLM 参考模板结构。
 
-**参考**: LLM-Wiki-Skilled 的 `wiki/templates/` 定义了每种页面类型的必需章节（Required Sections），OmegaWiki 的 `runtime/templates/` 为 9 种实体类型定义了精确的章节结构。
+---
 
-**推荐实现**: 在 `wiki/templates/` 目录下创建页面模板（`entity.md.tmpl`、`concept.md.tmpl`、`source.md.tmpl`、`synthesis.md.tmpl`），嵌入到两步骤摄取的 Generation step 的 system prompt 中。
+### P2-4: 日志契约验证缺失 ✅ 已实现
+
+> **状态（2026-05-28）**: `internal/engine/log_validator.go` 实现了 `ValidateLogMD()` 函数，验证：条目前缀格式 `## [YYYY-MM-DD] action-type | description`、日期有效性、日期非递减（仅追加契约）。集成到 `LintWorkspace()` 中。
+
+**涉及模块**: `internal/engine/log_validator.go`, `internal/engine/lint.go`
 
 ---
 
@@ -231,22 +203,6 @@
 **参考**: nashsu 使用 sigma.js + ForceAtlas2 布局；OmegaWiki 使用 Cytoscape.js；lcasastorian 后端有 `react-force-graph-2d`。
 
 **推荐实现**: 前端新增一个 GraphView 组件，使用 `react-force-graph-2d`（已在前端依赖中，来自 lcasastorian 的 web/package.json），从 `/api/v1/graph` 端点获取边数据。
-
----
-
-### P2-4: 日志契约验证缺失
-
-**影响**: `wiki/log.md` 的"仅追加"契约没有工具验证，可能出现 LLM 误操作破坏日志格式。
-
-**参考**: LLM-Wiki-Skilled 的 `scripts/validate_log.py` 验证格式、日期非递减、必需字段。OmegaWiki 在 schema 中定义了 log 格式规范。
-
-**推荐实现**: 在 `engine/` 中新增 `log_validator.go`，验证：
-- 条目前缀格式：`## [YYYY-MM-DD] action-type | description`
-- 日期有效性（ISO 8601）
-- 日期非递减（仅追加）
-- 必需字段存在（Action、Pages touched）
-
-集成到 `llmwiki lint` 命令中。
 
 ---
 
@@ -299,50 +255,28 @@
 ## 五、优先级路线图
 
 ```
-Phase 1: 补全核心 (P0) ───── 立即
+Phase 1: 补全核心 (P0) ───── ✅ 全部已完成
 ┌────────────────────────────────────────────────────────┐
-│ P0-1  wiki/index.md 自动生成 + reindex 集成             │
-│       └── cmd/llmwiki/init.go + engine/reindex.go      │
-│                                                        │
-│ P0-2  页面合并保护                                      │
-│       └── ingest/merge.go (新增) + fileblocks.go 改造   │
-│                          ┌─────────────────────────────┤
-│ P0-3  补全 wiki 子目录  │ 可与 P0-1 一起在 init 中修复  │
-│       └── cmd/llmwiki/init.go (一行改)                 │
-│                                                        │
-│ P0-4  SHA256 缓存覆盖 job-based 摄入                    │
-│       └── ingest/pipeline.go (IngestNormalized 加缓存)  │
+│ P0-1  wiki/index.md 自动生成 + reindex 集成  ✅          │
+│ P0-2  页面合并保护                           ✅          │
+│ P0-3  补全 wiki 子目录                       ✅          │
+│ P0-4  SHA256 缓存覆盖 job-based 摄入         ✅          │
 └────────────────────────────────────────────────────────┘
 
-Phase 2: 质量保障 (P1) ───── 短期 (P0 完成后)
+Phase 2: 质量保障 (P1) ───── ✅ 全部已完成
 ┌────────────────────────────────────────────────────────┐
-│ P1-1  Lint / Wiki 健康检查                              │
-│       ├── engine/lint.go (新增): 死链/孤立/type一致性    │
-│       └── cmd/llmwiki/lint.go (新增 CLI 命令)           │
-│                                                        │
-│ P1-2  Frontmatter 一致性验证 ─→ 可并入 P1-1 Lint        │
-│       └── engine/frontmatter.go (新增验证函数)           │
-│                                                        │
-│ P1-3  .obsidian/ 配置自动生成                           │
-│       └── cmd/llmwiki/init.go (新增 scaffold)           │
-│                                                        │
-│ P1-4  引导文件内容增强                                  │
-│       └── cmd/llmwiki/init.go (丰富模板内容)            │
+│ P1-1  Lint / Wiki 健康检查 (阶段1: 机械检查)  ✅          │
+│ P1-2  Frontmatter 一致性验证                  ✅          │
+│ P1-3  .obsidian/ 配置自动生成                 ✅          │
+│ P1-4  引导文件内容增强                        ✅          │
 └────────────────────────────────────────────────────────┘
 
-Phase 3: 体验提升 (P2) ───── 中期 (P1 完成后)
+Phase 3: 体验提升 (P2) ───── 进行中
 ┌────────────────────────────────────────────────────────┐
-│ P2-1  Web Clipper 扩展 ────────── 可独立开始            │
-│       └── extension/ (新目录, WXT 框架)                 │
-│                                                        │
-│ P2-2  页面模板系统                                      │
-│       └── wiki/templates/ + 摄取 prompt 改造            │
-│                                                        │
-│ P2-3  知识图谱可视化 ──── 依赖 P2-2 完成后 graph 数据就绪 │
-│       └── web/src/components/GraphView.tsx (新增)       │
-│                                                        │
-│ P2-4  日志契约验证 ──────── 可并入 P1-1 Lint            │
-│       └── engine/log_validator.go (新增)               │
+│ P2-1  Web Clipper 扩展 ────────── 待开始                 │
+│ P2-2  页面模板系统                           ✅          │
+│ P2-3  知识图谱可视化 ──── 待开始                         │
+│ P2-4  日志契约验证                           ✅          │
 └────────────────────────────────────────────────────────┘
 
 Phase 4: 长远增强 (P3) ───── 后期 (按需)
@@ -378,19 +312,21 @@ Phase 4: 长远增强 (P3) ───── 后期 (按需)
 
 ## 附录 B：当前已实现功能回顾
 
-本项目当前已实现 **约 90 个功能点**（包括 ✅ 和 ⚠️），核心包括：
+> **更新（2026-05-28）**: P0 全部 4 项、P1 全部 4 项、P2 中 2 项（模板 + 日志验证）已实现。
 
-**工作区基础** (10): 三层架构、purpose.md、log.md、overview.md、workspace init、reindex、raw/sources+assets、不可变策略、.llmwiki/
+本项目当前已实现 **约 100 个功能点**（包括 ✅ 和 ⚠️），核心包括：
+
+**工作区基础** (12): 三层架构、purpose.md、log.md、overview.md、index.md（自动生成）、workspace init、reindex、raw/sources+assets、不可变策略、.llmwiki/、.obsidian/ 自动配置
 
 **原始源处理** (5): Markdown/文本、PDF 提取、Office 文档、SHA256 去重、tiered 处理
 
-**Wiki 页面管理** (7): entity/concept/source 类型、frontmatter 回填、级联删除、wikilink 解析、markdown 链接解析、页面保护、文件名 slug
+**Wiki 页面管理** (9): entity/concept/source 类型、frontmatter 回填、frontmatter 一致性验证、级联删除、wikilink 解析、markdown 链接解析、页面保护、文件名 slug、错位页面检测
 
-**摄取 Pipeline** (11): 两步骤摄入、CoT 嵌入、持久化队列、全局串行、进度可视化、重试/取消、两阶段重试、Session 摄入、FILE 块解析、路径沙箱
+**摄取 Pipeline** (12): 两步骤摄入、CoT 嵌入、持久化队列、全局串行、进度可视化、重试/取消、两阶段重试、Session 摄入、FILE 块解析、路径沙箱、SHA256 缓存（含 IngestNormalized）、页面合并保护（三层）
 
 **搜索与发现** (11): FTS5 搜索、上下文片段、文件浏览、tag 过滤、引用图 cites+links_to、反向链接、未引用源检测、陈旧页面+传播
 
-**Wiki 健康** (1): 数据结构审计（FileTruth/DBDerived 分类）
+**Wiki 健康** (4): 数据结构审计（FileTruth/DBDerived）、Lint 健康检查（死链/孤立/frontmatter/错位/日志）、日志格式验证、Wiki 统计
 
 **交互接口** (30): MCP 6 工具、HTTP API 9+ 端点、Web UI 7 视图（含 wiki reader、文件树、大纲、搜索、摄入 Hub/聊天、Jobs、Timeline、活动日志、Settings、Provider 管理）、CLI 4 命令
 
@@ -398,4 +334,6 @@ Phase 4: 长远增强 (P3) ───── 后期 (按需)
 
 **扩展与兼容** (7): Git 版本控制、ingest commit、智能回滚、Timeline 视图、文件数据可移植性、跨平台、远程服务
 
-**部分实现** (6, 需修复): wiki/index.md 未生成、图片提取不完整、wiki 子目录缺 3 个、SHA256 缓存不覆盖 job、合并保护缺、Obsidian 配置缺
+**页面模板** (6): entity/concept/source/synthesis/comparison/query 六种模板
+
+**部分实现** (2): 图片提取不完整、知识图谱可视化未实现

@@ -87,6 +87,77 @@ Workbench navigation:
 
 Recommended flow: **chat or add context → archive → confirm plan in review → watch Jobs → read Wiki**.
 
+## Session Modes
+
+The Ingest page offers three session modes that control AI behavior and available tools:
+
+| Mode | Purpose | Tools | Characteristics |
+|------|---------|-------|-----------------|
+| **Chat** (default) | Explore materials, digest content | search, read, web_fetch | High conversational freedom, ideal for daily ingestion |
+| **QA** | Query existing wiki knowledge | search, read, web_fetch, references | Focused knowledge retrieval; answers can be archived as query pages |
+| **Organize** | Restructure and optimize wiki | All tools (incl. audit, structure, gaps, similar) | AI calls diagnostic tools in first round; most rounds (12) |
+
+**Ingest flow**:
+
+1. Select a mode and start chatting (or add context / upload attachments)
+2. Interact with AI over multiple turns to explore and understand materials
+3. When satisfied, click **Archive** → AI generates a plan (listing pages to create/update)
+4. Preview the plan in the review card → confirm or cancel
+5. System writes files → monitor status on **Jobs**
+6. Read results on **Wiki**
+
+**Merge protection**: writing to an existing page merges by default (locked fields preserved, arrays unioned, body intelligently merged by LLM) — your existing content is never overwritten.
+
+## Wiki Health
+
+Lint checks help you find issues in your wiki. Currently supported checks:
+
+| Check | Severity | Description |
+|-------|:--------:|-------------|
+| Dead link | error | `[[link]]` or `[text](path)` target does not exist |
+| Missing frontmatter | error | Required frontmatter fields missing (title/type/date) |
+| Log format invalid | error | Entry format in `log.md` does not match spec |
+| Log date decreasing | error | Log entries not in chronological order (violates append-only contract) |
+| Type mismatch | warning | Page `type` field does not match its directory |
+| Misplaced page | warning | Business page not in its typed subdirectory |
+| Orphan page | warning | No other pages link to this page |
+
+**How to trigger**:
+- Via MCP Agent: call `search` tool with mode=`lint`
+- In Organize mode: AI automatically calls the `audit` tool
+- Future: one-click check from Web UI
+
+**error**-level issues should be fixed promptly; **warning**-level issues can be evaluated case by case.
+
+## Workflows
+
+### New Wiki
+
+1. `llmwiki init ~/research` → edit `purpose.md` with your research goals
+2. Optional: edit `rules.md` to add domain rules and terminology
+3. `llmwiki serve ~/research` → configure Provider and model
+4. Start ingesting your first batch of materials on **Ingest**
+
+### Continuous Ingestion (daily)
+
+1. Open **Ingest** (Chat mode)
+2. Chat to explore materials, or use **Add context** to paste notes/text
+3. When satisfied, click **Archive** → review plan → confirm
+4. Monitor execution on **Jobs**, read results on **Wiki**
+
+### Periodic Maintenance (monthly)
+
+1. Run Lint checks — prioritize error-level issues
+2. Switch to Organize mode, describe your restructuring goals
+3. AI diagnoses with audit + structure, then proposes optimizations
+4. Confirm plan → archive to execute
+
+### Deep Q&A
+
+1. Switch to **QA** mode on **Ingest**
+2. Ask specific questions → AI retrieves existing wiki content and synthesizes answers
+3. Valuable answers can be archived to `wiki/queries/` as secondary knowledge sources
+
 ## CLI Reference
 
 Common commands (from workspace dir or with path argument):

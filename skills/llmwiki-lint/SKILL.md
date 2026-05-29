@@ -9,12 +9,22 @@ metadata:
 
 Check LLM Wiki health — find and fix broken links, orphan pages, frontmatter issues, and structural problems.
 
+This skill is the blueprint for health-diagnosis and organization prompts. Deterministic lint is executed by Go code; prompts explain, prioritize, and plan repairs, especially in organize mode and future LLM-assisted quality checks.
+
 ## When to Use
 
 - User says "check wiki health", "lint the wiki", "audit"
 - Before/after major reorganization
 - After bulk ingestion to verify consistency
 - When you notice dead links or inconsistencies during other operations
+
+## Core Invariants
+
+- `raw/` is read-only; lint fixes must not modify source material.
+- The filesystem is the source of truth; lint reports are derived from wiki files and rebuildable indexes.
+- Read affected pages before fixing to avoid losing information just to clear a warning.
+- `wiki/log.md` is append-only; format fixes should be minimal and must not delete historical entries.
+- During session diagnosis, report issues and proposed fixes only; archive confirmation moves the workflow into plan/generation steps.
 
 ## Steps
 
@@ -43,8 +53,8 @@ Check LLM Wiki health — find and fix broken links, orphan pages, frontmatter i
 
    **Log format errors** (`log_format_invalid`, `log_date_decreasing`):
    - Read `wiki/log.md`
-   - Fix entry format to match spec: `### YYYY-MM-DD — description`
-   - Ensure dates are in ascending order (append-only)
+   - Fix entry format to match spec: `## [YYYY-MM-DD] action | description`
+   - Ensure dates are non-decreasing (append-only; do not delete historical entries)
 
 4. **Fix warning-level issues**:
 
@@ -60,6 +70,10 @@ Check LLM Wiki health — find and fix broken links, orphan pages, frontmatter i
    - Move to the correct typed subdirectory
 
 5. **Re-run lint** to verify all fixes
+   ```
+   search(query="", mode="lint")
+   ```
+   If errors remain, continue fixing. Warnings may be consciously deferred with an explanation.
 
 ## Lint Checks Reference
 
@@ -73,14 +87,23 @@ Check LLM Wiki health — find and fix broken links, orphan pages, frontmatter i
 | `misplaced_wiki_page` | warning | Business page not in typed subdirectory |
 | `orphan_page` | warning | No incoming links from other wiki pages |
 
+## Fix Strategy
+
+- **Dead links**: first check for renamed pages or slug differences; if uncertain, ask or mark an open question before creating a placeholder page.
+- **Frontmatter**: infer type from directory, but do not casually change identity fields; if date is missing, use the current repair date.
+- **Orphan pages**: decide whether the orphan is legitimate, such as a source summary or temporary query page; otherwise add links from related overview, entity, or concept pages.
+- **Misplaced / type mismatch**: prefer keeping type and directory consistent; after moving pages, update links pointing to old paths.
+- **Log issues**: fix format and ordering problems only; do not rewrite historical meaning.
+
 ## Guardrails
 
 - Always run lint AFTER making changes, not just before
 - Fix errors before warnings
 - When fixing dead links, prefer creating the missing page over removing the link
 - Never modify `raw/` directory
-- Log format in `wiki/log.md` is strictly append-only — only fix format, never delete entries
+- Log format in `wiki/log.md` is strictly append-only — only fix format, never delete entries; entry prefixes are `## [YYYY-MM-DD] action | description`
 - If a page has multiple issues, fix them all in one pass
+- `overview.md`, `index.md`, and `log.md` are system pages; do not move or delete them as ordinary business pages
 
 ## Done Criteria
 
@@ -89,3 +112,4 @@ Check LLM Wiki health — find and fix broken links, orphan pages, frontmatter i
 - [ ] All pages have valid frontmatter
 - [ ] `wiki/log.md` format is valid and dates are ascending
 - [ ] Warning-level issues reviewed and either fixed or consciously deferred
+- [ ] Key repaired pages were read back to confirm old information was not lost

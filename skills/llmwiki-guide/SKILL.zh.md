@@ -10,6 +10,8 @@ metadata:
 
 探索 LLM Wiki 工作区 — 了解其目标、结构和当前状态。
 
+本 skill 是本项目 Go 代码内 prompts 的蓝本：先把外部 LLM Wiki 资料提炼为可读工作流，再映射到 `internal/ingest/prompts.go`、`internal/mcp/tools.go` 等运行时提示。它是设计源，不是运行时命令界面。
+
 ## 何时使用
 
 - 首次接触一个工作区（"这个 wiki 里有什么？"）
@@ -17,24 +19,47 @@ metadata:
 - 当被问及"我们对 X 了解多少？"
 - 作为 `/llmwiki-ingest`、`/llmwiki-query` 或 `/llmwiki-lint` 的前置步骤
 
+## 核心不变量
+
+- `raw/` 是不可变源材料层，只读不写；源文件修订应作为新来源加入。
+- `wiki/` 是 LLM 维护的持久知识层；写入必须尊重 `purpose.md` 和 `rules.md`。
+- 文件系统是真理源；`.llmwiki/index.db` / SQLite FTS5 只是可重建索引。
+- 写入前必须搜索和阅读相关页面，写入后必须回读验证。
+- `wiki/log.md` 是仅追加日志，条目格式为 `## [YYYY-MM-DD] action | description`。
+
 ## 步骤
 
 1. **调用 MCP `guide` 工具**获取工作区概览
-   - 返回：`purpose.md`、`rules.md`、页面计数、文件列表
-   - 这是了解工作区最快的方式
+   - 当前实现会返回工作区架构说明、`wiki/` 顶层 Markdown 文件、`raw/sources/` 文件和 MCP 工具清单。
+   - 它是快速入口，但不是完整目录树，也不等于已经读取了 `purpose.md` / `rules.md`。
 
-2. **如需深入探索**，使用 MCP `search` 工具：
+2. **读取工作区约定**
+   ```
+   read(path="purpose.md")
+   read(path="rules.md")
+   read(path="wiki/overview.md")
+   read(path="wiki/index.md")
+   ```
+   如果文件不存在，明确说明缺失，不要假设规则。
+
+3. **深入探索内容**，使用 MCP `search` 工具：
    ```
    search(query="", mode="list")    → 所有 wiki 页面
    search(query="主题", mode="search")  → 全文搜索
+   search(query="document-id", mode="references") → 引用图
    ```
 
-3. **查看具体页面**，使用 MCP `read` 工具：
+4. **查看具体页面**，使用 MCP `read` 工具：
    ```
    read(path="wiki/entities/some-entity.md")
    ```
 
-4. **总结**发现的内容：
+5. **选择下一步路由**：
+   - 新材料入库、消化文件/URL/对话 → `/llmwiki-ingest`
+   - 基于已有 wiki 回答问题或整理结构 → `/llmwiki-query`
+   - 检查死链、frontmatter、孤立页、日志格式 → `/llmwiki-lint`
+
+6. **总结**发现的内容：
    - 工作区目标和范围
    - 按类型统计页面数（实体、概念、来源等）
    - 已覆盖的关键主题
@@ -66,11 +91,12 @@ metadata:
 
 | 工具 | 用途 |
 |------|------|
-| `guide` | 工作区概览（目标、规则、文件列表） |
-| `search` | 列出页面 / 全文搜索 / 健康检查 |
+| `guide` | 工作区快速概览和工具清单 |
+| `search` | 列出页面 / 全文搜索 / 引用图 / 健康检查 |
 | `read` | 读取 wiki 页面 |
-| `write` | 创建或编辑 wiki 页面 |
-| `delete` | 删除页面（系统页面受保护） |
+| `write` | 创建或更新 wiki 页面（用于理解 MCP 工具契约；服务内摄入主要通过 FILE 块和 pipeline 写入） |
+| `delete` | 删除文档（`overview.md`、`log.md` 受 MCP 保护；`index.md` 也应视为系统页谨慎处理） |
+| `ping` | 测试 MCP 连通性 |
 
 ## 约束
 
@@ -78,3 +104,4 @@ metadata:
 - 在任何写入操作前阅读 `purpose.md` 和 `rules.md`
 - 文件系统是真理源；`index.db` 仅是可重建的索引
 - 绝不修改 `raw/` 下的文件 — 它们是不可变源文件
+- 不要把 `guide` 输出当成完整状态；需要结构化整理时继续使用 `search`、`read`、`references` 或 `/llmwiki-lint`

@@ -157,6 +157,8 @@ func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.In
 			return p.failReviewApplyFailed(reviewID, job.ID, "no_wiki_files_written", errNoWikiFilesWritten)
 		}
 
+		p.runPostApplyMaintenance(worktreeDir, job.SourcePath, plan.PlanJSON, applyResult, nil)
+
 		commitMsg := vcs.BuildCommitMessage(
 			filepath.Base(normalized.CanonicalPath),
 			job.ID,

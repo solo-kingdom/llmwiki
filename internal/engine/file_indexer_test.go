@@ -202,3 +202,42 @@ func TestIndexFileUpdateSyncsReferences(t *testing.T) {
 		t.Errorf("expected links_to → target.md after update, got refs: %+v", refs)
 	}
 }
+
+func TestRemoveFileArchivesDocument(t *testing.T) {
+	ws := t.TempDir()
+	wikiPath := filepath.Join(ws, "wiki", "entities", "gone.md")
+	if err := os.MkdirAll(filepath.Dir(wikiPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wikiPath, []byte("# Gone\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	adapter := storesvc.NewStoreAdapter(db)
+	indexer := engine.NewWorkspaceFileIndexer(adapter, ws)
+	if err := indexer.IndexFile("wiki/entities/gone.md"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Remove(wikiPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := indexer.RemoveFile("wiki/entities/gone.md"); err != nil {
+		t.Fatalf("RemoveFile: %v", err)
+	}
+
+	doc, err := db.GetDocumentByPath("gone.md", "/wiki/entities/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc != nil {
+		t.Fatal("expected document row to be archived after RemoveFile")
+	}
+}

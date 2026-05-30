@@ -462,6 +462,13 @@ const en: Record<MessageKey, string> = {
   "diff.split": "Split",
   "diff.close": "Close",
 
+  // Job Group Card
+  "jobs.group.archive_title": "Archive task",
+  "jobs.group.history": "History",
+  "jobs.group.history_count": "History ({count})",
+  "jobs.group.expand": "Expand",
+  "jobs.group.collapse": "Collapse",
+
   // Errors
   "error.reply_failed": "Reply failed",
   "error.reply_timeout": "Reply timed out. Please refresh and try again",

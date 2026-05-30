@@ -435,6 +435,13 @@ const zh = {
   "diff.split": "分栏",
   "diff.close": "关闭",
 
+  // Job Group Card
+  "jobs.group.archive_title": "归档任务",
+  "jobs.group.history": "历史记录",
+  "jobs.group.history_count": "历史记录 ({count})",
+  "jobs.group.expand": "展开",
+  "jobs.group.collapse": "收起",
+
   // Errors
   "error.reply_failed": "回复失败",
   "error.reply_timeout": "等待回复超时，请刷新重试",

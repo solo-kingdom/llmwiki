@@ -157,6 +157,114 @@ func TestAddCommitNoChanges(t *testing.T) {
 	}
 }
 
+func TestCommitWikiMaintenance(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	os.WriteFile(filepath.Join(dir, "wiki", "index.md"), []byte("# Index\n"), 0o644)
+	repo, err := InitRepo(dir)
+	if err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	sha, err := repo.CommitWikiMaintenance("wiki: post-apply maintenance")
+	if err != nil {
+		t.Fatalf("CommitWikiMaintenance (no changes): %v", err)
+	}
+	if sha != "" {
+		t.Errorf("expected empty SHA when unchanged, got %q", sha)
+	}
+
+	dirty, err := repo.HasUncommittedWikiMaintenance()
+	if err != nil {
+		t.Fatalf("HasUncommittedWikiMaintenance: %v", err)
+	}
+	if dirty {
+		t.Fatal("expected clean maintenance files")
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "wiki", "index.md"), []byte("# Updated Index\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirty, err = repo.HasUncommittedWikiMaintenance()
+	if err != nil {
+		t.Fatalf("HasUncommittedWikiMaintenance: %v", err)
+	}
+	if !dirty {
+		t.Fatal("expected dirty wiki/index.md")
+	}
+
+	sha, err = repo.CommitWikiMaintenance("wiki: post-apply maintenance")
+	if err != nil {
+		t.Fatalf("CommitWikiMaintenance: %v", err)
+	}
+	if sha == "" {
+		t.Fatal("expected commit SHA")
+	}
+
+	dirty, err = repo.HasUncommittedWikiMaintenance()
+	if err != nil {
+		t.Fatalf("HasUncommittedWikiMaintenance after commit: %v", err)
+	}
+	if dirty {
+		t.Fatal("expected clean maintenance files after commit")
+	}
+}
+
+func TestMergeBranchAfterDirtyWikiMaintenance(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	os.WriteFile(filepath.Join(dir, "wiki", "index.md"), []byte("# Index"), 0o644)
+	repo, _ := InitRepo(dir)
+
+	wtDir, err := repo.CreateWorktree("test-dirty-merge")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	defer repo.RemoveWorktree("test-dirty-merge")
+
+	os.WriteFile(filepath.Join(wtDir, "wiki", "merged.md"), []byte("# Merged"), 0o644)
+	if _, err := repo.CommitInWorktree(wtDir, "test: merge this"); err != nil {
+		t.Fatalf("CommitInWorktree: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "wiki", "index.md"), []byte("# Dirty Index"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirty, err := repo.HasUncommittedWikiMaintenance()
+	if err != nil {
+		t.Fatalf("HasUncommittedWikiMaintenance: %v", err)
+	}
+	if !dirty {
+		t.Fatal("expected dirty index before cleanup")
+	}
+
+	if _, err := repo.CommitWikiMaintenance("wiki: post-apply maintenance"); err != nil {
+		t.Fatalf("CommitWikiMaintenance before merge: %v", err)
+	}
+
+	result, err := repo.MergeBranch("test-dirty-merge")
+	if err != nil {
+		t.Fatalf("MergeBranch after maintenance commit: %v", err)
+	}
+	if len(result.Conflicts) != 0 {
+		t.Errorf("expected no conflicts, got %v", result.Conflicts)
+	}
+
+	dirty, err = repo.HasUncommittedWikiMaintenance()
+	if err != nil {
+		t.Fatalf("HasUncommittedWikiMaintenance after merge: %v", err)
+	}
+	if dirty {
+		t.Fatal("expected clean maintenance files after merge")
+	}
+}
+
 func TestLog(t *testing.T) {
 	if !IsGitAvailable().Available {
 		t.Skip("git not available")

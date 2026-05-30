@@ -123,6 +123,11 @@ func (a *StoreAdapter) DeleteChunks(docID string) error {
 	return a.db.DeleteChunks(docID)
 }
 
+func (a *StoreAdapter) ArchiveDocument(docID string) error {
+	_, err := a.db.ArchiveDocuments([]string{docID})
+	return err
+}
+
 func (a *StoreAdapter) StoreChunks(docID string, chunks []engine.ChunkData) error {
 	sqliteChunks := make([]sqlite.Chunk, len(chunks))
 	for i, c := range chunks {

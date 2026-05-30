@@ -45,6 +45,7 @@ type JobProcessor struct {
 type completedJob struct {
 	jobID       string
 	worktreeDir string
+	sourcePath  string
 	files       []string
 	normalized  *NormalizedSource
 	recorder    JobRecorder
@@ -270,6 +271,8 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 	}
 
 	// Git commit (if version control is enabled)
+	p.finalizeWikiApply(job.ID, job.SourcePath, "", ApplyWikiResult{Written: files})
+
 	if repo := p.gitRepoIfEnabled(); repo != nil {
 		commitMsg := vcs.BuildCommitMessage(
 			filepath.Base(normalized.CanonicalPath),
@@ -293,8 +296,6 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		}
 		vcs.TryAutoPush(repo, p.db)
 	}
-
-	p.finalizeWikiApply(job.ID, job.SourcePath, "", ApplyWikiResult{Written: files})
 
 	// Mark job succeeded
 	p.markJobSucceeded(job.ID, files)
@@ -378,6 +379,9 @@ func (p *JobProcessor) processJobInWorktree(ctx context.Context, job *sqlite.Ing
 		return
 	}
 
+	// Rebuild wiki/index.md in the worktree before commit.
+	p.runPostApplyMaintenance(worktreeDir, job.SourcePath, "", ApplyWikiResult{Written: files}, nil)
+
 	// Commit in worktree
 	commitMsg := vcs.BuildCommitMessage(
 		filepath.Base(normalized.CanonicalPath),
@@ -402,6 +406,7 @@ func (p *JobProcessor) processJobInWorktree(ctx context.Context, job *sqlite.Ing
 	p.mergeQueue <- &completedJob{
 		jobID:       job.ID,
 		worktreeDir: worktreeDir,
+		sourcePath:  job.SourcePath,
 		files:       files,
 		normalized:  normalized,
 		recorder:    rec,
@@ -418,6 +423,10 @@ func (p *JobProcessor) mergeWorktreeJobBranch(
 	llmClient *llm.Client,
 	rec JobRecorder,
 ) (string, error) {
+	if _, err := repo.CommitWikiMaintenance(wikiMaintenanceCommitMsg); err != nil {
+		return "", fmt.Errorf("commit pending wiki maintenance: %w", err)
+	}
+
 	result, err := repo.MergeBranch(jobID)
 	if err != nil {
 		_ = repo.AbortMerge()
@@ -479,6 +488,8 @@ func (p *JobProcessor) mergeCompletedJob(ctx context.Context, completed *complet
 	if sha != "" && completed.recorder != nil {
 		completed.recorder.Record("git_commit", "complete", "merged to main", map[string]any{"sha": sha})
 	}
+
+	p.finalizeWikiApply(completed.jobID, completed.sourcePath, "", ApplyWikiResult{Written: completed.files})
 
 	p.markJobSucceeded(completed.jobID, completed.files)
 

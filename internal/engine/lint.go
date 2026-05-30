@@ -26,6 +26,7 @@ const (
 	LintCodeLogFormatInvalid    = "log_format_invalid"
 	LintCodeLogDateDecreasing   = "log_date_decreasing"
 	LintCodeDuplicatePage       = "duplicate_page"
+	LintCodeGhostIndexEntry     = "ghost_index_entry"
 )
 
 // LintIssue is a single wiki health check finding.
@@ -402,6 +403,40 @@ func lintDuplicatePages(pages []wikiPage) []LintIssue {
 		}
 	}
 	return issues
+}
+
+// LintGhostIndexEntries reports SQLite documents whose files no longer exist on disk.
+func LintGhostIndexEntries(workspace string, store Store) ([]LintIssue, error) {
+	workspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	docs, err := store.ListAllDocuments()
+	if err != nil {
+		return nil, fmt.Errorf("list indexed documents: %w", err)
+	}
+
+	var issues []LintIssue
+	for _, doc := range docs {
+		rel := docRelativePath(doc)
+		if rel == "" {
+			continue
+		}
+		fullPath := filepath.Join(workspace, filepath.FromSlash(rel))
+		if _, err := os.Stat(fullPath); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("stat %s: %w", rel, err)
+		}
+		issues = append(issues, LintIssue{
+			Severity: LintSeverityError,
+			Code:     LintCodeGhostIndexEntry,
+			Path:     rel,
+			Message:  "索引幽灵页：数据库中存在但文件已缺失，请运行 reindex 或删除整理残留",
+		})
+	}
+	return issues, nil
 }
 
 func computeLintStats(workspace string, pages []wikiPage) LintStats {

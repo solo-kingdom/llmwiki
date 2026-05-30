@@ -1,7 +1,11 @@
 import { useWikiReader } from "@/context/WikiReaderContext"
 import { useT } from "@/i18n"
 import type { MessageKey } from "@/i18n"
-import { WIKI_PAGE_TYPES, type WikiPageType } from "@/lib/wiki-page-types"
+import {
+  WIKI_PAGE_TYPES,
+  CONCEPT_FILTER_TYPES,
+  type WikiPageType,
+} from "@/lib/wiki-page-types"
 import { cn } from "@/lib/utils"
 
 const TYPE_LABEL_KEYS: Record<WikiPageType, MessageKey> = {
@@ -15,7 +19,11 @@ const TYPE_LABEL_KEYS: Record<WikiPageType, MessageKey> = {
 
 export function WikiTypeFilter() {
   const t = useT()
-  const { selectedPageTypes, setSelectedPageTypes } = useWikiReader()
+  const { navigationMode, selectedPageTypes, setSelectedPageTypes } =
+    useWikiReader()
+
+  const availableTypes =
+    navigationMode === "concept" ? CONCEPT_FILTER_TYPES : WIKI_PAGE_TYPES
 
   const toggle = (type: string) => {
     if (selectedPageTypes.includes(type)) {
@@ -31,7 +39,7 @@ export function WikiTypeFilter() {
         {t("wiki.type_filter")}
       </p>
       <div className="flex flex-wrap gap-1">
-        {WIKI_PAGE_TYPES.map((type) => {
+        {availableTypes.map((type) => {
           const active = selectedPageTypes.includes(type)
           return (
             <button

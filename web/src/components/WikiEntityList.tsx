@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { useWikiReader } from "@/context/WikiReaderContext"
 import { useT } from "@/i18n"
-import { inferPageType } from "@/lib/wiki-page-types"
+import { inferPageType, CONCEPT_MODE_TYPES } from "@/lib/wiki-page-types"
 import { cn } from "@/lib/utils"
 
 function ChevronIcon({ open }: { open: boolean }) {
@@ -23,25 +23,25 @@ function ChevronIcon({ open }: { open: boolean }) {
   )
 }
 
+/** A concept-mode flat list showing entity, concept, and overview documents. */
 export function WikiEntityList({ onSelect }: { onSelect?: () => void }) {
   const t = useT()
   const { filteredDocuments, currentDocId, selectDocument, selectedPageTypes } =
     useWikiReader()
   const [open, setOpen] = useState(true)
 
-  const entities = useMemo(() => {
-    const list = filteredDocuments.filter(
-      (d) => inferPageType(d) === "entity",
-    )
-    return list.sort((a, b) =>
-      (a.title || a.filename).localeCompare(b.title || b.filename),
-    )
+  const items = useMemo(() => {
+    return filteredDocuments
+      .filter((d) => {
+        const pt = inferPageType(d)
+        return CONCEPT_MODE_TYPES.includes(pt) || d.page_type === "overview"
+      })
+      .sort((a, b) =>
+        (a.title || a.filename).localeCompare(b.title || b.filename),
+      )
   }, [filteredDocuments])
 
-  const showSection =
-    selectedPageTypes.length === 0 || selectedPageTypes.includes("entity")
-
-  if (!showSection || entities.length === 0) {
+  if (items.length === 0) {
     return null
   }
 
@@ -54,11 +54,11 @@ export function WikiEntityList({ onSelect }: { onSelect?: () => void }) {
       >
         <ChevronIcon open={open} />
         {t("wiki.entity_list")}
-        <span className="ml-auto tabular-nums">{entities.length}</span>
+        <span className="ml-auto tabular-nums">{items.length}</span>
       </button>
       {open && (
         <ul className="mt-1">
-          {entities.map((doc) => (
+          {items.map((doc) => (
             <li key={doc.id}>
               <button
                 type="button"

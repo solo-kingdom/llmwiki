@@ -33,12 +33,13 @@ The Web UI SHALL provide a graph visualization view for browsing wiki page relat
 - **AND** ForceGraph2D SHALL auto-detect its container size without explicit width/height props
 
 #### Scenario: Force simulation parameters
-- **WHEN** the force-directed graph renders
+- **WHEN** the force-directed graph renders for the first time (including when ForceGraph2D is loaded via React.lazy)
 - **THEN** the charge force strength SHALL be strong enough to spread nodes apart (at least -100)
 - **AND** the simulation SHALL run enough ticks for convergence (at least 100 cooldown ticks)
 - **AND** warmup ticks SHALL be configured so initial render shows partially settled layout
-- **AND** force parameters SHALL be configured via engine initialization callback (not React effects), ensuring correct configuration regardless of component loading timing
+- **AND** force parameters SHALL be configured via `onEngineInit` callback (not React effects), ensuring correct configuration regardless of component loading timing
 - **AND** nodes SHALL have randomized initial positions to reduce warmup convergence time
+- **AND** nodes SHALL NOT remain clustered at the origin (0,0) on first load
 
 #### Scenario: Node label readability
 - **WHEN** the graph is rendered

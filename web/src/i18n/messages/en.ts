@@ -171,6 +171,31 @@ const en: Record<MessageKey, string> = {
   "settings.vc.desc":
     "View wiki version history, change diffs, and rollbacks",
 
+  "settings.groups.basic.title": "Basic Settings",
+  "settings.groups.basic.desc": "UI language and document generation preferences",
+  "settings.groups.models.title": "Models & Connections",
+  "settings.groups.models.desc": "Manage Provider instances and models used by background jobs",
+  "settings.groups.rules.title": "Workspace Rules",
+  "settings.groups.rules.desc": "Preview workspace rule files and append temporary supplements",
+  "settings.groups.vc.title": "Version Control",
+  "settings.groups.vc.desc": "View wiki version control status and history entry",
+  "settings.groups.advanced.title": "Advanced Settings",
+  "settings.groups.advanced.desc":
+    "Low-frequency options such as MCP, tool loops, log retention, and processing parameters",
+
+  "settings.save.action": "Save Settings",
+  "settings.save.saving": "Saving…",
+  "settings.save.saved": "Settings saved",
+  "settings.save.unsaved": "Unsaved changes",
+
+  "settings.providers.docs": "Docs",
+  "settings.providers.loading": "Loading provider catalog…",
+  "settings.providers.add_title": "Add Provider",
+  "settings.providers.model_label": "Model",
+  "settings.providers.api_key_placeholder_short": "sk-…",
+  "settings.mcp.json_label": "MCP configuration JSON",
+  "settings.processing.desc": "Chunk size, overlap, and indexing behavior",
+
   // IngestChat
   "chat.copied": "Copied",
   "chat.copy": "Copy",

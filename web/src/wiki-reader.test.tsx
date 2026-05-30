@@ -35,6 +35,16 @@ describe("Wiki reader shell", () => {
     vi.mocked(api.listPublicDocuments).mockResolvedValue([])
   })
 
+  it("does not constrain reader layout to workbench max width", async () => {
+    render(
+      <WikiReaderProvider>
+        <WikiReaderLayout />
+      </WikiReaderProvider>,
+    )
+    await screen.findByText("管理工作台")
+    expect(document.querySelector(".max-w-5xl")).toBeNull()
+  })
+
   it("loads wiki-only documents", async () => {
     render(
       <WikiReaderProvider>

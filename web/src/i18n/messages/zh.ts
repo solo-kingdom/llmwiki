@@ -156,6 +156,30 @@ const zh = {
   "settings.vc.view_history": "查看历史",
   "settings.vc.desc": "查看 wiki 版本历史、变更差异和回滚",
 
+  "settings.groups.basic.title": "基础设置",
+  "settings.groups.basic.desc": "界面语言与文档生成偏好",
+  "settings.groups.models.title": "模型与连接",
+  "settings.groups.models.desc": "管理 Provider 实例与后台任务使用的模型",
+  "settings.groups.rules.title": "工作区规则",
+  "settings.groups.rules.desc": "查看工作区规则文件并追加临时补充",
+  "settings.groups.vc.title": "版本控制",
+  "settings.groups.vc.desc": "查看 wiki 版本控制状态与历史入口",
+  "settings.groups.advanced.title": "高级设置",
+  "settings.groups.advanced.desc": "MCP、工具循环、日志保留与处理参数等低频配置",
+
+  "settings.save.action": "保存设置",
+  "settings.save.saving": "保存中…",
+  "settings.save.saved": "设置已保存",
+  "settings.save.unsaved": "有未保存的更改",
+
+  "settings.providers.docs": "文档",
+  "settings.providers.loading": "正在加载 Provider 目录…",
+  "settings.providers.add_title": "添加 Provider",
+  "settings.providers.model_label": "模型",
+  "settings.providers.api_key_placeholder_short": "sk-…",
+  "settings.mcp.json_label": "MCP 配置 JSON",
+  "settings.processing.desc": "分块大小、重叠与索引行为",
+
   // IngestChat
   "chat.copied": "已复制",
   "chat.copy": "复制",

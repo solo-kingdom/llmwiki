@@ -183,7 +183,7 @@ export function WikiReaderLayout() {
           )}
         >
           {isGraphView ? (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-point-border bg-card/70 p-4 shadow-sm backdrop-blur-sm">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-point-border bg-card/70 shadow-sm backdrop-blur-sm">
               <GraphPage />
             </div>
           ) : loading && !currentDoc ? (

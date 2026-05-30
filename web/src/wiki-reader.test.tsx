@@ -134,6 +134,17 @@ function sampleDocs(): DocumentListItem[] {
       updated_at: "",
     },
     {
+      id: "entity-2",
+      filename: "bob.md",
+      title: "Bob",
+      path: "/wiki/entities/bob.md",
+      relative_path: "wiki/entities/bob.md",
+      page_type: "entity",
+      file_type: "md",
+      page_count: 1,
+      updated_at: "",
+    },
+    {
       id: "concept-1",
       filename: "intro.md",
       title: "Introduction",
@@ -167,35 +178,36 @@ describe("Sidebar navigation modes", () => {
     vi.mocked(api.listPublicDocuments).mockResolvedValue([])
   })
 
-  /** Get the mode-switcher button by its text (concept or pages). */
-  function getModeButton(name: "概念" | "Pages") {
+  /** Get the mode-switcher button by its text (Wiki or 页面). */
+  function getModeButton(name: "Wiki" | "页面") {
     // Mode switcher buttons have class "flex-1"
     return screen.getAllByText(name).find((el) =>
       el.classList.contains("flex-1"),
     )!
   }
 
-  it("defaults to concept mode", async () => {
+  it("defaults to Wiki mode", async () => {
     render(
       <WikiReaderProvider>
         <Sidebar variant="reader" />
       </WikiReaderProvider>,
     )
 
-    // Concept mode button should have the active style
-    const conceptBtn = await screen.findAllByText("概念")
-    const modeBtn = conceptBtn.find((el) => el.classList.contains("flex-1"))!
+    // Wiki mode button should have the active style
+    const wikiBtns = await screen.findAllByText("Wiki")
+    const modeBtn = wikiBtns.find((el) => el.classList.contains("flex-1"))!
     expect(modeBtn.className).toContain("bg-point")
 
-    // Concept list should show entity + concept docs (not source)
+    // Wiki mode should show entity + concept docs (not source)
     await waitFor(() => {
       expect(screen.getByText("Alice")).toBeInTheDocument()
+      expect(screen.getByText("Bob")).toBeInTheDocument()
       expect(screen.getByText("Introduction")).toBeInTheDocument()
     })
     expect(screen.queryByText("Paper Summary")).not.toBeInTheDocument()
   })
 
-  it("shows mode switcher with both options", async () => {
+  it("shows mode switcher with Wiki and 页面 options", async () => {
     render(
       <WikiReaderProvider>
         <Sidebar variant="reader" />
@@ -203,8 +215,8 @@ describe("Sidebar navigation modes", () => {
     )
 
     await waitFor(() => {
-      expect(getModeButton("概念")).toBeInTheDocument()
-      expect(getModeButton("Pages")).toBeInTheDocument()
+      expect(getModeButton("Wiki")).toBeInTheDocument()
+      expect(getModeButton("页面")).toBeInTheDocument()
     })
   })
 
@@ -215,53 +227,18 @@ describe("Sidebar navigation modes", () => {
       </WikiReaderProvider>,
     )
 
-    await waitFor(() => expect(getModeButton("概念")).toBeInTheDocument())
+    await waitFor(() => expect(getModeButton("Wiki")).toBeInTheDocument())
 
     // Switch to Pages mode
-    fireEvent.click(getModeButton("Pages"))
+    fireEvent.click(getModeButton("页面"))
 
     // Pages mode button should now be active
-    expect(getModeButton("Pages").className).toContain("bg-point")
+    expect(getModeButton("页面").className).toContain("bg-point")
 
     // Pages mode should show all docs in tree including source
     await waitFor(() => {
       const paperNodes = screen.getAllByText("paper.md")
       expect(paperNodes.length).toBeGreaterThanOrEqual(1)
-    })
-  })
-
-  it("concept mode type filter only shows entity and concept", async () => {
-    render(
-      <WikiReaderProvider>
-        <Sidebar variant="reader" />
-      </WikiReaderProvider>,
-    )
-
-    // Wait for sidebar to render
-    await waitFor(() => expect(getModeButton("概念")).toBeInTheDocument())
-
-    // Type filter should have entity and concept chips (plus entity list header)
-    expect(screen.getAllByText("实体").length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText("概念").length).toBeGreaterThanOrEqual(2)
-
-    // Source, synthesis, comparison, query should NOT be in the filter
-    expect(screen.queryByText("来源摘要")).not.toBeInTheDocument()
-    expect(screen.queryByText("综合")).not.toBeInTheDocument()
-  })
-
-  it("pages mode type filter shows all types", async () => {
-    render(
-      <WikiReaderProvider>
-        <Sidebar variant="reader" />
-      </WikiReaderProvider>,
-    )
-
-    await waitFor(() => expect(getModeButton("概念")).toBeInTheDocument())
-    fireEvent.click(getModeButton("Pages"))
-
-    // Wait for re-render after mode switch
-    await waitFor(() => {
-      expect(screen.getByText("来源摘要")).toBeInTheDocument()
     })
   })
 
@@ -313,9 +290,67 @@ describe("Sidebar navigation modes", () => {
     })
 
     // Switch to Pages mode
-    fireEvent.click(getModeButton("Pages"))
+    fireEvent.click(getModeButton("页面"))
 
     // Document selection should be preserved
     expect(screen.getByTestId("current-doc-id").textContent).toBe("entity-1")
+  })
+
+  it("Wiki mode shows entities and concepts as separate groups", async () => {
+    render(
+      <WikiReaderProvider>
+        <Sidebar variant="reader" />
+      </WikiReaderProvider>,
+    )
+
+    // Wait for documents to load
+    await waitFor(() => {
+      expect(screen.getByText("Alice")).toBeInTheDocument()
+      expect(screen.getByText("Bob")).toBeInTheDocument()
+      expect(screen.getByText("Introduction")).toBeInTheDocument()
+    })
+
+    // Entity section header should show "实体" with count
+    const entityHeaders = screen.getAllByText("实体")
+    const entitySectionHeader = entityHeaders.find(
+      (el) => el.classList.contains("flex-1") === false && el.closest("button"),
+    )
+    expect(entitySectionHeader).toBeTruthy()
+
+    // Concept section header should show "概念" with count
+    const conceptHeaders = screen.getAllByText("概念")
+    const conceptSectionHeader = conceptHeaders.find(
+      (el) => el.classList.contains("flex-1") === false && el.closest("button"),
+    )
+    expect(conceptSectionHeader).toBeTruthy()
+  })
+
+  it("Wiki mode does not show page type filter", async () => {
+    render(
+      <WikiReaderProvider>
+        <Sidebar variant="reader" />
+      </WikiReaderProvider>,
+    )
+
+    await waitFor(() => expect(getModeButton("Wiki")).toBeInTheDocument())
+
+    // Type filter label "页面类型" should NOT be present in Wiki mode
+    expect(screen.queryByText("页面类型")).not.toBeInTheDocument()
+  })
+
+  it("pages mode type filter shows all types", async () => {
+    render(
+      <WikiReaderProvider>
+        <Sidebar variant="reader" />
+      </WikiReaderProvider>,
+    )
+
+    await waitFor(() => expect(getModeButton("Wiki")).toBeInTheDocument())
+    fireEvent.click(getModeButton("页面"))
+
+    // Wait for re-render after mode switch
+    await waitFor(() => {
+      expect(screen.getByText("来源摘要")).toBeInTheDocument()
+    })
   })
 })

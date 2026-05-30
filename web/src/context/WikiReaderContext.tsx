@@ -10,7 +10,6 @@ import {
   type ReactNode,
 } from "react"
 import {
-  filterByPageTypes,
   inferPageType,
   CONCEPT_MODE_TYPES,
   type NavigationMode,
@@ -58,8 +57,6 @@ interface WikiReaderState {
   filteredDocuments: DocumentListItem[]
   navigationMode: NavigationMode
   setNavigationMode: (mode: NavigationMode) => void
-  selectedPageTypes: string[]
-  setSelectedPageTypes: (types: string[]) => void
   currentDoc: Document | null
   currentDocId: string | null
   searchResults: SearchResponse | null
@@ -78,7 +75,6 @@ const WikiReaderContext = createContext<WikiReaderState | null>(null)
 export function WikiReaderProvider({ children }: { children: ReactNode }) {
   const [documents, setDocuments] = useState<DocumentListItem[]>([])
   const [navigationMode, setNavigationMode] = useState<NavigationMode>("concept")
-  const [selectedPageTypes, setSelectedPageTypes] = useState<string[]>([])
   const [currentDoc, setCurrentDoc] = useState<Document | null>(null)
   const [currentDocId, setCurrentDocId] = useState<string | null>(null)
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null)
@@ -102,21 +98,17 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
   }, [usePublicApi])
 
   const filteredDocuments = useMemo(() => {
-    // First, apply navigation mode filter
-    const modeFiltered =
-      navigationMode === "concept"
-        ? documents.filter((d) => {
-            const pt = inferPageType(d)
-            return (
-              CONCEPT_MODE_TYPES.includes(pt) ||
-              // Also include docs whose raw page_type is "overview"
-              d.page_type === "overview"
-            )
-          })
-        : documents
-    // Then, apply user's page type filter
-    return filterByPageTypes(modeFiltered, selectedPageTypes)
-  }, [documents, navigationMode, selectedPageTypes])
+    if (navigationMode === "concept") {
+      return documents.filter((d) => {
+        const pt = inferPageType(d)
+        return (
+          CONCEPT_MODE_TYPES.includes(pt) ||
+          d.page_type === "overview"
+        )
+      })
+    }
+    return documents
+  }, [documents, navigationMode])
 
   useEffect(() => {
     api
@@ -209,8 +201,6 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
         filteredDocuments,
         navigationMode,
         setNavigationMode,
-        selectedPageTypes,
-        setSelectedPageTypes,
         currentDoc,
         currentDocId,
         searchResults,

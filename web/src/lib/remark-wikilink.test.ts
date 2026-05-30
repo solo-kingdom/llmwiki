@@ -50,15 +50,12 @@ async function processToAst(
   md: string,
   documents: DocumentListItem[],
 ): Promise<Root> {
-  const result = await unified()
+  const processor = unified()
     .use(remarkParse)
     .use(createRemarkWikiLink(documents))
-    .parse(md)
-  // Run the wikilink transformer
-  const transformer = createRemarkWikiLink(documents)
-  const plugin = transformer.call(null)
-  plugin(result as Root)
-  return result as Root
+  const tree = processor.parse(md)
+  const transformed = await processor.run(tree, md)
+  return transformed as Root
 }
 
 /** Extract children from a paragraph AST node. */

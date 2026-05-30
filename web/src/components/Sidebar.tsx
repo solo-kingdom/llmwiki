@@ -1,7 +1,6 @@
 import { useState, useMemo } from "react"
 import { useWikiReader } from "@/context/WikiReaderContext"
 import { WikiEntityList } from "@/components/WikiEntityList"
-import { WikiTypeFilter } from "@/components/WikiTypeFilter"
 import { buildTree } from "@/lib/tree"
 import { useT } from "@/i18n"
 import type { TreeNode } from "@/types"
@@ -195,7 +194,6 @@ export function Sidebar({ variant = "classic", onSelect }: SidebarProps) {
       }
     >
       <SidebarModeSwitcher />
-      <WikiTypeFilter />
       <div className="min-h-0 flex-1 overflow-y-auto wiki-scrollbar wiki-scrollbar-hidden">
         {navigationMode === "concept" ? (
           <>

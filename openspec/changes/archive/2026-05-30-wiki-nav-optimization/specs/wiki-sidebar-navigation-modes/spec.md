@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Wiki 侧边栏模式切换
 系统 SHALL 在 Wiki Reader 左侧导航提供"Wiki"与"页面"两种互斥模式切换。"Wiki"模式用于浏览知识实体和概念，"页面"模式用于浏览文档目录结构。

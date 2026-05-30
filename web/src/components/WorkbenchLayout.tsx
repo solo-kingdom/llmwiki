@@ -6,6 +6,7 @@ import { IngestChat } from "@/components/IngestChat"
 import { JobsPage } from "@/components/JobsPage"
 import { LogsPage } from "@/components/LogsPage"
 import { TimelinePage } from "@/components/TimelinePage"
+import { HelpPage } from "@/components/HelpPage"
 import { WarningPopover } from "@/components/WarningPopover"
 import { AppHeaderBar } from "@/components/AppHeaderBar"
 import { WorkbenchContentShell } from "@/components/WorkbenchContentShell"
@@ -27,6 +28,7 @@ const NAV_ITEMS: { id: WorkbenchView; labelKey: MessageKey }[] = [
   { id: "jobs", labelKey: "nav.jobs" },
   { id: "timeline", labelKey: "nav.timeline" },
   { id: "logs", labelKey: "nav.logs" },
+  { id: "help", labelKey: "nav.help" },
   { id: "settings", labelKey: "nav.settings" },
 ]
 
@@ -162,6 +164,7 @@ export function WorkbenchLayout() {
           {view === "jobs" && <JobsPage />}
           {view === "timeline" && <TimelinePage />}
           {view === "logs" && <LogsPage />}
+          {view === "help" && <HelpPage />}
           {view === "settings" && <SettingsPage />}
         </main>
       </WorkbenchContentShell>

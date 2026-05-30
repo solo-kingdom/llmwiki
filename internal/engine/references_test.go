@@ -202,3 +202,170 @@ func TestNewReferenceParserIndexing(t *testing.T) {
 		t.Errorf("resolveFilename('paper') = %q, want 'id1'", id)
 	}
 }
+
+func TestParseDoubleBracketBasic(t *testing.T) {
+	docs := []DocIndexEntry{
+		{ID: "doc1", Filename: "attention.md", Path: "/wiki/concepts"},
+	}
+	rp := NewReferenceParser(docs)
+
+	content := `See [[attention]] for details.`
+	refs := rp.ParseReferences(content, "/wiki/test.md")
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d", len(refs))
+	}
+	if refs[0].RefType != "links_to" {
+		t.Errorf("expected links_to, got %q", refs[0].RefType)
+	}
+	if refs[0].TargetPath != "doc1" {
+		t.Errorf("expected TargetPath='doc1', got %q", refs[0].TargetPath)
+	}
+}
+
+func TestParseDoubleBracketWithPath(t *testing.T) {
+	docs := []DocIndexEntry{
+		{ID: "doc1", Filename: "attention.md", Path: "/wiki/concepts"},
+	}
+	rp := NewReferenceParser(docs)
+
+	content := `See [[concepts/attention]] for details.`
+	refs := rp.ParseReferences(content, "/wiki/test.md")
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d", len(refs))
+	}
+	if refs[0].TargetPath != "doc1" {
+		t.Errorf("expected TargetPath='doc1', got %q", refs[0].TargetPath)
+	}
+}
+
+func TestParseDoubleBracketWithDisplayText(t *testing.T) {
+	docs := []DocIndexEntry{
+		{ID: "doc1", Filename: "attention.md", Path: "/wiki/concepts"},
+	}
+	rp := NewReferenceParser(docs)
+
+	content := `See [[concepts/attention|Attention Mechanism]] for details.`
+	refs := rp.ParseReferences(content, "/wiki/test.md")
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d", len(refs))
+	}
+	if refs[0].TargetPath != "doc1" {
+		t.Errorf("expected TargetPath='doc1', got %q", refs[0].TargetPath)
+	}
+}
+
+func TestParseDoubleBracketNonexistent(t *testing.T) {
+	docs := []DocIndexEntry{
+		{ID: "doc1", Filename: "attention.md", Path: "/wiki/concepts"},
+	}
+	rp := NewReferenceParser(docs)
+
+	content := `See [[nonexistent]] for details.`
+	refs := rp.ParseReferences(content, "/wiki/test.md")
+	if len(refs) != 0 {
+		t.Fatalf("expected 0 references for nonexistent target, got %d", len(refs))
+	}
+}
+
+func TestParseDoubleBracketNoExtension(t *testing.T) {
+	docs := []DocIndexEntry{
+		{ID: "doc1", Filename: "transformers.md", Path: "/wiki/concepts"},
+	}
+	rp := NewReferenceParser(docs)
+
+	content := `See [[transformers]] for details.`
+	refs := rp.ParseReferences(content, "/wiki/test.md")
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d", len(refs))
+	}
+	if refs[0].TargetPath != "doc1" {
+		t.Errorf("expected TargetPath='doc1', got %q", refs[0].TargetPath)
+	}
+}
+
+func TestParseMixedLinkStyles(t *testing.T) {
+	docs := []DocIndexEntry{
+		{ID: "doc1", Filename: "attention.md", Path: "/wiki/concepts"},
+		{ID: "doc2", Filename: "transformers.md", Path: "/wiki/concepts"},
+	}
+	rp := NewReferenceParser(docs)
+
+	content := `See [[attention]] and [Transformers](transformers.md) for details.`
+	refs := rp.ParseReferences(content, "/wiki/concepts/overview.md")
+	if len(refs) != 2 {
+		t.Fatalf("expected 2 references, got %d", len(refs))
+	}
+
+	// Both should be links_to
+	for _, r := range refs {
+		if r.RefType != "links_to" {
+			t.Errorf("expected links_to, got %q", r.RefType)
+		}
+	}
+
+	// Check both targets are present
+	seen := map[string]bool{}
+	for _, r := range refs {
+		seen[r.TargetPath] = true
+	}
+	if !seen["doc1"] {
+		t.Error("expected doc1 (attention) in references")
+	}
+	if !seen["doc2"] {
+		t.Error("expected doc2 (transformers) in references")
+	}
+}
+
+func TestResolveWikiPathSlugNormalization(t *testing.T) {
+	docs := []DocIndexEntry{
+		{ID: "doc-adam", Filename: "adam-foroughi.md", Path: "/wiki/entities"},
+	}
+	rp := NewReferenceParser(docs)
+
+	// [[Adam Foroughi]] should resolve via slug normalization to adam-foroughi.md
+	content := `Founded by [[Adam Foroughi]].`
+	refs := rp.ParseReferences(content, "/wiki/test.md")
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d", len(refs))
+	}
+	if refs[0].TargetPath != "doc-adam" {
+		t.Errorf("expected TargetPath='doc-adam', got %q", refs[0].TargetPath)
+	}
+}
+
+func TestResolveWikiPathTitleFallback(t *testing.T) {
+	docs := []DocIndexEntry{
+		{ID: "doc-1", Filename: "special-char.md", Title: "Special Character", Path: "/wiki/entities"},
+	}
+	rp := NewReferenceParser(docs)
+
+	// [[Special Character]] should resolve via title index
+	content := `See [[Special Character]] for details.`
+	refs := rp.ParseReferences(content, "/wiki/test.md")
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d", len(refs))
+	}
+	if refs[0].TargetPath != "doc-1" {
+		t.Errorf("expected TargetPath='doc-1', got %q", refs[0].TargetPath)
+	}
+}
+
+func TestSlugify(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Adam Foroughi", "adam-foroughi"},
+		{"Some  Long   Name", "some-long-name"},
+		{"already-hyphenated", "already-hyphenated"},
+		{"  spaces  ", "spaces"},
+		{"Mixed CASE", "mixed-case"},
+		{"a---b", "a-b"},
+	}
+	for _, tt := range tests {
+		got := slugify(tt.input)
+		if got != tt.want {
+			t.Errorf("slugify(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

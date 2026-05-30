@@ -9,7 +9,11 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { filterByPageTypes } from "@/lib/wiki-page-types"
+import {
+  inferPageType,
+  CONCEPT_MODE_TYPES,
+  type NavigationMode,
+} from "@/lib/wiki-page-types"
 import type {
   Document,
   DocumentListItem,
@@ -51,8 +55,8 @@ function publicToDocument(pub: PublicWikiDocument): Document {
 interface WikiReaderState {
   documents: DocumentListItem[]
   filteredDocuments: DocumentListItem[]
-  selectedPageTypes: string[]
-  setSelectedPageTypes: (types: string[]) => void
+  navigationMode: NavigationMode
+  setNavigationMode: (mode: NavigationMode) => void
   currentDoc: Document | null
   currentDocId: string | null
   searchResults: SearchResponse | null
@@ -70,7 +74,7 @@ const WikiReaderContext = createContext<WikiReaderState | null>(null)
 
 export function WikiReaderProvider({ children }: { children: ReactNode }) {
   const [documents, setDocuments] = useState<DocumentListItem[]>([])
-  const [selectedPageTypes, setSelectedPageTypes] = useState<string[]>([])
+  const [navigationMode, setNavigationMode] = useState<NavigationMode>("concept")
   const [currentDoc, setCurrentDoc] = useState<Document | null>(null)
   const [currentDocId, setCurrentDocId] = useState<string | null>(null)
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null)
@@ -87,16 +91,24 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
   const refreshDocuments = useCallback(() => {
     const loader = usePublicApi
       ? api.listPublicDocuments
-      : () => api.listDocuments({ source_kind: "wiki" })
+      : () => api.listDocuments({ source_kind: "wiki", exclude_hidden: true })
     loader()
       .then(setDocuments)
       .catch((e) => setError((e as Error).message))
   }, [usePublicApi])
 
-  const filteredDocuments = useMemo(
-    () => filterByPageTypes(documents, selectedPageTypes),
-    [documents, selectedPageTypes],
-  )
+  const filteredDocuments = useMemo(() => {
+    if (navigationMode === "concept") {
+      return documents.filter((d) => {
+        const pt = inferPageType(d)
+        return (
+          CONCEPT_MODE_TYPES.includes(pt) ||
+          d.page_type === "overview"
+        )
+      })
+    }
+    return documents
+  }, [documents, navigationMode])
 
   useEffect(() => {
     api
@@ -187,8 +199,8 @@ export function WikiReaderProvider({ children }: { children: ReactNode }) {
       value={{
         documents,
         filteredDocuments,
-        selectedPageTypes,
-        setSelectedPageTypes,
+        navigationMode,
+        setNavigationMode,
         currentDoc,
         currentDocId,
         searchResults,

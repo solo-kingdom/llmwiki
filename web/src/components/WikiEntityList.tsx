@@ -23,27 +23,29 @@ function ChevronIcon({ open }: { open: boolean }) {
   )
 }
 
-export function WikiEntityList({ onSelect }: { onSelect?: () => void }) {
-  const t = useT()
-  const { filteredDocuments, currentDocId, selectDocument, selectedPageTypes } =
-    useWikiReader()
+interface DocItem {
+  id: string
+  title: string
+  filename: string
+}
+
+/** A single collapsible group section. */
+function DocGroup({
+  title,
+  items,
+  currentDocId,
+  onSelectDoc,
+  onSelect,
+}: {
+  title: string
+  items: DocItem[]
+  currentDocId: string | null
+  onSelectDoc: (id: string) => void
+  onSelect?: () => void
+}) {
   const [open, setOpen] = useState(true)
 
-  const entities = useMemo(() => {
-    const list = filteredDocuments.filter(
-      (d) => inferPageType(d) === "entity",
-    )
-    return list.sort((a, b) =>
-      (a.title || a.filename).localeCompare(b.title || b.filename),
-    )
-  }, [filteredDocuments])
-
-  const showSection =
-    selectedPageTypes.length === 0 || selectedPageTypes.includes("entity")
-
-  if (!showSection || entities.length === 0) {
-    return null
-  }
+  if (items.length === 0) return null
 
   return (
     <div className="shrink-0 border-b px-2 py-2">
@@ -53,17 +55,17 @@ export function WikiEntityList({ onSelect }: { onSelect?: () => void }) {
         className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-xs font-medium text-muted-foreground hover:bg-muted cursor-pointer"
       >
         <ChevronIcon open={open} />
-        {t("wiki.entity_list")}
-        <span className="ml-auto tabular-nums">{entities.length}</span>
+        {title}
+        <span className="ml-auto tabular-nums">{items.length}</span>
       </button>
       {open && (
         <ul className="mt-1">
-          {entities.map((doc) => (
+          {items.map((doc) => (
             <li key={doc.id}>
               <button
                 type="button"
                 onClick={() => {
-                  selectDocument(doc.id)
+                  onSelectDoc(doc.id)
                   onSelect?.()
                 }}
                 className={cn(
@@ -79,5 +81,58 @@ export function WikiEntityList({ onSelect }: { onSelect?: () => void }) {
         </ul>
       )}
     </div>
+  )
+}
+
+/** A Wiki-mode grouped list showing entities and concepts as separate sections. */
+export function WikiEntityList({ onSelect }: { onSelect?: () => void }) {
+  const t = useT()
+  const { filteredDocuments, currentDocId, selectDocument } = useWikiReader()
+
+  const { entities, concepts } = useMemo(() => {
+    const entities: DocItem[] = []
+    const concepts: DocItem[] = []
+
+    for (const d of filteredDocuments) {
+      const pt = inferPageType(d)
+      const item: DocItem = { id: d.id, title: d.title || "", filename: d.filename }
+
+      if (pt === "entity" || d.page_type === "overview") {
+        entities.push(item)
+      } else if (pt === "concept") {
+        concepts.push(item)
+      }
+    }
+
+    // Sort each group alphabetically
+    const sortFn = (a: DocItem, b: DocItem) =>
+      (a.title || a.filename).localeCompare(b.title || b.filename)
+    entities.sort(sortFn)
+    concepts.sort(sortFn)
+
+    return { entities, concepts }
+  }, [filteredDocuments])
+
+  if (entities.length === 0 && concepts.length === 0) {
+    return null
+  }
+
+  return (
+    <>
+      <DocGroup
+        title={t("wiki.entity_section")}
+        items={entities}
+        currentDocId={currentDocId}
+        onSelectDoc={selectDocument}
+        onSelect={onSelect}
+      />
+      <DocGroup
+        title={t("wiki.concept_section")}
+        items={concepts}
+        currentDocId={currentDocId}
+        onSelectDoc={selectDocument}
+        onSelect={onSelect}
+      />
+    </>
   )
 }

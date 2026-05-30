@@ -1,9 +1,10 @@
 import { useState, useMemo } from "react"
 import { useWikiReader } from "@/context/WikiReaderContext"
 import { WikiEntityList } from "@/components/WikiEntityList"
-import { WikiTypeFilter } from "@/components/WikiTypeFilter"
 import { buildTree } from "@/lib/tree"
+import { useT } from "@/i18n"
 import type { TreeNode } from "@/types"
+import { cn } from "@/lib/utils"
 
 function FolderIcon({ open }: { open: boolean }) {
   return open ? (
@@ -137,13 +138,45 @@ function ChevronIcon({ open }: { open: boolean }) {
   )
 }
 
+function SidebarModeSwitcher() {
+  const t = useT()
+  const { navigationMode, setNavigationMode } = useWikiReader()
+
+  const modes = [
+    { key: "concept" as const, label: t("wiki.mode.concept") },
+    { key: "pages" as const, label: t("wiki.mode.pages") },
+  ]
+
+  return (
+    <div className="flex border-b px-3 py-2 gap-1">
+      {modes.map((mode) => (
+        <button
+          key={mode.key}
+          type="button"
+          onClick={() => setNavigationMode(mode.key)}
+          className={cn(
+            "flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+            navigationMode === mode.key
+              ? "bg-point text-point-foreground"
+              : "text-muted-foreground hover:bg-muted",
+          )}
+        >
+          {mode.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 interface SidebarProps {
   variant?: "classic" | "reader"
   onSelect?: () => void
 }
 
 export function Sidebar({ variant = "classic", onSelect }: SidebarProps) {
-  const { filteredDocuments, currentDocId, selectDocument } = useWikiReader()
+  const { filteredDocuments, navigationMode, currentDocId, selectDocument } =
+    useWikiReader()
+  const t = useT()
   const tree = useMemo(() => buildTree(filteredDocuments), [filteredDocuments])
   const isReader = variant === "reader"
 
@@ -160,30 +193,42 @@ export function Sidebar({ variant = "classic", onSelect }: SidebarProps) {
           : "flex h-full min-h-0 w-64 flex-col border-r bg-card"
       }
     >
-      <WikiTypeFilter />
+      <SidebarModeSwitcher />
       <div className="min-h-0 flex-1 overflow-y-auto wiki-scrollbar wiki-scrollbar-hidden">
-        <WikiEntityList onSelect={onSelect} />
-        <div className="border-b px-3 py-2">
-          <p className="text-xs text-muted-foreground">
-            {filteredDocuments.length} pages
-          </p>
-        </div>
-        <div className="py-1">
-          {tree.map((node) => (
-            <TreeNodeItem
-              key={node.path}
-              node={node}
-              depth={0}
-              activeId={currentDocId}
-              onSelect={handleSelect}
-            />
-          ))}
-          {tree.length === 0 && (
-            <p className="px-3 py-4 text-xs text-muted-foreground text-center">
-              No documents found
-            </p>
-          )}
-        </div>
+        {navigationMode === "concept" ? (
+          <>
+            <WikiEntityList onSelect={onSelect} />
+            {filteredDocuments.length === 0 && (
+              <p className="px-3 py-4 text-xs text-muted-foreground text-center">
+                {t("wiki.empty.concept")}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="border-b px-3 py-2">
+              <p className="text-xs text-muted-foreground">
+                {filteredDocuments.length} pages
+              </p>
+            </div>
+            <div className="py-1">
+              {tree.map((node) => (
+                <TreeNodeItem
+                  key={node.path}
+                  node={node}
+                  depth={0}
+                  activeId={currentDocId}
+                  onSelect={handleSelect}
+                />
+              ))}
+              {tree.length === 0 && (
+                <p className="px-3 py-4 text-xs text-muted-foreground text-center">
+                  {t("wiki.empty.pages")}
+                </p>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

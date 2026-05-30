@@ -4,26 +4,52 @@ import { GraphPage } from "@/components/GraphPage"
 import * as api from "@/lib/api"
 import { I18nProvider } from "@/i18n"
 
+const mockSelectDocument = vi.fn()
+const mockConfigureForceEngine = vi.fn()
+
 vi.mock("react-force-graph-2d", () => ({
   default: ({
     onNodeClick,
     graphData,
+    onEngineInit,
   }: {
     onNodeClick?: (node: { document_id?: string }) => void
     graphData: { nodes: Array<{ document_id: string; title: string }> }
-  }) => (
-    <div data-testid="mock-force-graph">
-      {graphData.nodes.map((node) => (
-        <button
-          key={node.document_id}
-          type="button"
-          onClick={() => onNodeClick?.(node)}
-        >
-          {node.title}
-        </button>
-      ))}
-    </div>
-  ),
+    onEngineInit?: (fg: {
+      d3Force: (name: string) => {
+        strength: (v: number) => unknown
+        distanceMax?: (v: number) => unknown
+        distance?: (v: number) => unknown
+      } | null
+    }) => void
+  }) => {
+    if (onEngineInit) {
+      onEngineInit({
+        d3Force: (name: string) => {
+          mockConfigureForceEngine(name)
+          return {
+            strength: () => ({}),
+            distanceMax: () => ({}),
+            distance: () => ({}),
+          }
+        },
+      })
+    }
+    return (
+      <div data-testid="mock-force-graph">
+        {onEngineInit && <span data-testid="engine-init-called" />}
+        {graphData.nodes.map((node) => (
+          <button
+            key={node.document_id}
+            type="button"
+            onClick={() => onNodeClick?.(node)}
+          >
+            {node.title}
+          </button>
+        ))}
+      </div>
+    )
+  },
 }))
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -33,6 +59,12 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getKnowledgeGraph: vi.fn(),
   }
 })
+
+vi.mock("@/context/WikiReaderContext", () => ({
+  useWikiReader: () => ({
+    selectDocument: mockSelectDocument,
+  }),
+}))
 
 const mockGraph = {
   nodes: [
@@ -58,6 +90,8 @@ const mockGraph = {
       type: "links_to",
     },
   ],
+  total_nodes: 2,
+  truncated: false,
 }
 
 function renderGraphPage() {
@@ -71,20 +105,15 @@ function renderGraphPage() {
 describe("GraphPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    class ResizeObserverMock {
-      observe() {}
-      disconnect() {}
-    }
-    vi.stubGlobal("ResizeObserver", ResizeObserverMock)
   })
 
-  it("shows loading then renders graph from API", async () => {
+  it("shows loading then renders graph from API without page title", async () => {
     vi.mocked(api.getKnowledgeGraph).mockResolvedValue(mockGraph)
     renderGraphPage()
 
     expect(screen.getByText("加载图谱中…")).toBeInTheDocument()
     expect(await screen.findByTestId("mock-force-graph")).toBeInTheDocument()
-    expect(screen.getByRole("heading", { name: "知识图谱" })).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "知识图谱" })).not.toBeInTheDocument()
   })
 
   it("shows empty state when fewer than two linked pages", async () => {
@@ -99,6 +128,8 @@ describe("GraphPage", () => {
         },
       ],
       edges: [],
+      total_nodes: 1,
+      truncated: false,
     })
     renderGraphPage()
 
@@ -107,17 +138,63 @@ describe("GraphPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("navigates to wiki reader when node is clicked", async () => {
+  it("calls selectDocument when node is clicked", async () => {
     vi.mocked(api.getKnowledgeGraph).mockResolvedValue(mockGraph)
-    window.history.replaceState(null, "", "/wiki/graph")
     renderGraphPage()
 
     const pageA = await screen.findByRole("button", { name: "Page A" })
     fireEvent.click(pageA)
 
     await waitFor(() => {
-      expect(window.location.pathname).toBe("/wiki")
-      expect(window.location.search).toContain("doc=doc-a")
+      expect(mockSelectDocument).toHaveBeenCalledWith("doc-a")
     })
+  })
+
+  it("shows truncation hint as canvas overlay when truncated is true", async () => {
+    vi.mocked(api.getKnowledgeGraph).mockResolvedValue({
+      ...mockGraph,
+      total_nodes: 500,
+      truncated: true,
+    })
+    renderGraphPage()
+
+    const overlay = await screen.findByTestId("graph-truncated-overlay")
+    expect(overlay).toHaveTextContent("显示前 2 个枢纽节点（共 500 个）")
+    expect(overlay).toHaveClass("absolute")
+  })
+
+  it("does not show truncation hint when not truncated", async () => {
+    vi.mocked(api.getKnowledgeGraph).mockResolvedValue(mockGraph)
+    renderGraphPage()
+
+    await screen.findByTestId("mock-force-graph")
+    expect(screen.queryByTestId("graph-truncated-overlay")).not.toBeInTheDocument()
+    expect(screen.queryByText(/枢纽节点/)).not.toBeInTheDocument()
+  })
+
+  it("fills parent container with full-bleed canvas", async () => {
+    vi.mocked(api.getKnowledgeGraph).mockResolvedValue(mockGraph)
+    renderGraphPage()
+
+    const container = await screen.findByTestId("graph-canvas-container")
+    expect(container).toHaveClass("flex-1", "h-full", "w-full")
+  })
+
+  it("calls getKnowledgeGraph with limit parameter", async () => {
+    vi.mocked(api.getKnowledgeGraph).mockResolvedValue(mockGraph)
+    renderGraphPage()
+
+    await screen.findByTestId("mock-force-graph")
+    expect(api.getKnowledgeGraph).toHaveBeenCalledWith({ limit: 300 })
+  })
+
+  it("calls onEngineInit to configure force parameters", async () => {
+    vi.mocked(api.getKnowledgeGraph).mockResolvedValue(mockGraph)
+    renderGraphPage()
+
+    await screen.findByTestId("mock-force-graph")
+    expect(screen.getByTestId("engine-init-called")).toBeInTheDocument()
+    expect(mockConfigureForceEngine).toHaveBeenCalledWith("charge")
+    expect(mockConfigureForceEngine).toHaveBeenCalledWith("link")
   })
 })

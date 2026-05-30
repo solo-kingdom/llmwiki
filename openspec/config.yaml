@@ -9,6 +9,8 @@ context: |
     - Wiki pages stored as markdown with YAML frontmatter
     - Three entry points: MCP (for LLM agents), HTTP/Web UI (for humans), CLI (for both)
     - All user data survives SQLite deletion (reindex rebuildable)
+    - LLM Wiki prompt workflow: external references are distilled into skills/ documents first; skills/ is the blueprint for Go runtime prompts, and internal/ingest/prompts.go is the executed implementation
+    - Do not treat skills/ as a runtime command surface; keep skills/ and internal prompts synchronized when changing LLM behavior
   Conventions:
     - Go package layout: cmd/llmwiki (entry), internal/{server,api,mcp,store,engine,watcher,llm,ingest}
     - Use Go standard library where possible; prefer modernc.org/sqlite over CGO-dependent mattn/go-sqlite3

@@ -10,6 +10,15 @@ export const WIKI_PAGE_TYPES = [
 
 export type WikiPageType = (typeof WIKI_PAGE_TYPES)[number]
 
+/** Sidebar navigation modes for the wiki reader. */
+export type NavigationMode = "concept" | "pages"
+
+/** Page types shown in concept mode (knowledge-oriented content). */
+export const CONCEPT_MODE_TYPES: readonly string[] = ["entity", "concept"]
+
+/** Page types available as filter chips in concept mode. */
+export const CONCEPT_FILTER_TYPES: readonly WikiPageType[] = ["entity", "concept"]
+
 export function inferPageType(doc: {
   page_type?: string
   relative_path?: string

@@ -2,18 +2,31 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
 // KnowledgeGraph returns wiki page nodes and links_to edges for visualization.
+// Accepts optional "limit" query parameter (default 300, max 10000) to cap the
+// number of nodes returned. Nodes are ranked by link count descending.
 func (a *API) KnowledgeGraph(w http.ResponseWriter, r *http.Request) {
 	if a.db == nil {
 		writeError(w, http.StatusInternalServerError, "database not configured")
 		return
 	}
 
-	data, err := a.db.BuildKnowledgeGraph()
+	limit := 300
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+			if limit > 10000 {
+				limit = 10000
+			}
+		}
+	}
+
+	data, err := a.db.BuildKnowledgeGraph(limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

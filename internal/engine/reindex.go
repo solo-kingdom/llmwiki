@@ -71,7 +71,7 @@ func (r *Reindexer) Rebuild(userID string) (int, error) {
 	indexed := 0
 	for _, rel := range files {
 		fullPath := filepath.Join(r.workspace, rel)
-		if err := r.indexFile(userID, rel, fullPath); err != nil {
+		if _, err := r.indexFile(userID, rel, fullPath); err != nil {
 			log.Printf("Warning: failed to index %s: %v", rel, err)
 			continue
 		}
@@ -93,7 +93,7 @@ func (r *Reindexer) Rebuild(userID string) (int, error) {
 		return indexed, fmt.Errorf("rebuild wiki index: %w", err)
 	}
 	indexPath := filepath.Join(r.workspace, indexRelPath)
-	if err := r.indexFile(userID, indexRelPath, indexPath); err != nil {
+	if _, err := r.indexFile(userID, indexRelPath, indexPath); err != nil {
 		return indexed, fmt.Errorf("index %s: %w", indexRelPath, err)
 	}
 	indexed++
@@ -101,10 +101,10 @@ func (r *Reindexer) Rebuild(userID string) (int, error) {
 	return indexed, nil
 }
 
-func (r *Reindexer) indexFile(userID, relPath, fullPath string) error {
+func (r *Reindexer) indexFile(userID, relPath, fullPath string) (string, error) {
 	info, err := os.Stat(fullPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Determine dir path and filename
@@ -180,24 +180,28 @@ func (r *Reindexer) indexFile(userID, relPath, fullPath string) error {
 
 	existing, err := r.store.GetDocumentByPath(filename, dir)
 	if err != nil {
-		return fmt.Errorf("lookup document: %w", err)
+		return "", fmt.Errorf("lookup document: %w", err)
 	}
 	if existing != nil {
 		doc.ID = existing.ID
 		if err := r.store.UpdateDocument(existing.ID, content, title, tags, date, metadata); err != nil {
-			return fmt.Errorf("update document: %w", err)
+			return "", fmt.Errorf("update document: %w", err)
 		}
 	} else {
 		if err := r.store.CreateDocument(doc); err != nil {
-			return fmt.Errorf("create document: %w", err)
+			return "", fmt.Errorf("create document: %w", err)
 		}
 	}
 
-	return storeSearchChunks(r.store, doc.ID, content)
+	if err := storeSearchChunks(r.store, doc.ID, content); err != nil {
+		return "", err
+	}
+	return doc.ID, nil
 }
 
 // IndexRelPath indexes or re-indexes a single workspace-relative file path.
-func (r *Reindexer) IndexRelPath(relPath string) error {
+// Returns the document ID of the created/updated document.
+func (r *Reindexer) IndexRelPath(relPath string) (string, error) {
 	fullPath := filepath.Join(r.workspace, relPath)
 	return r.indexFile("default", relPath, fullPath)
 }

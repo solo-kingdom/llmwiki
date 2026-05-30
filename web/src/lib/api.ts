@@ -56,10 +56,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export function listDocuments(params?: {
   source_kind?: string
   types?: string[]
+  exclude_hidden?: boolean
 }): Promise<DocumentListItem[]> {
   const q = new URLSearchParams()
   if (params?.source_kind) q.set("source_kind", params.source_kind)
   for (const t of params?.types ?? []) q.append("types", t)
+  if (params?.exclude_hidden) q.set("exclude_hidden", "true")
   const qs = q.toString()
   return request<DocumentListItem[]>(
     `/api/v1/documents/${qs ? `?${qs}` : ""}`,
@@ -178,8 +180,11 @@ export function getStalePages(): Promise<StalePage[]> {
   return request<StalePage[]>("/api/v1/graph/stale")
 }
 
-export function getKnowledgeGraph(): Promise<KnowledgeGraphResponse> {
-  return request<KnowledgeGraphResponse>("/api/v1/graph")
+export function getKnowledgeGraph(params?: { limit?: number }): Promise<KnowledgeGraphResponse> {
+  const qs = new URLSearchParams()
+  if (params?.limit) qs.set("limit", String(params.limit))
+  const query = qs.toString()
+  return request<KnowledgeGraphResponse>("/api/v1/graph" + (query ? `?${query}` : ""))
 }
 
 export function healthCheck(): Promise<{ status: string }> {

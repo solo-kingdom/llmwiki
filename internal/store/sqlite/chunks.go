@@ -199,6 +199,7 @@ func (d *DB) searchFTS5(query string, limit int, pathFilter string) ([]SearchChu
 
 	if pathFilter == "wiki" {
 		sqlStr += "AND d.source_kind = 'wiki' "
+		sqlStr += "AND NOT (" + hiddenSubdirsWhere("d.relative_path") + ") "
 	} else if pathFilter == "sources" {
 		sqlStr += "AND d.source_kind != 'wiki' "
 	}
@@ -262,6 +263,7 @@ func (d *DB) searchLIKE(query string, limit int, pathFilter string) ([]SearchChu
 
 	if pathFilter == "wiki" {
 		sqlStr += "AND d.source_kind = 'wiki' "
+		sqlStr += "AND NOT (" + hiddenSubdirsWhere("d.relative_path") + ") "
 	} else if pathFilter == "sources" {
 		sqlStr += "AND d.source_kind != 'wiki' "
 	}
@@ -286,6 +288,7 @@ func (d *DB) searchMetadata(query string, limit int, pathFilter string) ([]Searc
 
 	if pathFilter == "wiki" {
 		sqlStr += "AND d.source_kind = 'wiki' "
+		sqlStr += "AND NOT (" + hiddenSubdirsWhere("d.relative_path") + ") "
 	} else if pathFilter == "sources" {
 		sqlStr += "AND d.source_kind != 'wiki' "
 	}

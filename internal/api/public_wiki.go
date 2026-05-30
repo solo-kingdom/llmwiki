@@ -119,7 +119,8 @@ func (a *API) ListPublicWikiDocuments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := sqlite.ListDocumentsFilter{
-		SourceKind: "wiki",
+		SourceKind:    "wiki",
+		ExcludeHidden: true,
 	}
 	docs, err := a.db.ListDocumentsFiltered(filter)
 	if err != nil {

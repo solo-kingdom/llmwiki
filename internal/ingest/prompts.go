@@ -24,16 +24,16 @@ const (
 type PromptStep string
 
 const (
-	StepAnalysis         PromptStep = "analysis"
-	StepGeneration       PromptStep = "generation"
-	StepPlan             PromptStep = "plan"
-	StepSessionChat      PromptStep = "session_chat"
-	StepSessionQA        PromptStep = "session_qa"
-	StepSessionOrganize  PromptStep = "session_organize"
-	StepMergeBody        PromptStep = "merge_body"
-	StepRollback         PromptStep = "rollback"
-	StepPlanOrganize     PromptStep = "plan_organize"
-	StepPlanQA           PromptStep = "plan_qa"
+	StepAnalysis        PromptStep = "analysis"
+	StepGeneration      PromptStep = "generation"
+	StepPlan            PromptStep = "plan"
+	StepSessionChat     PromptStep = "session_chat"
+	StepSessionQA       PromptStep = "session_qa"
+	StepSessionOrganize PromptStep = "session_organize"
+	StepMergeBody       PromptStep = "merge_body"
+	StepRollback        PromptStep = "rollback"
+	StepPlanOrganize    PromptStep = "plan_organize"
+	StepPlanQA          PromptStep = "plan_qa"
 )
 
 // PromptStepForMode returns the session chat PromptStep for a given mode.
@@ -109,6 +109,8 @@ func ComposeSystemPrompt(step PromptStep, ctx PromptContext) string {
 	b.WriteString("\n\n")
 	b.WriteString(FidelityInstruction(ctx.DocLang))
 	b.WriteString("\n\n")
+	b.WriteString(workflowPrinciplesInstruction(ctx.DocLang))
+	b.WriteString("\n\n")
 	b.WriteString(defaultTaskInstruction(step, ctx.DocLang))
 	if step == StepGeneration {
 		b.WriteString("\n\n")
@@ -182,6 +184,26 @@ func FidelityInstruction(docLang string) string {
 - 更新已有页面时仅补充与本次源相关且有权依据的新信息；除非新源明确否定，否则不删除旧内容`
 }
 
+// workflowPrinciplesInstruction captures the distilled skills/ blueprint for runtime prompts.
+func workflowPrinciplesInstruction(docLang string) string {
+	if docLang == "en" {
+		return `【LLM Wiki workflow principles】
+- The skills/ documents are the design blueprint; this prompt is the runtime implementation
+- Treat raw/ as immutable source material and wiki/ as the persistent knowledge product
+- Filesystem content is authoritative; SQLite/FTS is only a rebuildable index
+- Search and read existing pages before planning updates; preserve old information when merging
+- Use source summaries, wikilinks, and page paths so claims remain traceable
+- Keep system pages (overview.md, index.md, log.md) conservative; log entries use ## [YYYY-MM-DD] action | description`
+	}
+	return `【LLM Wiki 工作流原则】
+- skills/ 文档是提示词设计蓝本；当前 prompt 是运行时实现
+- raw/ 是不可变源材料层，wiki/ 是持久知识产物
+- 文件系统内容是真理源；SQLite/FTS 只是可重建索引
+- 规划更新前先搜索并读取已有页面；合并时保留旧信息
+- 使用源摘要、wikilink 与页面路径保证论断可追溯
+- 谨慎处理 overview.md、index.md、log.md 等系统页；日志条目使用 ## [YYYY-MM-DD] action | description`
+}
+
 func defaultTaskInstruction(step PromptStep, docLang string) string {
 	if docLang == "en" {
 		return defaultTaskInstructionEN(step)
@@ -200,19 +222,24 @@ func defaultTaskInstructionZH(step PromptStep) string {
 
 你可以使用 search 工具搜索已有 wiki 页面，使用 read 工具读取页面全文。分析时应明确区分：哪些知识已有页面覆盖（建议 update），哪些是新知识（建议 create）。优先建议 update 已有页面。
 
+搜索时不要只查一次精确词：对关键实体/概念尝试别名、缩写、中文/英文变体或更宽泛关键词。摄入前留意隐私和敏感信息；如材料明显包含凭据、个人隐私或超出 purpose.md 范围的内容，应在分析中提示。
+
 要求：分析必须紧扣源文档；不确定的内容标注为「待证实」，不要当作事实。`
 	case StepGeneration:
 		return `你是 wiki 页面生成器。根据用户消息中的「原始内容」与「分析结果」生成 wiki 页面（FILE 块）。
 - 以原始内容为首要依据；分析结果仅作组织参考
 - 不要添加源中未支持的内容
 - 业务知识页必须写入 typed 子目录（entities/concepts/sources/synthesis/comparisons/queries），不得写入 wiki/ 顶层
+- 如果摄入来自文件、URL 或大段文本，应创建或更新 wiki/sources/ 下的 source 摘要页
+- 每个新增事实都应能追溯到 source 摘要、原始内容或已有 wiki 页面
+- 遇到新旧事实冲突时保留冲突上下文，写入 Open Questions 或明确标注不确定性
 
 你可以使用 read 工具读取已有 wiki 页面的当前内容。对于已有页面，生成的内容应保留原有信息并增量补充新内容。不要删除已有页面中的重要段落，除非源文档明确否定。`
 	case StepPlan:
 		return `你是 wiki 摄入规划师。请产出：
 1) 人类可读的计划（Markdown：将改什么、为什么）
 2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/entities/Example.md","action":"create|update","rationale":"..."}]}
-仅规划，不写文件。`
+仅规划，不写文件。计划中应说明 source 摘要页、实体/概念页、交叉引用和潜在冲突如何处理。`
 	case StepPlanOrganize:
 		return `你是 wiki 重组规划师。本次归档来自「整理模式」对话，用户的意图是重组和优化已有 wiki 页面。
 请产出：
@@ -235,7 +262,7 @@ func defaultTaskInstructionZH(step PromptStep) string {
 - 如果对话中有值得沉淀的新知识或澄清，更新相关 wiki 页面
 - 如果问答揭示了 wiki 内容的不足（缺失信息、错误），补充修正
 - 优先 update 已有页面，仅在确实需要时 create 新页面
-- 不要将纯问答交互本身作为内容写入 wiki
+- 不要将纯问答交互本身作为内容写入 wiki；若答案值得保留，可规划到 wiki/queries/ 或更新相关主题页
 仅规划，不写文件。`
 	case StepSessionChat:
 		return `你是 LLM Wiki 摄入前的对话助手，帮助用户澄清主题、定义与结构。
@@ -247,6 +274,8 @@ func defaultTaskInstructionZH(step PromptStep) string {
 		return `你是 LLM Wiki 知识库问答助手，基于已有文档回答用户问题。
 - 合法依据：通过 search/read/references 工具查找到的 wiki 页面内容
 - 必须使用工具查找依据后再回答，不要凭记忆编造
+- 如果 references 无法基于当前上下文定位 document ID，可退回 search/read 建立依据
+- 首次搜索无结果时，尝试同义词、别名、缩写、中文/英文变体或更宽泛查询
 - 不确定的信息明确标注「不确定」，不要当作已证实事实
 - 回答需引用来源页面路径，方便用户追溯
 - 优先综合多个相关页面给出完整回答`
@@ -264,11 +293,13 @@ func defaultTaskInstructionZH(step PromptStep) string {
 - 诊断时列出具体问题（路径 + 问题类型 + 影响范围）
 - 建议时给出可操作的重组方案（移动/合并/拆分/补充标签/补充链接）
 - 优先处理影响最大的问题，给出优先级排序
+- 不要建议删除 overview.md、index.md、log.md；合并/移动前必须保留所有独特信息并考虑链接更新
 - 用户满意后会点击「归档」将重组方案写入 wiki`
 	case StepMergeBody:
 		return `你是 wiki 正文合并助手。合并旧正文与新增量，保留旧内容所有重要信息，整合新内容。
 - 仅输出完整 markdown 正文（不含 frontmatter）
-- 合并结果不得明显短于旧正文（目标不低于旧内容约 70%）`
+- 合并结果不得明显短于旧正文（目标不低于旧内容约 70%）
+- 对冲突事实保留双方说法和来源，不要静默覆盖`
 	case StepRollback:
 		return `你是 wiki 回滚助手。根据 diff、原始摄入源与当前文件内容，生成回滚后的 wiki 文件（FILE 块）。
 - 移除该次摄入新增的内容，恢复被修改或删除的内容`
@@ -282,23 +313,29 @@ func defaultTaskInstructionEN(step PromptStep) string {
 	case StepAnalysis:
 		return `You are a knowledge analyst. Analyze the source document: entities, concepts, arguments, connections, contradictions, and structural recommendations. Stay grounded in the source; mark uncertain items as unverified.
 
-You can use the search tool to find existing wiki pages and the read tool to read page content. Clearly distinguish: which knowledge is already covered by existing pages (suggest update), and which is new (suggest create). Prefer suggesting updates to existing pages.`
+You can use the search tool to find existing wiki pages and the read tool to read page content. Clearly distinguish: which knowledge is already covered by existing pages (suggest update), and which is new (suggest create). Prefer suggesting updates to existing pages.
+
+Do not rely on a single exact search. For key entities and concepts, try aliases, abbreviations, English/Chinese variants, or broader terms. Before ingestion, flag obvious credentials, private information, or material outside purpose.md scope.`
 	case StepGeneration:
 		return `You are a wiki generator. Produce wiki pages from the original content and analysis in FILE blocks. The source is authoritative; analysis is organizational context only. Business pages MUST be written under typed wiki subdirectories (entities/concepts/sources/synthesis/comparisons/queries), not as top-level wiki/*.md files.
 
+If ingestion comes from a file, URL, or substantial text, create or update a source summary under wiki/sources/. Every new fact should trace to a source summary, source content, or existing wiki page. If new and old facts conflict, preserve the conflict context and mark uncertainty instead of silently overwriting.
+
 You can use the read tool to read the current content of existing wiki pages. For existing pages, your output should preserve original information and incrementally add new content. Do not remove important paragraphs from existing pages unless the source explicitly contradicts them.`
 	case StepPlan:
-		return `You are a wiki ingest planner. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Planning only — no FILE blocks.`
+		return `You are a wiki ingest planner. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Planning only — no FILE blocks. The plan should mention source summaries, entity/concept pages, cross-links, and potential conflicts.`
 	case StepPlanOrganize:
 		return `You are a wiki reorganization planner. This archive is from an "organize mode" session where the user intended to restructure existing wiki pages. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Focus on update/move/merge actions rather than create. Preserve important existing content. Planning only — no FILE blocks.`
 	case StepPlanQA:
-		return `You are a wiki knowledge consolidation planner. This archive is from a "QA mode" session where the user explored existing wiki content through questions. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Focus on updating existing pages with new insights or corrections from the Q&A. Only create new pages if genuinely needed. Planning only — no FILE blocks.`
+		return `You are a wiki knowledge consolidation planner. This archive is from a "QA mode" session where the user explored existing wiki content through questions. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Focus on updating existing pages with new insights or corrections from the Q&A. If an answer is worth preserving as an artifact, plan a wiki/queries/ page or update the relevant topic page. Only create new pages if genuinely needed. Planning only — no FILE blocks.`
 	case StepSessionChat:
 		return `You help the user explore knowledge before archiving to their LLM Wiki. Valid grounds include user messages, attachment summaries, user @ wiki page full text, and pages read via tools. The related wiki subset is an index only—do not claim content for unread pages.`
 	case StepSessionQA:
 		return `You are an LLM Wiki knowledge base QA assistant. Answer questions based on existing documents.
 - Valid grounds: wiki page content found via search/read/references tools
 - Always use tools to find evidence before answering; do not fabricate from memory
+- If references cannot be used because no document ID is available, fall back to search/read for evidence
+- If the first search fails, try synonyms, aliases, abbreviations, English/Chinese variants, or broader terms
 - Mark uncertain information clearly; do not present it as established fact
 - Cite source page paths in your answers for traceability
 - Synthesize multiple relevant pages for comprehensive answers when possible`
@@ -316,9 +353,10 @@ You MUST NOT reply without calling at least one tool first.
 - List specific issues in your diagnosis (path + issue type + impact scope)
 - Provide actionable reorganization plans (move/merge/split/add tags/add links)
 - Prioritize issues by impact and provide a priority ranking
+- Do not propose deleting overview.md, index.md, or log.md; preserve all unique information when merging/moving pages and consider link updates
 - The user will click "Archive" when satisfied to write the reorganization plan to the wiki`
 	case StepMergeBody:
-		return `Merge old and new wiki body text; preserve important old content; output markdown body only without frontmatter.`
+		return `Merge old and new wiki body text; preserve important old content; output markdown body only without frontmatter. Preserve conflicting claims with their sources instead of silently overwriting them.`
 	case StepRollback:
 		return `Restore wiki files after rolling back an ingest using the diff, source content, and current files. Output FILE blocks.`
 	default:
@@ -462,8 +500,8 @@ func WriteWorkspaceScaffoldsIfMissing(workspace string) error {
 		return err
 	}
 	for rel, content := range map[string]string{
-		"rules.md":                    RulesScaffoldMD,
-		".llmwiki/prompts.yaml":       DefaultPromptsYAMLExample,
+		"rules.md":              RulesScaffoldMD,
+		".llmwiki/prompts.yaml": DefaultPromptsYAMLExample,
 	} {
 		path := filepath.Join(workspace, rel)
 		if _, err := os.Stat(path); os.IsNotExist(err) {

@@ -135,6 +135,10 @@ describe("App navigation", () => {
     expect(await screen.findByText("暂无系统日志")).toBeInTheDocument()
     expect(window.location.pathname).toBe("/logs")
 
+    fireEvent.click(screen.getByRole("button", { name: "帮助" }))
+    expect(await screen.findByRole("heading", { name: "帮助", level: 1 })).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/help")
+
     const wikiLink = screen.getByRole("link", { name: "Wiki" })
     expect(wikiLink).toHaveAttribute("href", "/wiki")
   })
@@ -182,6 +186,15 @@ describe("App navigation", () => {
     expect(await screen.findByRole("button", { name: "模型" })).toBeInTheDocument()
     expect(await screen.findByTestId("ingest-message-panel")).toBeInTheDocument()
     expect(window.location.pathname).toBe("/")
+  })
+
+  it("restores help view from URL on load", async () => {
+    window.history.replaceState(null, "", "/help")
+    render(<App />)
+    expect(
+      await screen.findByRole("heading", { name: "帮助", level: 1 }),
+    ).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/help")
   })
 
   it("restores timeline view from URL on load when VC is enabled", async () => {

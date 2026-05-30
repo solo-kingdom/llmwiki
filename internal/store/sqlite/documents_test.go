@@ -427,3 +427,71 @@ func TestListDocumentsWithContent(t *testing.T) {
 		t.Errorf("expected 2 tags, got %d", len(docs[0].Tags))
 	}
 }
+
+func TestListDocumentsFilteredExcludeHidden(t *testing.T) {
+	db := helperDB(t)
+
+	// Create docs in various wiki subdirectories
+	docs := []struct {
+		filename, title, path, relativePath string
+	}{
+		{"entity.md", "Entity", "/wiki/entities", "wiki/entities/entity.md"},
+		{"concept.md", "Concept", "/wiki/concepts", "wiki/concepts/concept.md"},
+		{"template.md", "Template", "/wiki/templates", "wiki/templates/template.md"},
+		{"source.md", "Source Summary", "/wiki/sources", "wiki/sources/source.md"},
+		{"synthesis.md", "Synthesis", "/wiki/synthesis", "wiki/synthesis/synthesis.md"},
+	}
+	for _, d := range docs {
+		doc := &Document{
+			UserID:       "user1",
+			Filename:     d.filename,
+			Title:        d.title,
+			Path:         d.path,
+			RelativePath: d.relativePath,
+			SourceKind:   "wiki",
+			FileType:     "md",
+			Status:       "ready",
+		}
+		if err := db.CreateDocument(doc); err != nil {
+			t.Fatalf("CreateDocument(%s) error = %v", d.filename, err)
+		}
+	}
+
+	// Without ExcludeHidden — should return all 5
+	all, err := db.ListDocumentsFiltered(ListDocumentsFilter{})
+	if err != nil {
+		t.Fatalf("ListDocumentsFiltered() error = %v", err)
+	}
+	if len(all) != 5 {
+		t.Errorf("expected 5 documents without filter, got %d", len(all))
+	}
+
+	// With ExcludeHidden — should exclude templates and sources (3 remaining)
+	hidden, err := db.ListDocumentsFiltered(ListDocumentsFilter{ExcludeHidden: true})
+	if err != nil {
+		t.Fatalf("ListDocumentsFiltered(ExcludeHidden) error = %v", err)
+	}
+	if len(hidden) != 3 {
+		t.Fatalf("expected 3 documents with ExcludeHidden, got %d", len(hidden))
+	}
+	for _, d := range hidden {
+		if d.RelativePath == "wiki/templates/template.md" {
+			t.Error("templates document should be excluded")
+		}
+		if d.RelativePath == "wiki/sources/source.md" {
+			t.Error("sources document should be excluded")
+		}
+	}
+
+	// Combine with SourceKind filter
+	wikiHidden, err := db.ListDocumentsFiltered(ListDocumentsFilter{
+		SourceKind:    "wiki",
+		ExcludeHidden: true,
+	})
+	if err != nil {
+		t.Fatalf("ListDocumentsFiltered(wiki+hidden) error = %v", err)
+	}
+	if len(wikiHidden) != 3 {
+		t.Errorf("expected 3 wiki documents with ExcludeHidden, got %d", len(wikiHidden))
+	}
+}

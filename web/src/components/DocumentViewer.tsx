@@ -1,10 +1,11 @@
-import { useCallback, useEffect, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, type ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import rehypeHighlight from "rehype-highlight"
 import { useWikiReader } from "@/context/WikiReaderContext"
 import { useT } from "@/i18n"
 import { extractHeadings, uniqueHeadingSlugSequence } from "@/lib/markdown"
+import { createRemarkWikiLink } from "@/lib/remark-wikilink"
 import type { OutlineItem } from "@/types"
 import "highlight.js/styles/github.css"
 
@@ -40,9 +41,19 @@ export function DocumentViewer({
   variant = "classic",
 }: DocumentViewerProps) {
   const t = useT()
-  const { currentDoc, currentDocId, loading, error, selectDocument } =
+  const { currentDoc, currentDocId, loading, error, selectDocument, documents } =
     useWikiReader()
   const isReader = variant === "reader"
+
+  const remarkWikiLink = useMemo(
+    () => createRemarkWikiLink(documents),
+    [documents],
+  )
+
+  const remarkPlugins = useMemo(
+    () => [remarkGfm, remarkWikiLink],
+    [remarkWikiLink],
+  )
 
   useEffect(() => {
     if (!onOutlineChange) return
@@ -104,13 +115,15 @@ export function DocumentViewer({
           if (href?.startsWith("/d/")) {
             e.preventDefault()
             handleWikilink(href)
+          } else if (href === "#" || anchor.classList.contains("wikilink-broken")) {
+            e.preventDefault()
           }
         }
       }}
     >
       {currentDocId && currentDoc.content ? (
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={remarkPlugins}
           rehypePlugins={[rehypeHighlight]}
           components={makeHeadingComponents(
             uniqueHeadingSlugSequence(currentDoc.content),

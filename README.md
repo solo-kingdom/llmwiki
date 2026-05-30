@@ -25,6 +25,18 @@ make build
 # Open http://127.0.0.1:8868
 ```
 
+### Restore on a new machine
+
+```bash
+git clone <your-remote-url> ~/research
+cd ~/research
+llmwiki init ~/research    # repair: import .llmwiki/workspace-settings.json, reindex
+llmwiki serve ~/research
+# Re-enter API keys in Settings (keys are never stored in git)
+```
+
+Wiki history uses ingest commits on track A; workspace config and optional `raw/` backups use separate `backup:` commits. Configure remote URL and push/backup in **Settings → Version Control**.
+
 For development without building the web frontend:
 
 ```bash

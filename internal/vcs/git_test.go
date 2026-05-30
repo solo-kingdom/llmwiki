@@ -62,10 +62,13 @@ func TestInitRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(gitignore)
-	for _, entry := range []string{".llmwiki/", "raw/", "revert/"} {
+	for _, entry := range FineGrainedGitignoreEntries {
 		if !strings.Contains(content, entry) {
 			t.Errorf("expected .gitignore to contain %q", entry)
 		}
+	}
+	if strings.Contains(content, ".llmwiki/\n") || strings.TrimSpace(content) == ".llmwiki/" {
+		t.Error("expected legacy .llmwiki/ blanket ignore to be migrated away")
 	}
 
 	// Check that we have an initial commit
@@ -688,4 +691,78 @@ func TestRecreateWorktreeAfterFailed(t *testing.T) {
 
 	// Clean up
 	repo.RemoveWorktree("retry-job")
+}
+
+func TestBackupCommitAndLogIngestOnly(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	os.WriteFile(filepath.Join(dir, "wiki", "a.md"), []byte("# A"), 0o644)
+	os.WriteFile(filepath.Join(dir, "purpose.md"), []byte("# Purpose"), 0o644)
+
+	repo, err := InitRepo(dir)
+	if err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	os.WriteFile(filepath.Join(dir, "wiki", "b.md"), []byte("# B"), 0o644)
+	if _, err := repo.AddCommit("ingest: test.pdf"); err != nil {
+		t.Fatalf("AddCommit: %v", err)
+	}
+	if _, err := repo.BackupCommit(true); err != nil {
+		t.Fatalf("BackupCommit: %v", err)
+	}
+
+	all, err := repo.LogWithStats(10)
+	if err != nil {
+		t.Fatalf("LogWithStats: %v", err)
+	}
+	if len(all) < 2 {
+		t.Fatalf("expected at least 2 commits, got %d", len(all))
+	}
+
+	ingestOnly, err := repo.LogIngestOnly(10)
+	if err != nil {
+		t.Fatalf("LogIngestOnly: %v", err)
+	}
+	for _, e := range ingestOnly {
+		if !IsIngestCommitSubject(e.Subject) {
+			t.Errorf("unexpected subject in ingest log: %q", e.Subject)
+		}
+	}
+	foundIngest := false
+	for _, e := range ingestOnly {
+		if strings.HasPrefix(e.Subject, "ingest:") {
+			foundIngest = true
+		}
+	}
+	if !foundIngest {
+		t.Error("expected ingest commit in filtered log")
+	}
+}
+
+func TestSetRemote(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	repo, err := InitRepo(dir)
+	if err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	url := "https://example.com/user/repo.git"
+	if err := repo.SetRemote(url); err != nil {
+		t.Fatalf("SetRemote: %v", err)
+	}
+	st, err := repo.RemoteStatus()
+	if err != nil {
+		t.Fatalf("RemoteStatus: %v", err)
+	}
+	if !st.Configured || st.URL != url {
+		t.Errorf("remote status = %+v, want URL %q", st, url)
+	}
 }

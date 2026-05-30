@@ -278,49 +278,6 @@ func (r *GitRepo) lastCommitSHA() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// ensureGitignore ensures .gitignore contains the required entries.
-func (r *GitRepo) ensureGitignore() error {
-	required := []string{".llmwiki/", "raw/", "revert/"}
-	gitignorePath := filepath.Join(r.workDir, ".gitignore")
-
-	// Read existing content
-	var existing string
-	data, err := os.ReadFile(gitignorePath)
-	if err == nil {
-		existing = string(data)
-	}
-
-	var lines []string
-	if existing != "" {
-		lines = strings.Split(existing, "\n")
-	}
-
-	// Add missing entries
-	existingSet := make(map[string]bool)
-	for _, line := range lines {
-		existingSet[strings.TrimSpace(line)] = true
-	}
-
-	modified := false
-	for _, entry := range required {
-		if !existingSet[entry] {
-			lines = append(lines, entry)
-			modified = true
-		}
-	}
-
-	if modified {
-		content := strings.Join(lines, "\n")
-		// Ensure trailing newline
-		if !strings.HasSuffix(content, "\n") {
-			content += "\n"
-		}
-		return os.WriteFile(gitignorePath, []byte(content), 0o644)
-	}
-
-	return nil
-}
-
 // parseLogOutput parses git log output with shortstat into CommitEntry list.
 func parseLogOutput(output string) []CommitEntry {
 	var entries []CommitEntry
@@ -371,6 +328,32 @@ func (r *GitRepo) LogWithStats(limit int) ([]CommitEntry, error) {
 	}
 
 	return entries, nil
+}
+
+// LogIngestOnly returns ingest/rollback commits with file change counts (excludes backup:).
+func (r *GitRepo) LogIngestOnly(limit int) ([]CommitEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	// Fetch extra commits so filtering still fills the limit.
+	fetch := limit * 4
+	if fetch < 50 {
+		fetch = 50
+	}
+	entries, err := r.LogWithStats(fetch)
+	if err != nil {
+		return nil, err
+	}
+	var filtered []CommitEntry
+	for _, e := range entries {
+		if IsIngestCommitSubject(e.Subject) {
+			filtered = append(filtered, e)
+			if len(filtered) >= limit {
+				break
+			}
+		}
+	}
+	return filtered, nil
 }
 
 // filesChanged returns the number of files changed in a commit.

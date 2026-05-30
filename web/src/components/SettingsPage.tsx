@@ -13,7 +13,16 @@ import {
 import type { Settings, VCStatus, ProviderCheckResult, MCPServerCheckResult, WorkspaceRuleFilesPreview } from "@/types"
 import { PageContainer } from "@/components/PageContainer"
 import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff, CheckCircle2, XCircle, Loader2, CircleOff, RefreshCw, ChevronDown } from "lucide-react"
-import { getVCStatus, checkProviderInstance, checkAllProviderInstances, checkMCPStatus, getWorkspaceRuleFiles } from "@/lib/api"
+import {
+  getVCStatus,
+  setVCSRemote,
+  pushVC,
+  backupVC,
+  checkProviderInstance,
+  checkAllProviderInstances,
+  checkMCPStatus,
+  getWorkspaceRuleFiles,
+} from "@/lib/api"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 import { useI18n } from "@/i18n"
 import { cn } from "@/lib/utils"
@@ -138,6 +147,8 @@ export function SettingsPage() {
   const [editForm, setEditForm] = useState<EditFormState>({ mode: false })
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>(null)
   const [vcStatus, setVCStatus] = useState<VCStatus | null>(null)
+  const [remoteURL, setRemoteURL] = useState("")
+  const [vcActionBusy, setVcActionBusy] = useState<string | null>(null)
   const [mcpJsonError, setMcpJsonError] = useState<string | null>(null)
   const [providerChecks, setProviderChecks] = useState<Record<string, ProviderCheckResult>>({})
   const [providerChecking, setProviderChecking] = useState(false)
@@ -163,8 +174,46 @@ export function SettingsPage() {
     try {
       const status = await getVCStatus()
       setVCStatus(status)
+      setRemoteURL(status.remote_url ?? "")
     } catch {
       // ignore
+    }
+  }
+
+  const settingFlag = (v: string | boolean | undefined, defaultOn: boolean) => {
+    if (v === undefined || v === "") return defaultOn
+    return v === true || v === "true"
+  }
+
+  const handleSaveRemote = async () => {
+    if (!remoteURL.trim()) return
+    setVcActionBusy("remote")
+    try {
+      const status = await setVCSRemote(remoteURL.trim())
+      setVCStatus(status)
+      setRemoteURL(status.remote_url ?? remoteURL.trim())
+    } finally {
+      setVcActionBusy(null)
+    }
+  }
+
+  const handlePushNow = async () => {
+    setVcActionBusy("push")
+    try {
+      await pushVC()
+      await loadVCStatus()
+    } finally {
+      setVcActionBusy(null)
+    }
+  }
+
+  const handleBackupNow = async () => {
+    setVcActionBusy("backup")
+    try {
+      await backupVC()
+      await loadVCStatus()
+    } finally {
+      setVcActionBusy(null)
     }
   }
 
@@ -980,16 +1029,103 @@ export function SettingsPage() {
                 </div>
                 <div className="text-xs text-muted-foreground space-y-1">
                   <div>{t("settings.vc.tracked")}: <code className="bg-muted px-1 rounded">{vcStatus.tracked_dirs.join(", ")}</code></div>
+                  {vcStatus.backup_dirs && vcStatus.backup_dirs.length > 0 && (
+                    <div>{t("settings.vc.backup")}: <code className="bg-muted px-1 rounded">{vcStatus.backup_dirs.join(", ")}</code></div>
+                  )}
                   <div>{t("settings.vc.excluded")}: <code className="bg-muted px-1 rounded">{vcStatus.excluded_dirs.join(", ")}</code></div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => navigateTo(workbenchViewHref("timeline"))}
-                >
-                  <History className="size-3.5 mr-1" />
-                  {t("settings.vc.view_history")}
-                </Button>
+
+                <div className="space-y-2 pt-2 border-t">
+                  <label className="text-sm font-medium">{t("settings.vc.remote_url")}</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                      value={remoteURL}
+                      onChange={(e) => setRemoteURL(e.target.value)}
+                      placeholder="https://github.com/user/repo.git"
+                      data-testid="vc-remote-url"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={vcActionBusy !== null || !remoteURL.trim()}
+                      onClick={() => void handleSaveRemote()}
+                    >
+                      {t("settings.vc.remote_save")}
+                    </Button>
+                  </div>
+                  {vcStatus.remote_configured && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("settings.vc.remote_status", {
+                        branch: vcStatus.branch ?? "main",
+                        ahead: String(vcStatus.ahead ?? 0),
+                        behind: String(vcStatus.behind ?? 0),
+                      })}
+                    </p>
+                  )}
+                  {vcStatus.last_push_error && (
+                    <p className="text-xs text-destructive" data-testid="vc-push-error">
+                      {vcStatus.last_push_error}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-2 text-sm">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settingFlag(
+                        mergedForm.backup_include_raw ?? settings?.backup_include_raw,
+                        vcStatus.backup_include_raw ?? true,
+                      )}
+                      onChange={(e) => set("backup_include_raw", e.target.checked)}
+                    />
+                    <span>{t("settings.vc.backup_raw")}</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settingFlag(
+                        mergedForm.vc_auto_push ?? settings?.vc_auto_push,
+                        false,
+                      )}
+                      onChange={(e) => set("vc_auto_push", e.target.checked)}
+                    />
+                    <span>{t("settings.vc.auto_push")}</span>
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={vcActionBusy !== null}
+                    onClick={() => void handleBackupNow()}
+                    data-testid="vc-backup-now"
+                  >
+                    {t("settings.vc.backup_now")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={vcActionBusy !== null || !vcStatus.remote_configured}
+                    onClick={() => void handlePushNow()}
+                    data-testid="vc-push-now"
+                  >
+                    {t("settings.vc.push_now")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => navigateTo(workbenchViewHref("timeline"))}
+                  >
+                    <History className="size-3.5 mr-1" />
+                    {t("settings.vc.view_history")}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">{t("settings.vc.api_key_hint")}</p>
               </div>
             )}
           </CardContent>

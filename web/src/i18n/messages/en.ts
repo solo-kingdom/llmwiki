@@ -167,9 +167,19 @@ const en: Record<MessageKey, string> = {
   "settings.vc.commits": "{count} commit(s)",
   "settings.vc.tracked": "Tracked",
   "settings.vc.excluded": "Excluded",
+  "settings.vc.backup": "Backup track",
   "settings.vc.view_history": "View history",
   "settings.vc.desc":
-    "View wiki version history, change diffs, and rollbacks",
+    "View wiki version history, change diffs, and rollbacks; configure remote backup",
+  "settings.vc.remote_url": "Remote repository URL",
+  "settings.vc.remote_save": "Save remote",
+  "settings.vc.remote_status": "Branch {branch} · ahead {ahead} · behind {behind}",
+  "settings.vc.backup_raw": "Backup raw/ source files (on by default)",
+  "settings.vc.auto_push": "Auto push after commit",
+  "settings.vc.backup_now": "Backup now",
+  "settings.vc.push_now": "Push now",
+  "settings.vc.api_key_hint":
+    "Settings export to .llmwiki/workspace-settings.json. API keys are not stored in git; re-enter them on a new machine.",
 
   "settings.groups.basic.title": "Basic Settings",
   "settings.groups.basic.desc": "UI language and document generation preferences",

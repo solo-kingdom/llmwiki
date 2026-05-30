@@ -11,6 +11,7 @@ import (
 	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/vcs"
+	"github.com/solo-kingdom/llmwiki/internal/workspace"
 )
 
 func newInitCmd() *cobra.Command {
@@ -64,6 +65,10 @@ func runInit(dir string) error {
 		name,
 	); err != nil {
 		return fmt.Errorf("register workspace: %w", err)
+	}
+
+	if err := workspace.ImportSettings(db, abs); err != nil {
+		return fmt.Errorf("import workspace settings: %w", err)
 	}
 
 	adapter := storesvc.NewStoreAdapter(db)

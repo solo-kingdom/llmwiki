@@ -704,3 +704,20 @@ export function createRollback(
     },
   )
 }
+
+export function setVCSRemote(url: string): Promise<VCStatus> {
+  return request<VCStatus>("/api/v1/vcs/remote", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  })
+}
+
+export function pushVC(): Promise<{ status: string }> {
+  return request<{ status: string }>("/api/v1/vcs/push", { method: "POST" })
+}
+
+export function backupVC(): Promise<{ status: string; commit_sha?: string }> {
+  return request<{ status: string; commit_sha?: string }>("/api/v1/vcs/backup", {
+    method: "POST",
+  })
+}

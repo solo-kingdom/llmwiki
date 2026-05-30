@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
@@ -176,6 +177,58 @@ func TestVCSLogEmpty(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&entries)
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+func TestVCSLogExcludesBackupCommits(t *testing.T) {
+	if !vcs.IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	api, ws := setupVCSTest(t)
+	os.WriteFile(filepath.Join(ws, "wiki", "page.md"), []byte("# P"), 0o644)
+	os.WriteFile(filepath.Join(ws, "purpose.md"), []byte("# purpose"), 0o644)
+
+	repo, err := vcs.InitRepo(ws)
+	if err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+	if _, err := repo.AddCommit("ingest: doc.pdf"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.BackupCommit(false); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/vcs/log", nil)
+	w := httptest.NewRecorder()
+	api.VCSLog(w, req)
+
+	var entries []VCLogEntry
+	if err := json.NewDecoder(w.Body).Decode(&entries); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Subject, "backup:") {
+			t.Errorf("backup commit leaked into timeline log: %q", e.Subject)
+		}
+	}
+}
+
+func TestVCSBackupEndpoint(t *testing.T) {
+	if !vcs.IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	api, ws := setupVCSTest(t)
+	vcs.InitRepo(ws)
+	os.WriteFile(filepath.Join(ws, "rules.md"), []byte("# Rules"), 0o644)
+
+	req := httptest.NewRequest("POST", "/api/v1/vcs/backup", nil)
+	w := httptest.NewRecorder()
+	api.VCSBackup(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("backup status = %d, body: %s", w.Code, w.Body.String())
 	}
 }
 

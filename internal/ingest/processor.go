@@ -291,6 +291,7 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		if sha != "" {
 			_ = p.db.SetVCLastCommit(sha)
 		}
+		vcs.TryAutoPush(repo, p.db)
 	}
 
 	p.indexGeneratedWikiFiles(files, job.ID)
@@ -446,6 +447,7 @@ func (p *JobProcessor) mergeWorktreeJobBranch(
 	if sha != "" {
 		_ = p.db.SetVCLastCommit(sha)
 	}
+	vcs.TryAutoPush(repo, p.db)
 
 	p.indexGeneratedWikiFiles(files, jobID)
 	return sha, nil
@@ -527,6 +529,7 @@ func (p *JobProcessor) retryCommitOnly(job *sqlite.IngestJob) error {
 	if sha != "" {
 		_ = p.db.SetVCLastCommit(sha)
 	}
+	vcs.TryAutoPush(repo, p.db)
 
 	_, updateErr := p.db.DB().Exec(`
 		UPDATE ingest_jobs
@@ -732,6 +735,7 @@ func (p *JobProcessor) RunPipelineForJob(ctx context.Context, job *sqlite.Ingest
 		if sha != "" {
 			_ = p.db.SetVCLastCommit(sha)
 		}
+		vcs.TryAutoPush(repo, p.db)
 	}
 
 	p.indexGeneratedWikiFiles(files, job.ID)

@@ -274,6 +274,7 @@ export function IngestChat() {
   const [wikiRefs, setWikiRefs] = useState<WikiRefPayload[]>([])
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [archiveTitle, setArchiveTitle] = useState("")
+  const [deepOrganize, setDeepOrganize] = useState(false)
   const [activeReviewId, setActiveReviewId] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [modelDialogOpen, setModelDialogOpen] = useState(false)
@@ -478,10 +479,14 @@ export function IngestChat() {
 
   const handleArchive = async () => {
     try {
-      const reviewId = await archiveSession(archiveTitle || undefined)
+      const reviewId = await archiveSession(
+        archiveTitle || undefined,
+        sessionMode === "organize" ? deepOrganize : undefined,
+      )
       setActiveReviewId(reviewId)
       showToast(t("chat.archive_review_hint"))
       setArchiveOpen(false)
+      setDeepOrganize(false)
     } catch {
       // archiveSession 已通过 sessionError → 全局 toast 展示错误
     }
@@ -582,6 +587,17 @@ export function IngestChat() {
             value={archiveTitle}
             onChange={(e) => setArchiveTitle(e.target.value)}
           />
+          {sessionMode === "organize" && (
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={deepOrganize}
+                onChange={(e) => setDeepOrganize(e.target.checked)}
+                className="size-4 rounded border-border"
+              />
+              <span>{t("chat.deep_organize")}</span>
+            </label>
+          )}
           <div className="flex justify-end gap-2">
             <Button
               variant="outline"

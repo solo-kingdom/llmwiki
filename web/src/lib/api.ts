@@ -481,12 +481,16 @@ export function patchIngestSessionMessage(
 export function archiveIngestSession(
   sessionId: string,
   title?: string,
+  deepOrganize?: boolean,
 ): Promise<ArchiveSessionResponse> {
   return request<ArchiveSessionResponse>(
     `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/archive`,
     {
       method: "POST",
-      body: JSON.stringify({ title: title ?? "" }),
+      body: JSON.stringify({
+        title: title ?? "",
+        ...(deepOrganize != null ? { deep_organize: deepOrganize } : {}),
+      }),
     },
   )
 }

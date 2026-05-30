@@ -17,6 +17,7 @@ type IngestReview struct {
 	MergeCommitSHA      string `json:"merge_commit_sha,omitempty"`
 	CreatedAt           string `json:"created_at"`
 	UpdatedAt           string `json:"updated_at"`
+	DeepOrganize        bool   `json:"deep_organize"`
 }
 
 // ActiveReviewSummary is a lightweight review snapshot for session detail API.
@@ -106,7 +107,8 @@ const ingestReviewSelectColumns = `
 	COALESCE(status, ''), COALESCE(current_plan_version, 0),
 	COALESCE(approved_plan_version, 0), COALESCE(final_job_id, ''),
 	COALESCE(merge_commit_sha, ''),
-	COALESCE(created_at, ''), COALESCE(updated_at, '')`
+	COALESCE(created_at, ''), COALESCE(updated_at, ''),
+	COALESCE(deep_organize, 0)`
 
 func scanIngestReview(scanner interface{ Scan(...interface{}) error }, r *IngestReview) error {
 	return scanner.Scan(
@@ -120,6 +122,7 @@ func scanIngestReview(scanner interface{ Scan(...interface{}) error }, r *Ingest
 		&r.MergeCommitSHA,
 		&r.CreatedAt,
 		&r.UpdatedAt,
+		&r.DeepOrganize,
 	)
 }
 
@@ -139,10 +142,12 @@ func (d *DB) CreateIngestReview(r *IngestReview) error {
 	_, err := d.db.Exec(`
 		INSERT INTO ingest_reviews (
 			session_id, archive_source_path, status,
-			current_plan_version, approved_plan_version, final_job_id
-		) VALUES (?, ?, ?, ?, ?, ?)`,
+			current_plan_version, approved_plan_version, final_job_id,
+			deep_organize
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		r.SessionID, r.ArchiveSourcePath, r.Status,
 		r.CurrentPlanVersion, r.ApprovedPlanVersion, r.FinalJobID,
+		r.DeepOrganize,
 	)
 	if err != nil {
 		return err

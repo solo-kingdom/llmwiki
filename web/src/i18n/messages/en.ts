@@ -232,6 +232,7 @@ const en: Record<MessageKey, string> = {
   "chat.model": "Model",
   "chat.archive": "Archive",
   "chat.confirm_archive": "Confirm Archive",
+  "chat.deep_organize": "Deep organize: detect and merge duplicate pages",
   "chat.session_title_optional": "Session title (optional)",
   "chat.confirm": "Confirm Archive",
   "chat.cancel": "Cancel",

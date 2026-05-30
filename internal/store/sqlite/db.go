@@ -94,6 +94,9 @@ func (d *DB) Migrate() error {
 	if err := d.migrateReviewMergeCommit(); err != nil {
 		return err
 	}
+	if err := d.migrateReviewDeepOrganize(); err != nil {
+		return err
+	}
 	return d.migrateFTSTrigram()
 }
 

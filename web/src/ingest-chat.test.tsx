@@ -1527,4 +1527,179 @@ describe("IngestChat", () => {
 
     expect(await screen.findByTestId("context-input-dialog")).toBeInTheDocument()
   })
+
+  it("shows deep organize checkbox only in organize mode", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "organize my wiki",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    })
+    vi.mocked(api.getIngestSession).mockResolvedValue({
+      session: {
+        id: "sess-1",
+        title: "",
+        status: "active",
+        mode: "organize",
+        storage_path: "",
+        llm_instance_id: "inst-1",
+        llm_model: "gpt-4",
+        created_at: "",
+        updated_at: "",
+      },
+    })
+    vi.mocked(api.listIngestSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: "sess-1",
+          title: "",
+          status: "active",
+          llm_instance_id: "inst-1",
+          llm_model: "gpt-4",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    await screen.findByText("organize my wiki")
+    fireEvent.click(screen.getByRole("button", { name: /^归档$/ }))
+
+    // Deep organize checkbox should be visible in organize mode
+    expect(
+      await screen.findByText("深度整理：检测并合并内容重复页面"),
+    ).toBeInTheDocument()
+  })
+
+  it("hides deep organize checkbox in non-organize modes", async () => {
+    const api = await import("@/lib/api")
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({
+      instances: [
+        {
+          id: "inst-1",
+          catalog_id: "cat-1",
+          name: "OpenAI",
+          api_key_masked: "sk-****",
+          base_url: "",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+    vi.mocked(api.getSettings).mockResolvedValue({
+      last_instance_id: "inst-1",
+      last_model: "gpt-4",
+      max_tokens: 2048,
+      api_key: "",
+      temperature: 0.7,
+      chunk_size: 512,
+      chunk_overlap: 64,
+      auto_reindex: true,
+      watch_sources: false,
+      job_instance_id: "",
+      job_model: "",
+      ui_language: "zh",
+      doc_language: "zh",
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "msg-user",
+          session_id: "sess-1",
+          role: "user",
+          content: "ingest this",
+          message_type: "text",
+          attachment_id: "",
+          stream_status: "complete",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    })
+    vi.mocked(api.getIngestSession).mockResolvedValue({
+      session: {
+        id: "sess-1",
+        title: "",
+        status: "active",
+        mode: "ingest",
+        storage_path: "",
+        llm_instance_id: "inst-1",
+        llm_model: "gpt-4",
+        created_at: "",
+        updated_at: "",
+      },
+    })
+    vi.mocked(api.listIngestSessions).mockResolvedValue({
+      sessions: [
+        {
+          id: "sess-1",
+          title: "",
+          status: "active",
+          llm_instance_id: "inst-1",
+          llm_model: "gpt-4",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    })
+
+    render(
+      <AppProvider>
+        <IngestChat />
+      </AppProvider>,
+    )
+
+    await screen.findByText("ingest this")
+    fireEvent.click(screen.getByRole("button", { name: /^归档$/ }))
+
+    // Confirm archive panel is open but no deep organize checkbox
+    await screen.findByText("确认归档")
+    expect(
+      screen.queryByText("深度整理：检测并合并内容重复页面"),
+    ).not.toBeInTheDocument()
+  })
 })

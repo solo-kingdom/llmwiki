@@ -162,6 +162,20 @@ func (p *Pipeline) generateFromPlan(ctx context.Context, name, content, analysis
 			"adjustments": adjustments,
 		})
 	}
+
+	actions := ParsePlanActions(planJSON)
+	if len(actions) > 0 {
+		deletePaths := SourcePathsToDelete(actions, blocks)
+		for _, dp := range deletePaths {
+			blocks[dp] = "---DELETE---\n"
+		}
+		if p.recorder != nil && len(deletePaths) > 0 {
+			p.recorder.Record("apply_files", "info", "post-apply cleanup: injecting DELETE blocks for move/merge sources", map[string]any{
+				"delete_paths": deletePaths,
+			})
+		}
+	}
+
 	for path := range blocks {
 		p.lockMgr.Lock(path)
 		p.lockMgr.Unlock(path)

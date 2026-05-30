@@ -187,7 +187,7 @@ interface AppState {
   cancelStream: () => void
   toggleMessageExclude: (messageId: string) => Promise<void>
   uploadSessionAttachment: (file: File) => Promise<void>
-  archiveSession: (title?: string) => Promise<string>
+  archiveSession: (title?: string, deepOrganize?: boolean) => Promise<string>
 
   loadProviders: () => Promise<void>
   loadModels: (providerId: string) => Promise<void>
@@ -912,7 +912,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const archiveSession = useCallback(
-    async (title?: string) => {
+    async (title?: string, deepOrganize?: boolean) => {
       if (!sessionId) throw new Error("no session")
       if (archivingRef.current) {
         throw new Error("archive already in progress")
@@ -921,7 +921,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSessionBusy(true)
       setSessionError(null)
       try {
-        const res = await api.archiveIngestSession(sessionId, title)
+        const res = await api.archiveIngestSession(sessionId, title, deepOrganize)
         void listSessionsInternal()
         return res.review_id
       } catch (e) {

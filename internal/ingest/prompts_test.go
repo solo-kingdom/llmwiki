@@ -88,6 +88,24 @@ func TestComposeSystemPromptPlanAndOrganizeLanguage(t *testing.T) {
 	if !strings.Contains(enPlan, "reorganization planner") {
 		t.Fatalf("expected English organize plan prompt: %s", enPlan)
 	}
+	if !strings.Contains(enPlan, "from_path") || !strings.Contains(enPlan, "source_paths") {
+		t.Fatalf("expected English organize plan prompt with from_path and source_paths schema: %s", enPlan)
+	}
+
+	zhPlanOrganize := ComposeSystemPrompt(StepPlanOrganize, PromptContext{Workspace: t.TempDir(), DocLang: "zh"})
+	if !strings.Contains(zhPlanOrganize, "from_path") || !strings.Contains(zhPlanOrganize, "source_paths") {
+		t.Fatalf("expected Chinese organize plan prompt with from_path and source_paths schema: %s", zhPlanOrganize)
+	}
+
+	zhPlanQA := ComposeSystemPrompt(StepPlanQA, PromptContext{Workspace: t.TempDir(), DocLang: "zh"})
+	if !strings.Contains(zhPlanQA, "source_paths") {
+		t.Fatalf("expected Chinese QA plan prompt with source_paths schema: %s", zhPlanQA)
+	}
+
+	enPlanQA := ComposeSystemPrompt(StepPlanQA, PromptContext{Workspace: t.TempDir(), DocLang: "en"})
+	if !strings.Contains(enPlanQA, "source_paths") {
+		t.Fatalf("expected English QA plan prompt with source_paths schema: %s", enPlanQA)
+	}
 
 	zhRollback := ComposeSystemPrompt(StepRollback, PromptContext{Workspace: t.TempDir(), DocLang: "zh"})
 	if !strings.Contains(zhRollback, "回滚助手") || !strings.Contains(zhRollback, "中文") {

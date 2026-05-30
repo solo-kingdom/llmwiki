@@ -29,7 +29,8 @@ type appendMessageRequest struct {
 }
 
 type archiveSessionRequest struct {
-	Title string `json:"title"`
+	Title        string `json:"title"`
+	DeepOrganize bool   `json:"deep_organize"`
 }
 
 type sessionResponse struct {
@@ -965,6 +966,7 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 		SessionID:         sessionID,
 		ArchiveSourcePath: normalized.CanonicalPath,
 		Status:            "planning",
+		DeepOrganize:      req.DeepOrganize,
 	}
 	if err := a.db.CreateIngestReview(review); err != nil {
 		a.rollbackArchiveAttempt("", normalized.CanonicalPath, "")

@@ -6,6 +6,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
@@ -35,6 +36,11 @@ func (p *JobProcessor) processReviewPlanJob(ctx context.Context, job *sqlite.Ing
 	}
 
 	feedback := p.collectReviewFeedback(reviewID)
+	if review.DeepOrganize {
+		if simSummary := p.collectDeepOrganizeContext(); simSummary != "" {
+			feedback = feedback + "\n\n" + simSummary
+		}
+	}
 	plan, err := p.pipeline.PlanOnly(ctx, normalized, feedback)
 	if err != nil {
 		return p.failReviewPlanFailed(reviewID, job.ID, classifyPipelineError(err), err)
@@ -262,6 +268,62 @@ func (p *JobProcessor) collectReviewFeedback(reviewID string) string {
 		}
 	}
 	return FormatFeedbackForPlan(feedback)
+}
+
+func (p *JobProcessor) collectDeepOrganizeContext() string {
+	if p.db == nil {
+		return ""
+	}
+	docs, err := p.db.ListDocuments()
+	if err != nil {
+		return ""
+	}
+	var wikiDocs []sqlite.Document
+	for _, d := range docs {
+		if d.SourceKind == "wiki" {
+			wikiDocs = append(wikiDocs, d)
+		}
+	}
+	if len(wikiDocs) == 0 {
+		return ""
+	}
+
+	var pairs []string
+	seen := make(map[string]bool)
+	for _, doc := range wikiDocs {
+		query := doc.Content
+		if utf8.RuneCountInString(query) > 500 {
+			query = string([]rune(query)[:500])
+		}
+		if strings.TrimSpace(query) == "" {
+			continue
+		}
+		results, err := p.db.SearchChunks(query, 5, "wiki")
+		if err != nil {
+			continue
+		}
+		for _, r := range results {
+			if r.Path == doc.RelativePath || r.Score < 0.3 {
+				continue
+			}
+			a, b := doc.RelativePath, r.Path
+			if a > b {
+				a, b = b, a
+			}
+			key := a + "|" + b
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			pairs = append(pairs, fmt.Sprintf("- %s ⟷ %s (重叠度: %.2f)", a, b, r.Score))
+		}
+	}
+
+	if len(pairs) == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("## 深度整理：检测到 %d 对内容相似页面\n\n%s\n\n请在计划中考虑合并这些相似页面，使用 merge action 并填写 source_paths 和 to_path。", len(pairs), strings.Join(pairs, "\n"))
 }
 
 func (p *JobProcessor) failReviewPlanFailed(reviewID, jobID, code string, err error) error {

@@ -249,12 +249,17 @@ func defaultTaskInstructionZH(step PromptStep) string {
 		return `你是 wiki 重组规划师。本次归档来自「整理模式」对话，用户的意图是重组和优化已有 wiki 页面。
 请产出：
 1) 人类可读的计划（Markdown：将改什么、为什么）
-2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/entities/Example.md","action":"update|move|merge","rationale":"..."}]}
+2) 围栏代码块中的 JSON，格式如下：
+{"summary":"...","changes":[
+  {"path":"wiki/entities/Example.md","action":"update","rationale":"..."},
+  {"path":"wiki/concepts/New.md","action":"move","from_path":"wiki/concepts/Old.md","to_path":"wiki/concepts/New.md","rationale":"重命名"},
+  {"path":"wiki/concepts/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/concepts/Merged.md","rationale":"合并重复"}
+]}
 
 重点：
 - 优先使用 update（修改内容/标签/链接）而非 create
-- 如果需要合并页面，action 用 merge，rationale 说明合并原因
-- 如果需要移动页面到不同目录，action 用 move
+- 如果需要移动或重命名页面，action 用 move，必须填写 from_path（旧路径）和 to_path（新路径）
+- 如果需要合并多个页面为一个，action 用 merge，必须填写 source_paths（所有源页面路径）和 to_path（合并后目标路径）
 - 保留原有内容中的重要信息，不删除除非对话中明确要求
 - 若 audit/lint 报告 entity_concept_coupling：规划将实体绑定型概念页重命名为中性概念，并更新实体页与概念页之间的 wikilink
 仅规划，不写文件。`
@@ -262,12 +267,13 @@ func defaultTaskInstructionZH(step PromptStep) string {
 		return `你是 wiki 知识沉淀规划师。本次归档来自「问答模式」对话，用户通过问答探讨了已有 wiki 内容。
 请产出：
 1) 人类可读的计划（Markdown：将改什么、为什么）
-2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/concepts/Example.md","action":"update","rationale":"..."}]}
+2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/concepts/Example.md","action":"update","rationale":"..."},{"path":"wiki/concepts/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/concepts/Merged.md","rationale":"合并重复页面"}]}
 
 重点：
 - 如果对话中有值得沉淀的新知识或澄清，更新相关 wiki 页面
 - 如果问答揭示了 wiki 内容的不足（缺失信息、错误），补充修正
 - 优先 update 已有页面，仅在确实需要时 create 新页面
+- 如果问答发现重复或高度相似的页面，使用 merge action 合并，必须填写 source_paths 和 to_path
 - 不要将纯问答交互本身作为内容写入 wiki；若答案值得保留，可规划到 wiki/queries/ 或更新相关主题页
 仅规划，不写文件。`
 	case StepSessionChat:
@@ -340,9 +346,16 @@ You can use the read tool to read the current content of existing wiki pages. Fo
 	case StepPlan:
 		return `You are a wiki ingest planner. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Planning only — no FILE blocks. The plan should mention source summaries, entity/concept pages, cross-links, and potential conflicts.`
 	case StepPlanOrganize:
-		return `You are a wiki reorganization planner. This archive is from an "organize mode" session where the user intended to restructure existing wiki pages. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Focus on update/move/merge actions rather than create. Preserve important existing content. If audit/lint reports entity_concept_coupling, plan to rename entity-bound concept pages to neutral concepts and update wikilinks between entity and concept pages. Planning only — no FILE blocks.`
+		return `You are a wiki reorganization planner. This archive is from an "organize mode" session where the user intended to restructure existing wiki pages. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. The JSON schema supports:
+{"summary":"...","changes":[
+  {"path":"wiki/entities/Example.md","action":"update","rationale":"..."},
+  {"path":"wiki/concepts/New.md","action":"move","from_path":"wiki/concepts/Old.md","to_path":"wiki/concepts/New.md","rationale":"rename"},
+  {"path":"wiki/concepts/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/concepts/Merged.md","rationale":"deduplicate"}
+]}
+
+For move actions, fill in from_path (old path) and to_path (new path). For merge actions, fill in source_paths (all source pages) and to_path (merged destination). Focus on update/move/merge rather than create. Preserve important existing content. If audit/lint reports entity_concept_coupling, plan to rename entity-bound concept pages to neutral concepts and update wikilinks. Planning only — no FILE blocks.`
 	case StepPlanQA:
-		return `You are a wiki knowledge consolidation planner. This archive is from a "QA mode" session where the user explored existing wiki content through questions. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Focus on updating existing pages with new insights or corrections from the Q&A. If an answer is worth preserving as an artifact, plan a wiki/queries/ page or update the relevant topic page. Only create new pages if genuinely needed. Planning only — no FILE blocks.`
+		return `You are a wiki knowledge consolidation planner. This archive is from a "QA mode" session where the user explored existing wiki content through questions. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. The JSON schema supports update and merge actions: {"summary":"...","changes":[{"path":"wiki/concepts/Example.md","action":"update","rationale":"..."},{"path":"wiki/concepts/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/concepts/Merged.md","rationale":"deduplicate"}]}. For merge actions, fill in source_paths (all source pages) and to_path (merged destination). Focus on updating existing pages with new insights or corrections from the Q&A. If duplicate or highly similar pages are found, use the merge action. If an answer is worth preserving as an artifact, plan a wiki/queries/ page or update the relevant topic page. Only create new pages if genuinely needed. Planning only — no FILE blocks.`
 	case StepSessionChat:
 		return `You help the user explore knowledge before archiving to their LLM Wiki. Valid grounds include user messages, attachment summaries, user @ wiki page full text, and pages read via tools. The related wiki subset is an index only—do not claim content for unread pages.`
 	case StepSessionQA:

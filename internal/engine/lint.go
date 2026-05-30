@@ -25,6 +25,7 @@ const (
 	LintCodeMisplacedWikiPage   = "misplaced_wiki_page"
 	LintCodeLogFormatInvalid    = "log_format_invalid"
 	LintCodeLogDateDecreasing   = "log_date_decreasing"
+	LintCodeDuplicatePage       = "duplicate_page"
 )
 
 // LintIssue is a single wiki health check finding.
@@ -114,6 +115,7 @@ func LintWorkspace(workspace string) (*LintReport, error) {
 	}
 
 	report.Issues = append(report.Issues, lintEntityConceptCoupling(pages, pageContents)...)
+	report.Issues = append(report.Issues, lintDuplicatePages(pages)...)
 
 	for _, page := range pages {
 		if isOrphanExcluded(page.relPath) {
@@ -366,6 +368,40 @@ func isOrphanExcluded(relPath string) bool {
 		}
 	}
 	return false
+}
+
+func lintDuplicatePages(pages []wikiPage) []LintIssue {
+	groups := make(map[string][]wikiPage)
+	for _, page := range pages {
+		if !page.inTypedSubdir || page.isSystem {
+			continue
+		}
+		groups[page.subdir] = append(groups[page.subdir], page)
+	}
+
+	var issues []LintIssue
+	for _, group := range groups {
+		normalized := make(map[string][]string)
+		for _, page := range group {
+			stem := strings.TrimSuffix(filepath.Base(page.relPath), filepath.Ext(page.relPath))
+			key := normalizeNameKey(stem)
+			normalized[key] = append(normalized[key], page.relPath)
+		}
+		for _, paths := range normalized {
+			if len(paths) < 2 {
+				continue
+			}
+			for _, p := range paths {
+				issues = append(issues, LintIssue{
+					Severity: LintSeverityWarning,
+					Code:     LintCodeDuplicatePage,
+					Path:     p,
+					Message:  fmt.Sprintf("疑似重复页面：同目录下存在归一化文件名相同的页面 %v", paths),
+				})
+			}
+		}
+	}
+	return issues
 }
 
 func computeLintStats(workspace string, pages []wikiPage) LintStats {

@@ -213,6 +213,7 @@ const zh = {
   "chat.model": "模型",
   "chat.archive": "归档",
   "chat.confirm_archive": "确认归档",
+  "chat.deep_organize": "深度整理：检测并合并内容重复页面",
   "chat.session_title_optional": "会话标题（可选）",
   "chat.confirm": "确认归档",
   "chat.cancel": "取消",

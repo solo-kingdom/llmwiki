@@ -48,6 +48,21 @@ func TestParsePlanActionsMissingFields(t *testing.T) {
 	}
 }
 
+func TestPlanStructuralCounts(t *testing.T) {
+	planJSON := `{"summary":"dedupe concepts","changes":[
+		{"action":"move","from_path":"wiki/concepts/A.md","to_path":"wiki/concepts/B.md","path":"wiki/concepts/B.md"},
+		{"action":"merge","source_paths":["wiki/concepts/C.md","wiki/concepts/D.md"],"to_path":"wiki/concepts/CD.md","path":"wiki/concepts/CD.md"},
+		{"action":"update","path":"wiki/concepts/E.md"}
+	]}`
+	move, merge, summary := PlanStructuralCounts(planJSON)
+	if move != 1 || merge != 1 {
+		t.Fatalf("move=%d merge=%d", move, merge)
+	}
+	if summary != "dedupe concepts" {
+		t.Fatalf("summary = %q", summary)
+	}
+}
+
 func TestParsePlanActionsInvalidJSON(t *testing.T) {
 	actions := ParsePlanActions("not json")
 	if len(actions) != 0 {

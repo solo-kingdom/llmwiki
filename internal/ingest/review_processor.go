@@ -126,7 +126,7 @@ func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.In
 	}
 
 	repo := p.gitRepoIfEnabled()
-	var files []string
+	var applyResult ApplyWikiResult
 	var mergeSHA string
 	cleanupWorktree := repo != nil
 	if repo != nil {
@@ -148,12 +148,12 @@ func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.In
 		p.pipeline.SetTargetDir(worktreeDir)
 		defer p.pipeline.SetTargetDir(prevTarget)
 
-		files, err = p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
+		applyResult, err = p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
 		if err != nil {
 			code := classifyPipelineError(err)
 			return p.failReviewApplyFailed(reviewID, job.ID, code, err)
 		}
-		if len(files) == 0 {
+		if len(applyResult.Written) == 0 && len(applyResult.Deleted) == 0 {
 			return p.failReviewApplyFailed(reviewID, job.ID, "no_wiki_files_written", errNoWikiFilesWritten)
 		}
 
@@ -168,7 +168,7 @@ func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.In
 		}
 
 		llmClient, _ := p.resolveLLMClientForReview(review)
-		mergeSHA, err = p.mergeWorktreeJobBranch(ctx, repo, job.ID, files, llmClient, nil)
+		mergeSHA, err = p.mergeWorktreeJobBranch(ctx, repo, job.ID, applyResult.Written, llmClient, nil)
 		if err != nil {
 			code := "merge_failed"
 			if strings.Contains(err.Error(), "conflict resolution") {
@@ -182,23 +182,24 @@ func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.In
 			log.Printf("review apply: cleanup worktree for job %s: %v", job.ID, err)
 		}
 	} else {
-		files, err = p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
+		applyResult, err = p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
 		if err != nil {
 			code := classifyPipelineError(err)
 			return p.failReviewApplyFailed(reviewID, job.ID, code, err)
 		}
-		if len(files) == 0 {
+		if len(applyResult.Written) == 0 && len(applyResult.Deleted) == 0 {
 			return p.failReviewApplyFailed(reviewID, job.ID, "no_wiki_files_written", errNoWikiFilesWritten)
 		}
-		p.indexGeneratedWikiFiles(files, job.ID)
 	}
+
+	p.finalizeWikiApply(job.ID, job.SourcePath, plan.PlanJSON, applyResult)
 
 	if mergeSHA != "" {
 		_ = p.db.SetIngestReviewMergeCommitSHA(reviewID, mergeSHA)
 	}
 	_ = p.db.SetIngestReviewFinalJob(reviewID, job.ID)
 
-	summary := fmt.Sprintf("applied %d wiki page(s) from approved plan v%d", len(files), review.ApprovedPlanVersion)
+	summary := fmt.Sprintf("applied %d wiki page(s) from approved plan v%d", len(applyResult.Written), review.ApprovedPlanVersion)
 	_, updateErr := p.db.DB().Exec(`
 		UPDATE ingest_jobs
 		SET status = 'succeeded', result_summary = ?, runner_id = '', heartbeat_at = '',

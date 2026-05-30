@@ -154,12 +154,12 @@ func TestApplyWikiBlocksForceOverwriteSkipsMerge(t *testing.T) {
 		ForceOverwrite: true,
 		Merge:          &MergeContext{LLMClient: newMergeLLMClient(t, "unused")},
 	}
-	paths, err := ApplyWikiBlocks(context.Background(), ws, blocks, opts)
+	result, err := ApplyWikiBlocks(context.Background(), ws, blocks, opts)
 	if err != nil {
 		t.Fatalf("ApplyWikiBlocks: %v", err)
 	}
-	if len(paths) != 1 {
-		t.Fatalf("paths = %v", paths)
+	if len(result.Written) != 1 {
+		t.Fatalf("paths = %v", result.Written)
 	}
 
 	data, err := os.ReadFile(path)
@@ -232,11 +232,11 @@ func TestApplyWikiBlocksIdenticalContentSkipsWrite(t *testing.T) {
 	opts := &ApplyWikiBlocksOpts{
 		Merge: &MergeContext{LLMClient: newMergeLLMClient(t, "should not be called")},
 	}
-	paths, err := ApplyWikiBlocks(context.Background(), ws, blocks, opts)
+	result, err := ApplyWikiBlocks(context.Background(), ws, blocks, opts)
 	if err != nil {
 		t.Fatalf("ApplyWikiBlocks: %v", err)
 	}
-	if len(paths) != 0 {
-		t.Fatalf("expected no writes, got paths %v", paths)
+	if len(result.Written) != 0 {
+		t.Fatalf("expected no writes, got paths %v", result.Written)
 	}
 }

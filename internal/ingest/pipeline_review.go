@@ -57,16 +57,16 @@ func (p *Pipeline) PlanOnly(ctx context.Context, source *NormalizedSource, feedb
 }
 
 // ApplyFromPlan regenerates FILE blocks from an approved plan and writes wiki files.
-func (p *Pipeline) ApplyFromPlan(ctx context.Context, source *NormalizedSource, planJSON string) ([]string, error) {
+func (p *Pipeline) ApplyFromPlan(ctx context.Context, source *NormalizedSource, planJSON string) (ApplyWikiResult, error) {
 	if source == nil {
-		return nil, fmt.Errorf("normalized source is nil")
+		return ApplyWikiResult{}, fmt.Errorf("normalized source is nil")
 	}
 	if p.llmClient == nil {
-		return nil, fmt.Errorf("LLM client not configured")
+		return ApplyWikiResult{}, fmt.Errorf("LLM client not configured")
 	}
 	planJSON = strings.TrimSpace(planJSON)
 	if planJSON == "" {
-		return nil, fmt.Errorf("approved plan is empty")
+		return ApplyWikiResult{}, fmt.Errorf("approved plan is empty")
 	}
 
 	name := filepath.Base(source.CanonicalPath)
@@ -78,29 +78,32 @@ func (p *Pipeline) ApplyFromPlan(ctx context.Context, source *NormalizedSource, 
 
 	analysis, err := p.analyze(ctx, name, content)
 	if err != nil {
-		return nil, fmt.Errorf("analysis: %w", err)
+		return ApplyWikiResult{}, fmt.Errorf("analysis: %w", err)
 	}
 
-	files, err := p.generateFromPlan(ctx, name, content, analysis, planJSON)
+	result, err := p.generateFromPlan(ctx, name, content, analysis, planJSON)
 	if err != nil {
 		if p.recorder != nil {
 			p.recorder.Record("apply", "error", err.Error(), nil)
 		}
-		return nil, fmt.Errorf("generation: %w", err)
+		return ApplyWikiResult{}, fmt.Errorf("generation: %w", err)
 	}
 
 	if p.recorder != nil {
 		p.recorder.Record("apply_files", "complete", "wiki files applied from approved plan", map[string]any{
-			"paths_written": files,
+			"paths_written": result.Written,
+			"paths_deleted": result.Deleted,
 		})
 	}
-	return files, nil
+	return result, nil
 }
 
 func (p *Pipeline) generatePlan(ctx context.Context, name, content, analysis, feedback string) (string, error) {
 	// Detect session mode from archive content
 	planStep := StepPlan
+	toolMode := ""
 	if mode := ParseSessionModeFromArchive(content); mode != "" {
+		toolMode = mode
 		switch mode {
 		case "organize":
 			planStep = StepPlanOrganize
@@ -121,10 +124,13 @@ func (p *Pipeline) generatePlan(ctx context.Context, name, content, analysis, fe
 		{Role: "system", Content: systemMsg},
 		{Role: "user", Content: strings.Join(userParts, "\n\n---\n\n")},
 	}
-	return p.runLLMStep(ctx, "plan", messages, 0.2, 4096)
+	return p.runLLMStep(ctx, "plan", messages, 0.2, 4096, runLLMStepOpts{
+		promptStep: planStep,
+		toolMode:   toolMode,
+	})
 }
 
-func (p *Pipeline) generateFromPlan(ctx context.Context, name, content, analysis, planJSON string) ([]string, error) {
+func (p *Pipeline) generateFromPlan(ctx context.Context, name, content, analysis, planJSON string) (ApplyWikiResult, error) {
 	prompt := fmt.Sprintf(`源文件：**%s**
 
 已批准计划（必须遵循 — 仅据此重新生成 FILE 块）：
@@ -147,15 +153,15 @@ func (p *Pipeline) generateFromPlan(ctx context.Context, name, content, analysis
 
 	const temp = 0.1
 	const maxTok = 8192
-	result, err := p.runLLMStep(ctx, "generation", messages, temp, maxTok)
+	result, err := p.runLLMStep(ctx, "generation", messages, temp, maxTok, runLLMStepOpts{promptStep: StepGeneration})
 	if err != nil {
-		return nil, err
+		return ApplyWikiResult{}, err
 	}
 
 	blocks := parseFileBlocksWithContent(result)
 	blocks, adjustments, normErr := normalizeWikiFileBlocks(blocks)
 	if normErr != nil {
-		return nil, normErr
+		return ApplyWikiResult{}, normErr
 	}
 	if len(adjustments) > 0 && p.recorder != nil {
 		p.recorder.Record("apply_files", "warn", "normalized FILE paths", map[string]any{
@@ -182,4 +188,3 @@ func (p *Pipeline) generateFromPlan(ctx context.Context, name, content, analysis
 	}
 	return ApplyWikiBlocks(ctx, p.effectiveWorkspace(), blocks, p.applyWikiBlocksOpts())
 }
-

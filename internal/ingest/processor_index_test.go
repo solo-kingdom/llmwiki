@@ -29,14 +29,14 @@ func TestProcessorIndexesWrittenWikiFiles(t *testing.T) {
 	blocks := map[string]string{
 		"wiki/entities/searchable-ingest.md": "# Searchable\n\n" + longBody + "\n",
 	}
-	paths, err := ApplyWikiBlocks(context.Background(), ws, blocks, nil)
+	result, err := ApplyWikiBlocks(context.Background(), ws, blocks, nil)
 	if err != nil {
 		t.Fatalf("ApplyWikiBlocks: %v", err)
 	}
 
 	adapter := storesvc.NewStoreAdapter(db)
 	indexer := engine.NewWorkspaceFileIndexer(adapter, ws)
-	for _, rel := range paths {
+	for _, rel := range result.Written {
 		if err := indexer.IndexFile(rel); err != nil {
 			t.Fatalf("IndexFile(%s): %v", rel, err)
 		}
@@ -74,8 +74,8 @@ func TestPipelineFileBlocksWritePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyWikiBlocks: %v", err)
 	}
-	if len(paths) != 1 {
-		t.Fatalf("paths = %v", paths)
+	if len(paths.Written) != 1 {
+		t.Fatalf("paths = %v", paths.Written)
 	}
 	if _, err := os.Stat(filepath.Join(ws, "wiki", "entities", "from-pipeline.md")); err != nil {
 		t.Fatalf("expected file on disk: %v", err)

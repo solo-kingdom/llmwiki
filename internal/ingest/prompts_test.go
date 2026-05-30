@@ -40,6 +40,14 @@ func TestComposeSystemPromptEntityConceptSeparation(t *testing.T) {
 	if !strings.Contains(organize, "entity_concept_coupling") {
 		t.Fatalf("organize prompt missing entity_concept_coupling guidance: %s", organize)
 	}
+	if !strings.Contains(organize, "structure 工具") || !strings.Contains(organize, "禁止自行绘制") {
+		t.Fatalf("organize prompt missing structure fidelity guidance: %s", organize)
+	}
+
+	enOrganize := ComposeSystemPrompt(StepSessionOrganize, PromptContext{Workspace: dir, DocLang: "en"})
+	if !strings.Contains(enOrganize, "structure tool") || !strings.Contains(enOrganize, "Do NOT draw generic") {
+		t.Fatalf("english organize prompt missing structure fidelity guidance: %s", enOrganize)
+	}
 
 	enAnalysis := ComposeSystemPrompt(StepAnalysis, PromptContext{Workspace: dir, DocLang: "en"})
 	if !strings.Contains(enAnalysis, "entity name + abstract concept") {

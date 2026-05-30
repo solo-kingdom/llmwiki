@@ -98,20 +98,25 @@ func normalizeWikiFileBlocks(blocks map[string]string) (map[string]string, []str
 	return out, adjustments, nil
 }
 
+// ApplyWikiResult holds paths touched by ApplyWikiBlocks.
+type ApplyWikiResult struct {
+	Written []string
+	Deleted []string
+}
+
 // ApplyWikiBlocks writes or deletes wiki files under workspace from LLM FILE blocks.
 // When opts.Merge is set and ForceOverwrite is false, existing pages are merged instead of overwritten.
-// Returns relative paths that were written (not deleted or skipped as unchanged).
-func ApplyWikiBlocks(ctx context.Context, workspace string, blocks map[string]string, opts *ApplyWikiBlocksOpts) ([]string, error) {
+func ApplyWikiBlocks(ctx context.Context, workspace string, blocks map[string]string, opts *ApplyWikiBlocksOpts) (ApplyWikiResult, error) {
 	rawCount := len(blocks)
 	blocks, adjustments, err := normalizeWikiFileBlocks(blocks)
 	if err != nil {
-		return nil, err
+		return ApplyWikiResult{}, err
 	}
 	if len(adjustments) > 0 {
 		log.Printf("ApplyWikiBlocks: normalized paths: %s", strings.Join(adjustments, ", "))
 	}
 
-	var written []string
+	var result ApplyWikiResult
 	var handled int
 	for path, content := range blocks {
 		fullPath := filepath.Join(workspace, path)
@@ -119,19 +124,21 @@ func ApplyWikiBlocks(ctx context.Context, workspace string, blocks map[string]st
 		if content == "---DELETE---\n" {
 			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 				log.Printf("ApplyWikiBlocks: failed to delete %s: %v", path, err)
+			} else {
+				result.Deleted = append(result.Deleted, path)
 			}
 			continue
 		}
 
 		if err := engine.ValidateWikiWritePath(path); err != nil {
-			return nil, err
+			return ApplyWikiResult{}, err
 		}
 
 		writeContent := content
 		if opts != nil && opts.Merge != nil && !opts.ForceOverwrite {
 			merged, skip, err := MergeWikiPage(ctx, fullPath, content, opts.Merge)
 			if err != nil {
-				return nil, fmt.Errorf("merge %s: %w", path, err)
+				return ApplyWikiResult{}, fmt.Errorf("merge %s: %w", path, err)
 			}
 			if skip {
 				handled++
@@ -142,18 +149,18 @@ func ApplyWikiBlocks(ctx context.Context, workspace string, blocks map[string]st
 
 		dir := filepath.Dir(fullPath)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create dir %s: %w", dir, err)
+			return ApplyWikiResult{}, fmt.Errorf("create dir %s: %w", dir, err)
 		}
 		if err := os.WriteFile(fullPath, []byte(writeContent), 0o644); err != nil {
-			return nil, fmt.Errorf("write %s: %w", path, err)
+			return ApplyWikiResult{}, fmt.Errorf("write %s: %w", path, err)
 		}
-		written = append(written, path)
+		result.Written = append(result.Written, path)
 		handled++
 	}
 
 	// Fail when blocks were present but nothing was applied (not even unchanged merge skips).
-	if rawCount > 0 && len(written) == 0 && handled == 0 {
-		return nil, errNoWikiFilesWritten
+	if rawCount > 0 && len(result.Written) == 0 && len(result.Deleted) == 0 && handled == 0 {
+		return ApplyWikiResult{}, errNoWikiFilesWritten
 	}
-	return written, nil
+	return result, nil
 }

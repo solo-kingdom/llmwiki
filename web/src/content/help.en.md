@@ -42,14 +42,26 @@ Typical layout after `init`:
 
 ```
 ~/research/
-├── purpose.md          # Goals and scope (human + LLM)
-├── rules.md            # Writing and citation rules
+├── purpose.md          # Goals and scope (workspace root)
+├── rules.md            # Writing and citation rules (workspace root)
 ├── wiki/               # LLM-maintained structured Markdown
-├── raw/                # Immutable sources (read-only)
+│   ├── overview.md     # Global overview (system page)
+│   ├── index.md        # Content catalog (auto-rebuilt after apply)
+│   ├── log.md          # Operation log (system page)
+│   ├── entities/       # Entities (plural typed dirs)
+│   ├── concepts/
+│   ├── sources/
+│   ├── synthesis/
+│   ├── comparisons/
+│   ├── queries/
+│   └── templates/      # System templates (not business content)
+├── raw/                # Immutable sources (outside wiki/)
 │   └── sources/
 └── .llmwiki/
     └── index.db        # SQLite index (delete + reindex to rebuild)
 ```
+
+See `docs/workspace-layout.md` for the canonical layout.
 
 - **`raw/`**: original PDFs, notes, web clips — LLM read-only.
 - **`wiki/`**: generated knowledge pages in typed subdirectories (below).
@@ -70,7 +82,15 @@ Business pages live in **typed directories**:
 
 Reserved top-level pages: `wiki/overview.md`, `wiki/index.md`, `wiki/log.md`. Templates under `wiki/templates/` guide generation and are not business content.
 
-Updating an existing page **merges** by default (locked frontmatter, union arrays, LLM body merge). Use CLI `--force-overwrite` for legacy overwrite behavior.
+### Invalid layouts (anti-patterns)
+
+Not canonical: `wiki/purpose.md`, `wiki/rules.md` (belong at workspace root), `wiki/raw/`, singular `wiki/entity/`, or fictitious `wiki/skills/`. Directory trees with emoji prefixes or `root/` wrappers are usually LLM-fabricated, not real `structure()` output.
+
+### structure() tool output
+
+In Organize mode, call `structure()` first. Authentic output starts with `# Wiki 目录结构` / workspace path lines and `├── entities/ (N pages)` entries. See `docs/workspace-layout.md` for format examples. **Quote the tool result; do not invent example trees.**
+
+Updating an existing page **merges** by default. After a successful wiki apply, `wiki/index.md` is rebuilt automatically; organize move/merge actions append a structure entry to `wiki/log.md`.
 
 ## Web UI Guide
 

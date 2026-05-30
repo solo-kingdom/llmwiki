@@ -228,6 +228,8 @@ func executeLocalStructure(workspace string, db *sqlite.DB, _ map[string]interfa
 
 	var sb strings.Builder
 	sb.WriteString("# Wiki 目录结构\n\n")
+	sb.WriteString(fmt.Sprintf("工作区：`%s`\n", workspace))
+	sb.WriteString("数据来源：SQLite index（与文件系统不一致时请运行 `llmwiki reindex`）\n\n")
 	sb.WriteString(fmt.Sprintf("总计 %d 个 wiki 文档（%d 个业务内容页）\n\n", len(wikiDocs), contentCount))
 
 	reserved := []sqlite.Document{}
@@ -310,6 +312,10 @@ func executeLocalStructure(workspace string, db *sqlite.DB, _ map[string]interfa
 			}
 			sb.WriteString(fmt.Sprintf("%s%s (系统模板)\n", prefix, title))
 		}
+	} else if templatesDirExists(workspace) {
+		shownDirs["templates"] = true
+		sb.WriteString("├── templates/ (0 个系统模板)\n")
+		sb.WriteString("│   (空目录)\n")
 	}
 
 	// Other directories
@@ -593,6 +599,11 @@ func pathToTitle(path string, docs []sqlite.Document) string {
 		}
 	}
 	return filepath.Base(path)
+}
+
+func templatesDirExists(workspace string) bool {
+	info, err := os.Stat(filepath.Join(workspace, "wiki", "templates"))
+	return err == nil && info.IsDir()
 }
 
 // ensure json import is used

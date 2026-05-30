@@ -3,6 +3,7 @@ package ingest
 import (
 	"encoding/json"
 	"log"
+	"strings"
 )
 
 type PlanAction struct {
@@ -39,6 +40,28 @@ func ParsePlanActions(planJSON string) []PlanAction {
 		}
 	}
 	return result
+}
+
+// PlanStructuralCounts returns move/merge counts and plan summary from plan JSON.
+func PlanStructuralCounts(planJSON string) (moveCount, mergeCount int, summary string) {
+	var plan planChangesJSON
+	if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
+		return 0, 0, ""
+	}
+	summary = strings.TrimSpace(plan.Summary)
+	for _, change := range plan.Changes {
+		switch change.Action {
+		case "move":
+			if change.FromPath != "" {
+				moveCount++
+			}
+		case "merge":
+			if len(change.SourcePaths) > 0 {
+				mergeCount++
+			}
+		}
+	}
+	return moveCount, mergeCount, summary
 }
 
 func SourcePathsToDelete(actions []PlanAction, writeTargets map[string]string) []string {

@@ -244,7 +244,9 @@ func defaultTaskInstructionZH(step PromptStep) string {
 		return `你是 wiki 摄入规划师。请产出：
 1) 人类可读的计划（Markdown：将改什么、为什么）
 2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/entities/Example.md","action":"create|update","rationale":"..."}]}
-仅规划，不写文件。计划中应说明 source 摘要页、实体/概念页、交叉引用和潜在冲突如何处理。`
+仅规划，不写文件。计划中应说明 source 摘要页、实体/概念页、交叉引用和潜在冲突如何处理。
+
+你可以使用 search 工具搜索已有 wiki 页面，使用 read 工具读取页面全文。工具探索应控制在必要范围；信息足够后必须输出 plan，不要无限调用工具。`
 	case StepPlanOrganize:
 		return `你是 wiki 重组规划师。本次归档来自「整理模式」对话，用户的意图是重组和优化已有 wiki 页面。
 请产出：
@@ -262,7 +264,9 @@ func defaultTaskInstructionZH(step PromptStep) string {
 - 如果需要合并多个页面为一个，action 用 merge，必须填写 source_paths（所有源页面路径）和 to_path（合并后目标路径）
 - 保留原有内容中的重要信息，不删除除非对话中明确要求
 - 若 audit/lint 报告 entity_concept_coupling：规划将实体绑定型概念页重命名为中性概念，并更新实体页与概念页之间的 wikilink
-仅规划，不写文件。`
+仅规划，不写文件。
+
+你可以使用 structure、audit、search、read 等工具了解 wiki 现状。工具探索应控制在必要范围；信息足够后必须输出 plan，不要无限调用工具。`
 	case StepPlanQA:
 		return `你是 wiki 知识沉淀规划师。本次归档来自「问答模式」对话，用户通过问答探讨了已有 wiki 内容。
 请产出：
@@ -275,7 +279,9 @@ func defaultTaskInstructionZH(step PromptStep) string {
 - 优先 update 已有页面，仅在确实需要时 create 新页面
 - 如果问答发现重复或高度相似的页面，使用 merge action 合并，必须填写 source_paths 和 to_path
 - 不要将纯问答交互本身作为内容写入 wiki；若答案值得保留，可规划到 wiki/queries/ 或更新相关主题页
-仅规划，不写文件。`
+仅规划，不写文件。
+
+你可以使用 search、read、references 等工具查找已有 wiki 页面。工具探索应控制在必要范围；信息足够后必须输出 plan，不要无限调用工具。`
 	case StepSessionChat:
 		return `你是 LLM Wiki 摄入前的对话助手，帮助用户澄清主题、定义与结构。
 - 合法依据：用户消息、附件摘要、用户 @ 引用的 wiki 全文、以及通过 read 工具读取的 wiki 页面
@@ -292,22 +298,20 @@ func defaultTaskInstructionZH(step PromptStep) string {
 - 回答需引用来源页面路径，方便用户追溯
 - 优先综合多个相关页面给出完整回答`
 	case StepSessionOrganize:
-		return `你是 LLM Wiki 架构师，负责诊断和优化 wiki 的结构与内容。
-
-⚠️ 工作流程（必须遵守）：
-1. 收到请求后，先调用 structure 工具获取 wiki 目录结构
-2. 然后调用 audit 工具获取健康诊断
-3. 用 read 工具深入阅读具体页面内容
-4. 基于 tool 返回的数据给出具体、可操作的重组方案
-
-禁止在未调用任何工具的情况下直接回复。
-
-- 诊断时列出具体问题（路径 + 问题类型 + 影响范围）
-- 建议时给出可操作的重组方案（移动/合并/拆分/补充标签/补充链接）
-- 对 lint 报告中的 entity_concept_coupling 警告：将实体绑定型概念标题拆为中性概念页，并通过 wikilink 链接实体案例
-- 优先处理影响最大的问题，给出优先级排序
-- 不要建议删除 overview.md、index.md、log.md；合并/移动前必须保留所有独特信息并考虑链接更新
-- 用户满意后会点击「归档」将重组方案写入 wiki`
+		return "你是 LLM Wiki 架构师，负责诊断和优化 wiki 的结构与内容。\n\n" +
+			"⚠️ 工作流程（必须遵守）：\n" +
+			"1. 收到请求后，先调用 structure 工具获取 wiki 目录结构\n" +
+			"2. 然后调用 audit 工具获取健康诊断\n" +
+			"3. 用 read 工具深入阅读具体页面内容\n" +
+			"4. 基于 tool 返回的数据给出具体、可操作的重组方案\n\n" +
+			"禁止在未调用任何工具的情况下直接回复。\n" +
+			"展示 wiki 目录结构时，必须引用 structure 工具返回的原始内容（路径与计数须一致）；禁止自行绘制示例目录树、使用占位文件名，或出现无效路径（如 wiki/skills/、单数 entity/、wiki 内的 raw/）。\n\n" +
+			"- 诊断时列出具体问题（路径 + 问题类型 + 影响范围）\n" +
+			"- 建议时给出可操作的重组方案（移动/合并/拆分/补充标签/补充链接）\n" +
+			"- 对 lint 报告中的 entity_concept_coupling 警告：将实体绑定型概念标题拆为中性概念页，并通过 wikilink 链接实体案例\n" +
+			"- 优先处理影响最大的问题，给出优先级排序\n" +
+			"- 不要建议删除 overview.md、index.md、log.md；合并/移动前必须保留所有独特信息并考虑链接更新\n" +
+			"- 用户满意后会点击「归档」将重组方案写入 wiki"
 	case StepMergeBody:
 		return `你是 wiki 正文合并助手。合并旧正文与新增量，保留旧内容所有重要信息，整合新内容。
 - 仅输出完整 markdown 正文（不含 frontmatter）
@@ -344,7 +348,9 @@ Concept page titles should stay neutral by default; do not embed concrete entity
 
 You can use the read tool to read the current content of existing wiki pages. For existing pages, your output should preserve original information and incrementally add new content. Do not remove important paragraphs from existing pages unless the source explicitly contradicts them.`
 	case StepPlan:
-		return `You are a wiki ingest planner. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Planning only — no FILE blocks. The plan should mention source summaries, entity/concept pages, cross-links, and potential conflicts.`
+		return `You are a wiki ingest planner. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Planning only — no FILE blocks. The plan should mention source summaries, entity/concept pages, cross-links, and potential conflicts.
+
+You can use search to find existing wiki pages and read to load page content. Keep tool exploration to what is necessary; once you have enough context, output the plan — do not call tools indefinitely.`
 	case StepPlanOrganize:
 		return `You are a wiki reorganization planner. This archive is from an "organize mode" session where the user intended to restructure existing wiki pages. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. The JSON schema supports:
 {"summary":"...","changes":[
@@ -353,9 +359,13 @@ You can use the read tool to read the current content of existing wiki pages. Fo
   {"path":"wiki/concepts/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/concepts/Merged.md","rationale":"deduplicate"}
 ]}
 
-For move actions, fill in from_path (old path) and to_path (new path). For merge actions, fill in source_paths (all source pages) and to_path (merged destination). Focus on update/move/merge rather than create. Preserve important existing content. If audit/lint reports entity_concept_coupling, plan to rename entity-bound concept pages to neutral concepts and update wikilinks. Planning only — no FILE blocks.`
+For move actions, fill in from_path (old path) and to_path (new path). For merge actions, fill in source_paths (all source pages) and to_path (merged destination). Focus on update/move/merge rather than create. Preserve important existing content. If audit/lint reports entity_concept_coupling, plan to rename entity-bound concept pages to neutral concepts and update wikilinks. Planning only — no FILE blocks.
+
+You can use structure, audit, search, read, and related tools to understand the wiki. Keep tool exploration to what is necessary; once you have enough context, output the plan — do not call tools indefinitely.`
 	case StepPlanQA:
-		return `You are a wiki knowledge consolidation planner. This archive is from a "QA mode" session where the user explored existing wiki content through questions. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. The JSON schema supports update and merge actions: {"summary":"...","changes":[{"path":"wiki/concepts/Example.md","action":"update","rationale":"..."},{"path":"wiki/concepts/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/concepts/Merged.md","rationale":"deduplicate"}]}. For merge actions, fill in source_paths (all source pages) and to_path (merged destination). Focus on updating existing pages with new insights or corrections from the Q&A. If duplicate or highly similar pages are found, use the merge action. If an answer is worth preserving as an artifact, plan a wiki/queries/ page or update the relevant topic page. Only create new pages if genuinely needed. Planning only — no FILE blocks.`
+		return `You are a wiki knowledge consolidation planner. This archive is from a "QA mode" session where the user explored existing wiki content through questions. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. The JSON schema supports update and merge actions: {"summary":"...","changes":[{"path":"wiki/concepts/Example.md","action":"update","rationale":"..."},{"path":"wiki/concepts/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/concepts/Merged.md","rationale":"deduplicate"}]}. For merge actions, fill in source_paths (all source pages) and to_path (merged destination). Focus on updating existing pages with new insights or corrections from the Q&A. If duplicate or highly similar pages are found, use the merge action. If an answer is worth preserving as an artifact, plan a wiki/queries/ page or update the relevant topic page. Only create new pages if genuinely needed. Planning only — no FILE blocks.
+
+You can use search, read, and references to find existing wiki pages. Keep tool exploration to what is necessary; once you have enough context, output the plan — do not call tools indefinitely.`
 	case StepSessionChat:
 		return `You help the user explore knowledge before archiving to their LLM Wiki. Valid grounds include user messages, attachment summaries, user @ wiki page full text, and pages read via tools. The related wiki subset is an index only—do not claim content for unread pages.`
 	case StepSessionQA:
@@ -368,22 +378,20 @@ For move actions, fill in from_path (old path) and to_path (new path). For merge
 - Cite source page paths in your answers for traceability
 - Synthesize multiple relevant pages for comprehensive answers when possible`
 	case StepSessionOrganize:
-		return `You are an LLM Wiki architect responsible for diagnosing and optimizing wiki structure and content.
-
-⚠️ Workflow (mandatory):
-1. Upon receiving a request, first call the structure tool to get the wiki directory layout
-2. Then call the audit tool to get a health diagnosis
-3. Use the read tool to examine specific page content in depth
-4. Based on the tool results, provide specific, actionable reorganization recommendations
-
-You MUST NOT reply without calling at least one tool first.
-
-- List specific issues in your diagnosis (path + issue type + impact scope)
-- Provide actionable reorganization plans (move/merge/split/add tags/add links)
-- For entity_concept_coupling lint warnings: split entity-bound concept titles into neutral concepts and link entity cases via wikilinks
-- Prioritize issues by impact and provide a priority ranking
-- Do not propose deleting overview.md, index.md, or log.md; preserve all unique information when merging/moving pages and consider link updates
-- The user will click "Archive" when satisfied to write the reorganization plan to the wiki`
+		return "You are an LLM Wiki architect responsible for diagnosing and optimizing wiki structure and content.\n\n" +
+			"⚠️ Workflow (mandatory):\n" +
+			"1. Upon receiving a request, first call the structure tool to get the wiki directory layout\n" +
+			"2. Then call the audit tool to get a health diagnosis\n" +
+			"3. Use the read tool to examine specific page content in depth\n" +
+			"4. Based on the tool results, provide specific, actionable reorganization recommendations\n\n" +
+			"You MUST NOT reply without calling at least one tool first.\n" +
+			"When presenting wiki directory structure, you MUST quote or faithfully reproduce the structure tool output (paths and counts must match). Do NOT draw generic example trees, use placeholder filenames, or include invalid paths such as wiki/skills/, singular entity/, or wiki/raw/.\n\n" +
+			"- List specific issues in your diagnosis (path + issue type + impact scope)\n" +
+			"- Provide actionable reorganization plans (move/merge/split/add tags/add links)\n" +
+			"- For entity_concept_coupling lint warnings: split entity-bound concept titles into neutral concepts and link entity cases via wikilinks\n" +
+			"- Prioritize issues by impact and provide a priority ranking\n" +
+			"- Do not propose deleting overview.md, index.md, or log.md; preserve all unique information when merging/moving pages and consider link updates\n" +
+			`- The user will click "Archive" when satisfied to write the reorganization plan to the wiki`
 	case StepMergeBody:
 		return `Merge old and new wiki body text; preserve important old content; output markdown body only without frontmatter. Preserve conflicting claims with their sources instead of silently overwriting them.`
 	case StepRollback:

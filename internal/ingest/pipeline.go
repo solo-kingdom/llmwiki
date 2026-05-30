@@ -245,7 +245,7 @@ func (p *Pipeline) analyze(ctx context.Context, name, content string) (string, e
 
 	const temp = 0.1
 	const maxTok = 4096
-	return p.runLLMStep(ctx, "analysis", messages, temp, maxTok)
+	return p.runLLMStep(ctx, "analysis", messages, temp, maxTok, runLLMStepOpts{promptStep: StepAnalysis})
 }
 
 func (p *Pipeline) generate(ctx context.Context, name, content, analysis string) ([]string, error) {
@@ -268,7 +268,7 @@ func (p *Pipeline) generate(ctx context.Context, name, content, analysis string)
 
 	const temp = 0.1
 	const maxTok = 8192
-	result, err := p.runLLMStep(ctx, "generation", messages, temp, maxTok)
+	result, err := p.runLLMStep(ctx, "generation", messages, temp, maxTok, runLLMStepOpts{promptStep: StepGeneration})
 	if err != nil {
 		return nil, err
 	}
@@ -289,38 +289,68 @@ func (p *Pipeline) generate(ctx context.Context, name, content, analysis string)
 		p.lockMgr.Unlock(path)
 	}
 
-	return ApplyWikiBlocks(ctx, p.effectiveWorkspace(), blocks, p.applyWikiBlocksOpts())
+	applyResult, err := ApplyWikiBlocks(ctx, p.effectiveWorkspace(), blocks, p.applyWikiBlocksOpts())
+	if err != nil {
+		return nil, err
+	}
+	return applyResult.Written, nil
 }
 
 func (p *Pipeline) cachePath() string {
 	return filepath.Join(p.workspace, ".llmwiki", "cache.json")
 }
 
+// runLLMStepOpts optional overrides for tool loop limits and local tool set selection.
+type runLLMStepOpts struct {
+	promptStep PromptStep
+	toolMode   string // session mode for local tools: "", "qa", "organize"
+}
+
 // defaultToolLoopConfigForStep returns step-appropriate tool loop limits.
 func defaultToolLoopConfigForStep(step PromptStep) llm.ToolLoopConfig {
 	switch step {
-	case StepAnalysis, StepPlan, StepPlanOrganize, StepPlanQA:
-		return llm.ToolLoopConfig{MaxRounds: 3, MaxToolCallsPerRound: 3}
+	case StepAnalysis:
+		return llm.ToolLoopConfig{MaxRounds: 4, MaxToolCallsPerRound: 4}
+	case StepPlan:
+		return llm.ToolLoopConfig{MaxRounds: 5, MaxToolCallsPerRound: 4}
+	case StepPlanOrganize:
+		return llm.ToolLoopConfig{MaxRounds: 8, MaxToolCallsPerRound: 4}
+	case StepPlanQA:
+		return llm.ToolLoopConfig{MaxRounds: 5, MaxToolCallsPerRound: 4}
 	case StepGeneration:
-		return llm.ToolLoopConfig{MaxRounds: 4, MaxToolCallsPerRound: 3}
+		return llm.ToolLoopConfig{MaxRounds: 4, MaxToolCallsPerRound: 4}
 	default:
 		return llm.ToolLoopConfig{MaxRounds: 0, MaxToolCallsPerRound: 0}
 	}
 }
 
-func (p *Pipeline) runLLMStep(ctx context.Context, step string, messages []llm.Message, temp float64, maxTok int) (string, error) {
+func recordToolLoopFallback(rec JobRecorder, step string, cfg llm.ToolLoopConfig, err error) {
+	if rec == nil || err == nil {
+		return
+	}
+	rec.Record(step, "warn", "tool loop failed, falling back to stream", map[string]any{
+		"error":      err.Error(),
+		"max_rounds": cfg.MaxRounds,
+	})
+}
+
+func (p *Pipeline) runLLMStep(ctx context.Context, step string, messages []llm.Message, temp float64, maxTok int, opts runLLMStepOpts) (string, error) {
 	RecordLLMRequest(p.recorder, step, p.llmClient.Model(), llmMessagesForRecord(messages), temp, maxTok)
 	start := time.Now()
 
+	promptStep := opts.promptStep
+	if promptStep == "" {
+		promptStep = promptStepForStepName(step)
+	}
+
 	cfg := p.toolLoopCfg
 	if cfg.MaxRounds == 0 {
-		// Resolve step name to PromptStep for config lookup
-		cfg = defaultToolLoopConfigForStep(promptStepForStepName(step))
+		cfg = defaultToolLoopConfigForStep(promptStep)
 	}
 
 	// Build combined tool executor (local + external MCP) when tools are available
 	if cfg.MaxRounds > 0 {
-		exec := NewPipelineToolExecutor(p.workspace, p.db, p.mcpExecutor)
+		exec := NewPipelineToolExecutor(p.workspace, p.db, p.mcpExecutor, opts.toolMode)
 		tools, toolsErr := exec.ListTools(ctx)
 		if toolsErr == nil && len(tools) > 0 {
 			result, err := llm.RunToolLoop(ctx, p.llmClient, exec, messages, tools, temp, maxTok, cfg)
@@ -329,9 +359,7 @@ func (p *Pipeline) runLLMStep(ctx context.Context, step string, messages []llm.M
 				return result, nil
 			}
 			// Tool loop failed, fall through to stream
-			if p.recorder != nil {
-				p.recorder.Record(step, "warn", "tool loop failed, falling back to stream: "+err.Error(), nil)
-			}
+			recordToolLoopFallback(p.recorder, step, cfg, err)
 		}
 	}
 
@@ -350,9 +378,7 @@ func (p *Pipeline) runLLMStep(ctx context.Context, step string, messages []llm.M
 				RecordLLMResponse(p.recorder, step, result, time.Since(start))
 				return result, nil
 			}
-			if p.recorder != nil {
-				p.recorder.Record(step, "warn", "MCP tool loop failed, falling back to stream: "+err.Error(), nil)
-			}
+			recordToolLoopFallback(p.recorder, step, mcpCfg, err)
 		}
 	}
 

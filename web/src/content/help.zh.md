@@ -45,11 +45,23 @@ LLM Wiki 与传统 RAG 的本质区别：
 ├── purpose.md          # 研究目标与范围（人与 LLM 共读）
 ├── rules.md            # Wiki 写作与引用规则
 ├── wiki/               # LLM 维护的结构化 Markdown
-├── raw/                # 不可变源文件（只读）
+│   ├── overview.md     # 全局总览（系统页）
+│   ├── index.md        # 内容目录（系统页，apply 后自动重建）
+│   ├── log.md          # 操作日志（系统页）
+│   ├── entities/       # 实体（复数 typed 目录）
+│   ├── concepts/       # 概念
+│   ├── sources/        # 源摘要
+│   ├── synthesis/      # 综合分析
+│   ├── comparisons/    # 对比分析
+│   ├── queries/        # 归档问答
+│   └── templates/      # 系统模板（非业务内容）
+├── raw/                # 不可变源文件（只读，不在 wiki/ 内）
 │   └── sources/
 └── .llmwiki/
     └── index.db        # SQLite 索引（可 delete + reindex 重建）
 ```
+
+完整布局与 anti-pattern 见 `docs/workspace-layout.md`（与仓库 canonical 规范一致）。
 
 - **`raw/`**：原始 PDF、笔记、Web 归档等，LLM 只读不写。
 - **`wiki/`**：LLM 生成的知识页，按类型分子目录（见下文）。
@@ -70,7 +82,15 @@ LLM Wiki 与传统 RAG 的本质区别：
 
 保留的顶层系统页：`wiki/overview.md`（全局总览）、`wiki/index.md`（目录）、`wiki/log.md`（操作日志）。模板在 `wiki/templates/`，供生成参考而非业务内容。
 
-写入已有页面时默认 **合并** 而非覆盖：锁定 frontmatter 字段、数组合并、正文由 LLM 合并（可用 CLI `--force-overwrite` 恢复覆盖行为）。
+### 常见错误布局
+
+以下**不是**合法 canonical 布局：`wiki/purpose.md`、`wiki/rules.md`（应在工作区根）、`wiki/raw/`（raw 在工作区根）、单数目录 `wiki/entity/`、不存在的 `wiki/skills/`。Organize 模式若出现带 emoji 或 `root/` 包装的占位目录树，通常是 LLM 编造而非 `structure()` 工具返回。
+
+### structure() 工具输出
+
+Organize 模式应调用 `structure()` 获取目录。真实输出以 `# Wiki 目录结构` 开头，含工作区路径、`├── entities/ (N 页)` 等 typed 子目录行。示例格式见 `docs/workspace-layout.md`；**必须引用 tool 原始返回，不可自行绘制示例树**。
+
+写入已有页面时默认 **合并** 而非覆盖：锁定 frontmatter 字段、数组合并、正文由 LLM 合并（可用 CLI `--force-overwrite` 恢复覆盖行为）。Wiki apply 成功后会自动重建 `wiki/index.md`；organize 模式的 move/merge 还会在 `wiki/log.md` 追加结构变更条目。
 
 ## Web UI 使用指南
 

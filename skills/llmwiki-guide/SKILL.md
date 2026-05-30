@@ -77,14 +77,17 @@ This skill is a blueprint for the Go runtime prompts. External LLM Wiki referenc
 │   ├── synthesis/      # Cross-source analysis
 │   ├── comparisons/    # Comparisons
 │   ├── queries/        # Archived Q&A
+│   ├── templates/      # System page templates (not business content)
 │   ├── overview.md     # Global overview
-│   ├── index.md        # Directory listing
+│   ├── index.md        # Directory listing (auto-rebuilt after apply)
 │   └── log.md          # Append-only operation log
-├── raw/                # Immutable sources (read-only)
+├── raw/                # Immutable sources (read-only, outside wiki/)
 │   └── sources/
 └── .llmwiki/
     └── index.db        # SQLite FTS5 index (rebuildable)
 ```
+
+Canonical layout: `docs/workspace-layout.md`.
 
 ## MCP Tools Available
 

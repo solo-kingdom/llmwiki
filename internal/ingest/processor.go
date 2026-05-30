@@ -294,7 +294,7 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		vcs.TryAutoPush(repo, p.db)
 	}
 
-	p.indexGeneratedWikiFiles(files, job.ID)
+	p.finalizeWikiApply(job.ID, job.SourcePath, "", ApplyWikiResult{Written: files})
 
 	// Mark job succeeded
 	p.markJobSucceeded(job.ID, files)

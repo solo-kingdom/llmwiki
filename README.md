@@ -101,19 +101,26 @@ After `llmwiki init ~/research`:
 
 ```
 ~/research/
-├── purpose.md            # Goals, key questions, research scope
+├── purpose.md            # Goals, key questions, research scope (workspace root)
+├── rules.md              # Writing and citation rules (workspace root)
 ├── wiki/
 │   ├── overview.md       # Auto-maintained global overview
+│   ├── index.md          # Content catalog (auto-rebuilt after apply/reindex)
 │   ├── log.md            # Append-only operation log
 │   ├── entities/         # Entity pages
 │   ├── concepts/         # Concept pages
 │   ├── sources/          # Source summaries
-│   └── ...
+│   ├── synthesis/      # Cross-source analysis
+│   ├── comparisons/      # Comparisons
+│   ├── queries/          # Archived Q&A
+│   └── templates/        # System page templates (not business content)
 ├── raw/
 │   └── sources/          # Source documents (immutable)
 └── .llmwiki/
     └── index.db          # SQLite index (rebuildable from files)
 ```
+
+See `docs/workspace-layout.md` for the canonical layout and common anti-patterns.
 
 ## Architecture
 

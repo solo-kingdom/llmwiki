@@ -1039,11 +1039,11 @@ export function SettingsPage() {
                   <label className="text-sm font-medium">{t("settings.vc.remote_url")}</label>
                   <div className="flex gap-2">
                     <input
-                      type="url"
+                      type="text"
                       className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm"
                       value={remoteURL}
                       onChange={(e) => setRemoteURL(e.target.value)}
-                      placeholder="https://github.com/user/repo.git"
+                      placeholder="https://github.com/user/repo.git 或 git@host:user/repo.git"
                       data-testid="vc-remote-url"
                     />
                     <Button

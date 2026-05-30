@@ -27,8 +27,12 @@ vi.mock("@/context/AppContext", () => ({
   }),
 }))
 
+const mockGetVCStatus = vi.fn().mockResolvedValue({ enabled: false, git_available: true })
+const mockSetVCSRemote = vi.fn()
+
 vi.mock("@/lib/api", () => ({
-  getVCStatus: vi.fn().mockResolvedValue({ enabled: false, git_available: true }),
+  getVCStatus: (...args: unknown[]) => mockGetVCStatus(...args),
+  setVCSRemote: (...args: unknown[]) => mockSetVCSRemote(...args),
   checkAllProviderInstances: vi.fn().mockResolvedValue({ instances: [] }),
   checkProviderInstance: vi.fn(),
   checkMCPStatus: vi.fn().mockResolvedValue({ servers: [] }),
@@ -42,6 +46,8 @@ describe("SettingsPage layout and save UX", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockSaveSettings.mockResolvedValue({ ui_language: "zh" })
+    mockGetVCStatus.mockResolvedValue({ enabled: false, git_available: true })
+    mockSetVCSRemote.mockResolvedValue({ enabled: true, git_available: true })
   })
 
   it("renders grouped settings sections", () => {
@@ -99,6 +105,31 @@ describe("SettingsPage layout and save UX", () => {
       expect(screen.getByTestId("settings-saved-indicator")).toHaveTextContent(
         "设置已保存",
       )
+    })
+  })
+
+  it("accepts SSH git remote URLs without HTML5 url validation", async () => {
+    mockGetVCStatus.mockResolvedValue({
+      enabled: true,
+      git_available: true,
+      commit_count: 1,
+      tracked_dirs: [".wiki"],
+      excluded_dirs: [],
+    })
+
+    render(<SettingsPage />)
+
+    const input = await screen.findByTestId("vc-remote-url")
+    expect(input).toHaveAttribute("type", "text")
+
+    const sshURL = "git@codeup.aliyun.com:wii/llmwiki-data.git"
+    fireEvent.change(input, { target: { value: sshURL } })
+    expect((input as HTMLInputElement).checkValidity()).toBe(true)
+
+    fireEvent.click(screen.getByText("保存远程"))
+
+    await waitFor(() => {
+      expect(mockSetVCSRemote).toHaveBeenCalledWith(sshURL)
     })
   })
 })

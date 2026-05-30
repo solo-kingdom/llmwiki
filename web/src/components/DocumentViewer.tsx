@@ -115,6 +115,8 @@ export function DocumentViewer({
           if (href?.startsWith("/d/")) {
             e.preventDefault()
             handleWikilink(href)
+          } else if (href === "#" || anchor.classList.contains("wikilink-broken")) {
+            e.preventDefault()
           }
         }
       }}

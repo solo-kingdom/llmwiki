@@ -4,6 +4,20 @@ import remarkParse from "remark-parse"
 import remarkStringify from "remark-stringify"
 import { createRemarkWikiLink } from "@/lib/remark-wikilink"
 import type { DocumentListItem } from "@/types"
+import type { Root } from "mdast"
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyAstNode = Record<string, any>
+
+interface LinkAstNode {
+  type: string
+  url?: string
+  data?: {
+    hProperties?: {
+      className?: string
+    }
+  }
+}
 
 function makeDocs(
   entries: Array<{ id: string; filename: string; path: string; title?: string }>,
@@ -29,6 +43,28 @@ async function processMarkdown(
     .use(remarkStringify)
     .process(md)
   return String(result)
+}
+
+/** Process markdown and return the AST for direct inspection. */
+async function processToAst(
+  md: string,
+  documents: DocumentListItem[],
+): Promise<Root> {
+  const result = await unified()
+    .use(remarkParse)
+    .use(createRemarkWikiLink(documents))
+    .parse(md)
+  // Run the wikilink transformer
+  const transformer = createRemarkWikiLink(documents)
+  const plugin = transformer.call(null)
+  plugin(result as Root)
+  return result as Root
+}
+
+/** Extract children from a paragraph AST node. */
+function getParaChildren(ast: Root): AnyAstNode[] {
+  const para = ast.children[0] as AnyAstNode | undefined
+  return para?.children ?? []
 }
 
 describe("remarkWikiLink", () => {
@@ -68,11 +104,17 @@ describe("remarkWikiLink", () => {
     expect(result).toContain("/d/doc-1")
   })
 
-  it("marks unresolvable wikilink as broken", async () => {
-    const result = await processMarkdown("[[nonexistent]]", docs)
-    expect(result).toContain("wikilink-broken")
-    expect(result).toContain("nonexistent")
-    expect(result).not.toContain("/d/")
+  it("marks unresolvable wikilink as broken link node", async () => {
+    const ast = await processToAst("[[nonexistent]]", docs)
+    const children = getParaChildren(ast) as LinkAstNode[]
+    const brokenLink = children.find(
+      (c) => c.type === "link" && c.url === "#",
+    )
+    expect(brokenLink).toBeDefined()
+    expect(brokenLink!.data?.hProperties?.className).toBe("wikilink-broken")
+    // Verify no html nodes in the AST
+    const hasHtmlNode = children.some((c) => c.type === "html")
+    expect(hasHtmlNode).toBe(false)
   })
 
   it("handles multiple wikilinks in one line", async () => {
@@ -96,9 +138,23 @@ describe("remarkWikiLink", () => {
   })
 
   it("handles empty document list by marking all links as broken", async () => {
-    const result = await processMarkdown("[[attention]]", [])
-    expect(result).toContain("wikilink-broken")
-    expect(result).not.toContain("/d/")
+    const ast = await processToAst("[[attention]]", [])
+    const children = getParaChildren(ast) as LinkAstNode[]
+    const brokenLink = children.find(
+      (c) => c.type === "link" && c.url === "#",
+    )
+    expect(brokenLink).toBeDefined()
+    expect(brokenLink!.data?.hProperties?.className).toBe("wikilink-broken")
+  })
+
+  it("broken wikilink output does not contain html node type", async () => {
+    const ast = await processToAst("[[nonexistent]]", docs)
+    const children = getParaChildren(ast)
+    // No html node type — broken links use link nodes now
+    expect(children.every((c) => c.type !== "html")).toBe(true)
+    // Should contain a link node
+    const link = children.find((c) => c.type === "link")
+    expect(link).toBeDefined()
   })
 
   it("preserves surrounding text around wikilinks", async () => {

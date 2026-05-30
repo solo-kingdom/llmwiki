@@ -295,8 +295,8 @@
 }
 
 /* Wikilink broken link style */
-.wiki-prose .wikilink-broken,
-.chat-prose .wikilink-broken {
+.wiki-prose a.wikilink-broken,
+.chat-prose a.wikilink-broken {
   color: var(--muted-foreground);
   text-decoration: underline wavy;
   text-decoration-color: var(--muted-foreground);

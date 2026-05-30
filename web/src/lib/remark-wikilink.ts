@@ -255,10 +255,16 @@ function splitByWikilinks(
         children: [{ type: "text", value: displayText }],
       })
     } else {
-      // Broken link → create an html node with wikilink-broken class
+      // Broken link → create a link node with wikilink-broken class via hProperties
       result.push({
-        type: "html",
-        value: `<span class="wikilink-broken">${escapeHtml(displayText)}</span>`,
+        type: "link",
+        url: "#",
+        children: [{ type: "text", value: displayText }],
+        data: {
+          hProperties: {
+            className: "wikilink-broken",
+          },
+        },
       })
     }
 
@@ -273,10 +279,4 @@ function splitByWikilinks(
   return result
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-}
+

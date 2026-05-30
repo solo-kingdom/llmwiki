@@ -10,11 +10,16 @@ vi.mock("react-force-graph-2d", () => ({
   default: ({
     onNodeClick,
     graphData,
+    onEngineInit,
   }: {
     onNodeClick?: (node: { document_id?: string }) => void
     graphData: { nodes: Array<{ document_id: string; title: string }> }
+    onEngineInit?: (fg: { d3Force: (name: string) => { strength: (v: number) => unknown; distanceMax?: (v: number) => unknown; distance?: (v: number) => unknown } | null }) => void
   }) => (
     <div data-testid="mock-force-graph">
+      {onEngineInit &&
+        <span data-testid="engine-init-called" />
+      }
       {graphData.nodes.map((node) => (
         <button
           key={node.document_id}
@@ -153,5 +158,14 @@ describe("GraphPage", () => {
 
     await screen.findByTestId("mock-force-graph")
     expect(api.getKnowledgeGraph).toHaveBeenCalledWith({ limit: 300 })
+  })
+
+  it("calls onEngineInit to configure force parameters", async () => {
+    vi.mocked(api.getKnowledgeGraph).mockResolvedValue(mockGraph)
+    renderGraphPage()
+
+    await screen.findByTestId("mock-force-graph")
+    // The mock renders a testid when onEngineInit is provided
+    expect(screen.getByTestId("engine-init-called")).toBeInTheDocument()
   })
 })

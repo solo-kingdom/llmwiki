@@ -34,7 +34,6 @@ export function GraphPage() {
   const t = useT()
   const { selectDocument } = useWikiReader()
   const containerRef = useRef<HTMLDivElement>(null)
-  const fgRef = useRef<ForceGraphMethods>(undefined)
   const [graphData, setGraphData] = useState<KnowledgeGraphResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -99,9 +98,7 @@ export function GraphPage() {
     [],
   )
 
-  useEffect(() => {
-    const fg = fgRef.current
-    if (!fg) return
+  const handleEngineInit = useCallback((fg: ForceGraphMethods) => {
     const charge = fg.d3Force("charge")
     if (charge) {
       charge.strength(-120)
@@ -111,7 +108,7 @@ export function GraphPage() {
     if (link) {
       link.distance(50)
     }
-  }, [forceData])
+  }, [])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -158,7 +155,7 @@ export function GraphPage() {
               linkColor={() => "#cbd5e1"}
               linkDirectionalArrowLength={3.5}
               linkDirectionalArrowRelPos={1}
-              ref={fgRef}
+              onEngineInit={handleEngineInit}
               onNodeClick={(node) => handleNodeClick(node as ForceNode)}
               d3AlphaDecay={0.02}
               d3VelocityDecay={0.3}

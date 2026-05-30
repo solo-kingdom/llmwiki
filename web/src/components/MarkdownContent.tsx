@@ -45,7 +45,19 @@ export function MarkdownContent({
   }, [documents])
 
   return (
-    <div className={cn(proseClass, "max-w-none", className)}>
+    <div
+      className={cn(proseClass, "max-w-none", className)}
+      onClick={(e) => {
+        const target = e.target as HTMLElement
+        const anchor = target.closest("a")
+        if (anchor) {
+          const href = anchor.getAttribute("href")
+          if (href === "#" || anchor.classList.contains("wikilink-broken")) {
+            e.preventDefault()
+          }
+        }
+      }}
+    >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={[rehypeHighlight]}

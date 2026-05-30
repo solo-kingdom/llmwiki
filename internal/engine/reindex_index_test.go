@@ -48,10 +48,10 @@ date: "2024-05-02"
 		t.Fatalf("ReadFile index.md: %v", err)
 	}
 	index := string(indexData)
-	if !strings.Contains(index, "[[entities/foo|Foo Entity]]") {
+	if !strings.Contains(index, "[[entities/foo\\|Foo Entity]]") {
 		t.Errorf("index missing entity entry:\n%s", index)
 	}
-	if !strings.Contains(index, "[[concepts/bar|Bar Concept]]") {
+	if !strings.Contains(index, "[[concepts/bar\\|Bar Concept]]") {
 		t.Errorf("index missing concept entry:\n%s", index)
 	}
 

@@ -64,6 +64,15 @@ describe("SettingsPage layout and save UX", () => {
     expect(screen.getByTestId("provider-local-actions")).toBeInTheDocument()
   })
 
+  it("places save bar as the last child of the settings form", () => {
+    render(<SettingsPage />)
+
+    const saveBar = screen.getByTestId("settings-save-bar")
+    const form = saveBar.closest("form")
+    expect(form).not.toBeNull()
+    expect(form!.lastElementChild).toBe(saveBar)
+  })
+
   it("shows unsaved state and save feedback after editing", async () => {
     render(<SettingsPage />)
 

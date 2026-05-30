@@ -75,8 +75,19 @@ func (b *IndexBuilder) buildIndexContent(date string, entriesBySubdir map[string
 			entries = entriesBySubdir[sub.dir]
 		}
 		for _, e := range entries {
-			link := fmt.Sprintf("[[%s/%s|%s]]", e.Subdir, e.Slug, e.Title)
-			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", link, e.Title, e.Description, e.Date))
+			link := fmt.Sprintf(
+				"[[%s/%s\\|%s]]",
+				e.Subdir,
+				e.Slug,
+				escapeGFMTableCell(e.Title),
+			)
+			sb.WriteString(fmt.Sprintf(
+				"| %s | %s | %s | %s |\n",
+				link,
+				escapeGFMTableCell(e.Title),
+				escapeGFMTableCell(e.Description),
+				escapeGFMTableCell(e.Date),
+			))
 		}
 		sb.WriteString("\n")
 	}
@@ -176,6 +187,11 @@ func (b *IndexBuilder) entryFromFile(subdir, filename, fullPath string) (IndexEn
 		Description: description,
 		Date:        date,
 	}, nil
+}
+
+// escapeGFMTableCell escapes literal pipe characters for GFM table cells.
+func escapeGFMTableCell(s string) string {
+	return strings.ReplaceAll(s, "|", "\\|")
 }
 
 func truncateRunes(s string, max int) string {

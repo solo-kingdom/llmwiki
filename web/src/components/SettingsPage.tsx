@@ -465,12 +465,13 @@ export function SettingsPage() {
   }
 
   return (
-    <PageContainer className="pb-24 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <h1 className="mb-6 text-xl font-semibold">{t("nav.settings")}</h1>
-      <form
-        onSubmit={handleSubmit}
-        className="space-y-8 [&_[data-slot=card]]:overflow-visible"
-      >
+    <form
+      onSubmit={handleSubmit}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <PageContainer className="[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <h1 className="mb-6 text-xl font-semibold">{t("nav.settings")}</h1>
+        <div className="space-y-8 [&_[data-slot=card]]:overflow-visible">
         <SettingsSectionGroup
           id="settings-group-basic"
           titleKey="settings.groups.basic.title"
@@ -1298,35 +1299,37 @@ export function SettingsPage() {
 
         </SettingsAdvancedSection>
 
-        <div
-          className="sticky bottom-0 z-30 -mx-1 mt-6 flex flex-wrap items-center gap-3 border-t border-border/70 bg-background/95 px-1 py-3 backdrop-blur-sm supports-[backdrop-filter]:bg-background/80"
-          data-testid="settings-save-bar"
-        >
-          {hasUnsavedChanges && (
-            <span
-              className="text-sm text-amber-600"
-              data-testid="settings-unsaved-indicator"
-            >
-              {t("settings.save.unsaved")}
-            </span>
-          )}
-          <Button
-            type="submit"
-            disabled={saving || !hasUnsavedChanges}
-            data-testid="settings-save-button"
-          >
-            {saving ? t("settings.save.saving") : t("settings.save.action")}
-          </Button>
-          {saved && (
-            <span
-              className="text-sm text-green-600"
-              data-testid="settings-saved-indicator"
-            >
-              {t("settings.save.saved")}
-            </span>
-          )}
         </div>
-      </form>
-    </PageContainer>
+      </PageContainer>
+
+      <div
+        className="flex shrink-0 flex-wrap items-center gap-3 border-t border-border/70 bg-background px-1 py-3"
+        data-testid="settings-save-bar"
+      >
+        {hasUnsavedChanges && (
+          <span
+            className="text-sm text-amber-600"
+            data-testid="settings-unsaved-indicator"
+          >
+            {t("settings.save.unsaved")}
+          </span>
+        )}
+        <Button
+          type="submit"
+          disabled={saving || !hasUnsavedChanges}
+          data-testid="settings-save-button"
+        >
+          {saving ? t("settings.save.saving") : t("settings.save.action")}
+        </Button>
+        {saved && (
+          <span
+            className="text-sm text-green-600"
+            data-testid="settings-saved-indicator"
+          >
+            {t("settings.save.saved")}
+          </span>
+        )}
+      </div>
+    </form>
   )
 }

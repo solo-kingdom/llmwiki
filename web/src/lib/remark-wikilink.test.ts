@@ -200,4 +200,22 @@ describe("remarkWikiLink", () => {
     expect(result).toContain("/d/doc-long")
     expect(result).not.toContain("wikilink-broken")
   })
+
+  it("parses GFM-escaped wikilink display separator", async () => {
+    const entityDocs = makeDocs([
+      {
+        id: "doc-alpha",
+        filename: "alpha.md",
+        path: "/wiki/entities",
+        title: "Alpha Entity",
+      },
+    ])
+    const result = await processMarkdown(
+      "[[entities/alpha\\|Alpha Entity]]",
+      entityDocs,
+    )
+    expect(result).toContain("/d/doc-alpha")
+    expect(result).toContain("Alpha Entity")
+    expect(result).not.toContain("[[")
+  })
 })

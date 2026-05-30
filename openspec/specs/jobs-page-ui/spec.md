@@ -31,10 +31,10 @@ Jobs 页面顶部 SHALL 提供状态筛选（All / Queued / Running / Succeeded 
 - **THEN** 状态筛选项的计数 SHALL 自动更新
 
 ### Requirement: Job 卡片列表
-每个摄入任务 SHALL 以卡片形式展示，包含来源路径、输入类型、创建时间、状态标签和操作按钮。来源路径对支持预览的文件格式可点击。cancelled 状态增加 Restart 操作按钮。
+每个摄入任务 SHALL 以卡片形式展示，包含来源路径、输入类型、创建时间、状态标签和操作按钮。来源路径对支持预览的文件格式可点击。cancelled 状态增加 Restart 操作按钮。对于 `source_ref` 以 `review:` 开头的 job，SHALL 按 `source_ref` 分组为聚合卡片展示（详见 job-list-grouping-ui spec），其余 job 保持平铺 JobCard 展示。
 
 #### Scenario: 任务卡片基本展示
-- **WHEN** 一个任务显示在列表中
+- **WHEN** 一个任务以平铺 JobCard 形式显示在列表中
 - **THEN** 卡片 SHALL 展示来源路径（`source_path`）、输入类型（`input_type`）、创建时间（`created_at`）和状态标签
 
 #### Scenario: 来源路径可点击预览
@@ -64,6 +64,10 @@ Jobs 页面顶部 SHALL 提供状态筛选（All / Queued / Running / Succeeded 
 #### Scenario: 状态标签样式
 - **WHEN** 任务状态为 succeeded / failed / running / queued / cancelled
 - **THEN** 状态标签 SHALL 使用对应语义颜色（succeeded=绿、failed=红、running=蓝、queued/cancelled=灰色）
+
+#### Scenario: Review 类型 job 使用分组卡片
+- **WHEN** 任务的 `source_ref` 以 `review:` 开头
+- **THEN** 该任务 SHALL 被归入对应的分组卡片展示，而非独立平铺 JobCard
 
 ### Requirement: Jobs 页面无标题
 Jobs 页面 SHALL 不显示"Ingest Jobs"页面标题，直接展示筛选栏和任务列表。

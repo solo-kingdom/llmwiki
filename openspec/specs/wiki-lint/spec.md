@@ -1,81 +1,29 @@
-## Requirements
+## ADDED Requirements
 
-### Requirement: Wiki lint engine
-The system SHALL provide mechanical Wiki health checks without LLM involvement, producing structured issues with severity, code, path, and message. The lint engine SHALL enforce typed wiki organization by detecting misplaced top-level business pages and system template files that are accidentally treated as business content.
+### Requirement: 重复页面检测
+Wiki lint 引擎 SHALL 检测同一 typed 子目录中文件名归一化后相同的页面对，报告为 `duplicate_page` warning。归一化规则为去除空格、下划线、连字符、全角空格后转小写。
 
-#### Scenario: Dead link detection
-- **WHEN** a wiki page contains `[[concepts/nonexistent]]` and no matching file exists
-- **THEN** lint report SHALL include an error with code `dead_link`
+#### Scenario: 文件名空格与下划线重复
+- **WHEN** `wiki/concepts/` 下同时存在 `A_Player文化.md` 和 `A Player文化.md`
+- **THEN** lint 报告 SHALL 包含两个 `duplicate_page` warning
+- **AND** 每个 warning 的 message SHALL 列出归一化后相同的文件路径对
 
-#### Scenario: Orphan page detection
-- **WHEN** a wiki page under `wiki/entities/` has no incoming links from other wiki pages
-- **THEN** lint report SHALL include a warning with code `orphan_page`
-- **AND** `wiki/index.md`, `wiki/log.md`, `wiki/overview.md`, and files under `wiki/templates/` SHALL be excluded from orphan checks
+#### Scenario: 文件名连字符与空格重复
+- **WHEN** `wiki/entities/` 下同时存在 `RT-Merger.md` 和 `RT Merger.md`
+- **THEN** lint 报告 SHALL 包含 `duplicate_page` warning
 
-#### Scenario: Frontmatter type-directory consistency
-- **WHEN** a file in `wiki/entities/` has frontmatter `type: concept`
-- **THEN** lint report SHALL include an error with code `type_dir_mismatch`
+#### Scenario: 不同目录不互检
+- **WHEN** `wiki/entities/App.md` 和 `wiki/concepts/App.md` 文件名归一化后相同
+- **THEN** lint 报告 SHALL NOT 报告 `duplicate_page`，因为它们在不同目录
 
-#### Scenario: Log append-only contract
-- **WHEN** `wiki/log.md` contains entries with decreasing dates or invalid prefix format
-- **THEN** lint report SHALL include errors with codes `log_format_invalid` or `log_date_decreasing`
+#### Scenario: 无重复时不报告
+- **WHEN** 所有 wiki 页面文件名归一化后在同目录内唯一
+- **THEN** lint 报告 SHALL NOT 包含 `duplicate_page` issue
 
-#### Scenario: Misplaced top-level business page detection
-- **WHEN** a workspace contains `wiki/dsp.md`
-- **THEN** lint report SHALL include an issue with code `misplaced_wiki_page`
-- **AND** the issue SHALL identify that business pages belong under typed wiki directories
+#### Scenario: audit 工具展示重复页面
+- **WHEN** organize 模式调用 `audit` 工具且存在 `duplicate_page` issues
+- **THEN** audit 输出 SHALL 在诊断报告中展示重复页面信息
 
-#### Scenario: Misplaced page destination suggestion
-- **WHEN** a misplaced top-level page contains frontmatter `type: entity`
-- **THEN** lint report SHALL include `wiki/entities/` as the suggested destination in the issue message or structured metadata
-
-#### Scenario: Template files excluded from business lint checks
-- **WHEN** lint scans `wiki/templates/entity.md`
-- **THEN** the file SHALL NOT be reported as an orphan business page
-- **AND** the file SHALL NOT be validated against the entity page directory contract
-
-### Requirement: Lint CLI command
-The system SHALL provide `llmwiki lint [dir]` with optional `--json` output.
-
-#### Scenario: Lint CLI success
-- **WHEN** user runs `llmwiki lint ~/research`
-- **THEN** the command SHALL print human-readable issue summary and exit 0 if no errors (warnings allowed)
-
-#### Scenario: Lint CLI JSON
-- **WHEN** user runs `llmwiki lint --json`
-- **THEN** output SHALL be valid JSON matching LintReport structure
-
-### Requirement: Lint HTTP endpoint
-The system SHALL expose `GET /api/v1/lint` returning the same LintReport as CLI.
-
-#### Scenario: Web UI lint fetch
-- **WHEN** client calls `GET /api/v1/lint`
-- **THEN** response SHALL include issues array and stats object
-
-### Requirement: Lint MCP access
-The MCP `search` tool SHALL support `mode="lint"` returning structured lint results for agents.
-
-#### Scenario: Agent lint query
-- **WHEN** agent calls `search(mode="lint")`
-- **THEN** results SHALL list lint issues grouped by severity
-
-### Requirement: Entity-concept coupling lint
-The wiki lint engine SHALL report a warning when a concept page appears to bind an existing entity name to an abstract concept title. The check SHALL be mechanical and non-destructive: it MUST NOT move, rewrite, delete, or rename pages.
-
-#### Scenario: Existing entity name prefixes concept title
-- **WHEN** `wiki/entities/AppLovin.md` exists
-- **AND** `wiki/concepts/AppLovin组织裁剪方法论.md` exists
-- **THEN** lint report SHALL include a warning with code `entity_concept_coupling`
-- **AND** the issue SHALL identify the concept page as the affected path
-- **AND** the issue message SHALL recommend using a neutral concept title and linking the entity as a case
-
-#### Scenario: Neutral concept title is accepted
-- **WHEN** `wiki/entities/AppLovin.md` exists
-- **AND** `wiki/concepts/组织裁剪方法论.md` exists
-- **AND** the concept page links to `[[AppLovin]]`
-- **THEN** lint report SHALL NOT include `entity_concept_coupling` for that concept page
-
-#### Scenario: Warning is shown through lint access paths
-- **WHEN** an agent calls `search(mode="lint")` or organize diagnostics call `audit(focus="structure")`
-- **THEN** `entity_concept_coupling` warnings SHALL be included with the other lint issues
-- **AND** the warning SHALL remain lower priority than error-level issues such as dead links or missing frontmatter
+#### Scenario: 重复页面检测使用现有归一化函数
+- **WHEN** lint 引擎执行重复页面检测
+- **THEN** 系统 SHALL 复用 `entity_concept_coupling.go` 中的 `normalizeNameKey()` 函数进行文件名归一化

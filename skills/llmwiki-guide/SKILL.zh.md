@@ -78,14 +78,17 @@ metadata:
 │   ├── synthesis/      # 跨源综合分析
 │   ├── comparisons/    # 对比分析
 │   ├── queries/        # 归档的问答
+│   ├── templates/      # 系统页面模板（非业务内容）
 │   ├── overview.md     # 全局总览
-│   ├── index.md        # 目录索引
+│   ├── index.md        # 目录索引（apply 后自动重建）
 │   └── log.md          # 仅追加操作日志
-├── raw/                # 不可变源文件（只读）
+├── raw/                # 不可变源文件（只读，不在 wiki/ 内）
 │   └── sources/
 └── .llmwiki/
     └── index.db        # SQLite FTS5 索引（可重建）
 ```
+
+Canonical 规范：`docs/workspace-layout.md`。
 
 ## 可用 MCP 工具
 

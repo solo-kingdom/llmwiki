@@ -155,7 +155,8 @@ project/
 
 ```
 ~/research/
-├── purpose.md               📄 目标/问题/范围
+├── purpose.md               📄 目标/问题/范围（工作区根）
+├── rules.md                 📄 写作与引用规则（工作区根）
 ├── schema.md                📄 结构约定 (可选)
 ├── raw/
 │   ├── sources/             🖼️ 不可变源
@@ -163,17 +164,20 @@ project/
 ├── wiki/
 │   ├── overview.md          📄 全局总览 (自动维护)
 │   ├── log.md               📄 操作日志 (仅追加)
-│   ├── index.md             📄 内容目录 (按类别)
+│   ├── index.md             📄 内容目录 (apply/reindex 后自动维护)
 │   ├── entities/            📄 实体页面
 │   ├── concepts/            📄 概念页面
 │   ├── sources/             📄 源文件摘要
 │   ├── queries/             📄 查询结果归档
 │   ├── synthesis/           📄 综合分析
-│   └── comparisons/         📄 对比分析
+│   ├── comparisons/         📄 对比分析
+│   └── templates/           ⚙️ 页面模板（系统目录）
 └── .llmwiki/
     ├── index.db            ⚙️ SQLite 索引
     └── cache/              ⚙️ 衍生缓存
 ```
+
+完整规范见 `docs/workspace-layout.md`。
 
 ---
 

@@ -75,6 +75,8 @@ This skill is the blueprint for query and organization Go prompts, especially `S
    references() → link graph
    ```
 
+   **Structure fidelity**: when presenting wiki layout, quote the raw `structure()` tool output (starts with `# Wiki 目录结构`, paths use `wiki/` prefix). Do not invent `wiki/skills/`, singular `entity/`, `wiki/raw/`, or placeholder filenames. See `docs/workspace-layout.md`.
+
 2. **Identify issues**:
    - Duplicate or highly similar pages
    - Orphan pages (no incoming links)

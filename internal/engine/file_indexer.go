@@ -86,7 +86,7 @@ func (w *WorkspaceFileIndexer) RemoveFile(relPath string) error {
 	if err != nil || doc == nil {
 		return err
 	}
-	return w.store.DeleteChunks(doc.ID)
+	return w.store.ArchiveDocument(doc.ID)
 }
 
 func filepathToSlash(p string) string {

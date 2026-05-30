@@ -3,10 +3,52 @@ import type { Plugin } from "unified"
 import type { DocumentListItem } from "@/types"
 
 /**
- * Matches Obsidian-style wikilinks: [[target]] or [[target|display text]]
- * Same regex as backend's wikiDoubleBracketRe in internal/engine/lint.go
+ * Matches Obsidian-style wikilinks: [[target]], [[target|display]], or
+ * [[target\|display]] when the pipe is GFM-escaped inside table cells.
  */
-const WIKILINK_RE = /\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]/g
+const WIKILINK_RE =
+  /\[\[((?:[^\]|#\\]|\\.)+)(?:\\?\|(?:[^\]]|\\.)*)?\]\]/g
+
+function findWikilinkSeparatorIndex(inner: string): number {
+  for (let i = 0; i < inner.length; i++) {
+    if (inner[i] === "\\" && inner[i + 1] === "|") {
+      return i
+    }
+    if (inner[i] === "\\") {
+      i++
+      continue
+    }
+    if (inner[i] === "|") {
+      return i
+    }
+  }
+  return -1
+}
+
+function unescapeWikilinkPart(value: string): string {
+  return value.replace(/\\(.)/g, "$1")
+}
+
+function parseWikilinkContent(fullMatch: string): {
+  target: string
+  displayText: string
+} {
+  const inner = fullMatch.slice(2, -2)
+  const separatorIndex = findWikilinkSeparatorIndex(inner)
+
+  if (separatorIndex < 0) {
+    const target = unescapeWikilinkPart(inner).trim()
+    return { target, displayText: target }
+  }
+
+  const target = unescapeWikilinkPart(inner.slice(0, separatorIndex)).trim()
+  const displayStart =
+    inner[separatorIndex] === "\\" ? separatorIndex + 2 : separatorIndex + 1
+  const displayText =
+    unescapeWikilinkPart(inner.slice(displayStart)).trim() || target
+
+  return { target, displayText }
+}
 
 /** Resolution indexes built from the document list. */
 interface ResolutionIndexes {
@@ -239,11 +281,8 @@ function splitByWikilinks(
       result.push({ type: "text", value: text.slice(lastIndex, match.index) })
     }
 
-    const fullMatch = match[0] // e.g. [[target|display]]
-    const target = match[1].trim()
-    // Extract display text if present (e.g. [[target|Display Text]] → "Display Text")
-    const pipeMatch = fullMatch.match(/^\[\[[^\]|]+\|([^\]]*)\]\]$/)
-    const displayText = pipeMatch ? pipeMatch[1] : target
+    const fullMatch = match[0]
+    const { target, displayText } = parseWikilinkContent(fullMatch)
 
     const resolved = resolveWikiPath(target, indexes)
 

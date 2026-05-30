@@ -481,12 +481,16 @@ export function patchIngestSessionMessage(
 export function archiveIngestSession(
   sessionId: string,
   title?: string,
+  deepOrganize?: boolean,
 ): Promise<ArchiveSessionResponse> {
   return request<ArchiveSessionResponse>(
     `/api/v1/ingest/sessions/${encodeURIComponent(sessionId)}/archive`,
     {
       method: "POST",
-      body: JSON.stringify({ title: title ?? "" }),
+      body: JSON.stringify({
+        title: title ?? "",
+        ...(deepOrganize != null ? { deep_organize: deepOrganize } : {}),
+      }),
     },
   )
 }
@@ -699,4 +703,21 @@ export function createRollback(
       body: JSON.stringify({ commit_sha: commitSHA }),
     },
   )
+}
+
+export function setVCSRemote(url: string): Promise<VCStatus> {
+  return request<VCStatus>("/api/v1/vcs/remote", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  })
+}
+
+export function pushVC(): Promise<{ status: string }> {
+  return request<{ status: string }>("/api/v1/vcs/push", { method: "POST" })
+}
+
+export function backupVC(): Promise<{ status: string; commit_sha?: string }> {
+  return request<{ status: string; commit_sha?: string }>("/api/v1/vcs/backup", {
+    method: "POST",
+  })
 }

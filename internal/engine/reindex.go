@@ -78,6 +78,12 @@ func (r *Reindexer) Rebuild(userID string) (int, error) {
 		indexed++
 	}
 
+	if pruned, err := r.pruneMissingFiles(); err != nil {
+		log.Printf("Warning: failed to prune missing files: %v", err)
+	} else if pruned > 0 {
+		log.Printf("Reindex: pruned %d document(s) missing from filesystem", pruned)
+	}
+
 	// After indexing all files, rebuild reference graph
 	if err := r.rebuildReferences(); err != nil {
 		log.Printf("Warning: failed to rebuild references: %v", err)
@@ -209,6 +215,36 @@ func (r *Reindexer) IndexRelPath(relPath string) (string, error) {
 // IndexDocumentContent chunks and stores search index rows for a document by ID.
 func IndexDocumentContent(store Store, docID, content string) error {
 	return storeSearchChunks(store, docID, content)
+}
+
+func docRelativePath(doc DocEntry) string {
+	return strings.TrimPrefix(doc.Path, "/") + doc.Filename
+}
+
+func (r *Reindexer) pruneMissingFiles() (int, error) {
+	allDocs, err := r.store.ListAllDocuments()
+	if err != nil {
+		return 0, fmt.Errorf("list documents for prune: %w", err)
+	}
+
+	pruned := 0
+	for _, doc := range allDocs {
+		rel := docRelativePath(doc)
+		if rel == "" {
+			continue
+		}
+		fullPath := filepath.Join(r.workspace, filepath.FromSlash(rel))
+		if _, err := os.Stat(fullPath); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return pruned, fmt.Errorf("stat %s: %w", rel, err)
+		}
+		if err := r.store.ArchiveDocument(doc.ID); err != nil {
+			return pruned, fmt.Errorf("archive ghost document %s: %w", rel, err)
+		}
+		pruned++
+	}
+	return pruned, nil
 }
 
 func storeSearchChunks(store Store, docID, content string) error {

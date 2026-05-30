@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
@@ -134,6 +135,17 @@ func executeLocalAudit(workspace string, db *sqlite.DB, args map[string]interfac
 		}
 	}
 
+	// Ghost index entries (DB out of sync with filesystem)
+	if workspace != "" && db != nil {
+		adapter := storesvc.NewStoreAdapter(db)
+		if ghostIssues, err := engine.LintGhostIndexEntries(workspace, adapter); err == nil && len(ghostIssues) > 0 {
+			sb.WriteString(fmt.Sprintf("\n## 索引幽灵页 (%d)\n\n", len(ghostIssues)))
+			for _, issue := range ghostIssues {
+				sb.WriteString(fmt.Sprintf("- **%s** `%s` — %s\n", issue.Severity, issue.Path, issue.Message))
+			}
+		}
+	}
+
 	// Lint report (structure + links + metadata)
 	if focus == "all" || focus == "structure" || focus == "links" || focus == "metadata" {
 		if workspace != "" {
@@ -157,7 +169,10 @@ func executeLocalAudit(workspace string, db *sqlite.DB, args map[string]interfac
 						case "structure":
 							if issue.Code != engine.LintCodeOrphanPage &&
 								issue.Code != engine.LintCodeTypeDirMismatch &&
-								issue.Code != engine.LintCodeMisplacedWikiPage {
+								issue.Code != engine.LintCodeMisplacedWikiPage &&
+								issue.Code != engine.LintCodeEntityConceptCoupling &&
+								issue.Code != engine.LintCodeDuplicatePage &&
+								issue.Code != engine.LintCodeGhostIndexEntry {
 								continue
 							}
 						case "links":
@@ -226,6 +241,8 @@ func executeLocalStructure(workspace string, db *sqlite.DB, _ map[string]interfa
 
 	var sb strings.Builder
 	sb.WriteString("# Wiki 目录结构\n\n")
+	sb.WriteString(fmt.Sprintf("工作区：`%s`\n", workspace))
+	sb.WriteString("数据来源：SQLite index（与文件系统不一致时请运行 `llmwiki reindex`，将自动清理幽灵索引）\n\n")
 	sb.WriteString(fmt.Sprintf("总计 %d 个 wiki 文档（%d 个业务内容页）\n\n", len(wikiDocs), contentCount))
 
 	reserved := []sqlite.Document{}
@@ -308,6 +325,10 @@ func executeLocalStructure(workspace string, db *sqlite.DB, _ map[string]interfa
 			}
 			sb.WriteString(fmt.Sprintf("%s%s (系统模板)\n", prefix, title))
 		}
+	} else if templatesDirExists(workspace) {
+		shownDirs["templates"] = true
+		sb.WriteString("├── templates/ (0 个系统模板)\n")
+		sb.WriteString("│   (空目录)\n")
 	}
 
 	// Other directories
@@ -591,6 +612,11 @@ func pathToTitle(path string, docs []sqlite.Document) string {
 		}
 	}
 	return filepath.Base(path)
+}
+
+func templatesDirExists(workspace string) bool {
+	info, err := os.Stat(filepath.Join(workspace, "wiki", "templates"))
+	return err == nil && info.IsDir()
 }
 
 // ensure json import is used

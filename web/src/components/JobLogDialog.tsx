@@ -147,7 +147,8 @@ export function JobLogDialog({ open, onOpenChange, job }: JobLogDialogProps) {
                       <p className="text-muted-foreground">{selected.message}</p>
                     )}
                     <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 text-xs font-mono overflow-x-auto">
-                      {formatPayload(selected.payload) || t("common.no_details")}
+                      {formatPayload(selected.payload) ||
+                        (selected.message ? "" : t("common.no_details"))}
                     </pre>
                   </div>
                 ) : (

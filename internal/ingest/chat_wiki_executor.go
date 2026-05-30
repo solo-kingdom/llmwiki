@@ -248,7 +248,7 @@ func RunSessionChatToolLoop(
 					Content:          result.Content,
 					ReasoningContent: result.ReasoningContent,
 				})
-				msgs = append(msgs, llm.Message{Role: "user", Content: "请先调用 structure 和 audit 工具来诊断 wiki 的状况，然后再给出建议。"})
+				msgs = append(msgs, llm.Message{Role: "user", Content: "请先调用 structure 和 audit 工具来诊断 wiki 的状况。展示目录结构时必须引用 structure 工具原始返回，不要自行编造目录树，然后再给出建议。"})
 				result2, err2 := client.Chat(ctx, msgs, tools, temperature, maxTokens)
 				if err2 != nil {
 					return result.Content, nil

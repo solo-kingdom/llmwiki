@@ -62,10 +62,13 @@ func TestInitRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(gitignore)
-	for _, entry := range []string{".llmwiki/", "raw/", "revert/"} {
+	for _, entry := range FineGrainedGitignoreEntries {
 		if !strings.Contains(content, entry) {
 			t.Errorf("expected .gitignore to contain %q", entry)
 		}
+	}
+	if strings.Contains(content, ".llmwiki/\n") || strings.TrimSpace(content) == ".llmwiki/" {
+		t.Error("expected legacy .llmwiki/ blanket ignore to be migrated away")
 	}
 
 	// Check that we have an initial commit
@@ -151,6 +154,114 @@ func TestAddCommitNoChanges(t *testing.T) {
 	}
 	if sha != "" {
 		t.Errorf("expected empty SHA when no changes, got %q", sha)
+	}
+}
+
+func TestCommitWikiMaintenance(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	os.WriteFile(filepath.Join(dir, "wiki", "index.md"), []byte("# Index\n"), 0o644)
+	repo, err := InitRepo(dir)
+	if err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	sha, err := repo.CommitWikiMaintenance("wiki: post-apply maintenance")
+	if err != nil {
+		t.Fatalf("CommitWikiMaintenance (no changes): %v", err)
+	}
+	if sha != "" {
+		t.Errorf("expected empty SHA when unchanged, got %q", sha)
+	}
+
+	dirty, err := repo.HasUncommittedWikiMaintenance()
+	if err != nil {
+		t.Fatalf("HasUncommittedWikiMaintenance: %v", err)
+	}
+	if dirty {
+		t.Fatal("expected clean maintenance files")
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "wiki", "index.md"), []byte("# Updated Index\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirty, err = repo.HasUncommittedWikiMaintenance()
+	if err != nil {
+		t.Fatalf("HasUncommittedWikiMaintenance: %v", err)
+	}
+	if !dirty {
+		t.Fatal("expected dirty wiki/index.md")
+	}
+
+	sha, err = repo.CommitWikiMaintenance("wiki: post-apply maintenance")
+	if err != nil {
+		t.Fatalf("CommitWikiMaintenance: %v", err)
+	}
+	if sha == "" {
+		t.Fatal("expected commit SHA")
+	}
+
+	dirty, err = repo.HasUncommittedWikiMaintenance()
+	if err != nil {
+		t.Fatalf("HasUncommittedWikiMaintenance after commit: %v", err)
+	}
+	if dirty {
+		t.Fatal("expected clean maintenance files after commit")
+	}
+}
+
+func TestMergeBranchAfterDirtyWikiMaintenance(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	os.WriteFile(filepath.Join(dir, "wiki", "index.md"), []byte("# Index"), 0o644)
+	repo, _ := InitRepo(dir)
+
+	wtDir, err := repo.CreateWorktree("test-dirty-merge")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	defer repo.RemoveWorktree("test-dirty-merge")
+
+	os.WriteFile(filepath.Join(wtDir, "wiki", "merged.md"), []byte("# Merged"), 0o644)
+	if _, err := repo.CommitInWorktree(wtDir, "test: merge this"); err != nil {
+		t.Fatalf("CommitInWorktree: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "wiki", "index.md"), []byte("# Dirty Index"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirty, err := repo.HasUncommittedWikiMaintenance()
+	if err != nil {
+		t.Fatalf("HasUncommittedWikiMaintenance: %v", err)
+	}
+	if !dirty {
+		t.Fatal("expected dirty index before cleanup")
+	}
+
+	if _, err := repo.CommitWikiMaintenance("wiki: post-apply maintenance"); err != nil {
+		t.Fatalf("CommitWikiMaintenance before merge: %v", err)
+	}
+
+	result, err := repo.MergeBranch("test-dirty-merge")
+	if err != nil {
+		t.Fatalf("MergeBranch after maintenance commit: %v", err)
+	}
+	if len(result.Conflicts) != 0 {
+		t.Errorf("expected no conflicts, got %v", result.Conflicts)
+	}
+
+	dirty, err = repo.HasUncommittedWikiMaintenance()
+	if err != nil {
+		t.Fatalf("HasUncommittedWikiMaintenance after merge: %v", err)
+	}
+	if dirty {
+		t.Fatal("expected clean maintenance files after merge")
 	}
 }
 
@@ -688,4 +799,78 @@ func TestRecreateWorktreeAfterFailed(t *testing.T) {
 
 	// Clean up
 	repo.RemoveWorktree("retry-job")
+}
+
+func TestBackupCommitAndLogIngestOnly(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	os.WriteFile(filepath.Join(dir, "wiki", "a.md"), []byte("# A"), 0o644)
+	os.WriteFile(filepath.Join(dir, "purpose.md"), []byte("# Purpose"), 0o644)
+
+	repo, err := InitRepo(dir)
+	if err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	os.WriteFile(filepath.Join(dir, "wiki", "b.md"), []byte("# B"), 0o644)
+	if _, err := repo.AddCommit("ingest: test.pdf"); err != nil {
+		t.Fatalf("AddCommit: %v", err)
+	}
+	if _, err := repo.BackupCommit(true); err != nil {
+		t.Fatalf("BackupCommit: %v", err)
+	}
+
+	all, err := repo.LogWithStats(10)
+	if err != nil {
+		t.Fatalf("LogWithStats: %v", err)
+	}
+	if len(all) < 2 {
+		t.Fatalf("expected at least 2 commits, got %d", len(all))
+	}
+
+	ingestOnly, err := repo.LogIngestOnly(10)
+	if err != nil {
+		t.Fatalf("LogIngestOnly: %v", err)
+	}
+	for _, e := range ingestOnly {
+		if !IsIngestCommitSubject(e.Subject) {
+			t.Errorf("unexpected subject in ingest log: %q", e.Subject)
+		}
+	}
+	foundIngest := false
+	for _, e := range ingestOnly {
+		if strings.HasPrefix(e.Subject, "ingest:") {
+			foundIngest = true
+		}
+	}
+	if !foundIngest {
+		t.Error("expected ingest commit in filtered log")
+	}
+}
+
+func TestSetRemote(t *testing.T) {
+	if !IsGitAvailable().Available {
+		t.Skip("git not available")
+	}
+
+	dir := createTempWorkspace(t)
+	repo, err := InitRepo(dir)
+	if err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	url := "https://example.com/user/repo.git"
+	if err := repo.SetRemote(url); err != nil {
+		t.Fatalf("SetRemote: %v", err)
+	}
+	st, err := repo.RemoteStatus()
+	if err != nil {
+		t.Fatalf("RemoteStatus: %v", err)
+	}
+	if !st.Configured || st.URL != url {
+		t.Errorf("remote status = %+v, want URL %q", st, url)
+	}
 }

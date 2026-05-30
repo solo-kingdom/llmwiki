@@ -1274,7 +1274,6 @@ func TestPatchSessionMode(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 
-	// Create default session
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions",
 		bytes.NewReader([]byte(`{"title":"Mode Test"}`)))
 	w := httptest.NewRecorder()
@@ -1290,7 +1289,6 @@ func TestPatchSessionMode(t *testing.T) {
 		t.Errorf("expected default mode 'ingest', got %q", created.Session.Mode)
 	}
 
-	// Patch to qa
 	req = httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+created.Session.ID,
 		bytes.NewReader([]byte(`{"mode":"qa"}`)))
 	w = httptest.NewRecorder()
@@ -1308,13 +1306,69 @@ func TestPatchSessionMode(t *testing.T) {
 		t.Errorf("expected mode 'qa' after patch, got %q", patched.Session.Mode)
 	}
 
-	// Patch to invalid mode -> 400
 	req = httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+created.Session.ID,
 		bytes.NewReader([]byte(`{"mode":"invalid"}`)))
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for invalid mode, got %d", w.Code)
+	}
+}
+
+func TestArchiveSessionWithDeepOrganize(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions",
+		bytes.NewReader([]byte(`{"title":"Organize Session","mode":"organize"}`)))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create session: %d %s", w.Code, w.Body.String())
+	}
+	var created struct {
+		Session struct {
+			ID string `json:"id"`
+		} `json:"session"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+
+	body, _ := json.Marshal(map[string]string{"content": "reorganize pages"})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+created.Session.ID+"/messages", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("append message: %d %s", w.Code, w.Body.String())
+	}
+
+	archiveBody, _ := json.Marshal(map[string]interface{}{
+		"title":         "Deep Organize",
+		"deep_organize": true,
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+created.Session.ID+"/archive", bytes.NewReader(archiveBody))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("archive: %d %s", w.Code, w.Body.String())
+	}
+	var arch struct {
+		ReviewID string `json:"review_id"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&arch); err != nil {
+		t.Fatal(err)
+	}
+	if arch.ReviewID == "" {
+		t.Fatal("expected review id")
+	}
+
+	review, err := api.db.GetIngestReview(arch.ReviewID)
+	if err != nil {
+		t.Fatalf("GetIngestReview: %v", err)
+	}
+	if !review.DeepOrganize {
+		t.Errorf("expected deep_organize=true, got false")
 	}
 }
 

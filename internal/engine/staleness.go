@@ -33,6 +33,8 @@ type Store interface {
 	StoreChunks(docID string, chunks []ChunkData) error
 	// DeleteChunks removes all chunks for a document.
 	DeleteChunks(docID string) error
+	// ArchiveDocument removes a document row and cascaded derived data.
+	ArchiveDocument(docID string) error
 }
 
 // BacklinkInfo holds a backlink result.

@@ -108,6 +108,7 @@ func (p *JobProcessor) processRollbackJob(ctx context.Context, job *sqlite.Inges
 	if sha != "" {
 		_ = p.db.SetVCLastCommit(sha)
 	}
+	vcs.TryAutoPush(repo, p.db)
 
 	// Mark job succeeded
 	summary := fmt.Sprintf("rolled back commit %s (%s)", commitSHA, rbCtx.SourceFilename)

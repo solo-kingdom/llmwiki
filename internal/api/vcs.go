@@ -14,28 +14,37 @@ import (
 
 // VCStatus represents the version control status response.
 type VCStatus struct {
-	Enabled      bool              `json:"enabled"`
-	CommitCount  int               `json:"commit_count"`
-	GitAvailable bool              `json:"git_available"`
-	GitVersion   string            `json:"git_version,omitempty"`
-	TrackedDirs  []string          `json:"tracked_dirs"`
-	ExcludedDirs []string          `json:"excluded_dirs"`
+	Enabled           bool     `json:"enabled"`
+	CommitCount       int      `json:"commit_count"`
+	GitAvailable      bool     `json:"git_available"`
+	GitVersion        string   `json:"git_version,omitempty"`
+	TrackedDirs       []string `json:"tracked_dirs"`
+	ExcludedDirs      []string `json:"excluded_dirs"`
+	BackupDirs        []string `json:"backup_dirs"`
+	RemoteConfigured  bool     `json:"remote_configured"`
+	RemoteURL         string   `json:"remote_url,omitempty"`
+	Branch            string   `json:"branch,omitempty"`
+	Ahead             int      `json:"ahead"`
+	Behind            int      `json:"behind"`
+	AutoPush          bool     `json:"auto_push"`
+	BackupIncludeRaw  bool     `json:"backup_include_raw"`
+	LastPushError     string   `json:"last_push_error,omitempty"`
 }
 
 // VCInitResponse represents the response from VCS initialization.
 type VCInitResponse struct {
-	Status     string `json:"status"`
-	CommitSHA  string `json:"commit_sha,omitempty"`
-	CommitCount int   `json:"commit_count"`
+	Status      string `json:"status"`
+	CommitSHA   string `json:"commit_sha,omitempty"`
+	CommitCount int    `json:"commit_count"`
 }
 
 // VCLogEntry represents a single commit in the log response.
 type VCLogEntry struct {
-	SHA         string `json:"sha"`
-	Subject     string `json:"subject"`
-	Timestamp   string `json:"timestamp"`
-	FilesChanged int   `json:"files_changed"`
-	IsRollback  bool   `json:"is_rollback"`
+	SHA          string `json:"sha"`
+	Subject      string `json:"subject"`
+	Timestamp    string `json:"timestamp"`
+	FilesChanged int    `json:"files_changed"`
+	IsRollback   bool   `json:"is_rollback"`
 }
 
 // VCDiffResponse represents the diff response.
@@ -59,7 +68,6 @@ func (a *API) VCSInit(w http.ResponseWriter, r *http.Request) {
 
 	repo := vcs.NewGitRepo(a.workspace)
 	if repo.IsInitialized() {
-		// Already initialized, return current status
 		count, _ := repo.CommitCount()
 		writeJSON(w, http.StatusOK, VCInitResponse{
 			Status:      "already_initialized",
@@ -96,29 +104,48 @@ func (a *API) VCSInit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// VCSStatus handles GET /api/v1/vcs/status
-func (a *API) VCSStatus(w http.ResponseWriter, r *http.Request) {
+func (a *API) buildVCStatus() VCStatus {
 	avail := vcs.IsGitAvailable()
-
 	status := VCStatus{
-		GitAvailable: avail.Available,
-		GitVersion:   avail.Version,
-		TrackedDirs:  []string{"wiki/"},
-		ExcludedDirs: []string{".llmwiki/", "raw/", "revert/"},
+		GitAvailable:     avail.Available,
+		GitVersion:       avail.Version,
+		TrackedDirs:      []string{"wiki/"},
+		ExcludedDirs:     []string{".llmwiki/cache/", ".llmwiki/index.db", ".llmwiki/worktrees/", "revert/"},
+		BackupDirs:       []string{"purpose.md", "rules.md", ".llmwiki/workspace-settings.json"},
+		AutoPush:         false,
+		BackupIncludeRaw: true,
+	}
+	if a.db != nil {
+		status.AutoPush = a.db.VCAutoPush()
+		status.BackupIncludeRaw = a.db.BackupIncludeRaw()
+		status.LastPushError = a.db.GetVCLastPushError()
+	}
+	if status.BackupIncludeRaw {
+		status.BackupDirs = append(status.BackupDirs, "raw/")
 	}
 
 	if a.workspace != "" {
 		repo := vcs.NewGitRepo(a.workspace)
 		if repo.IsInitialized() {
 			status.Enabled = true
-			count, err := repo.CommitCount()
-			if err == nil {
+			if count, err := repo.CommitCount(); err == nil {
 				status.CommitCount = count
+			}
+			if remote, err := repo.RemoteStatus(); err == nil && remote != nil {
+				status.RemoteConfigured = remote.Configured
+				status.RemoteURL = remote.URL
+				status.Branch = remote.Branch
+				status.Ahead = remote.Ahead
+				status.Behind = remote.Behind
 			}
 		}
 	}
+	return status
+}
 
-	writeJSON(w, http.StatusOK, status)
+// VCSStatus handles GET /api/v1/vcs/status
+func (a *API) VCSStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, a.buildVCStatus())
 }
 
 // VCSLog handles GET /api/v1/vcs/log
@@ -135,7 +162,7 @@ func (a *API) VCSLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limit := getIntQuery(r, "limit", 50)
-	entries, err := repo.LogWithStats(limit)
+	entries, err := repo.LogIngestOnly(limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get log: %v", err))
 		return
@@ -181,6 +208,80 @@ func (a *API) VCSDiff(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// VCSRemote handles POST /api/v1/vcs/remote
+func (a *API) VCSRemote(w http.ResponseWriter, r *http.Request) {
+	if a.workspace == "" {
+		writeError(w, http.StatusBadRequest, "workspace not configured")
+		return
+	}
+	repo := vcs.NewGitRepo(a.workspace)
+	if !repo.IsInitialized() {
+		writeError(w, http.StatusBadRequest, "git repository is not initialized")
+		return
+	}
+
+	var payload struct {
+		URL string `json:"url"`
+	}
+	if err := readJSON(r, &payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := repo.SetRemote(payload.URL); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	_ = a.db.SetVCLastPushError("")
+	writeJSON(w, http.StatusOK, a.buildVCStatus())
+}
+
+// VCSPush handles POST /api/v1/vcs/push
+func (a *API) VCSPush(w http.ResponseWriter, r *http.Request) {
+	if a.workspace == "" {
+		writeError(w, http.StatusBadRequest, "workspace not configured")
+		return
+	}
+	repo := vcs.NewGitRepo(a.workspace)
+	if !repo.IsInitialized() {
+		writeError(w, http.StatusBadRequest, "git repository is not initialized")
+		return
+	}
+	remote, _ := repo.RemoteStatus()
+	if remote == nil || !remote.Configured {
+		writeError(w, http.StatusBadRequest, "remote origin is not configured")
+		return
+	}
+	if err := repo.Push(); err != nil {
+		_ = a.db.SetVCLastPushError(err.Error())
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	_ = a.db.SetVCLastPushError("")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "pushed"})
+}
+
+// VCSBackup handles POST /api/v1/vcs/backup
+func (a *API) VCSBackup(w http.ResponseWriter, r *http.Request) {
+	if a.workspace == "" {
+		writeError(w, http.StatusBadRequest, "workspace not configured")
+		return
+	}
+	repo := vcs.NewGitRepo(a.workspace)
+	if !repo.IsInitialized() {
+		writeError(w, http.StatusBadRequest, "git repository is not initialized")
+		return
+	}
+	sha, err := a.runWorkspaceBackup()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":     "ok",
+		"commit_sha": sha,
+	})
+}
+
 // VCSRollback handles POST /api/v1/ingest/rollback
 func (a *API) VCSRollback(w http.ResponseWriter, r *http.Request) {
 	if a.workspace == "" {
@@ -201,21 +302,18 @@ func (a *API) VCSRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify git repository exists
 	repo := vcs.NewGitRepo(a.workspace)
 	if !repo.IsInitialized() {
 		writeError(w, http.StatusBadRequest, "git repository is not initialized")
 		return
 	}
 
-	// Verify the commit exists
 	_, err := repo.ShowMessage(payload.CommitSHA)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("commit %s not found", payload.CommitSHA))
 		return
 	}
 
-	// Create a rollback job
 	job := &sqlite.IngestJob{
 		InputType:  "rollback",
 		SourcePath: "rollback://" + payload.CommitSHA,

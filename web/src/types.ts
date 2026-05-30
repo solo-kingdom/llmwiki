@@ -136,6 +136,8 @@ export interface Settings {
   session_tool_loop_max_rounds_qa?: number
   session_tool_loop_max_rounds_organize?: number
   session_tool_loop_max_calls_per_round?: number
+  backup_include_raw?: string | boolean
+  vc_auto_push?: string | boolean
 }
 
 export interface WorkspaceRuleFilesPreview {
@@ -389,6 +391,15 @@ export interface VCStatus {
   git_version: string
   tracked_dirs: string[]
   excluded_dirs: string[]
+  backup_dirs?: string[]
+  remote_configured?: boolean
+  remote_url?: string
+  branch?: string
+  ahead?: number
+  behind?: number
+  auto_push?: boolean
+  backup_include_raw?: boolean
+  last_push_error?: string
 }
 
 export interface ProviderCheckResult {

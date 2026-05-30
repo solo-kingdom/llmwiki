@@ -76,6 +76,8 @@ metadata:
    references() → 引用关系
    ```
 
+   **structure 输出保真**：展示 wiki 目录时必须引用 `structure()` 工具原始返回（以 `# Wiki 目录结构` 开头，含 `wiki/` 前缀路径）。禁止编造 `wiki/skills/`、单数 `entity/`、wiki 内 `raw/` 或占位文件名。格式示例见 `docs/workspace-layout.md`。
+
 2. **识别问题**：
    - 重复或高度相似的页面
    - 孤立页面（无入链）

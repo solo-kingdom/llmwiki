@@ -44,6 +44,8 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *eng
 		sb.WriteString("LLM Wiki is a knowledge management system that indexes documents\n")
 		sb.WriteString("into a searchable SQLite-backed vault with full-text search,\n")
 		sb.WriteString("automatic chunking, and reference graph tracking.\n\n")
+		sb.WriteString(engine.WorkspaceLayoutSummary())
+		sb.WriteString("\n")
 		sb.WriteString("## Workspaces\n\n")
 
 		wikiDir := filepath.Join(workspace, "wiki")

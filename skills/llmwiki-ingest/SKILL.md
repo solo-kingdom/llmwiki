@@ -97,6 +97,35 @@ This skill is the blueprint for ingest-related Go prompts, especially `StepAnaly
 | comparison | `wiki/comparisons/` | Comparative analysis |
 | query | `wiki/queries/` | Archived Q&A |
 
+## Entity / Concept / Relation Classification
+
+Before planning pages, distinguish three object types:
+
+| Type | Definition | Example | Directory |
+|------|------------|---------|-----------|
+| entity | A uniquely identifiable concrete object (person, org, product, project) | `AppLovin`, `Adam Foroughi` | `wiki/entities/` |
+| concept | A reusable term, method, framework, mechanism, or theory | `组织裁剪方法论`, `A Player culture` | `wiki/concepts/` |
+| relation | A case, adoption, or embodiment link between entity and concept | `AppLovin` practices `组织裁剪方法论` | Expressed via wikilinks, not a coupled page title |
+
+**Naming rules**
+
+- Concept page titles should stay neutral by default; do not embed concrete entity names in concept titles.
+- Express entity–concept relationships in the body and via wikilinks, not by concatenating names into one concept page.
+- Only keep a combined title when the source clearly treats the full phrase as a fixed proper term, and explain that basis in the body.
+
+**Anti-patterns**
+
+- ❌ `AppLovin组织裁剪方法论` as a concept page — binds a company (entity) to a methodology (concept)
+- ✅ Entity page `AppLovin` + concept page `组织裁剪方法论` + concept page links `[[AppLovin]]` as a case
+- ❌ `工程师必备工具_ClaudeCode_Cursor` when it is only AppLovin's tool stack — split into a neutral concept plus entity case links
+- ✅ If the source explicitly names an indivisible term, keep the combined title and cite the naming basis in the body
+
+For each candidate phrase, ask:
+
+1. Is this a concrete object or a reusable abstraction?
+2. Does the title embed an existing entity name?
+3. If both entity and concept appear, should they be split into two pages linked together?
+
 ## Merge Strategy
 
 The built-in ingest pipeline has three-layer merge protection: locked fields, array union, and LLM-assisted body merge. Prompts should still ask the model to generate merge-friendly content instead of relying on post-processing as a fallback:

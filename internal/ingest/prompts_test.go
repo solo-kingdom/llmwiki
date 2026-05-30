@@ -7,6 +7,54 @@ import (
 	"testing"
 )
 
+func TestComposeSystemPromptEntityConceptSeparation(t *testing.T) {
+	dir := t.TempDir()
+	ctx := PromptContext{Workspace: dir, DocLang: "zh"}
+
+	analysis := ComposeSystemPrompt(StepAnalysis, ctx)
+	for _, want := range []string{
+		"实体",
+		"概念",
+		"关系",
+		"AppLovin组织裁剪方法论",
+		"不要当作单个概念页",
+	} {
+		if !strings.Contains(analysis, want) {
+			t.Errorf("analysis prompt missing %q", want)
+		}
+	}
+
+	generation := ComposeSystemPrompt(StepGeneration, ctx)
+	for _, want := range []string{
+		"概念页标题默认保持中性",
+		"wikilink",
+		"组织裁剪方法论",
+		"AppLovin",
+	} {
+		if !strings.Contains(generation, want) {
+			t.Errorf("generation prompt missing %q", want)
+		}
+	}
+
+	organize := ComposeSystemPrompt(StepSessionOrganize, ctx)
+	if !strings.Contains(organize, "entity_concept_coupling") {
+		t.Fatalf("organize prompt missing entity_concept_coupling guidance: %s", organize)
+	}
+	if !strings.Contains(organize, "structure 工具") || !strings.Contains(organize, "禁止自行绘制") {
+		t.Fatalf("organize prompt missing structure fidelity guidance: %s", organize)
+	}
+
+	enOrganize := ComposeSystemPrompt(StepSessionOrganize, PromptContext{Workspace: dir, DocLang: "en"})
+	if !strings.Contains(enOrganize, "structure tool") || !strings.Contains(enOrganize, "Do NOT draw generic") {
+		t.Fatalf("english organize prompt missing structure fidelity guidance: %s", enOrganize)
+	}
+
+	enAnalysis := ComposeSystemPrompt(StepAnalysis, PromptContext{Workspace: dir, DocLang: "en"})
+	if !strings.Contains(enAnalysis, "entity name + abstract concept") {
+		t.Fatalf("english analysis prompt missing separation guidance: %s", enAnalysis)
+	}
+}
+
 func TestComposeSystemPromptGenerationTemplateGuidance(t *testing.T) {
 	ctx := PromptContext{Workspace: t.TempDir(), DocLang: "zh"}
 	out := ComposeSystemPrompt(StepGeneration, ctx)
@@ -47,6 +95,24 @@ func TestComposeSystemPromptPlanAndOrganizeLanguage(t *testing.T) {
 	enPlan := ComposeSystemPrompt(StepPlanOrganize, PromptContext{Workspace: t.TempDir(), DocLang: "en"})
 	if !strings.Contains(enPlan, "reorganization planner") {
 		t.Fatalf("expected English organize plan prompt: %s", enPlan)
+	}
+	if !strings.Contains(enPlan, "from_path") || !strings.Contains(enPlan, "source_paths") {
+		t.Fatalf("expected English organize plan prompt with from_path and source_paths schema: %s", enPlan)
+	}
+
+	zhPlanOrganize := ComposeSystemPrompt(StepPlanOrganize, PromptContext{Workspace: t.TempDir(), DocLang: "zh"})
+	if !strings.Contains(zhPlanOrganize, "from_path") || !strings.Contains(zhPlanOrganize, "source_paths") {
+		t.Fatalf("expected Chinese organize plan prompt with from_path and source_paths schema: %s", zhPlanOrganize)
+	}
+
+	zhPlanQA := ComposeSystemPrompt(StepPlanQA, PromptContext{Workspace: t.TempDir(), DocLang: "zh"})
+	if !strings.Contains(zhPlanQA, "source_paths") {
+		t.Fatalf("expected Chinese QA plan prompt with source_paths schema: %s", zhPlanQA)
+	}
+
+	enPlanQA := ComposeSystemPrompt(StepPlanQA, PromptContext{Workspace: t.TempDir(), DocLang: "en"})
+	if !strings.Contains(enPlanQA, "source_paths") {
+		t.Fatalf("expected English QA plan prompt with source_paths schema: %s", enPlanQA)
 	}
 
 	zhRollback := ComposeSystemPrompt(StepRollback, PromptContext{Workspace: t.TempDir(), DocLang: "zh"})

@@ -25,6 +25,18 @@ make build
 # Open http://127.0.0.1:8868
 ```
 
+### Restore on a new machine
+
+```bash
+git clone <your-remote-url> ~/research
+cd ~/research
+llmwiki init ~/research    # repair: import .llmwiki/workspace-settings.json, reindex
+llmwiki serve ~/research
+# Re-enter API keys in Settings (keys are never stored in git)
+```
+
+Wiki history uses ingest commits on track A; workspace config and optional `raw/` backups use separate `backup:` commits. Configure remote URL and push/backup in **Settings → Version Control**.
+
 For development without building the web frontend:
 
 ```bash
@@ -89,19 +101,26 @@ After `llmwiki init ~/research`:
 
 ```
 ~/research/
-├── purpose.md            # Goals, key questions, research scope
+├── purpose.md            # Goals, key questions, research scope (workspace root)
+├── rules.md              # Writing and citation rules (workspace root)
 ├── wiki/
 │   ├── overview.md       # Auto-maintained global overview
+│   ├── index.md          # Content catalog (auto-rebuilt after apply/reindex)
 │   ├── log.md            # Append-only operation log
 │   ├── entities/         # Entity pages
 │   ├── concepts/         # Concept pages
 │   ├── sources/          # Source summaries
-│   └── ...
+│   ├── synthesis/      # Cross-source analysis
+│   ├── comparisons/      # Comparisons
+│   ├── queries/          # Archived Q&A
+│   └── templates/        # System page templates (not business content)
 ├── raw/
 │   └── sources/          # Source documents (immutable)
 └── .llmwiki/
     └── index.db          # SQLite index (rebuildable from files)
 ```
+
+See `docs/workspace-layout.md` for the canonical layout and common anti-patterns.
 
 ## Architecture
 

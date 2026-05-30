@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo, type FormEvent } from "react"
+import { useEffect, useState, useMemo, type FormEvent, type ReactNode } from "react"
 import { useApp } from "@/context/AppContext"
-import { useT } from "@/i18n"
+import { useT, type MessageKey } from "@/i18n"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,10 +12,83 @@ import {
 } from "@/components/ui/card"
 import type { Settings, VCStatus, ProviderCheckResult, MCPServerCheckResult, WorkspaceRuleFilesPreview } from "@/types"
 import { PageContainer } from "@/components/PageContainer"
-import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff, CheckCircle2, XCircle, Loader2, CircleOff, RefreshCw } from "lucide-react"
-import { getVCStatus, checkProviderInstance, checkAllProviderInstances, checkMCPStatus, getWorkspaceRuleFiles } from "@/lib/api"
+import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff, CheckCircle2, XCircle, Loader2, CircleOff, RefreshCw, ChevronDown } from "lucide-react"
+import {
+  getVCStatus,
+  setVCSRemote,
+  pushVC,
+  backupVC,
+  checkProviderInstance,
+  checkAllProviderInstances,
+  checkMCPStatus,
+  getWorkspaceRuleFiles,
+} from "@/lib/api"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 import { useI18n } from "@/i18n"
+import { cn } from "@/lib/utils"
+
+function SettingsSectionGroup({
+  id,
+  titleKey,
+  descKey,
+  children,
+}: {
+  id: string
+  titleKey: MessageKey
+  descKey: MessageKey
+  children: ReactNode
+}) {
+  const t = useT()
+  return (
+    <section id={id} data-testid={id} className="space-y-4">
+      <div>
+        <h2 className="text-base font-semibold tracking-tight">{t(titleKey)}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t(descKey)}</p>
+      </div>
+      <div className="space-y-4">{children}</div>
+    </section>
+  )
+}
+
+function SettingsAdvancedSection({ children }: { children: ReactNode }) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  return (
+    <section
+      id="settings-group-advanced"
+      data-testid="settings-group-advanced"
+      className="space-y-4"
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between rounded-lg border border-dashed border-border/80 bg-muted/20 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+        aria-expanded={open}
+        data-testid="settings-advanced-toggle"
+      >
+        <div>
+          <h2 className="text-base font-semibold tracking-tight">
+            {t("settings.groups.advanced.title")}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("settings.groups.advanced.desc")}
+          </p>
+        </div>
+        <ChevronDown
+          className={cn(
+            "size-4 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open && (
+        <div className="space-y-4 rounded-lg border border-border/60 bg-muted/10 p-4">
+          {children}
+        </div>
+      )}
+    </section>
+  )
+}
 
 type AddFormState = {
   mode: false
@@ -74,6 +147,8 @@ export function SettingsPage() {
   const [editForm, setEditForm] = useState<EditFormState>({ mode: false })
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>(null)
   const [vcStatus, setVCStatus] = useState<VCStatus | null>(null)
+  const [remoteURL, setRemoteURL] = useState("")
+  const [vcActionBusy, setVcActionBusy] = useState<string | null>(null)
   const [mcpJsonError, setMcpJsonError] = useState<string | null>(null)
   const [providerChecks, setProviderChecks] = useState<Record<string, ProviderCheckResult>>({})
   const [providerChecking, setProviderChecking] = useState(false)
@@ -99,8 +174,46 @@ export function SettingsPage() {
     try {
       const status = await getVCStatus()
       setVCStatus(status)
+      setRemoteURL(status.remote_url ?? "")
     } catch {
       // ignore
+    }
+  }
+
+  const settingFlag = (v: string | boolean | undefined, defaultOn: boolean) => {
+    if (v === undefined || v === "") return defaultOn
+    return v === true || v === "true"
+  }
+
+  const handleSaveRemote = async () => {
+    if (!remoteURL.trim()) return
+    setVcActionBusy("remote")
+    try {
+      const status = await setVCSRemote(remoteURL.trim())
+      setVCStatus(status)
+      setRemoteURL(status.remote_url ?? remoteURL.trim())
+    } finally {
+      setVcActionBusy(null)
+    }
+  }
+
+  const handlePushNow = async () => {
+    setVcActionBusy("push")
+    try {
+      await pushVC()
+      await loadVCStatus()
+    } finally {
+      setVcActionBusy(null)
+    }
+  }
+
+  const handleBackupNow = async () => {
+    setVcActionBusy("backup")
+    try {
+      await backupVC()
+      await loadVCStatus()
+    } finally {
+      setVcActionBusy(null)
     }
   }
 
@@ -139,6 +252,11 @@ export function SettingsPage() {
       ...(form ?? {}),
     }
   }, [form, settings])
+
+  const hasUnsavedChanges = useMemo(
+    () => form !== null && Object.keys(form).length > 0,
+    [form],
+  )
 
   const jobInstanceId = mergedForm.job_instance_id ?? ""
   const jobModel = mergedForm.job_model ?? ""
@@ -396,12 +514,18 @@ export function SettingsPage() {
   }
 
   return (
-    <PageContainer className="[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <h1 className="mb-6 text-xl font-semibold">{t("nav.settings")}</h1>
-      <form
-        onSubmit={handleSubmit}
-        className="space-y-6 [&_[data-slot=card]]:overflow-visible"
-      >
+    <form
+      onSubmit={handleSubmit}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <PageContainer className="[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <h1 className="mb-6 text-xl font-semibold">{t("nav.settings")}</h1>
+        <div className="space-y-8 [&_[data-slot=card]]:overflow-visible">
+        <SettingsSectionGroup
+          id="settings-group-basic"
+          titleKey="settings.groups.basic.title"
+          descKey="settings.groups.basic.desc"
+        >
         {/* Language Settings */}
         <Card>
           <CardHeader>
@@ -438,58 +562,24 @@ export function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+        </SettingsSectionGroup>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("settings.rules.title")}</CardTitle>
-            <CardDescription>{t("settings.rules.desc")}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <p className="text-sm font-medium mb-1">{t("settings.rules.purpose_preview")}</p>
-                <pre className="text-xs rounded-md border bg-muted/40 p-2 max-h-32 overflow-auto whitespace-pre-wrap">
-                  {rulePreview?.purpose_preview?.trim() || t("settings.rules.file_missing")}
-                </pre>
-              </div>
-              <div>
-                <p className="text-sm font-medium mb-1">{t("settings.rules.rules_preview")}</p>
-                <pre className="text-xs rounded-md border bg-muted/40 p-2 max-h-32 overflow-auto whitespace-pre-wrap">
-                  {rulePreview?.rules_preview?.trim() || t("settings.rules.file_missing")}
-                </pre>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">{t("settings.rules.edit_hint")}</p>
-            <div>
-              <label className="text-sm font-medium">{t("settings.rules.supplement")}</label>
-              <textarea
-                value={mergedForm.rules_supplement ?? ""}
-                onChange={(e) => set("rules_supplement", e.target.value)}
-                placeholder={t("settings.rules.supplement_placeholder")}
-                rows={4}
-                className="mt-1 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
-                data-testid="rules-supplement"
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                {t("settings.rules.char_count", {
-                  count: String((mergedForm.rules_supplement ?? "").length),
-                  max: String(rulesSupplementMax),
-                })}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <SettingsSectionGroup
+          id="settings-group-models"
+          titleKey="settings.groups.models.title"
+          descKey="settings.groups.models.desc"
+        >
 
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Providers</CardTitle>
+                <CardTitle>{t("settings.providers.title")}</CardTitle>
                 <CardDescription>
                   {t("settings.providers.desc")}
                 </CardDescription>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2" data-testid="provider-local-actions">
                 <Button
                   size="sm"
                   variant="outline"
@@ -638,7 +728,7 @@ export function SettingsPage() {
                           rel="noopener noreferrer"
                           className="ml-auto text-xs text-primary hover:underline inline-flex items-center gap-0.5 shrink-0"
                         >
-                          Docs <ExternalLink className="size-3" />
+                          {t("settings.providers.docs")} <ExternalLink className="size-3" />
                         </a>
                       )}
                       <Button
@@ -679,7 +769,7 @@ export function SettingsPage() {
             {addForm.mode === "add" && (
               <div className="border rounded-lg p-3 space-y-2 bg-muted/30">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{t("settings.providers.add")} Provider</span>
+                  <span className="text-sm font-medium">{t("settings.providers.add_title")}</span>
                   <Button size="sm" variant="ghost" className="size-6 p-0" onClick={() => setAddForm({ mode: false })}>
                     <X className="size-3.5" />
                   </Button>
@@ -709,14 +799,14 @@ export function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">API Key</label>
+                  <label className="text-xs font-medium text-muted-foreground">{t("settings.providers.api_key_label")}</label>
                   <Input
                     type="password"
                     value={addForm.api_key}
                     onChange={(e) => setAddForm((prev) =>
                       prev.mode === "add" ? { ...prev, api_key: e.target.value } : prev,
                     )}
-                    placeholder="sk-..."
+                    placeholder={t("settings.providers.api_key_placeholder_short")}
                     className="h-7 text-sm mt-0.5"
                   />
                 </div>
@@ -775,7 +865,7 @@ export function SettingsPage() {
 
             {providers.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                Loading providers...
+                {t("settings.providers.loading")}
               </p>
             )}
           </CardContent>
@@ -795,7 +885,7 @@ export function SettingsPage() {
               </p>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label className="text-sm font-medium">{t("settings.providers.title")}</label>
                     <select
@@ -812,7 +902,7 @@ export function SettingsPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-sm font-medium">Model</label>
+                    <label className="text-sm font-medium">{t("settings.providers.model_label")}</label>
                     <select
                       value={jobModel}
                       onChange={(e) => set("job_model", e.target.value)}
@@ -852,6 +942,197 @@ export function SettingsPage() {
             )}
           </CardContent>
         </Card>
+        </SettingsSectionGroup>
+
+        <SettingsSectionGroup
+          id="settings-group-rules"
+          titleKey="settings.groups.rules.title"
+          descKey="settings.groups.rules.desc"
+        >
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("settings.rules.title")}</CardTitle>
+            <CardDescription>{t("settings.rules.desc")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium mb-1">{t("settings.rules.purpose_preview")}</p>
+                <pre className="text-xs rounded-md border bg-muted/40 p-2 max-h-32 overflow-auto whitespace-pre-wrap break-words">
+                  {rulePreview?.purpose_preview?.trim() || t("settings.rules.file_missing")}
+                </pre>
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium mb-1">{t("settings.rules.rules_preview")}</p>
+                <pre className="text-xs rounded-md border bg-muted/40 p-2 max-h-32 overflow-auto whitespace-pre-wrap break-words">
+                  {rulePreview?.rules_preview?.trim() || t("settings.rules.file_missing")}
+                </pre>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("settings.rules.edit_hint")}</p>
+            <div>
+              <label className="text-sm font-medium">{t("settings.rules.supplement")}</label>
+              <textarea
+                value={mergedForm.rules_supplement ?? ""}
+                onChange={(e) => set("rules_supplement", e.target.value)}
+                placeholder={t("settings.rules.supplement_placeholder")}
+                rows={4}
+                className="mt-1 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                data-testid="rules-supplement"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                {t("settings.rules.char_count", {
+                  count: String((mergedForm.rules_supplement ?? "").length),
+                  max: String(rulesSupplementMax),
+                })}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        </SettingsSectionGroup>
+
+        <SettingsSectionGroup
+          id="settings-group-vc"
+          titleKey="settings.groups.vc.title"
+          descKey="settings.groups.vc.desc"
+        >
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <GitBranch className="size-4" />
+              {t("settings.vc.title")}
+            </CardTitle>
+            <CardDescription>
+              {t("settings.vc.desc")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!vcStatus?.enabled ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <ShieldOff className="size-4" />
+                  <span>{t("settings.vc.not_ready")}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("settings.vc.repair_hint")}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
+                    {t("settings.vc.active")}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {t("settings.vc.commits", { count: vcStatus.commit_count })}
+                  </span>
+                </div>
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <div>{t("settings.vc.tracked")}: <code className="bg-muted px-1 rounded">{vcStatus.tracked_dirs.join(", ")}</code></div>
+                  {vcStatus.backup_dirs && vcStatus.backup_dirs.length > 0 && (
+                    <div>{t("settings.vc.backup")}: <code className="bg-muted px-1 rounded">{vcStatus.backup_dirs.join(", ")}</code></div>
+                  )}
+                  <div>{t("settings.vc.excluded")}: <code className="bg-muted px-1 rounded">{vcStatus.excluded_dirs.join(", ")}</code></div>
+                </div>
+
+                <div className="space-y-2 pt-2 border-t">
+                  <label className="text-sm font-medium">{t("settings.vc.remote_url")}</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                      value={remoteURL}
+                      onChange={(e) => setRemoteURL(e.target.value)}
+                      placeholder="https://github.com/user/repo.git 或 git@host:user/repo.git"
+                      data-testid="vc-remote-url"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={vcActionBusy !== null || !remoteURL.trim()}
+                      onClick={() => void handleSaveRemote()}
+                    >
+                      {t("settings.vc.remote_save")}
+                    </Button>
+                  </div>
+                  {vcStatus.remote_configured && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("settings.vc.remote_status", {
+                        branch: vcStatus.branch ?? "main",
+                        ahead: String(vcStatus.ahead ?? 0),
+                        behind: String(vcStatus.behind ?? 0),
+                      })}
+                    </p>
+                  )}
+                  {vcStatus.last_push_error && (
+                    <p className="text-xs text-destructive" data-testid="vc-push-error">
+                      {vcStatus.last_push_error}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-2 text-sm">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settingFlag(
+                        mergedForm.backup_include_raw ?? settings?.backup_include_raw,
+                        vcStatus.backup_include_raw ?? true,
+                      )}
+                      onChange={(e) => set("backup_include_raw", e.target.checked)}
+                    />
+                    <span>{t("settings.vc.backup_raw")}</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settingFlag(
+                        mergedForm.vc_auto_push ?? settings?.vc_auto_push,
+                        false,
+                      )}
+                      onChange={(e) => set("vc_auto_push", e.target.checked)}
+                    />
+                    <span>{t("settings.vc.auto_push")}</span>
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={vcActionBusy !== null}
+                    onClick={() => void handleBackupNow()}
+                    data-testid="vc-backup-now"
+                  >
+                    {t("settings.vc.backup_now")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={vcActionBusy !== null || !vcStatus.remote_configured}
+                    onClick={() => void handlePushNow()}
+                    data-testid="vc-push-now"
+                  >
+                    {t("settings.vc.push_now")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => navigateTo(workbenchViewHref("timeline"))}
+                  >
+                    <History className="size-3.5 mr-1" />
+                    {t("settings.vc.view_history")}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">{t("settings.vc.api_key_hint")}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        </SettingsSectionGroup>
+
+        <SettingsAdvancedSection>
 
         <Card>
           <CardHeader>
@@ -859,7 +1140,7 @@ export function SettingsPage() {
             <CardDescription>{t("settings.tool_loop.desc")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="text-sm font-medium">
                   {t("settings.tool_loop.max_rounds_ingest")}
@@ -968,7 +1249,7 @@ export function SettingsPage() {
           <CardHeader>
             <div className="flex items-center justify-between gap-4">
               <div>
-                <CardTitle>MCP Servers</CardTitle>
+                <CardTitle>{t("settings.mcp.title")}</CardTitle>
                 <CardDescription>
                   {t("settings.mcp.desc")}
                 </CardDescription>
@@ -990,10 +1271,10 @@ export function SettingsPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            <label className="text-sm font-medium">mcp_servers_json</label>
+            <label className="text-sm font-medium">{t("settings.mcp.json_label")}</label>
             <textarea
               data-testid="mcp-servers-json"
-              className="mt-1 w-full min-h-[200px] rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"
+              className="mt-1 w-full min-h-[200px] max-w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs overflow-x-auto"
               value={mergedForm.mcp_servers_json ?? settings?.mcp_servers_json ?? ""}
               onChange={(e) => handleMCPJsonChange(e.target.value)}
               spellCheck={false}
@@ -1074,15 +1355,15 @@ export function SettingsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Processing</CardTitle>
+            <CardTitle>{t("settings.processing.title")}</CardTitle>
             <CardDescription>
-              Chunk size, overlap, and indexing behavior.
+              {t("settings.processing.desc")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <label className="text-sm font-medium">Max Tokens</label>
+                <label className="text-sm font-medium">{t("settings.processing.max_tokens")}</label>
                 <Input
                   type="number"
                   value={mergedForm.max_tokens || ""}
@@ -1093,7 +1374,7 @@ export function SettingsPage() {
                 />
               </div>
               <div>
-                <label className="text-sm font-medium">Temperature</label>
+                <label className="text-sm font-medium">{t("settings.processing.temperature")}</label>
                 <Input
                   type="number"
                   step="0.1"
@@ -1105,9 +1386,9 @@ export function SettingsPage() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <label className="text-sm font-medium">Chunk Size</label>
+                <label className="text-sm font-medium">{t("settings.processing.chunk_size")}</label>
                 <Input
                   type="number"
                   value={mergedForm.chunk_size || ""}
@@ -1118,7 +1399,7 @@ export function SettingsPage() {
                 />
               </div>
               <div>
-                <label className="text-sm font-medium">Chunk Overlap</label>
+                <label className="text-sm font-medium">{t("settings.processing.chunk_overlap")}</label>
                 <Input
                   type="number"
                   value={mergedForm.chunk_overlap || ""}
@@ -1137,7 +1418,7 @@ export function SettingsPage() {
                   onChange={(e) => set("auto_reindex", e.target.checked)}
                   className="rounded"
                 />
-                Auto Reindex
+                {t("settings.processing.auto_reindex")}
               </label>
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -1146,69 +1427,45 @@ export function SettingsPage() {
                   onChange={(e) => set("watch_sources", e.target.checked)}
                   className="rounded"
                 />
-                Watch Sources
+                {t("settings.processing.watch_sources")}
               </label>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <GitBranch className="size-4" />
-              {t("settings.vc.title")}
-            </CardTitle>
-            <CardDescription>
-              {t("settings.vc.desc")}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {!vcStatus?.enabled ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <ShieldOff className="size-4" />
-                  <span>{t("settings.vc.not_ready")}</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {t("settings.vc.repair_hint")}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
-                    {t("settings.vc.active")}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {t("settings.vc.commits", { count: vcStatus.commit_count })}
-                  </span>
-                </div>
-                <div className="text-xs text-muted-foreground space-y-1">
-                  <div>{t("settings.vc.tracked")}: <code className="bg-muted px-1 rounded">{vcStatus.tracked_dirs.join(", ")}</code></div>
-                  <div>{t("settings.vc.excluded")}: <code className="bg-muted px-1 rounded">{vcStatus.excluded_dirs.join(", ")}</code></div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => navigateTo(workbenchViewHref("timeline"))}
-                >
-                  <History className="size-3.5 mr-1" />
-                  {t("settings.vc.view_history")}
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        </SettingsAdvancedSection>
 
-        <div className="flex items-center gap-3">
-          <Button type="submit" disabled={saving}>
-            {saving ? "Saving..." : "Save Settings"}
-          </Button>
-          {saved && (
-            <span className="text-sm text-green-600">Settings saved</span>
-          )}
         </div>
-      </form>
-    </PageContainer>
+      </PageContainer>
+
+      <div
+        className="flex shrink-0 flex-wrap items-center gap-3 border-t border-border/70 bg-background px-1 py-3"
+        data-testid="settings-save-bar"
+      >
+        {hasUnsavedChanges && (
+          <span
+            className="text-sm text-amber-600"
+            data-testid="settings-unsaved-indicator"
+          >
+            {t("settings.save.unsaved")}
+          </span>
+        )}
+        <Button
+          type="submit"
+          disabled={saving || !hasUnsavedChanges}
+          data-testid="settings-save-button"
+        >
+          {saving ? t("settings.save.saving") : t("settings.save.action")}
+        </Button>
+        {saved && (
+          <span
+            className="text-sm text-green-600"
+            data-testid="settings-saved-indicator"
+          >
+            {t("settings.save.saved")}
+          </span>
+        )}
+      </div>
+    </form>
   )
 }

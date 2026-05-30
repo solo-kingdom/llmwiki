@@ -38,7 +38,7 @@ This skill is the blueprint for health-diagnosis and organization prompts. Deter
    | Severity | Issues | Action |
    |:--------:|--------|--------|
    | **error** | Dead links, missing frontmatter, log format errors | Fix immediately |
-   | **warning** | Orphan pages, type mismatches, misplaced pages | Evaluate and fix |
+   | **warning** | Orphan pages, type mismatches, misplaced pages, entity-concept coupling | Evaluate and fix |
 
 3. **Fix error-level issues first**:
 
@@ -69,6 +69,12 @@ This skill is the blueprint for health-diagnosis and organization prompts. Deter
    **Misplaced pages** (`misplaced_wiki_page`):
    - Move to the correct typed subdirectory
 
+   **Entity-concept coupling** (`entity_concept_coupling`):
+   - Read the concept page and confirm the title binds a concrete entity name to an abstract concept
+   - Rename to a neutral concept title (e.g. `组织裁剪方法论`) while preserving body content
+   - Link the entity as a case via `[[Entity Name]]` in the concept body; update related links on the entity page
+   - After move/rename, update wikilinks pointing to the old path to avoid dead links
+
 5. **Re-run lint** to verify all fixes
    ```
    search(query="", mode="lint")
@@ -85,6 +91,7 @@ This skill is the blueprint for health-diagnosis and organization prompts. Deter
 | `log_date_decreasing` | error | Log entries not in chronological order |
 | `type_dir_mismatch` | warning | Page `type` doesn't match its directory |
 | `misplaced_wiki_page` | warning | Business page not in typed subdirectory |
+| `entity_concept_coupling` | warning | Concept title appears to bind an entity name to an abstract concept |
 | `orphan_page` | warning | No incoming links from other wiki pages |
 
 ## Fix Strategy
@@ -93,6 +100,7 @@ This skill is the blueprint for health-diagnosis and organization prompts. Deter
 - **Frontmatter**: infer type from directory, but do not casually change identity fields; if date is missing, use the current repair date.
 - **Orphan pages**: decide whether the orphan is legitimate, such as a source summary or temporary query page; otherwise add links from related overview, entity, or concept pages.
 - **Misplaced / type mismatch**: prefer keeping type and directory consistent; after moving pages, update links pointing to old paths.
+- **Entity-concept coupling**: split into a neutral concept page plus entity case links; do not delete concept content just to clear the warning.
 - **Log issues**: fix format and ordering problems only; do not rewrite historical meaning.
 
 ## Guardrails

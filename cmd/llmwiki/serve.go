@@ -20,6 +20,7 @@ import (
 	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/watcher"
+	"github.com/solo-kingdom/llmwiki/internal/workspace"
 )
 
 func newServeCmd() *cobra.Command {
@@ -87,6 +88,10 @@ func runServe(dir string, opts serveOptions) error {
 		return fmt.Errorf("open database: %w", err)
 	}
 	defer db.Close()
+
+	if err := workspace.ImportSettingsIfEmpty(db, ws); err != nil {
+		return fmt.Errorf("import workspace settings: %w", err)
+	}
 
 	lockMgr := ingest.NewPageLockManager()
 	srv := server.New(server.Config{

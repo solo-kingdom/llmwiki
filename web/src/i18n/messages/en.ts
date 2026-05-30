@@ -167,9 +167,44 @@ const en: Record<MessageKey, string> = {
   "settings.vc.commits": "{count} commit(s)",
   "settings.vc.tracked": "Tracked",
   "settings.vc.excluded": "Excluded",
+  "settings.vc.backup": "Backup track",
   "settings.vc.view_history": "View history",
   "settings.vc.desc":
-    "View wiki version history, change diffs, and rollbacks",
+    "View wiki version history, change diffs, and rollbacks; configure remote backup",
+  "settings.vc.remote_url": "Remote repository URL",
+  "settings.vc.remote_save": "Save remote",
+  "settings.vc.remote_status": "Branch {branch} · ahead {ahead} · behind {behind}",
+  "settings.vc.backup_raw": "Backup raw/ source files (on by default)",
+  "settings.vc.auto_push": "Auto push after commit",
+  "settings.vc.backup_now": "Backup now",
+  "settings.vc.push_now": "Push now",
+  "settings.vc.api_key_hint":
+    "Settings export to .llmwiki/workspace-settings.json. API keys are not stored in git; re-enter them on a new machine.",
+
+  "settings.groups.basic.title": "Basic Settings",
+  "settings.groups.basic.desc": "UI language and document generation preferences",
+  "settings.groups.models.title": "Models & Connections",
+  "settings.groups.models.desc": "Manage Provider instances and models used by background jobs",
+  "settings.groups.rules.title": "Workspace Rules",
+  "settings.groups.rules.desc": "Preview workspace rule files and append temporary supplements",
+  "settings.groups.vc.title": "Version Control",
+  "settings.groups.vc.desc": "View wiki version control status and history entry",
+  "settings.groups.advanced.title": "Advanced Settings",
+  "settings.groups.advanced.desc":
+    "Low-frequency options such as MCP, tool loops, log retention, and processing parameters",
+
+  "settings.save.action": "Save Settings",
+  "settings.save.saving": "Saving…",
+  "settings.save.saved": "Settings saved",
+  "settings.save.unsaved": "Unsaved changes",
+
+  "settings.providers.docs": "Docs",
+  "settings.providers.loading": "Loading provider catalog…",
+  "settings.providers.add_title": "Add Provider",
+  "settings.providers.model_label": "Model",
+  "settings.providers.api_key_placeholder_short": "sk-…",
+  "settings.mcp.json_label": "MCP configuration JSON",
+  "settings.processing.desc": "Chunk size, overlap, and indexing behavior",
 
   // IngestChat
   "chat.copied": "Copied",
@@ -207,6 +242,7 @@ const en: Record<MessageKey, string> = {
   "chat.model": "Model",
   "chat.archive": "Archive",
   "chat.confirm_archive": "Confirm Archive",
+  "chat.deep_organize": "Deep organize: detect and merge duplicate pages",
   "chat.session_title_optional": "Session title (optional)",
   "chat.confirm": "Confirm Archive",
   "chat.cancel": "Cancel",
@@ -425,6 +461,13 @@ const en: Record<MessageKey, string> = {
   "diff.unified": "Unified",
   "diff.split": "Split",
   "diff.close": "Close",
+
+  // Job Group Card
+  "jobs.group.archive_title": "Archive task",
+  "jobs.group.history": "History",
+  "jobs.group.history_count": "History ({count})",
+  "jobs.group.expand": "Expand",
+  "jobs.group.collapse": "Collapse",
 
   // Errors
   "error.reply_failed": "Reply failed",

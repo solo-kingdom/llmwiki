@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,12 +13,12 @@ func TestApplyWikiBlocksWritesFiles(t *testing.T) {
 	blocks := map[string]string{
 		"wiki/entities/generated.md": "# Generated\n\nUniqueSearchTermXYZ123 content here.\n",
 	}
-	paths, err := ApplyWikiBlocks(context.Background(), ws, blocks, nil)
+	result, err := ApplyWikiBlocks(context.Background(), ws, blocks, nil)
 	if err != nil {
 		t.Fatalf("ApplyWikiBlocks: %v", err)
 	}
-	if len(paths) != 1 || paths[0] != "wiki/entities/generated.md" {
-		t.Fatalf("paths = %v, want [wiki/entities/generated.md]", paths)
+	if len(result.Written) != 1 || result.Written[0] != "wiki/entities/generated.md" {
+		t.Fatalf("paths = %v, want [wiki/entities/generated.md]", result.Written)
 	}
 
 	data, err := os.ReadFile(filepath.Join(ws, "wiki", "entities", "generated.md"))
@@ -46,14 +45,14 @@ func TestApplyWikiBlocksRejectsMisplacedTopLevelPage(t *testing.T) {
 
 func TestApplyWikiBlocksAllowsReservedTopLevelPages(t *testing.T) {
 	ws := t.TempDir()
-	paths, err := ApplyWikiBlocks(context.Background(), ws, map[string]string{
+	result, err := ApplyWikiBlocks(context.Background(), ws, map[string]string{
 		"wiki/overview.md": "---\ntitle: Overview\n---\n# Overview\n",
 	}, nil)
 	if err != nil {
 		t.Fatalf("ApplyWikiBlocks: %v", err)
 	}
-	if len(paths) != 1 || paths[0] != "wiki/overview.md" {
-		t.Fatalf("paths = %v", paths)
+	if len(result.Written) != 1 || result.Written[0] != "wiki/overview.md" {
+		t.Fatalf("paths = %v", result.Written)
 	}
 }
 
@@ -91,12 +90,12 @@ func TestApplyWikiBlocksNormalizesEntityShorthand(t *testing.T) {
 	blocks := map[string]string{
 		"entity/RT-Merger.md": "# RT Merger\n\nBody.\n",
 	}
-	paths, err := ApplyWikiBlocks(context.Background(), ws, blocks, nil)
+	result, err := ApplyWikiBlocks(context.Background(), ws, blocks, nil)
 	if err != nil {
 		t.Fatalf("ApplyWikiBlocks: %v", err)
 	}
-	if len(paths) != 1 || paths[0] != "wiki/entities/RT-Merger.md" {
-		t.Fatalf("paths = %v", paths)
+	if len(result.Written) != 1 || result.Written[0] != "wiki/entities/RT-Merger.md" {
+		t.Fatalf("paths = %v", result.Written)
 	}
 	if _, err := os.Stat(filepath.Join(ws, "wiki", "entities", "RT-Merger.md")); err != nil {
 		t.Fatalf("expected file on disk: %v", err)
@@ -114,12 +113,15 @@ func TestApplyWikiBlocksZeroWriteFails(t *testing.T) {
 		t.Fatal("expected error for unrecognized path")
 	}
 
-	// All blocks deleted only — still counts as zero writes when blocks were present.
-	_, err = ApplyWikiBlocks(context.Background(), ws, map[string]string{
+	// Delete-only blocks succeed and record deleted paths.
+	result, err := ApplyWikiBlocks(context.Background(), ws, map[string]string{
 		"wiki/entities/Gone.md": "---DELETE---\n",
 	}, nil)
-	if !errors.Is(err, errNoWikiFilesWritten) {
-		t.Fatalf("expected errNoWikiFilesWritten, got %v", err)
+	if err != nil {
+		t.Fatalf("delete-only apply: %v", err)
+	}
+	if len(result.Deleted) != 1 || result.Deleted[0] != "wiki/entities/Gone.md" {
+		t.Fatalf("deleted = %v", result.Deleted)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/vcs"
 )
 
 func maskKey(key string) string {
@@ -46,6 +47,8 @@ type settingsResponse struct {
 	SessionToolLoopMaxRoundsQA         string `json:"session_tool_loop_max_rounds_qa"`
 	SessionToolLoopMaxRoundsOrganize   string `json:"session_tool_loop_max_rounds_organize"`
 	SessionToolLoopMaxCallsPerRound    string `json:"session_tool_loop_max_calls_per_round"`
+	BackupIncludeRaw                   string `json:"backup_include_raw"`
+	VCAutoPush                         string `json:"vc_auto_push"`
 }
 
 func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +80,23 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		SessionToolLoopMaxRoundsQA:       mcp.SessionToolLoopMaxRoundsForResponse(all[mcp.ConfigSessionToolLoopMaxRoundsQA], "qa"),
 		SessionToolLoopMaxRoundsOrganize: mcp.SessionToolLoopMaxRoundsForResponse(all[mcp.ConfigSessionToolLoopMaxRoundsOrganize], "organize"),
 		SessionToolLoopMaxCallsPerRound:  mcp.SessionToolLoopMaxCallsForResponse(all[mcp.ConfigSessionToolLoopMaxCallsPerRound]),
+		BackupIncludeRaw:                 backupIncludeRawForResponse(all[sqlite.ConfigBackupIncludeRaw]),
+		VCAutoPush:                       vcAutoPushForResponse(all[sqlite.ConfigVCAutoPush]),
 	})
+}
+
+func backupIncludeRawForResponse(stored string) string {
+	if stored == "false" {
+		return "false"
+	}
+	return "true"
+}
+
+func vcAutoPushForResponse(stored string) string {
+	if stored == "true" {
+		return "true"
+	}
+	return "false"
 }
 
 func mcpServersJSONForResponse(stored string) string {
@@ -139,6 +158,8 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		mcp.ConfigSessionToolLoopMaxRoundsQA:       true,
 		mcp.ConfigSessionToolLoopMaxRoundsOrganize: true,
 		mcp.ConfigSessionToolLoopMaxCallsPerRound:  true,
+		sqlite.ConfigBackupIncludeRaw:              true,
+		sqlite.ConfigVCAutoPush:                  true,
 	}
 
 	for key, raw := range req {
@@ -202,6 +223,18 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if key == sqlite.ConfigBackupIncludeRaw {
+			if value != "true" && value != "false" {
+				writeError(w, http.StatusBadRequest, "backup_include_raw must be 'true' or 'false'")
+				return
+			}
+		}
+		if key == sqlite.ConfigVCAutoPush {
+			if value != "true" && value != "false" {
+				writeError(w, http.StatusBadRequest, "vc_auto_push must be 'true' or 'false'")
+				return
+			}
+		}
 		if err := a.db.SetConfig(key, value); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -227,6 +260,23 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := a.db.TrimAllIngestJobEvents(maxN); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	if raw, ok := req[sqlite.ConfigBackupIncludeRaw]; ok {
+		if v, err := parseSettingsValue(raw); err == nil && a.workspace != "" {
+			repo := vcs.NewGitRepo(a.workspace)
+			if repo.IsInitialized() {
+				_ = repo.EnsureGitignoreForBackup(v != "false")
+			}
+		}
+	}
+
+	// Export settings file and backup commit after any successful settings update
+	if a.workspace != "" {
+		if _, err := a.runWorkspaceBackup(); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

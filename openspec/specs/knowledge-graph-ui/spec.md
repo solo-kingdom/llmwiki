@@ -24,11 +24,13 @@ The system SHALL expose `GET /api/v1/graph` returning wiki page nodes and refere
 - **THEN** response SHALL include `truncated: false` and `total_nodes` count
 
 ### Requirement: Knowledge graph Web UI
-The Web UI SHALL provide a graph visualization view for browsing wiki page relationships within the Wiki reader shell, with correct layout constraints, force simulation parameters, and node click navigation that directly loads the target document.
+The Web UI SHALL provide a graph visualization view for browsing wiki page relationships within the Wiki reader shell, with full-bleed layout, correct force simulation parameters, and node click navigation that directly loads the target document.
 
-#### Scenario: Graph view layout
+#### Scenario: Graph view full-bleed layout
 - **WHEN** user opens the knowledge graph from the Wiki reader
-- **THEN** the graph component SHALL render as a direct flex child without intermediate padding wrapper divs
+- **THEN** the graph view SHALL NOT display a page-level title heading (e.g. "知识图谱")
+- **AND** the force-directed canvas SHALL fill the entire available parent container (width and height)
+- **AND** the graph component SHALL render as a direct flex child without intermediate padding wrapper divs that reduce canvas area
 - **AND** the graph canvas container SHALL have a stable height derived from flex layout (no ResizeObserver feedback loop)
 - **AND** ForceGraph2D SHALL auto-detect its container size without explicit width/height props
 
@@ -50,6 +52,7 @@ The Web UI SHALL provide a graph visualization view for browsing wiki page relat
 #### Scenario: Large graph truncation indicator
 - **WHEN** the graph API returns `truncated: true`
 - **THEN** the UI SHALL display a message indicating that only the top connected nodes are shown
+- **AND** the message SHALL be rendered as an overlay within the graph canvas area (not as a separate header row)
 - **AND** the message SHALL include the total node count
 
 #### Scenario: Node click opens reader

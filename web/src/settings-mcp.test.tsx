@@ -44,14 +44,20 @@ describe("SettingsPage MCP JSON", () => {
     })
   })
 
+  const openAdvancedSettings = () => {
+    fireEvent.click(screen.getByTestId("settings-advanced-toggle"))
+  }
+
   it("renders MCP JSON textarea with settings value", () => {
     render(<SettingsPage />)
+    openAdvancedSettings()
     const area = screen.getByTestId("mcp-servers-json") as HTMLTextAreaElement
     expect(area.value).toContain('"version": 1')
   })
 
   it("shows validation error for invalid JSON", () => {
     render(<SettingsPage />)
+    openAdvancedSettings()
     const area = screen.getByTestId("mcp-servers-json")
     fireEvent.change(area, { target: { value: "not-json" } })
     expect(screen.getByTestId("mcp-json-error").textContent).toMatch(
@@ -61,6 +67,7 @@ describe("SettingsPage MCP JSON", () => {
 
   it("rejects servers array format", () => {
     render(<SettingsPage />)
+    openAdvancedSettings()
     const area = screen.getByTestId("mcp-servers-json")
     fireEvent.change(area, {
       target: {
@@ -74,6 +81,7 @@ describe("SettingsPage MCP JSON", () => {
 
   it("accepts null servers", async () => {
     render(<SettingsPage />)
+    openAdvancedSettings()
     const area = screen.getByTestId("mcp-servers-json")
     const valid = JSON.stringify(
       {
@@ -86,7 +94,7 @@ describe("SettingsPage MCP JSON", () => {
     )
     fireEvent.change(area, { target: { value: valid } })
     expect(screen.queryByTestId("mcp-json-error")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: /Save Settings/i }))
+    fireEvent.click(screen.getByTestId("settings-save-button"))
     await waitFor(() => {
       expect(mockSaveSettings).toHaveBeenCalled()
     })
@@ -94,6 +102,7 @@ describe("SettingsPage MCP JSON", () => {
 
   it("saves valid MCP JSON", async () => {
     render(<SettingsPage />)
+    openAdvancedSettings()
     const area = screen.getByTestId("mcp-servers-json")
     const valid = JSON.stringify(
       { version: 1, servers: {}, defaults: { readonly_only: true } },
@@ -101,7 +110,7 @@ describe("SettingsPage MCP JSON", () => {
       2,
     )
     fireEvent.change(area, { target: { value: valid } })
-    fireEvent.click(screen.getByRole("button", { name: /Save Settings/i }))
+    fireEvent.click(screen.getByTestId("settings-save-button"))
     await waitFor(() => {
       expect(mockSaveSettings).toHaveBeenCalledWith({
         mcp_servers_json: valid,
@@ -111,6 +120,7 @@ describe("SettingsPage MCP JSON", () => {
 
   it("renders tool loop settings with defaults", () => {
     render(<SettingsPage />)
+    openAdvancedSettings()
     expect(
       (screen.getByTestId("tool-loop-max-rounds-organize") as HTMLInputElement)
         .value,
@@ -132,6 +142,7 @@ describe("SettingsPage MCP JSON", () => {
       ],
     })
     render(<SettingsPage />)
+    openAdvancedSettings()
     fireEvent.click(screen.getByTestId("check-mcp"))
     await waitFor(() => {
       expect(checkMCPStatus).toHaveBeenCalled()

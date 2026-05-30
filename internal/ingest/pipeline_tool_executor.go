@@ -17,24 +17,26 @@ type PipelineToolExecutor struct {
 	workspace string
 	db        *sqlite.DB
 	mcpExec   *pipelineMCPExecutor
+	toolMode  string // session mode for local tool set: "", "qa", "organize"
 }
 
 // NewPipelineToolExecutor creates a tool executor with local tools and optional MCP.
-func NewPipelineToolExecutor(workspace string, db *sqlite.DB, mcpExec *pipelineMCPExecutor) *PipelineToolExecutor {
+func NewPipelineToolExecutor(workspace string, db *sqlite.DB, mcpExec *pipelineMCPExecutor, toolMode string) *PipelineToolExecutor {
 	return &PipelineToolExecutor{
 		workspace: workspace,
 		db:        db,
 		mcpExec:   mcpExec,
+		toolMode:  toolMode,
 	}
 }
 
-// ListTools returns local search/read definitions plus any external MCP tools.
+// ListTools returns local tool definitions plus any external MCP tools.
 func (e *PipelineToolExecutor) ListTools(ctx context.Context) ([]llm.ToolDefinition, error) {
 	var tools []llm.ToolDefinition
 
 	// Local tools: always available when db is present
 	if e.db != nil {
-		for _, t := range mcp.BuiltinReadonlyToolDefinitions() {
+		for _, t := range mcp.BuiltinToolDefinitionsForMode(e.toolMode) {
 			tools = append(tools, llm.ToolDefinition{
 				Name:        t.Name,
 				Description: t.Description,
@@ -58,8 +60,8 @@ func (e *PipelineToolExecutor) ListTools(ctx context.Context) ([]llm.ToolDefinit
 func (e *PipelineToolExecutor) Execute(ctx context.Context, name string, argsJSON string) (string, error) {
 	name = strings.TrimSpace(name)
 
-	// Local tools: search and read
-	if isLocalReadonlyTool(name) {
+	// Local tools: search, read, and mode-specific diagnostics
+	if isLocalPipelineTool(name) {
 		if e.db == nil {
 			return "Error: database not connected", nil
 		}
@@ -82,10 +84,11 @@ func (e *PipelineToolExecutor) Execute(ctx context.Context, name string, argsJSO
 	return "", nil
 }
 
-// isLocalReadonlyTool reports whether a tool name should be handled locally.
-func isLocalReadonlyTool(name string) bool {
+// isLocalPipelineTool reports whether a tool name should be handled locally.
+func isLocalPipelineTool(name string) bool {
 	switch strings.ToLower(name) {
-	case mcp.DefaultToolSearch, mcp.DefaultToolRead, mcp.DefaultToolWebFetch:
+	case mcp.DefaultToolSearch, mcp.DefaultToolRead, mcp.DefaultToolWebFetch,
+		"references", "audit", "structure", "gaps", "similar":
 		return true
 	default:
 		return false

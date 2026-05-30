@@ -177,6 +177,9 @@ func (s *Server) Start() error {
 		r.Get("/vcs/status", s.api.VCSStatus)
 		r.Get("/vcs/log", s.api.VCSLog)
 		r.Get("/vcs/diff/{sha}", s.api.VCSDiff)
+		r.Post("/vcs/remote", s.api.VCSRemote)
+		r.Post("/vcs/push", s.api.VCSPush)
+		r.Post("/vcs/backup", s.api.VCSBackup)
 
 		r.Get("/providers", s.api.ListProviders)
 		r.Get("/providers/{id}/models", s.api.ListProviderModels)

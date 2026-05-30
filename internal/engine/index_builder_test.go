@@ -52,15 +52,16 @@ date: "2024-03-02"
 	if err != nil {
 		t.Fatalf("BuildIndex: %v", err)
 	}
-	if !strings.Contains(content, "[[entities/alpha|Alpha Entity]]") {
-		t.Errorf("missing entities link, got:\n%s", content)
+	if !strings.Contains(content, "[[entities/alpha\\|Alpha Entity]]") {
+		t.Errorf("missing entities link with escaped pipe, got:\n%s", content)
 	}
-	if !strings.Contains(content, "[[concepts/beta|Beta Concept]]") {
-		t.Errorf("missing concepts link, got:\n%s", content)
+	if !strings.Contains(content, "[[concepts/beta\\|Beta Concept]]") {
+		t.Errorf("missing concepts link with escaped pipe, got:\n%s", content)
 	}
 	if !strings.Contains(content, "| Alpha Entity | First entity | 2024-03-01 |") {
 		t.Error("expected entity row with frontmatter fields")
 	}
+	assertIndexTableRowColumns(t, content, "[[entities/alpha\\|Alpha Entity]] | Alpha Entity | First entity | 2024-03-01 |", 4)
 }
 
 func TestIndexBuilderFrontmatterFallback(t *testing.T) {
@@ -78,7 +79,7 @@ func TestIndexBuilderFrontmatterFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildIndex: %v", err)
 	}
-	if !strings.Contains(content, "[[sources/my-source|My Source]]") {
+	if !strings.Contains(content, "[[sources/my-source\\|My Source]]") {
 		t.Errorf("expected title from filename, got:\n%s", content)
 	}
 }
@@ -132,9 +133,38 @@ title: Real Page
 	if strings.Contains(content, "dsp") {
 		t.Error("misplaced top-level page should not appear in index entries")
 	}
-	if !strings.Contains(content, "[[entities/page|Real Page]]") {
+	if !strings.Contains(content, "[[entities/page\\|Real Page]]") {
 		t.Error("expected typed page in index")
 	}
+}
+
+func TestIndexBuilderEscapesPipesInTableCells(t *testing.T) {
+	ws := t.TempDir()
+	writePage(t, ws, "wiki/entities/pipe-title.md", `---
+title: "Alpha|Beta"
+description: "Summary|note"
+date: "2024-03-01"
+---
+# Pipe`)
+	writePage(t, ws, "wiki/entities/normal.md", `---
+title: Normal Entity
+description: Plain summary
+date: "2024-03-02"
+---
+# Normal`)
+
+	b := NewIndexBuilder(ws)
+	content, err := b.BuildIndex()
+	if err != nil {
+		t.Fatalf("BuildIndex: %v", err)
+	}
+
+	expectedRow := "[[entities/pipe-title\\|Alpha\\|Beta]] | Alpha\\|Beta | Summary\\|note | 2024-03-01 |"
+	if !strings.Contains(content, expectedRow) {
+		t.Errorf("expected escaped pipe row, got:\n%s", content)
+	}
+	assertIndexTableRowColumns(t, content, expectedRow, 4)
+	assertIndexTableRowColumns(t, content, "[[entities/normal\\|Normal Entity]] | Normal Entity | Plain summary | 2024-03-02 |", 4)
 }
 
 func TestIndexBuilderExcludesNavPages(t *testing.T) {
@@ -156,7 +186,7 @@ title: Real Page
 	if strings.Contains(content, "overview") {
 		t.Error("overview.md should not appear in index entries")
 	}
-	if !strings.Contains(content, "[[entities/page|Real Page]]") {
+	if !strings.Contains(content, "[[entities/page\\|Real Page]]") {
 		t.Error("expected real page in index")
 	}
 }
@@ -204,4 +234,43 @@ func normalizeIndexForCompare(s string) string {
 		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
+}
+
+func assertIndexTableRowColumns(t *testing.T, content, rowFragment string, wantCols int) {
+	t.Helper()
+	for _, line := range strings.Split(content, "\n") {
+		if !strings.Contains(line, rowFragment) {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "|") || !strings.HasSuffix(trimmed, "|") {
+			t.Fatalf("expected table row for %q, got %q", rowFragment, line)
+		}
+		gotCols := countGFMTableColumns(trimmed)
+		if gotCols != wantCols {
+			t.Errorf("row %q has %d columns, want %d", line, gotCols, wantCols)
+		}
+		return
+	}
+	t.Fatalf("row containing %q not found in index content", rowFragment)
+}
+
+func countGFMTableColumns(row string) int {
+	inner := strings.Trim(strings.TrimSpace(row), "|")
+	cols := 1
+	escaped := false
+	for _, r := range inner {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if r == '|' {
+			cols++
+		}
+	}
+	return cols
 }

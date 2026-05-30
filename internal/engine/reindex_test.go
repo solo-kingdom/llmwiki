@@ -161,3 +161,55 @@ func TestReindexPreservesWebIngestAfterDoubleReindex(t *testing.T) {
 		t.Fatal("expected web-ingested source to survive double reindex")
 	}
 }
+
+func TestReindexPrunesMissingFiles(t *testing.T) {
+	ws := t.TempDir()
+	wikiDir := filepath.Join(ws, "wiki", "concepts")
+	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wikiDir, "keep.md"), []byte("# Keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	adapter := storesvc.NewStoreAdapter(db)
+	if err := adapter.CreateDocument(&engine.DocData{
+		Filename:   "ghost.md",
+		Title:      "Ghost",
+		Path:       "/wiki/concepts/",
+		Content:    "# Ghost",
+		SourceKind: "wiki",
+		FileType:   "md",
+		Status:     "ready",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reindexer := engine.NewReindexer(adapter, ws)
+	if _, err := reindexer.Rebuild("default"); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	ghost, err := db.GetDocumentByPath("ghost.md", "/wiki/concepts/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ghost != nil {
+		t.Fatal("expected ghost document to be pruned during reindex")
+	}
+
+	keep, err := db.GetDocumentByPath("keep.md", "/wiki/concepts/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keep == nil {
+		t.Fatal("expected keep.md to remain indexed after reindex")
+	}
+}

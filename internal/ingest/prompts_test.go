@@ -7,6 +7,46 @@ import (
 	"testing"
 )
 
+func TestComposeSystemPromptEntityConceptSeparation(t *testing.T) {
+	dir := t.TempDir()
+	ctx := PromptContext{Workspace: dir, DocLang: "zh"}
+
+	analysis := ComposeSystemPrompt(StepAnalysis, ctx)
+	for _, want := range []string{
+		"实体",
+		"概念",
+		"关系",
+		"AppLovin组织裁剪方法论",
+		"不要当作单个概念页",
+	} {
+		if !strings.Contains(analysis, want) {
+			t.Errorf("analysis prompt missing %q", want)
+		}
+	}
+
+	generation := ComposeSystemPrompt(StepGeneration, ctx)
+	for _, want := range []string{
+		"概念页标题默认保持中性",
+		"wikilink",
+		"组织裁剪方法论",
+		"AppLovin",
+	} {
+		if !strings.Contains(generation, want) {
+			t.Errorf("generation prompt missing %q", want)
+		}
+	}
+
+	organize := ComposeSystemPrompt(StepSessionOrganize, ctx)
+	if !strings.Contains(organize, "entity_concept_coupling") {
+		t.Fatalf("organize prompt missing entity_concept_coupling guidance: %s", organize)
+	}
+
+	enAnalysis := ComposeSystemPrompt(StepAnalysis, PromptContext{Workspace: dir, DocLang: "en"})
+	if !strings.Contains(enAnalysis, "entity name + abstract concept") {
+		t.Fatalf("english analysis prompt missing separation guidance: %s", enAnalysis)
+	}
+}
+
 func TestComposeSystemPromptGenerationTemplateGuidance(t *testing.T) {
 	ctx := PromptContext{Workspace: t.TempDir(), DocLang: "zh"}
 	out := ComposeSystemPrompt(StepGeneration, ctx)

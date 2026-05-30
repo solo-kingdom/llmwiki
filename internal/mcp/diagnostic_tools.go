@@ -157,7 +157,8 @@ func executeLocalAudit(workspace string, db *sqlite.DB, args map[string]interfac
 						case "structure":
 							if issue.Code != engine.LintCodeOrphanPage &&
 								issue.Code != engine.LintCodeTypeDirMismatch &&
-								issue.Code != engine.LintCodeMisplacedWikiPage {
+								issue.Code != engine.LintCodeMisplacedWikiPage &&
+								issue.Code != engine.LintCodeEntityConceptCoupling {
 								continue
 							}
 						case "links":

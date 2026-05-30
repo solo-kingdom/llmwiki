@@ -71,6 +71,7 @@ func LintWorkspace(workspace string) (*LintReport, error) {
 
 	pathIndex := buildWikiPathIndex(pages)
 	incoming := make(map[string]int)
+	pageContents := make(map[string]string, len(pages))
 
 	for _, page := range pages {
 		content, err := os.ReadFile(page.absPath)
@@ -78,6 +79,7 @@ func LintWorkspace(workspace string) (*LintReport, error) {
 			return nil, fmt.Errorf("read %s: %w", page.relPath, err)
 		}
 		text := string(content)
+		pageContents[page.relPath] = text
 
 		if page.inTypedSubdir {
 			fm := ParseFrontmatter(text)
@@ -110,6 +112,8 @@ func LintWorkspace(workspace string) (*LintReport, error) {
 			}
 		}
 	}
+
+	report.Issues = append(report.Issues, lintEntityConceptCoupling(pages, pageContents)...)
 
 	for _, page := range pages {
 		if isOrphanExcluded(page.relPath) {

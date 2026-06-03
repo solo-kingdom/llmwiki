@@ -419,8 +419,8 @@ func TestRPCContract_Initialize(t *testing.T) {
 	if meta["accessModel"] != "rpc-first" {
 		t.Errorf("expected accessModel 'rpc-first', got %v", meta["accessModel"])
 	}
-	if meta["transport"] != "http-post" {
-		t.Errorf("expected transport 'http-post', got %v", meta["transport"])
+	if meta["transport"] != "http-post-jsonrpc" {
+		t.Errorf("expected transport 'http-post-jsonrpc', got %v", meta["transport"])
 	}
 }
 

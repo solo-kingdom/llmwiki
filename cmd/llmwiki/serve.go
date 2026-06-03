@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -25,12 +26,13 @@ import (
 
 func newServeCmd() *cobra.Command {
 	var (
-		bindAddr   string
-		port       int
-		token      string
-		publicWiki bool
-		noMCP      bool
-		noWatch    bool
+		bindAddr       string
+		port           int
+		token          string
+		publicWiki     bool
+		noMCP          bool
+		noWatch        bool
+		mcpAllowWrite  bool
 	)
 
 	cmd := &cobra.Command{
@@ -43,12 +45,13 @@ func newServeCmd() *cobra.Command {
 				dir = args[0]
 			}
 			return runServe(dir, serveOptions{
-				bindAddr:   bindAddr,
-				port:       port,
-				token:      token,
-				publicWiki: publicWiki,
-				noMCP:      noMCP,
-				noWatch:    noWatch,
+				bindAddr:      bindAddr,
+				port:          port,
+				token:         token,
+				publicWiki:    publicWiki,
+				noMCP:         noMCP,
+				noWatch:       noWatch,
+				mcpAllowWrite: mcpAllowWrite,
 			})
 		},
 	}
@@ -59,17 +62,19 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&publicWiki, "public-wiki", false, "Enable public read-only Wiki at /wiki and /api/public/wiki/*")
 	cmd.Flags().BoolVar(&noMCP, "no-mcp", false, "Disable MCP server")
 	cmd.Flags().BoolVar(&noWatch, "no-watch", false, "Disable file watcher")
+	cmd.Flags().BoolVar(&mcpAllowWrite, "mcp-allow-write", false, "Allow MCP write/delete tools for remote agents (default: readonly)")
 
 	return cmd
 }
 
 type serveOptions struct {
-	bindAddr   string
-	port       int
-	token      string
-	publicWiki bool
-	noMCP      bool
-	noWatch    bool
+	bindAddr      string
+	port          int
+	token         string
+	publicWiki    bool
+	noMCP         bool
+	noWatch       bool
+	mcpAllowWrite bool
 }
 
 func runServe(dir string, opts serveOptions) error {
@@ -93,17 +98,23 @@ func runServe(dir string, opts serveOptions) error {
 		return fmt.Errorf("import workspace settings: %w", err)
 	}
 
+	// Remote MCP security: non-loopback bind with MCP enabled requires token.
+	if !opts.noMCP && !isLoopback(opts.bindAddr) && opts.token == "" {
+		return fmt.Errorf("remote MCP security: --token is required when binding to non-loopback address %q.\nUse --no-mcp to disable MCP or set --token <secret>", opts.bindAddr)
+	}
+
 	lockMgr := ingest.NewPageLockManager()
 	srv := server.New(server.Config{
-		BindAddr:   opts.bindAddr,
-		Port:       opts.port,
-		Token:      opts.token,
-		PublicWiki: opts.publicWiki,
-		NoMCP:      opts.noMCP,
-		NoWatch:    opts.noWatch,
-		Workspace:  ws,
-		DB:         db,
-		LockMgr:    lockMgr,
+		BindAddr:      opts.bindAddr,
+		Port:          opts.port,
+		Token:         opts.token,
+		PublicWiki:    opts.publicWiki,
+		NoMCP:         opts.noMCP,
+		NoWatch:       opts.noWatch,
+		Workspace:     ws,
+		DB:            db,
+		LockMgr:       lockMgr,
+		MCPAllowWrite: opts.mcpAllowWrite,
 	})
 
 	adapter := storesvc.NewStoreAdapter(db)
@@ -115,6 +126,8 @@ func runServe(dir string, opts serveOptions) error {
 			"You are connected to an LLM Wiki workspace. Call the `guide` tool first to see available knowledge bases and learn the full workflow.",
 		)
 		mcp.RegisterTools(mcpServer, ws, db, fileIndexer)
+		mcpServer.SetToolPolicy(mcp.DefaultToolPolicy(opts.mcpAllowWrite))
+		mcpServer.SetAuditDB(mcp.NewAuditAdapter(db))
 		srv.SetMCPHandler(mcp.NewHTTPHandler(mcpServer))
 	}
 
@@ -173,4 +186,16 @@ func runServe(dir string, opts serveOptions) error {
 		}
 		return nil
 	}
+}
+
+// isLoopback reports whether the bind address is a loopback address.
+func isLoopback(addr string) bool {
+	if addr == "localhost" || addr == "127.0.0.1" || addr == "::1" {
+		return true
+	}
+	ip := net.ParseIP(addr)
+	if ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }

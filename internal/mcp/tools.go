@@ -5,11 +5,36 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
+
+// mcpAuditAdapter bridges *sqlite.DB to the AuditDB interface for MCP server audit logging.
+type mcpAuditAdapter struct {
+	db *sqlite.DB
+}
+
+// NewAuditAdapter creates an AuditDB adapter for the given SQLite database.
+func NewAuditAdapter(db *sqlite.DB) AuditDB {
+	return &mcpAuditAdapter{db: db}
+}
+
+func (a *mcpAuditAdapter) RecordMCPToolCall(toolName, remoteAddr, clientAgent string, duration time.Duration, status, errorType string) {
+	if a.db == nil {
+		return
+	}
+	activity.LogMCPRemoteToolCall(a.db, activity.MCPToolCallInfo{
+		ToolName:    toolName,
+		RemoteAddr:  remoteAddr,
+		ClientAgent: clientAgent,
+		Duration:    duration,
+		Status:      status,
+		ErrorType:   errorType,
+	})
+}
 
 func RunLocalMCP(workspace string, db *sqlite.DB) error {
 	server := NewServer("LLM Wiki",

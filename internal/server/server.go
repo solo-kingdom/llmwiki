@@ -30,15 +30,16 @@ var WebAssets fs.FS
 
 // Config holds the server configuration.
 type Config struct {
-	BindAddr    string
-	Port        int
-	Token       string
-	PublicWiki  bool
-	NoMCP       bool
-	NoWatch     bool
-	Workspace   string
-	DB          *sqlite.DB
-	LockMgr     *ingest.PageLockManager
+	BindAddr      string
+	Port          int
+	Token         string
+	PublicWiki    bool
+	NoMCP         bool
+	NoWatch       bool
+	Workspace     string
+	DB            *sqlite.DB
+	LockMgr       *ingest.PageLockManager
+	MCPAllowWrite bool
 }
 
 // Server is the LLM Wiki HTTP server.
@@ -390,6 +391,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	mcpEnabled := s.mcpHandler != nil
 	watchEnabled := s.watcher != nil
+	authRequired := s.config.Token != ""
+	mcpDefaultPolicy := "readonly"
+	if s.config.MCPAllowWrite {
+		mcpDefaultPolicy = "readwrite"
+	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "ok",
@@ -401,8 +407,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"mcp_transport": "rpc-http",
 			"watch_enabled": watchEnabled,
 		},
-		"mcp_access_model":  "rpc-first",
-		"mcp_compatibility": "First release focuses on RPC access. Direct Claude Desktop stdio connection is not a release gate.",
+		"mcp_access_model":    "rpc-first",
+		"mcp_auth_required":   authRequired,
+		"mcp_default_policy":  mcpDefaultPolicy,
+		"mcp_compatibility":   "First release focuses on RPC access. Direct Claude Desktop stdio connection is not a release gate.",
 	})
 }
 

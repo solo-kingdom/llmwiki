@@ -8,11 +8,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
-	"github.com/spf13/cobra"
 	_ "github.com/solo-kingdom/llmwiki" // embed web assets
+	"github.com/solo-kingdom/llmwiki/internal/acp"
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
@@ -22,17 +23,18 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/watcher"
 	"github.com/solo-kingdom/llmwiki/internal/workspace"
+	"github.com/spf13/cobra"
 )
 
 func newServeCmd() *cobra.Command {
 	var (
-		bindAddr       string
-		port           int
-		token          string
-		publicWiki     bool
-		noMCP          bool
-		noWatch        bool
-		mcpAllowWrite  bool
+		bindAddr      string
+		port          int
+		token         string
+		publicWiki    bool
+		noMCP         bool
+		noWatch       bool
+		mcpAllowWrite bool
 	)
 
 	cmd := &cobra.Command{
@@ -97,6 +99,15 @@ func runServe(dir string, opts serveOptions) error {
 	if err := workspace.ImportSettingsIfEmpty(db, ws); err != nil {
 		return fmt.Errorf("import workspace settings: %w", err)
 	}
+	acp.Version = Version
+	maxConcurrent := acp.DefaultMaxConcurrentAgents
+	if raw, err := db.GetConfig("acp_max_concurrent_agents"); err == nil && raw != "" {
+		if n, parseErr := strconv.Atoi(raw); parseErr == nil && n >= acp.MinConcurrentAgents && n <= acp.MaxConcurrentAgents {
+			maxConcurrent = n
+		}
+	}
+	acpManager := acp.NewManager(maxConcurrent)
+	defer acpManager.CloseAll()
 
 	// Remote MCP security: non-loopback bind with MCP enabled requires token.
 	if !opts.noMCP && !isLoopback(opts.bindAddr) && opts.token == "" {
@@ -115,6 +126,7 @@ func runServe(dir string, opts serveOptions) error {
 		DB:            db,
 		LockMgr:       lockMgr,
 		MCPAllowWrite: opts.mcpAllowWrite,
+		ACPManager:    acpManager,
 	})
 
 	adapter := storesvc.NewStoreAdapter(db)

@@ -283,7 +283,7 @@ func RunSessionChatToolLoop(
 			start := time.Now()
 			out, execErr := executor.Execute(ctx, tc.Name, tc.Arguments)
 			duration := time.Since(start)
-			detail := "ok"
+			var detail string
 			if execErr != nil {
 				out = fmt.Sprintf("tool error: %v", execErr)
 				detail = out

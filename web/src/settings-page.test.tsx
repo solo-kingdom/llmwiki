@@ -24,6 +24,9 @@ vi.mock("@/context/AppContext", () => ({
     deleteInstance: vi.fn(),
     loadModels: vi.fn(),
     currentModels: [],
+    acpAgents: [],
+    acpConfigError: null,
+    loadACPAgents: vi.fn(),
   }),
 }))
 
@@ -36,6 +39,7 @@ vi.mock("@/lib/api", () => ({
   checkAllProviderInstances: vi.fn().mockResolvedValue({ instances: [] }),
   checkProviderInstance: vi.fn(),
   checkMCPStatus: vi.fn().mockResolvedValue({ servers: [] }),
+  checkACPAgents: vi.fn().mockResolvedValue({ agents: [] }),
   getWorkspaceRuleFiles: vi.fn().mockResolvedValue({
     purpose_preview: "",
     rules_preview: "",
@@ -130,6 +134,17 @@ describe("SettingsPage layout and save UX", () => {
 
     await waitFor(() => {
       expect(mockSetVCSRemote).toHaveBeenCalledWith(sshURL)
+    })
+  })
+
+  it("saves the default ACP runtime through the page save bar", async () => {
+    render(<SettingsPage />)
+    fireEvent.change(screen.getByTestId("acp-default-agent-kind"), { target: { value: "acp" } })
+    const saveButton = screen.getByTestId("settings-save-button")
+    expect(saveButton).not.toBeDisabled()
+    fireEvent.click(saveButton)
+    await waitFor(() => {
+      expect(mockSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ default_agent_kind: "acp" }))
     })
   })
 })

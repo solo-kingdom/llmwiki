@@ -3,7 +3,7 @@ import { Dialog } from "@base-ui/react/dialog"
 import { Clock, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/i18n"
-import type { ModelInfo, ProviderInstance } from "@/types"
+import type { ACPAgent, AgentKind, ModelInfo, ProviderInstance } from "@/types"
 import {
   cn,
   getRecentModels,
@@ -20,8 +20,11 @@ interface ModelSelectDialogProps {
   selectedModel: string
   lastUsedInstanceId?: string
   lastUsedModel?: string
+  agentKind: AgentKind
+  acpAgentId: string
+  acpAgents: ACPAgent[]
   onLoadModels: (catalogId: string) => void
-  onConfirm: (instanceId: string, modelId: string) => void
+  onConfirm: (runtime: { agentKind: AgentKind; acpAgentId: string; instanceId: string; modelId: string }) => void
 }
 
 export function ModelSelectDialog({
@@ -33,18 +36,25 @@ export function ModelSelectDialog({
   selectedModel,
   lastUsedInstanceId,
   lastUsedModel,
+  agentKind,
+  acpAgentId,
+  acpAgents,
   onLoadModels,
   onConfirm,
 }: ModelSelectDialogProps) {
   const t = useT()
   const [draftInstanceId, setDraftInstanceId] = useState(selectedInstanceId)
   const [draftModel, setDraftModel] = useState(selectedModel)
+  const [draftAgentKind, setDraftAgentKind] = useState<AgentKind>(agentKind)
+  const [draftACPAgentId, setDraftACPAgentId] = useState(acpAgentId)
 
   useEffect(() => {
     if (!open) return
     setDraftInstanceId(selectedInstanceId)
     setDraftModel(selectedModel)
-  }, [open, selectedInstanceId, selectedModel])
+    setDraftAgentKind(agentKind)
+    setDraftACPAgentId(acpAgentId)
+  }, [open, selectedInstanceId, selectedModel, agentKind, acpAgentId])
 
   useEffect(() => {
     if (!open || !draftInstanceId) return
@@ -97,9 +107,15 @@ export function ModelSelectDialog({
   }
 
   const handleConfirm = () => {
-    if (!draftInstanceId || !draftModel) return
-    persistRecentModel(draftInstanceId, draftModel)
-    onConfirm(draftInstanceId, draftModel)
+    if (draftAgentKind === "native" && (!draftInstanceId || !draftModel)) return
+    if (draftAgentKind === "acp" && !draftACPAgentId) return
+    if (draftAgentKind === "native") persistRecentModel(draftInstanceId, draftModel)
+    onConfirm({
+      agentKind: draftAgentKind,
+      acpAgentId: draftAgentKind === "acp" ? draftACPAgentId : "",
+      instanceId: draftInstanceId,
+      modelId: draftModel,
+    })
     onOpenChange(false)
   }
 
@@ -131,11 +147,48 @@ export function ModelSelectDialog({
             </Dialog.Close>
           </div>
 
-          {instances.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {t("model.no_provider")}
-            </p>
-          ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                {t("model.runtime.label")}
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-lg border px-2 py-1.5 text-sm transition-colors",
+                    draftAgentKind === "native" ? "border-ring bg-muted" : "border-input",
+                  )}
+                  onClick={() => setDraftAgentKind("native")}
+                >
+                  {t("model.runtime.native")}
+                </button>
+                {acpAgents.filter((agent) => agent.enabled).map((agent) => (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    disabled={!agent.available}
+                    title={agent.available ? agent.name : agent.unavailable_reason}
+                    className={cn(
+                      "rounded-lg border px-2 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                      draftAgentKind === "acp" && draftACPAgentId === agent.id
+                        ? "border-ring bg-muted"
+                        : "border-input",
+                    )}
+                    onClick={() => {
+                      setDraftAgentKind("acp")
+                      setDraftACPAgentId(agent.id)
+                    }}
+                  >
+                    {agent.name}
+                    {!agent.available && agent.unavailable_reason ? ` — ${agent.unavailable_reason}` : ""}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {instances.length === 0 && draftAgentKind === "native" && (
+              <p className="text-sm text-muted-foreground">{t("model.no_provider")}</p>
+            )}
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
@@ -143,6 +196,7 @@ export function ModelSelectDialog({
                 </label>
                 <select
                   value={draftInstanceId}
+                  disabled={draftAgentKind === "acp"}
                   onChange={(e) => handleInstanceChange(e.target.value)}
                   className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
                 >
@@ -161,7 +215,7 @@ export function ModelSelectDialog({
                 <select
                   value={draftModel}
                   onChange={(e) => setDraftModel(e.target.value)}
-                  disabled={!draftInstanceId || models.length === 0}
+                  disabled={draftAgentKind === "acp" || !draftInstanceId || models.length === 0}
                   className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring disabled:opacity-50"
                 >
                   <option value="">{t("model.select_model")}</option>
@@ -171,9 +225,12 @@ export function ModelSelectDialog({
                     </option>
                   ))}
                 </select>
+                {draftAgentKind === "acp" && (
+                  <p className="mt-1 text-xs text-muted-foreground">{t("model.runtime.agent_selects_model")}</p>
+                )}
               </div>
 
-              {recentModels.length > 0 && (
+              {draftAgentKind === "native" && recentModels.length > 0 && (
                 <div>
                   <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                     <Clock className="size-3" />
@@ -200,14 +257,18 @@ export function ModelSelectDialog({
                 </div>
               )}
             </div>
-          )}
+          </div>
 
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               {t("common.cancel")}
             </Button>
             <Button
-              disabled={!draftInstanceId || !draftModel}
+              disabled={
+                draftAgentKind === "native"
+                  ? !draftInstanceId || !draftModel
+                  : !draftACPAgentId
+              }
               onClick={handleConfirm}
             >
               {t("common.confirm")}

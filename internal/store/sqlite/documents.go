@@ -50,27 +50,6 @@ const docSelect = `
 	COALESCE(d.parser, ''), COALESCE(d.content_hash, ''), COALESCE(d.stale_since, ''),
 	COALESCE(d.highlights, '[]'), COALESCE(d.created_at, ''), COALESCE(d.updated_at, '')`
 
-// scanFullDoc scans all document columns into a Document, parsing tags from JSON.
-func scanFullDoc(scanner interface{ Scan(...interface{}) error }, doc *Document) error {
-	var tagsStr string
-	err := scanner.Scan(
-		&doc.ID, &doc.UserID, &doc.Filename, &doc.Title, &doc.Path,
-		&doc.RelativePath, &doc.SourceKind, &doc.FileType, &doc.FileSize,
-		&doc.DocumentNumber, &doc.Status, &doc.PageCount, &doc.Content,
-		&tagsStr, &doc.Date, &doc.Metadata, &doc.ErrorMessage, &doc.Version,
-		&doc.Parser, &doc.ContentHash, &doc.StaleSince, &doc.Highlights,
-		&doc.CreatedAt, &doc.UpdatedAt,
-	)
-	if err != nil {
-		return err
-	}
-	if tagsStr != "" && tagsStr != "[]" {
-		json.Unmarshal([]byte(tagsStr), &doc.Tags)
-	}
-	return nil
-}
-
-// CreateDocument inserts a new document.
 func (d *DB) CreateDocument(doc *Document) error {
 	id := uuid.New().String()
 	if doc.ID != "" {

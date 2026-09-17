@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +31,129 @@ func setupSessionRoutes(api *API, r chi.Router) {
 		r.Get("/{id}/references", api.ListIngestSessionReferences)
 		r.Post("/{id}/archive", api.ArchiveIngestSession)
 	})
+}
+
+func seedACPTestAgent(t *testing.T, api *API, id, command string, enabled bool) string {
+	t.Helper()
+	raw := `{"version":1,"agents":{"` + id + `":{"id":"` + id + `","name":"Test Agent","enabled":` + fmt.Sprintf("%t", enabled) + `,"command":"` + command + `"}},"defaults":{"readonly_only":true,"on_unavailable":"error"}}`
+	if err := api.db.SetConfig("acp_agents_json", raw); err != nil {
+		t.Fatalf("SetConfig acp_agents_json: %v", err)
+	}
+	return raw
+}
+
+func TestCreateIngestSessionInheritsDefaultACP(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+	seedACPTestAgent(t, api, "x", "echo", true)
+	_ = api.db.SetConfig("default_agent_kind", "acp")
+	_ = api.db.SetConfig("default_acp_agent_id", "x")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", strings.NewReader(`{"title":"ACP"}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp sessionResponse
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Session.AgentKind != "acp" || resp.Session.ACPAgentID != "x" {
+		t.Fatalf("session runtime = %+v", resp.Session)
+	}
+}
+
+func TestCreateIngestSessionExplicitACP(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+	seedACPTestAgent(t, api, "x", "echo", true)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions", strings.NewReader(`{"title":"ACP","agent_kind":"acp","acp_agent_id":"x"}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), `"agent_kind":"acp"`) {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestPatchIngestSessionAgent(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+	seedACPTestAgent(t, api, "x", "echo", true)
+	session := &sqlite.IngestSession{Title: "native"}
+	if err := api.db.CreateIngestSession(session); err != nil {
+		t.Fatalf("CreateIngestSession: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+session.ID, strings.NewReader(`{"agent_kind":"acp","acp_agent_id":"x"}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	got, _ := api.db.GetIngestSession(session.ID)
+	if got.AgentKind != "acp" || got.ACPAgentID != "x" {
+		t.Fatalf("runtime = %+v", got)
+	}
+	defaultKind, _ := api.db.GetConfig("default_agent_kind")
+	defaultID, _ := api.db.GetConfig("default_acp_agent_id")
+	if defaultKind != "acp" || defaultID != "x" {
+		t.Fatalf("defaults = (%q,%q)", defaultKind, defaultID)
+	}
+}
+
+func TestPatchIngestSessionAgentValidationAndConflicts(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+	seedACPTestAgent(t, api, "x", "echo", true)
+	session := &sqlite.IngestSession{Title: "native"}
+	if err := api.db.CreateIngestSession(session); err != nil {
+		t.Fatalf("CreateIngestSession: %v", err)
+	}
+	for _, body := range []string{
+		`{"agent_kind":"bogus"}`,
+		`{"agent_kind":"acp"}`,
+		`{"agent_kind":"acp","acp_agent_id":"missing"}`,
+	} {
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+session.ID, strings.NewReader(body))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s status=%d response=%s", body, w.Code, w.Body.String())
+		}
+	}
+	streaming := &sqlite.IngestSessionMessage{SessionID: session.ID, Role: "assistant", Content: "partial", StreamStatus: "streaming"}
+	if err := api.db.CreateIngestSessionMessage(streaming); err != nil {
+		t.Fatalf("CreateIngestSessionMessage: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+session.ID, strings.NewReader(`{"agent_kind":"acp","acp_agent_id":"x"}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("streaming switch status=%d body=%s", w.Code, w.Body.String())
+	}
+	_ = api.db.UpdateIngestSessionStatus(session.ID, "archived")
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/ingest/sessions/"+session.ID, strings.NewReader(`{"agent_kind":"native"}`))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("archived switch status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestACPSessionWithoutProviderDoesNotMentionProvider(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSessionRoutes(api, r)
+	seedACPTestAgent(t, api, "x", "definitely-missing-acp-cli", true)
+	session := &sqlite.IngestSession{Title: "acp", AgentKind: "acp", ACPAgentID: "x"}
+	if err := api.db.CreateIngestSession(session); err != nil {
+		t.Fatalf("CreateIngestSession: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/sessions/"+session.ID+"/messages?stream=1", strings.NewReader(`{"content":"hello"}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(strings.ToLower(w.Body.String()), "provider") || strings.Contains(w.Body.String(), "API Key") {
+		t.Fatalf("provider wording leaked into ACP error: %s", w.Body.String())
+	}
 }
 
 func TestIngestSessionCRUDAndArchive(t *testing.T) {

@@ -13,17 +13,17 @@ import (
 )
 
 type Pipeline struct {
-	workspace   string
-	targetDir   string // optional: when set, wiki/ reads and writes go to this directory instead of workspace
-	db          *sqlite.DB // database for local tool execution
-	llmClient   *llm.Client
-	lockMgr     *PageLockManager
-	recorder    JobRecorder
-	mcpExecutor *pipelineMCPExecutor
-	toolLoopCfg llm.ToolLoopConfig
-	docLang          string // "zh" or "en", controls generation language
-	rulesSupplement  string
-	forceOverwrite   bool
+	workspace       string
+	targetDir       string     // optional: when set, wiki/ reads and writes go to this directory instead of workspace
+	db              *sqlite.DB // database for local tool execution
+	llmClient       *llm.Client
+	lockMgr         *PageLockManager
+	recorder        JobRecorder
+	mcpExecutor     *pipelineMCPExecutor
+	toolLoopCfg     llm.ToolLoopConfig
+	docLang         string // "zh" or "en", controls generation language
+	rulesSupplement string
+	forceOverwrite  bool
 }
 
 type CacheEntry struct {
@@ -109,14 +109,6 @@ func (p *Pipeline) SetForceOverwrite(force bool) {
 // of the main workspace. This is used for worktree-based parallel execution.
 func (p *Pipeline) SetTargetDir(dir string) {
 	p.targetDir = dir
-}
-
-// wikiDir returns the directory where wiki files are read from and written to.
-func (p *Pipeline) wikiDir() string {
-	if p.targetDir != "" {
-		return filepath.Join(p.targetDir, "wiki")
-	}
-	return filepath.Join(p.workspace, "wiki")
 }
 
 // effectiveWorkspace returns the directory that should be used for file operations.

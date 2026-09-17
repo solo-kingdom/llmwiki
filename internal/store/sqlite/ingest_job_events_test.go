@@ -68,6 +68,9 @@ func TestRecoverStaleRunningJobsClearsErrors(t *testing.T) {
 
 func TestClaimNextIngestJobSerial(t *testing.T) {
 	db := helperDB(t)
+	if err := db.SetConfig("job_max_concurrent", "1"); err != nil {
+		t.Fatalf("SetConfig job_max_concurrent: %v", err)
+	}
 	for i := 0; i < 2; i++ {
 		j := &IngestJob{InputType: "text", SourcePath: "raw/sources/x.md", Status: "queued"}
 		if err := db.CreateIngestJob(j); err != nil {

@@ -360,7 +360,7 @@ describe("Sidebar navigation modes", () => {
 
     // Wait for re-render after mode switch
     await waitFor(() => {
-      expect(screen.getByText("来源摘要")).toBeInTheDocument()
+      expect(screen.getByText("4 pages")).toBeInTheDocument()
     })
   })
 })

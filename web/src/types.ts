@@ -102,6 +102,45 @@ export interface ModelInfo {
   attachment: boolean
 }
 
+export type AgentKind = "native" | "acp"
+
+export interface ACPAgentEnvVar {
+  name: string
+  present: boolean
+}
+
+export interface ACPAgent {
+  id: string
+  name: string
+  enabled: boolean
+  command: string
+  args: string[]
+  cwd_policy: string
+  permission: {
+    mode: string
+    allow_read: boolean
+    allow_search: boolean
+    allow_fetch: boolean
+    allow_write: boolean
+    allow_execute: boolean
+  }
+  env_passthrough: ACPAgentEnvVar[]
+  available: boolean
+  unavailable_reason?: string
+}
+
+export interface ACPAgentCheckResult {
+  id: string
+  name: string
+  enabled: boolean
+  status: "ok" | "error" | "disabled"
+  code?: string
+  message?: string
+  agent_name?: string
+  agent_version?: string
+  protocol_version?: number
+}
+
 export interface SessionListItem {
   id: string
   title: string
@@ -109,6 +148,8 @@ export interface SessionListItem {
   llm_instance_id: string
   llm_model: string
   mode?: string
+  agent_kind?: AgentKind
+  acp_agent_id?: string
   created_at: string
   updated_at: string
 }
@@ -138,6 +179,10 @@ export interface Settings {
   session_tool_loop_max_calls_per_round?: number
   backup_include_raw?: string | boolean
   vc_auto_push?: string | boolean
+  acp_agents_json?: string
+  default_agent_kind?: AgentKind
+  default_acp_agent_id?: string
+  acp_max_concurrent_agents?: string | number
 }
 
 export interface WorkspaceRuleFilesPreview {
@@ -298,6 +343,8 @@ export interface IngestSession {
   storage_path: string
   llm_instance_id: string
   llm_model: string
+  agent_kind?: AgentKind
+  acp_agent_id?: string
   created_at: string
   updated_at: string
 }
@@ -327,7 +374,15 @@ export interface IngestSessionMessage {
   /** Client-side tool activity during streaming. */
   tool_status?: string | null
   tool_reads?: string[]
+  thought_text?: string
+  plan_entries?: ACPPlanEntry[]
   created_at: string
+}
+
+export interface ACPPlanEntry {
+  content: string
+  priority?: string
+  status: string
 }
 
 export interface SessionWikiReference {

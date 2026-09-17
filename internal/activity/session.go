@@ -2,7 +2,6 @@ package activity
 
 import (
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -87,21 +86,6 @@ func sanitizeRemoteAddr(addr string) string {
 	return addr
 }
 
-// extractClientAgent extracts client identity from request headers.
-func extractClientAgent(r *http.Request) string {
-	if v := r.Header.Get("MCP-Client-Name"); v != "" {
-		return v
-	}
-	if v := r.Header.Get("User-Agent"); v != "" {
-		// Truncate long user agents
-		if len(v) > 100 {
-			return v[:100]
-		}
-		return v
-	}
-	return ""
-}
-
 // LogMCPRemoteToolCall records a structured audit log for a remote MCP tool call.
 // It ensures no sensitive data (tokens, full args, full results) is logged.
 func LogMCPRemoteToolCall(db *sqlite.DB, info MCPToolCallInfo) {
@@ -114,9 +98,9 @@ func LogMCPRemoteToolCall(db *sqlite.DB, info MCPToolCallInfo) {
 	}
 
 	details := map[string]interface{}{
-		"tool":         info.ToolName,
-		"remote_addr":  sanitizeRemoteAddr(info.RemoteAddr),
-		"duration_ms":  info.Duration.Milliseconds(),
+		"tool":        info.ToolName,
+		"remote_addr": sanitizeRemoteAddr(info.RemoteAddr),
+		"duration_ms": info.Duration.Milliseconds(),
 	}
 	if info.ClientAgent != "" {
 		details["client_agent"] = info.ClientAgent

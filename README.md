@@ -9,6 +9,7 @@ Single Go binary with embedded React web UI, REST API, and MCP (Model Context Pr
 - Go 1.21+
 - Node.js 18+ (for building the web UI)
 - **git CLI** (required for `llmwiki init`, which bootstraps version control for the workspace)
+- Optional: a local ACP-compatible agent CLI when using the external agent runtime
 
 ## Quick Start
 
@@ -131,6 +132,7 @@ See `docs/workspace-layout.md` for the canonical layout and common anti-patterns
 3. **Embedded Web UI** — React 19 + Vite + TypeScript, served with SPA fallback.
 4. **CLI** — For humans and scripts. Powered by cobra.
 5. **File Watcher** — Automatic index updates on file changes.
+6. **Agent Runtime** — Session chat runs through either the built-in native LLM path or an optional external ACP agent over stdio.
 
 **Data model**: Files are the source of truth. SQLite is an index only — deleting the database and running `reindex` fully rebuilds it. FTS5 provides full-text search with BM25 ranking (trigram tokenizer for Chinese/CJK substring matching).
 
@@ -154,6 +156,19 @@ External integrations (browser extension, API) may still use direct job APIs (`P
 - **Ingest job observability**: lifecycle states (`queued`, `running`, `succeeded`, `failed`, `cancelled`), retry and cancel controls
 
 All Web-submitted sources are persisted to workspace files under `raw/sources/web-ingest/` before enqueueing.
+
+## Agent Runtime (native / ACP)
+
+Session chat supports two runtimes:
+
+- `native` (default): the existing provider instance + model + built-in readonly tool loop.
+- `acp`: an external coding agent launched as a local subprocess and driven over Agent Client Protocol (ACP) v1.
+
+Runtime is stored per ingest session (`agent_kind`, `acp_agent_id`) and can be switched from the model-selection dialog without clearing provider/model fields. New sessions inherit `default_agent_kind` and `default_acp_agent_id`; both default to native/no agent. ACP unavailability never silently falls back to native.
+
+ACP processes are started lazily, reused per session, and terminated on session delete/archive or server shutdown. The default security posture is readonly and non-interactive: `fs/*` and `terminal/*` client capabilities are not exposed, cwd is constrained to the workspace, permissions are denied unless explicitly enabled, and the subprocess receives only declared `env_passthrough` variables plus `PATH`.
+
+See `docs/16-acp-agent-runtime.md` for configuration, credentials, permission, deployment, and troubleshooting details.
 
 ## MCP RPC-First Compatibility
 
@@ -221,6 +236,8 @@ Version info is injected via ldflags: `main.Version`, `main.Commit`, `main.Build
 | GET | `/api/v1/graph/stale` | Stale pages |
 | GET | `/api/v1/settings` | Get settings |
 | PUT | `/api/v1/settings` | Update settings |
+| GET | `/api/v1/acp-agents` | List configured ACP agents with redacted environment status |
+| POST | `/api/v1/acp-agents/check` | Probe saved or unsaved ACP agent configuration |
 | GET | `/api/v1/capabilities` | Server capabilities |
 | GET | `/api/v1/ingest/jobs` | List ingest jobs |
 | GET | `/api/v1/ingest/jobs/{id}` | Get ingest job detail |
@@ -244,6 +261,15 @@ LLM Wiki supports bilingual UI and document generation (Chinese / English).
 | `doc_language` | `zh` (default), `en` | Controls the output language for all wiki document generation |
 
 Both settings are configured via the **Settings** page in the web UI or via `PUT /api/v1/settings`.
+
+The same Settings page and API expose the ACP runtime keys:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `acp_agents_json` | empty config, version 1 | Generic ACP agent definitions (command, args, env variable names, cwd, timeouts, permission policy) |
+| `default_agent_kind` | `native` | Runtime used by new sessions |
+| `default_acp_agent_id` | empty | Last selected ACP agent for new sessions |
+| `acp_max_concurrent_agents` | `4` | Maximum concurrent live ACP subprocesses (1–16) |
 
 **Note:** `doc_language` affects all generation paths: file upload, text ingest, conversation ingest, session archive, and rollback regeneration.
 

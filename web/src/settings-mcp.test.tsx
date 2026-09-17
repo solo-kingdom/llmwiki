@@ -22,6 +22,9 @@ vi.mock("@/context/AppContext", () => ({
     deleteInstance: vi.fn(),
     loadModels: vi.fn(),
     currentModels: [],
+    acpAgents: [],
+    acpConfigError: null,
+    loadACPAgents: vi.fn(),
   }),
 }))
 
@@ -30,6 +33,7 @@ vi.mock("@/lib/api", () => ({
   checkAllProviderInstances: vi.fn().mockResolvedValue({ instances: [] }),
   checkProviderInstance: vi.fn(),
   checkMCPStatus: vi.fn().mockResolvedValue({ servers: [] }),
+  checkACPAgents: vi.fn().mockResolvedValue({ agents: [] }),
   getWorkspaceRuleFiles: vi.fn().mockResolvedValue({
     purpose_preview: "",
     rules_preview: "",

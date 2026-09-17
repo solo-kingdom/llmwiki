@@ -241,6 +241,44 @@ describe("updateIngestSession", () => {
       updateIngestSession("nonexistent", { instance_id: "inst-1" }),
     ).rejects.toThrow("session not found")
   })
+
+  it("sends agent runtime fields when switching to ACP", async () => {
+    const { updateIngestSession } = await import("@/lib/api")
+    mockFetch.mockReturnValue(mockResponse({ session: { id: "s-1" } }))
+    await updateIngestSession("s-1", { agent_kind: "acp", acp_agent_id: "codex" })
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/v1/ingest/sessions/s-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ agent_kind: "acp", acp_agent_id: "codex" }),
+      }),
+    )
+  })
+})
+
+describe("ACP agent APIs", () => {
+  it("calls GET /api/v1/acp-agents", async () => {
+    const { listACPAgents } = await import("@/lib/api")
+    mockFetch.mockReturnValue(mockResponse({ agents: [] }))
+    await listACPAgents()
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/v1/acp-agents",
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    )
+  })
+
+  it("calls POST /api/v1/acp-agents/check with unsaved JSON", async () => {
+    const { checkACPAgents } = await import("@/lib/api")
+    mockFetch.mockReturnValue(mockResponse({ agents: [] }))
+    await checkACPAgents('{"version":1}')
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/v1/acp-agents/check",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ acp_agents_json: '{"version":1}' }),
+      }),
+    )
+  })
 })
 
 describe("deleteIngestSession", () => {

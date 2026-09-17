@@ -15,7 +15,7 @@ function detectFormats(text: string): { formats: string[]; speakers: string[] } 
   }
 
   // SRT subtitle detection: number line followed by timestamp
-  if (/^\d+\s*\n\d{2}:\d{2}[:-]\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}/m.test(text)) {
+  if (/^\d+\s*\n\d{2}:\d{2}[:-]\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}/m.test(text)) {
     formats.push("SRT subtitles")
   }
 

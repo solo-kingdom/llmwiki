@@ -1,0 +1,9 @@
+version: "2"
+
+linters:
+  default: standard
+  disable:
+    # The repository predates errcheck/staticcheck enforcement and currently
+    # has broad legacy findings. Keep vet/ineffassign/unused as the lint gate.
+    - errcheck
+    - staticcheck

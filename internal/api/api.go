@@ -2,11 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/solo-kingdom/llmwiki/internal/acp"
+	"github.com/solo-kingdom/llmwiki/internal/agentruntime"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
@@ -19,6 +22,7 @@ type API struct {
 	lockMgr           *ingest.PageLockManager
 	indexer           *engine.WorkspaceFileIndexer
 	publicWikiEnabled bool
+	acpMgr            *acp.Manager
 }
 
 func New(db *sqlite.DB) *API {
@@ -47,6 +51,31 @@ func (a *API) SetFileIndexer(indexer *engine.WorkspaceFileIndexer) {
 	a.indexer = indexer
 }
 
+func (a *API) SetACPManager(mgr *acp.Manager) {
+	a.acpMgr = mgr
+}
+
+func (a *API) sessionAgentRuntime(session *sqlite.IngestSession) (agentruntime.Runtime, error) {
+	return agentruntime.Resolve(a.db, a.workspace, a.acpMgr, session)
+}
+
+func runtimeErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, agentruntime.ErrNoProviderInstance):
+		return "请先选择 Provider 实例和 Model"
+	case errors.Is(err, agentruntime.ErrNoACPAgent):
+		return "请先在 Settings 配置并选择 ACP Agent"
+	case errors.Is(err, agentruntime.ErrACPAgentDisabled):
+		return "该 ACP Agent 已禁用"
+	case errors.Is(err, agentruntime.ErrACPCLINotFound):
+		return "ACP Agent 命令未找到，请确认已安装并在 PATH 中"
+	case errors.Is(err, agentruntime.ErrACPConfigInvalid):
+		return err.Error()
+	default:
+		return err.Error()
+	}
+}
+
 func (a *API) indexDocumentRelPath(relPath string) {
 	if a.indexer == nil || relPath == "" {
 		return
@@ -63,26 +92,6 @@ func (a *API) indexDocumentContent(docID, content string) {
 	if err := a.indexer.IndexDocumentContent(docID, content); err != nil {
 		log.Printf("api: index document %s: %v", docID, err)
 	}
-}
-
-// sessionLLMClient creates an LLM client for the given session.
-// It reads instance/model from the session, falls back to global defaults,
-// then reads API key from provider_instances table.
-func (a *API) sessionLLMClient(session *sqlite.IngestSession) (*llm.Client, string, string) {
-	instanceID := session.LLMInstanceID
-	model := session.LLMModel
-
-	if instanceID == "" {
-		instanceID, _ = a.db.GetConfig("last_instance_id")
-	}
-	if model == "" {
-		model, _ = a.db.GetConfig("last_model")
-	}
-	if instanceID == "" || model == "" {
-		return nil, "", ""
-	}
-
-	return a.instanceLLMClient(instanceID, model)
 }
 
 // instanceLLMClient creates an LLM client for a given provider instance and model.
@@ -124,13 +133,3 @@ func getIntQuery(r *http.Request, key string, defaultVal int) int {
 	}
 	return n
 }
-
-// truncateDebugString truncates a string to maxBytes for debug payload storage.
-func truncateDebugString(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
-	}
-	return s[:maxBytes] + "…(truncated)"
-}
-
-

@@ -27,6 +27,7 @@ export function SessionControls() {
     activeSessionId,
     sessionBusy,
     instances,
+    acpAgents,
     settings,
     sessionMode,
     createSession,
@@ -35,6 +36,7 @@ export function SessionControls() {
     listSessions,
     loadInstances,
     loadSettings,
+    loadACPAgents,
     switchSessionMode,
   } = useApp()
 
@@ -46,7 +48,8 @@ export function SessionControls() {
     void listSessions()
     void loadInstances()
     void loadSettings()
-  }, [listSessions, loadInstances, loadSettings])
+    void loadACPAgents()
+  }, [listSessions, loadInstances, loadSettings, loadACPAgents])
 
   const activeSessions = sessions.filter((s) => s.status === "active")
   const archivedSessions = sessions.filter((s) => s.status === "archived")
@@ -103,6 +106,7 @@ export function SessionControls() {
 
   const renderSessionRow = (s: SessionListItem, archived = false) => {
     const isActive = s.id === activeSessionId
+    const acpAgent = acpAgents.find((agent) => agent.id === s.acp_agent_id)
     const content = (
       <>
         <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -111,12 +115,16 @@ export function SessionControls() {
             {sessionLabel(s.title, t("common.untitled"))}
           </span>
         </div>
-        {(s.llm_instance_id || s.llm_model) && (
+        {s.agent_kind === "acp" ? (
+          <p className="mt-1 truncate pl-5.5 text-xs text-muted-foreground">
+            ACP / {acpAgent?.name ?? s.acp_agent_id}
+          </p>
+        ) : (s.llm_instance_id || s.llm_model) ? (
           <p className="mt-1 truncate pl-5.5 text-xs text-muted-foreground">
             {getInstanceName(s.llm_instance_id)}
             {s.llm_model ? ` / ${s.llm_model}` : ""}
           </p>
-        )}
+        ) : null}
       </>
     )
 

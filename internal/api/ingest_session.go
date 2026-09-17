@@ -3,28 +3,25 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/solo-kingdom/llmwiki/internal/acp"
 	"github.com/solo-kingdom/llmwiki/internal/activity"
+	"github.com/solo-kingdom/llmwiki/internal/agentruntime"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	"github.com/solo-kingdom/llmwiki/internal/mcp"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
-type createSessionRequest struct {
-	Title string `json:"title"`
-}
-
 type appendMessageRequest struct {
-	Content  string                `json:"content"`
+	Content  string                  `json:"content"`
 	WikiRefs []ingest.WikiRefRequest `json:"wiki_refs"`
 }
 
@@ -63,6 +60,8 @@ func (a *API) CreateIngestSession(w http.ResponseWriter, r *http.Request) {
 		InstanceID string `json:"instance_id"`
 		Model      string `json:"model"`
 		Mode       string `json:"mode"`
+		AgentKind  string `json:"agent_kind"`
+		ACPAgentID string `json:"acp_agent_id"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -92,12 +91,29 @@ func (a *API) CreateIngestSession(w http.ResponseWriter, r *http.Request) {
 	if mode == "" {
 		mode = "ingest"
 	}
+	agentKind := req.AgentKind
+	if agentKind == "" {
+		agentKind, _ = a.db.GetConfig("default_agent_kind")
+	}
+	if agentKind == "" {
+		agentKind = agentruntime.KindNative
+	}
+	acpAgentID := req.ACPAgentID
+	if acpAgentID == "" && agentKind == agentruntime.KindACP {
+		acpAgentID, _ = a.db.GetConfig("default_acp_agent_id")
+	}
+	if err := a.validateIngestSessionAgent(agentKind, acpAgentID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	session := &sqlite.IngestSession{
 		Title:         title,
 		Status:        "active",
 		LLMInstanceID: instanceID,
 		LLMModel:      model,
 		Mode:          mode,
+		AgentKind:     agentKind,
+		ACPAgentID:    acpAgentID,
 	}
 	if err := a.db.CreateIngestSession(session); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -112,6 +128,35 @@ func (a *API) CreateIngestSession(w http.ResponseWriter, r *http.Request) {
 	_ = a.db.UpdateIngestSessionStoragePath(session.ID, rel)
 	_ = a.db.UpdateIngestSessionTitle(session.ID, session.Title)
 	writeJSON(w, http.StatusCreated, sessionResponse{Session: session})
+}
+
+func (a *API) validateIngestSessionAgent(kind, acpAgentID string) error {
+	switch kind {
+	case agentruntime.KindNative:
+		return nil
+	case agentruntime.KindACP:
+		if strings.TrimSpace(acpAgentID) == "" {
+			return fmt.Errorf("请先在 Settings 配置并选择 ACP Agent")
+		}
+		raw, err := a.db.GetConfig("acp_agents_json")
+		if err != nil {
+			return err
+		}
+		cfg, err := acp.ParseConfig(raw)
+		if err != nil {
+			return err
+		}
+		agent, ok := cfg.Agent(acpAgentID)
+		if !ok {
+			return fmt.Errorf("ACP Agent %q 不存在", acpAgentID)
+		}
+		if !agent.Enabled {
+			return fmt.Errorf("该 ACP Agent 已禁用")
+		}
+		return nil
+	default:
+		return fmt.Errorf("agent_kind must be native or acp")
+	}
 }
 
 func (a *API) GetIngestSession(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +314,7 @@ func (a *API) RetryIngestSessionMessage(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	a.streamAssistantReply(w, r, session, filtered, llmUserContent, userMsg.Content, wikiRefs, assistantMsg, nil)
+	a.streamAssistantReply(w, r, session, nil, filtered, llmUserContent, userMsg.Content, wikiRefs, assistantMsg, nil)
 }
 
 func (a *API) PatchIngestSessionMessage(w http.ResponseWriter, r *http.Request) {
@@ -328,16 +373,17 @@ func (a *API) ListIngestSessionReferences(w http.ResponseWriter, r *http.Request
 }
 
 func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session *sqlite.IngestSession, userContent string, wikiRefs []ingest.WikiRefInput) {
-	llmClient, instanceID, model := a.sessionLLMClient(session)
-	if llmClient == nil {
-		if instanceID == "" || model == "" {
-			writeError(w, http.StatusBadRequest, "请先选择 Provider 实例和 Model")
-		} else {
-			writeError(w, http.StatusBadRequest, "Provider 实例不存在或未配置 API Key")
-		}
+	runtime, err := a.sessionAgentRuntime(session)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, runtimeErrorMessage(err))
 		activity.LogSession(a.db, "stream_error", session.ID,
-			"LLM 客户端初始化失败", "failure", "api",
-			map[string]interface{}{"instance_id": instanceID, "model": model})
+			"Agent runtime 初始化失败", "failure", "api",
+			map[string]interface{}{"agent_kind": session.AgentKind, "acp_agent_id": session.ACPAgentID, "error": err.Error()})
+		return
+	}
+	if session.AgentKind == agentruntime.KindACP && a.acpMgr != nil && !a.acpMgr.HasCapacity(session.ID) {
+		w.Header().Set("Retry-After", "5")
+		writeError(w, http.StatusServiceUnavailable, "ACP agent concurrency limit reached")
 		return
 	}
 
@@ -383,7 +429,7 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 
-	a.streamAssistantReply(w, r, session, history, llmUserContent, userContent, wikiRefs, assistantMsg, userMsg)
+	a.streamAssistantReply(w, r, session, runtime, history, llmUserContent, userContent, wikiRefs, assistantMsg, userMsg)
 }
 
 func (a *API) buildLLMUserContent(_ context.Context, userText string, wikiRefs []ingest.WikiRefInput) (string, error) {
@@ -398,19 +444,11 @@ func (a *API) buildLLMUserContent(_ context.Context, userText string, wikiRefs [
 	return ingest.InjectWikiRefsIntoUserContent(docLang, wikiRefs, bodies, userText), nil
 }
 
-func (a *API) sessionChatRouter() *mcp.Router {
-	raw, _ := a.db.GetConfig("mcp_servers_json")
-	reg, err := mcp.NewRegistry(raw)
-	if err != nil {
-		return nil
-	}
-	return mcp.NewRouter(reg, nil)
-}
-
 func (a *API) streamAssistantReply(
 	w http.ResponseWriter,
 	r *http.Request,
 	session *sqlite.IngestSession,
+	runtime agentruntime.Runtime,
 	history []sqlite.IngestSessionMessage,
 	llmUserContent string,
 	displayUserContent string,
@@ -418,17 +456,16 @@ func (a *API) streamAssistantReply(
 	assistantMsg *sqlite.IngestSessionMessage,
 	userMsg *sqlite.IngestSessionMessage,
 ) {
-	client, instanceID, model := a.sessionLLMClient(session)
-	if client == nil {
-		if instanceID == "" || model == "" {
-			writeError(w, http.StatusBadRequest, "请先选择 Provider 实例和 Model")
-		} else {
-			writeError(w, http.StatusBadRequest, "Provider 实例不存在或未配置 API Key")
+	if runtime == nil {
+		var err error
+		runtime, err = a.sessionAgentRuntime(session)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, runtimeErrorMessage(err))
+			activity.LogSession(a.db, "stream_error", session.ID,
+				"Agent runtime 初始化失败", "failure", "api",
+				map[string]interface{}{"agent_kind": session.AgentKind, "acp_agent_id": session.ACPAgentID, "error": err.Error()})
+			return
 		}
-		activity.LogSession(a.db, "stream_error", session.ID,
-			"LLM 客户端初始化失败", "failure", "api",
-			map[string]interface{}{"instance_id": instanceID, "model": model})
-		return
 	}
 
 	flusher, ok := w.(http.Flusher)
@@ -452,209 +489,63 @@ func (a *API) streamAssistantReply(
 	}
 	sendEvent("assistant_start", map[string]string{"id": assistantMsg.ID})
 
-	docLang := ResolveDocLanguage(a.db)
-	resolver := &ingest.ContextResolver{DB: a.db, Workspace: a.workspace}
-	subset, err := resolver.ResolveRelatedSubset(displayUserContent, wikiRefs)
-	if err != nil {
-		log.Printf("[ingest-session] subset resolve failed session=%s: %v", session.ID, err)
-	}
-	subsetSection := ingest.FormatRelatedSubsetSection(docLang, subset)
-
-	step := ingest.PromptStepForMode(session.Mode)
-	msgs := ingest.AssembleIngestChatMessages(
-		history, llmUserContent, docLang, a.workspace, ingest.ResolveRulesSupplement(a.db), subsetSection, step,
-	)
-	ctx := r.Context()
-
-	// Create debug recorder for this assistant message
 	recorder := ingest.NewSessionMessageRecorder(a.db, assistantMsg.ID)
-
-	// Record system prompt composition
-	if len(msgs) > 0 {
-		systemPrompt := msgs[0].Content
-		recorder.Record("compose", "system_prompt", "System prompt assembled", map[string]any{
-			"system_prompt": truncateDebugString(systemPrompt, 32*1024),
-			"total_chars":   len(systemPrompt),
-			"message_count": len(msgs),
-			"model":         model,
-			"instance_id":   instanceID,
-		})
-		recorder.Record("compose", "messages_snapshot", "Messages assembled for LLM", map[string]any{
-			"total_messages":     len(msgs),
-			"user_content_chars": len(llmUserContent),
-			"wiki_refs_count":    len(wikiRefs),
-			"related_subset":     subsetSection != "",
-		})
+	sink := newSSEEventSink(sendEvent, a.db, assistantMsg.ID, recorder)
+	req := agentruntime.PromptRequest{
+		SessionID:          session.ID,
+		Mode:               session.Mode,
+		DocLang:            ResolveDocLanguage(a.db),
+		UserContent:        llmUserContent,
+		DisplayUserContent: displayUserContent,
+		History:            history,
+		WikiRefs:           wikiRefs,
+		Recorder:           recorder,
 	}
+	result, promptErr := runtime.Prompt(r.Context(), req, sink)
+	content := sink.Flush()
 
-	router := a.sessionChatRouter()
-	onToolRead := func(documentID, relativePath, title string) {
-		ingest.RecordToolReadReference(a.db, session.ID, documentID, relativePath, title)
-	}
-	executor := ingest.NewChatWikiExecutor(a.workspace, a.db, session.ID, router, session.Mode, onToolRead)
-	tools, _ := executor.ListTools(ctx)
-
-	toolHandler := func(phase, toolName, detail string) {
-		eventType := "tool_done"
-		if phase == "start" {
-			eventType = "tool_start"
-		}
-		sendEvent(eventType, map[string]string{
-			"tool":   toolName,
-			"detail": detail,
-		})
-	}
-
-	cfg := mcp.ToolLoopConfigForModeFromStore(session.Mode, a.db)
-	temp := mcp.ToolTemperatureForMode(session.Mode)
-	tokens := mcp.ToolMaxTokensForMode(session.Mode)
-	finalText, err := ingest.RunSessionChatToolLoop(ctx, client, executor, msgs, tools, temp, tokens, cfg, toolHandler, session.Mode, recorder)
-	if err != nil {
-		log.Printf(
-			"[ingest-session] tool loop failed session=%s instance=%s model=%s: %v; falling back to stream",
-			session.ID, instanceID, model, err,
-		)
-		sendEvent("warning", map[string]string{
-			"code":    "tool_loop_failed",
-			"message": err.Error(),
-		})
-		recorder.Record("fallback", "tool_loop_failed", "Tool loop failed, falling back to direct stream", map[string]any{
-			"error": err.Error(),
-		})
-		cleaned := ingest.StripToolMessages(msgs)
-		a.streamSessionChatDirect(ctx, w, sendEvent, client, session, instanceID, model, cleaned, assistantMsg)
-		return
-	}
-
-	streamStatus := "complete"
-	if strings.TrimSpace(finalText) == "" {
-		streamStatus = "failed"
-		lastErr := "LLM returned an empty response"
-		_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, lastErr, streamStatus)
-		assistantMsg.Content = lastErr
-		assistantMsg.StreamStatus = streamStatus
-		sendEvent("error", map[string]string{"message": lastErr})
-		sendEvent("done", assistantMsg)
-		return
-	}
-
-	// Emit final text in chunks for progressive UI rendering.
-	chunkSize := 48
-	runes := []rune(finalText)
-	for i := 0; i < len(runes); i += chunkSize {
-		end := i + chunkSize
-		if end > len(runes) {
-			end = len(runes)
-		}
-		part := string(runes[i:end])
-		sendEvent("token", map[string]string{"content": part})
-		if i == 0 {
-			_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, part, "streaming")
-		} else {
-			cur, _ := a.db.GetIngestSessionMessage(assistantMsg.ID)
-			if cur != nil {
-				_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, cur.Content+part, "streaming")
-			}
-		}
-	}
-	_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, finalText, streamStatus)
-	assistantMsg.Content = finalText
-	assistantMsg.StreamStatus = streamStatus
-	sendEvent("done", assistantMsg)
-}
-
-func (a *API) streamSessionChatDirect(
-	ctx context.Context,
-	w http.ResponseWriter,
-	sendEvent func(string, interface{}),
-	client *llm.Client,
-	session *sqlite.IngestSession,
-	instanceID, model string,
-	msgs []llm.Message,
-	assistantMsg *sqlite.IngestSessionMessage,
-) {
-	ch, err := client.StreamChat(ctx, msgs, 0.7, 2048)
-	if err != nil {
-		log.Printf(
-			"[ingest-session] stream start failed session=%s instance=%s model=%s: %v",
-			session.ID, instanceID, model, err,
-		)
-		_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, err.Error(), "failed")
-		assistantMsg.Content = err.Error()
-		assistantMsg.StreamStatus = "failed"
-		sendEvent("error", map[string]string{"message": err.Error()})
-		sendEvent("done", assistantMsg)
-		activity.LogSession(a.db, "stream_error", session.ID,
-			err.Error(), "failure", "api",
-			map[string]interface{}{"instance_id": instanceID, "model": model})
-		return
-	}
-
-	var builder strings.Builder
-	streamStatus := "complete"
-	var lastErr string
-	lastFlush := time.Now()
-	lastFlushLen := 0
-	flushStreaming := func(force bool) {
-		curLen := builder.Len()
-		if !force && curLen == lastFlushLen {
-			return
-		}
-		if !force && curLen-lastFlushLen < 32 && time.Since(lastFlush) < 300*time.Millisecond {
-			return
-		}
-		_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, builder.String(), "streaming")
-		lastFlush = time.Now()
-		lastFlushLen = curLen
-	}
-	for ev := range ch {
-		if ctx.Err() != nil {
+	streamStatus := streamStatusForStopReason(result.StopReason)
+	if promptErr != nil {
+		if r.Context().Err() != nil || errors.Is(promptErr, context.Canceled) {
 			streamStatus = "incomplete"
-			break
-		}
-		switch ev.Type {
-		case "token":
-			builder.WriteString(ev.Content)
-			sendEvent("token", map[string]string{"content": ev.Content})
-			flushStreaming(false)
-		case "error":
+		} else {
 			streamStatus = "failed"
-			if ev.Error != nil {
-				lastErr = ev.Error.Error()
-				sendEvent("error", map[string]string{"message": lastErr})
-			} else {
-				lastErr = "LLM stream failed"
-				sendEvent("error", map[string]string{"message": lastErr})
-			}
 		}
 	}
-	if ctx.Err() != nil && streamStatus == "complete" {
-		streamStatus = "incomplete"
-	}
-	if streamStatus == "complete" && builder.Len() == 0 {
+	if strings.TrimSpace(content) == "" && streamStatus != "incomplete" {
 		streamStatus = "failed"
-		lastErr = "LLM returned an empty response"
-		sendEvent("error", map[string]string{"message": lastErr})
+		content = "LLM returned an empty response"
 	}
-	content := builder.String()
-	if content == "" && lastErr != "" &&
-		(streamStatus == "failed" || streamStatus == "incomplete") {
-		content = lastErr
+	if streamStatus == "failed" && promptErr != nil && strings.TrimSpace(result.Text) == "" {
+		content = promptErr.Error()
 	}
+
 	_ = a.db.UpdateIngestSessionMessageContent(assistantMsg.ID, content, streamStatus)
 	assistantMsg.Content = content
 	assistantMsg.StreamStatus = streamStatus
-	if streamStatus == "failed" || streamStatus == "incomplete" {
+	if promptErr != nil {
 		activity.LogSession(a.db, "stream_error", session.ID,
-			lastErr, "failure", "api",
-			map[string]interface{}{
-				"stream_status": streamStatus,
-				"instance_id":   instanceID,
-				"model":         model,
+			promptErr.Error(), "failure", "api", map[string]interface{}{
+				"agent_kind": session.AgentKind, "stop_reason": result.StopReason, "stream_status": streamStatus,
 			})
 	}
+	if promptErr != nil && r.Context().Err() == nil {
+		sendEvent("error", map[string]string{"message": promptErr.Error()})
+	}
 	sendEvent("done", assistantMsg)
-	_ = w
+}
+
+func streamStatusForStopReason(stopReason string) string {
+	switch stopReason {
+	case "end_turn", "max_tokens", "max_turn_requests":
+		return "complete"
+	case "cancelled":
+		return "incomplete"
+	case "refusal":
+		return "failed"
+	default:
+		return "failed"
+	}
 }
 
 func sessionHasStreamingAssistant(msgs []sqlite.IngestSessionMessage) bool {
@@ -1033,6 +924,9 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 			"plan_job_id": planJob.ID,
 		},
 	})
+	if a.acpMgr != nil {
+		a.acpMgr.CloseSession(sessionID)
+	}
 	writeJSON(w, http.StatusCreated, archiveResponse{
 		ReviewID:   review.ID,
 		Status:     review.Status,
@@ -1091,14 +985,41 @@ func (a *API) UpdateIngestSessionHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		InstanceID string `json:"instance_id"`
-		Model      string `json:"model"`
-		Title      string `json:"title"`
-		Mode       string `json:"mode"`
+		InstanceID string  `json:"instance_id"`
+		Model      string  `json:"model"`
+		Title      string  `json:"title"`
+		Mode       string  `json:"mode"`
+		AgentKind  *string `json:"agent_kind"`
+		ACPAgentID *string `json:"acp_agent_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+
+	if req.AgentKind != nil {
+		if session.Status == "archived" {
+			writeError(w, http.StatusConflict, "archived session cannot switch agent runtime")
+			return
+		}
+		history, err := a.db.ListIngestSessionMessages(sessionID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if sessionHasStreamingAssistant(history) {
+			writeError(w, http.StatusConflict, "another message is still streaming")
+			return
+		}
+		kind := strings.TrimSpace(*req.AgentKind)
+		acpAgentID := session.ACPAgentID
+		if req.ACPAgentID != nil {
+			acpAgentID = strings.TrimSpace(*req.ACPAgentID)
+		}
+		if err := a.validateIngestSessionAgent(kind, acpAgentID); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	updated := false
@@ -1107,7 +1028,6 @@ func (a *API) UpdateIngestSessionHandler(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		// Also update last_used globally
 		if req.InstanceID != "" {
 			_ = a.db.SetConfig("last_instance_id", req.InstanceID)
 		}
@@ -1132,13 +1052,29 @@ func (a *API) UpdateIngestSessionHandler(w http.ResponseWriter, r *http.Request)
 		}
 		updated = true
 	}
+	if req.AgentKind != nil {
+		kind := strings.TrimSpace(*req.AgentKind)
+		acpAgentID := session.ACPAgentID
+		if req.ACPAgentID != nil {
+			acpAgentID = strings.TrimSpace(*req.ACPAgentID)
+		}
+		if kind == agentruntime.KindNative {
+			acpAgentID = ""
+		}
+		if err := a.db.UpdateIngestSessionAgent(sessionID, kind, acpAgentID); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		_ = a.db.SetConfig("default_agent_kind", kind)
+		_ = a.db.SetConfig("default_acp_agent_id", acpAgentID)
+		updated = true
+	}
 
 	if !updated {
 		writeError(w, http.StatusBadRequest, "no fields to update")
 		return
 	}
 
-	// Return updated session
 	session, _ = a.db.GetIngestSession(sessionID)
 	writeJSON(w, http.StatusOK, sessionResponse{Session: session})
 }
@@ -1156,6 +1092,9 @@ func (a *API) DeleteIngestSessionHandler(w http.ResponseWriter, r *http.Request)
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if a.acpMgr != nil {
+		a.acpMgr.CloseSession(sessionID)
 	}
 	if a.workspace != "" {
 		if err := ingest.RemoveSessionDir(a.workspace, sessionID); err != nil {

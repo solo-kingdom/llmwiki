@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { AppProvider } from "@/context/AppContext"
 import { IngestChat } from "@/components/IngestChat"
 import { WorkbenchContentShell } from "@/components/WorkbenchContentShell"
+import * as api from "@/lib/api"
 
 const mockWriteText = vi.fn().mockResolvedValue(undefined)
 
@@ -84,6 +85,9 @@ vi.mock("@/lib/api", () => ({
   uploadIngestJobs: vi.fn(),
   listProviders: vi.fn().mockResolvedValue([]),
   listProviderModels: vi.fn().mockResolvedValue([]),
+  listACPAgents: vi.fn().mockResolvedValue({ agents: [] }),
+  updateIngestSession: vi.fn().mockResolvedValue({ session: {} }),
+  updateLastModel: vi.fn().mockResolvedValue({ status: "ok" }),
 }))
 
 describe("IngestChat", () => {
@@ -1697,9 +1701,113 @@ describe("IngestChat", () => {
     fireEvent.click(screen.getByRole("button", { name: /^归档$/ }))
 
     // Confirm archive panel is open but no deep organize checkbox
-    await screen.findByText("确认归档")
+    await screen.findByRole("button", { name: "确认归档" })
     expect(
       screen.queryByText("深度整理：检测并合并内容重复页面"),
     ).not.toBeInTheDocument()
+  })
+})
+
+describe("IngestChat ACP runtime", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockWriteText.mockResolvedValue(true)
+    localStorage.clear()
+    localStorage.setItem("llmwiki.ingest.sessionId", "sess-1")
+    vi.mocked(api.listProviderInstances).mockResolvedValue({ instances: [] })
+    vi.mocked(api.getIngestSession).mockResolvedValue({
+      session: {
+        id: "sess-1",
+        title: "ACP session",
+        status: "active",
+        mode: "qa",
+        storage_path: "",
+        llm_instance_id: "",
+        llm_model: "",
+        agent_kind: "acp",
+        acp_agent_id: "agent-x",
+        created_at: "",
+        updated_at: "",
+      },
+    })
+    vi.mocked(api.listIngestSessions).mockResolvedValue({
+      sessions: [{
+        id: "sess-1",
+        title: "ACP session",
+        status: "active",
+        llm_instance_id: "",
+        llm_model: "",
+        agent_kind: "acp",
+        acp_agent_id: "agent-x",
+        created_at: "",
+        updated_at: "",
+      }],
+    })
+  })
+
+  it("enables input for an available ACP agent without provider instances", async () => {
+    vi.mocked(api.listACPAgents).mockResolvedValue({
+      agents: [{
+        id: "agent-x",
+        name: "Agent X",
+        enabled: true,
+        command: "agent-x",
+        args: [],
+        cwd_policy: "workspace",
+        permission: { mode: "auto", allow_read: true, allow_search: true, allow_fetch: false, allow_write: false, allow_execute: false },
+        env_passthrough: [],
+        available: true,
+      }],
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({ messages: [] })
+    render(<AppProvider><IngestChat /></AppProvider>)
+    const textarea = await screen.findByPlaceholderText(/输入消息/)
+    expect(textarea).not.toBeDisabled()
+    expect(screen.getByText("ACP")).toBeInTheDocument()
+    expect(screen.getByText("Agent X")).toBeInTheDocument()
+  })
+
+  it("disables input and explains when the ACP CLI is unavailable", async () => {
+    vi.mocked(api.listACPAgents).mockResolvedValue({
+      agents: [{
+        id: "agent-x",
+        name: "Agent X",
+        enabled: true,
+        command: "missing",
+        args: [],
+        cwd_policy: "workspace",
+        permission: { mode: "auto", allow_read: true, allow_search: true, allow_fetch: false, allow_write: false, allow_execute: false },
+        env_passthrough: [],
+        available: false,
+        unavailable_reason: "command missing",
+      }],
+    })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({ messages: [] })
+    render(<AppProvider><IngestChat /></AppProvider>)
+    const textarea = await screen.findByPlaceholderText(/命令未找到/)
+    expect(textarea).toBeDisabled()
+  })
+
+  it("renders thought and plan details", async () => {
+    vi.mocked(api.listACPAgents).mockResolvedValue({ agents: [] })
+    vi.mocked(api.listIngestSessionMessages).mockResolvedValue({
+      messages: [{
+        id: "msg-assistant",
+        session_id: "sess-1",
+        role: "assistant",
+        content: "answer",
+        message_type: "text",
+        attachment_id: "",
+        stream_status: "complete",
+        thought_text: "private reasoning",
+        plan_entries: [{ content: "Do work", status: "completed" }],
+        created_at: "2026-01-01T00:00:00Z",
+      }],
+    })
+    render(<AppProvider><IngestChat /></AppProvider>)
+    expect(await screen.findByText("思考过程")).toBeInTheDocument()
+    expect(screen.getByText("private reasoning")).toBeInTheDocument()
+    expect(screen.getByText("Agent 计划")).toBeInTheDocument()
+    expect(screen.getByText("Do work")).toBeInTheDocument()
   })
 })

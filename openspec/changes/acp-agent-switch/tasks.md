@@ -176,4 +176,4 @@
 - [x] 14.6 给出凭据注入约定：agent 所需 API key 通过 compose `env_file: /home/wii/.agent-deploy/lnv/llmwiki/.env.acp`（权限 600，不入任何 git 仓）注入 llmwiki 进程环境；`acp_agents_json` 里只出现 `env_passthrough` 变量名；明确 compose、仓库与 `acp_agents_json` 均不得出现明文密钥，`args` 里也不行
 - [x] 14.7 给出部署后验证清单：`curl -k https://llmwiki.lan/api/v1/health` 的 `mode.acp_enabled` 字段；`curl` `GET /api/v1/acp-agents` 检查 `available` 与 `env_passthrough[].present`；`POST /api/v1/acp-agents/check` 检查 `status/agent_version/protocol_version`；容器内 `docker exec lnv-llmwiki sh -c 'command -v <cli>'`
 - [x] 14.8 运行完整验证：`make lint`、`make test`、`cd web && npm run lint && npm test`、`make build`，全部通过
-- [ ] 14.9 手动端到端（本机 `make dev` + 一个真实 ACP agent CLI）：Settings 配置 agent → 检查连接 ok → 新建 session 切 ACP → 发消息看到 token/thought/tool 流 → 刷新页面历史与 debug 事件仍在 → 点 Stop 得到 `incomplete` → 归档进入 review → 切回 native 发消息正常 → 停服务后 `ps` 确认无残留 agent 进程
+- [x] 14.9 手动端到端（本机 `make dev` + 一个真实 ACP agent CLI）：Settings 配置 agent → 检查连接 ok → 新建 session 切 ACP → 发消息看到 token/thought/tool 流 → 刷新页面历史与 debug 事件仍在 → 点 Stop 得到 `incomplete` → 归档进入 review → 切回 native 发消息正常 → 停服务后 `ps` 确认无残留 agent 进程（含 detach 后代；见 implementation-report「定向修复」）

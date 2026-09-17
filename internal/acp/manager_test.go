@@ -2,14 +2,33 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 )
 
-func fakeAgentConfig(t *testing.T, behavior string) AgentConfig {
+func fakeAgentConfig(t *testing.T, behavior string, extraEnv ...string) AgentConfig {
 	t.Helper()
 	t.Setenv("FAKE_ACP_BEHAVIOR", behavior)
-	cfg, err := ParseConfig(`{"version":1,"agents":{"fake":{"id":"fake","name":"Fake","enabled":true,"command":"` + buildFakeAgent(t) + `","env_passthrough":["PATH","FAKE_ACP_BEHAVIOR"],"permission":{"mode":"auto"}}},"defaults":{"readonly_only":true,"on_unavailable":"error"}}`)
+	passthrough := append([]string{"PATH", "FAKE_ACP_BEHAVIOR"}, extraEnv...)
+	raw, err := json.Marshal(map[string]any{
+		"version": 1,
+		"agents": map[string]any{
+			"fake": map[string]any{
+				"id":              "fake",
+				"name":            "Fake",
+				"enabled":         true,
+				"command":         buildFakeAgent(t),
+				"env_passthrough": passthrough,
+				"permission":      map[string]any{"mode": "auto"},
+			},
+		},
+		"defaults": map[string]any{"readonly_only": true, "on_unavailable": "error"},
+	})
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	cfg, err := ParseConfig(string(raw))
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}

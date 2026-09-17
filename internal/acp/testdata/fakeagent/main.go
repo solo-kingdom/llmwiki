@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -35,6 +38,11 @@ type server struct {
 }
 
 func main() {
+	if os.Getenv("FAKE_ACP_DETACH_CHILD") != "" && os.Getenv("FAKE_ACP_DETACH_MODE") == "child" {
+		detachedChildMain()
+		return
+	}
+	spawnDetachedChild()
 	s := &server{pending: map[int64]chan rpcMessage{}, cancel: make(chan struct{})}
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -61,6 +69,44 @@ func main() {
 		default:
 			s.write(rpcMessage{JSONRPC: "2.0", ID: msg.ID, Error: &rpcError{Code: -32601, Message: "Method not found"}})
 		}
+	}
+}
+
+// spawnDetachedChild models an ACP agent launcher that creates a worker in a
+// brand-new session and process group. The worker deliberately escapes the
+// process group set up for the agent root, reproducing the orphan case:
+// a negative-PGID signal alone cannot reach it.
+func spawnDetachedChild() {
+	if os.Getenv("FAKE_ACP_DETACH_CHILD") == "" {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "detached child executable:", err)
+		os.Exit(2)
+	}
+	cmd := exec.Command(exe)
+	cmd.Env = append(os.Environ(), "FAKE_ACP_DETACH_MODE=child")
+	// Setsid before exec puts the worker in its own session and process
+	// group, so it is unreachable from the agent root's process group.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, "detached child start failed:", err)
+		os.Exit(2)
+	}
+	if path := os.Getenv("FAKE_ACP_DETACH_CHILD_PIDFILE"); path != "" {
+		if err := os.WriteFile(path, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, "detached child pidfile failed:", err)
+			os.Exit(2)
+		}
+	}
+}
+
+// detachedChildMain runs in the worker process. It never exits on its own
+// until killed, so the test can assert that cleanup reached it.
+func detachedChildMain() {
+	for {
+		time.Sleep(time.Hour)
 	}
 }
 

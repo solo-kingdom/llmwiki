@@ -2,17 +2,20 @@ package acp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 )
 
 const stderrTailLimit = 4 * 1024
+
+// terminateGrace is how long Terminate waits after SIGTERM before escalating
+// to SIGKILL. Tests override it via newTestProcess if needed; the value must
+// stay below the 3s grace promised by the ACP lifecycle spec.
+const terminateGrace = 3 * time.Second
 
 type stderrRing struct {
 	mu   sync.Mutex
@@ -45,6 +48,7 @@ type process struct {
 	waitErr       error
 	terminateOnce sync.Once
 	terminateErr  error
+	cleanup       *processCleanup
 }
 
 func spawn(ctx context.Context, cfg AgentConfig, cwd string) (*process, error) {
@@ -60,7 +64,7 @@ func spawn(ctx context.Context, cfg AgentConfig, cwd string) (*process, error) {
 	cmd := exec.Command(path, cfg.Args...)
 	cmd.Dir = cwd
 	cmd.Env = whitelistedEnv(cfg.EnvPassthrough)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = processSysProcAttr()
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -91,6 +95,7 @@ func spawn(ctx context.Context, cfg AgentConfig, cwd string) (*process, error) {
 		stderr:   &stderrRing{},
 		waitDone: make(chan struct{}),
 	}
+	p.cleanup = newProcessCleanup(cmd.Process.Pid)
 	go func() {
 		_, _ = io.Copy(p.stderr, stderrPipe)
 		_ = stderrPipe.Close()
@@ -151,26 +156,79 @@ func (p *process) StderrTail() string {
 	return p.stderr.String()
 }
 
+// Terminate stops the ACP agent and every process it started. It always runs
+// two phases: SIGTERM first, then SIGKILL after terminateGrace.
+//
+// The root process is started in its own process group, so a negative-PGID
+// signal reaches the direct agent and its ordinary descendants. Agents that
+// detach children with setsid / double fork escape that group; the
+// platform-specific cleanup snapshots those descendants while the parent
+// tree is still queryable and signals them individually.
 func (p *process) Terminate() error {
 	if p == nil || p.cmd == nil || p.cmd.Process == nil {
 		return nil
 	}
 	p.terminateOnce.Do(func() {
-		pgid := p.cmd.Process.Pid
-		if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
-			p.terminateErr = err
-		}
-		timer := time.NewTimer(3 * time.Second)
-		defer timer.Stop()
-		select {
-		case <-p.waitDone:
-		case <-timer.C:
-			if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-				p.terminateErr = err
-			}
-			<-p.waitDone
-		}
-		_ = p.closeStdin()
+		p.terminateErr = p.terminate()
 	})
 	return p.terminateErr
+}
+
+func (p *process) terminate() error {
+	pid := p.cmd.Process.Pid
+	if p.cleanup != nil {
+		p.cleanup.watch()
+	}
+	first := p.signalTargets(pid, signalTerm)
+	groupErr := signalProcessGroup(pid, signalTerm)
+
+	timer := time.NewTimer(terminateGrace)
+	defer timer.Stop()
+	select {
+	case <-p.waitDone:
+	case <-timer.C:
+	}
+
+	// Re-snapshot before the hard kill so agents that spawned detached
+	// children during the grace window are still caught. Once the root is
+	// gone its subtree is reparented and cannot be walked, so this is only
+	// possible while the root remains queryable.
+	second := p.signalTargets(pid, signalKill)
+	groupErr2 := signalProcessGroup(pid, signalKill)
+
+	_ = p.closeStdin()
+	<-p.waitDone
+
+	// Confirm the descendants we signalled are actually gone (pidfds, where
+	// available, cannot be confused by PID reuse).
+	if p.cleanup != nil {
+		p.cleanup.wait(2 * time.Second)
+		p.cleanup.cleanup()
+	}
+	return firstError(first, second, groupErr, groupErr2, p.terminateSignalError())
+}
+
+// signalTargets is implemented per platform. It returns the first unexpected
+// error while signalling the known descendants of pid with sig.
+func (p *process) signalTargets(pid int, sig processSignal) error {
+	if p == nil || p.cleanup == nil {
+		return nil
+	}
+	return p.cleanup.signal(pid, sig)
+}
+
+func (p *process) terminateSignalError() error {
+	if p == nil || p.cleanup == nil {
+		return nil
+	}
+	return p.cleanup.err()
+}
+
+func firstError(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

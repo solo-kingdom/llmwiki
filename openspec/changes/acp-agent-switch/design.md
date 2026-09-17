@@ -267,7 +267,7 @@ type Runtime interface {
 - **懒启动**：首次 `Prompt` 时 spawn，做 `initialize` → 校验 `protocolVersion == 1`（不等则关闭并报错"agent 要求 protocolVersion=N，llmwiki 当前实现 1"）→ `session/new{cwd, mcpServers: []}` → 缓存 `Conn{cmd, remoteSessionID, agentInfo, stderrRing}`。
 - **复用**：同 session 后续 turn 复用同一进程与同一 ACP `sessionId`，保留 agent 侧上下文。
 - **并发**：同 session 串行（沿用现有 `sessionHasStreamingAssistant` → HTTP 409）。不同 session 并行，上限 `app_config.acp_max_concurrent_agents`（默认 4，范围 1–16）；超限返回 HTTP 503 + `Retry-After: 5`，不排队（避免 SSE 长时间挂住）。
-- **进程组**：`SysProcAttr{Setpgid: true}`；终止时 `syscall.Kill(-pgid, SIGTERM)`，3s 后 `SIGKILL`。这是必需的：`npx`/`node` 这类启动器会 fork 子进程，只杀首进程会留孤儿。
+- **进程与后代清理**：`SysProcAttr{Setpgid: true}`；终止统一为 `SIGTERM` → 3s → `SIGKILL`。这是必需的：`npx`/`node` 这类启动器会 fork 子进程，只杀首进程会留孤儿。Linux 额外在根进程仍可查询时递归快照 `/proc/<pid>/task/<pid>/children`，对后代逐个补发信号，并用 pidfd/starttime 防止 PID 复用误杀；`setsid` / 新建进程组 / 双重 fork 后的后代因此也能被清理。非 Linux 保持负 PGID 两阶段语义。
 - **崩溃恢复**：stdout EOF 或进程退出 → 当前 turn `stream_status=failed`，把脱敏截断后的 stderr 尾部与 exit code 写 `phase=acp_process_exit`，SSE 发 `error`；从池中移除 `Conn`。同一 turn 内**最多自动重启 1 次**（仅当崩溃发生在收到任何 `agent_message_chunk` 之前，避免重复输出）；否则交给用户重试（现有 `POST /messages/{messageId}/retry` 已支持）。
 - **超时**：`init_timeout_ms` 覆盖 initialize+session/new；`prompt_timeout_ms` 覆盖单 turn；`idle_timeout_ms` 由"最近一次 `session/update` 时间"驱动的 timer 判定。任一超时先走取消序列，再按崩溃路径清理。
 - **取消**：HTTP request context 取消（用户点 Stop → `AbortController`）→ 发 `session/cancel` notification → 等 `session/prompt` 返回 `cancelled`，上限 5s → 超时则终止进程组。期间继续接收并持久化 `session/update`（协议要求 client 在 cancel 后仍接受 tool call 更新）。
@@ -362,7 +362,7 @@ func (d *DB) migrateSessionAgentRuntime() error // 幂等
 - **[外部 agent 行为不可控]** ACP agent 可能长时间静默、输出巨量 chunk、或请求未知权限 → `idle_timeout_ms` + `prompt_timeout_ms` 兜时长；`ingest.SanitizePayload` 的 32KB 截断 + `session_message_events` 的 per-message 保留上限（`GetSessionMsgEventsMaxCount`，默认 100）兜存储；未知 `kind` 默认拒绝兜权限。
 - **[凭据依赖部署方正确注入进程环境]** `env_passthrough` 只声明名字，值存不存在由部署方保证 → 名字在进程环境缺失时 llmwiki 直接跳过该变量，agent 自己报鉴权失败，错误现场离根因较远；缓解是 `{name, present}` 里的 `present=false` 在 Settings 卡片显性暴露，llmwiki 侧不猜测、不补值、不从配置读值。
 - **[args 凭据校验是模式匹配，可被绕过]** 用户仍可以用未覆盖的参数名或自定义 token 形态把密钥塞进 `args` → 接受：该校验的目标是挡住常见误用并把人导向正确做法，不是做完备的密钥检测；真正的保证来自"配置里没有任何字段是为放密钥而设计的"以及 `env_passthrough` 这条更省事的正路。相应地，误伤风险也要控住：只匹配明确的凭据参数名与 token 前缀，不做通用高熵字符串检测。
-- **[进程孤儿与资源泄漏]** `npx` 类启动器 fork 子进程 → `Setpgid` + 负 pgid 信号 + `CloseAll` 三重兜底；仍存在 llmwiki 被 `SIGKILL` 时留孤儿的窗口，接受（单用户本机场景，容器重启即清）。
+- **[进程孤儿与资源泄漏]** `npx` 类启动器 fork 子进程，且可能 `setsid` 逃出进程组 → Linux 用 `/proc` 后代快照 + pidfd（或 starttime 校验回退）覆盖，非 Linux 用负 pgid + `CloseAll` 兜底。仍存在 llmwiki 自身被 `SIGKILL` 时来不及清理、以及根进程在两次快照之间被 reparent 的极小窗口，接受（单用户本机场景，容器重启即清）。
 - **[agent 侧历史与 llmwiki 历史不一致]** 进程重启后 agent 上下文清零，靠压缩历史重建，语义有损（工具调用细节丢失）→ 接受；在 `session_message_events` 记 `phase=acp_history_replay` 让用户可诊断。
 - **[协议版本漂移]** ACP v2 已在演进（`state_update`、`session/set_config_option`、移除 `fs/*` 与 `terminal/*`）→ 本变更只声明 `protocolVersion: 1` 并在不匹配时明确报错而非猜测降级；`internal/acp/events.go` 的解码全部走 `switch ... default: 忽略并记事件`，为 v1 内的新 `sessionUpdate` 变体留兼容余地。
 - **[写权限打开后的破坏面]** 用户若同时关掉 `readonly_only` 并开 `allow_write`，agent 可在 workspace 内任意改文件，绕过 `internal/api/filewrite.go` 的 file-first 写入与 `PageLockManager` → 接受但显式：默认关闭、需双开关、每次决策入 `activity_logs`（category `agent`），且 `wiki/` 变更仍会被 watcher 与 `workspace-backup-track` 捕获，可 git 回滚。

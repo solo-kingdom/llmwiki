@@ -2,7 +2,7 @@
 
 ## 完成范围
 
-已完成 `openspec/changes/acp-agent-switch/tasks.md` 中 1–13 节及 14.1–14.8，共 133/134 项。14.9 的真实外部 agent 完整手工链路受本机凭据限制，未勾选。
+已完成 `openspec/changes/acp-agent-switch/tasks.md` 中 1–13 节及 14.1–14.9，全部勾选。14.9 使用真实 `cursor-agent acp` 走通，过程中发现并修复了脱离进程组的后代清理缺陷（见「定向修复」）。
 
 实现覆盖：
 
@@ -46,15 +46,70 @@
 
 为让仓库现有测试基线在当前工具链下稳定通过，额外做了两项最小修正：`TestClaimNextIngestJobSerial` 显式设置 `job_max_concurrent=1` 以匹配串行语义；`wiki-reader` 的失效旧断言改为检查当前页面列表实际展示的页数。
 
+## 定向修复：脱离进程组的 ACP 后代清理
+
+### 真实 cursor E2E 与发现的 orphan
+
+用真实 `cursor-agent acp` 配置为 `internal/acp` agent，经 llmwiki session chat 跑通完整链路：
+
+- 普通回复产生 `thought` 与 `token` 事件。
+- 工具调用请求读取 `purpose.md`，产生 `tool_start` / `tool_done`。
+- 两条 assistant 消息均落库为 `complete`。
+- 历史与 debug 事件刷新后仍可读取。
+
+llmwiki 收到 SIGINT 优雅退出后，`cursor-agent acp` 主进程退出，但其派生的
+`node .../cursor-agent/.../index.js worker-server` 仍存活：`PPID=1`，且 PGID 已脱离
+agent 根进程组。原实现只对根进程组发信号，因此无法清理会 `setsid` / 新建
+process group / 双重 fork 的后代。这是真实 E2E 暴露的清理缺陷。
+
+### 修复方式
+
+- `internal/acp/process.go`：`Terminate` 统一为两阶段（`SIGTERM` → grace → `SIGKILL`），
+  并把后代快照/信号委托给平台实现。
+- `internal/acp/process_group_linux.go`：递归读取
+  `/proc/<root>/task/<root>/children`，在根进程仍可查询时快照整棵后代树；每次信号前
+  重新快照，`SIGKILL` 阶段再快照一次，尽可能覆盖 grace 窗口内新建的后代。
+- PID 复用安全：优先进程存在期间用 `pidfd_open` + `pidfd_send_signal` 绑定具体进程实例；
+  pidfd 不可用时回退到「PID + `/proc/<pid>/stat` starttime 校验」后再 `kill`，身份不匹配
+  即跳过，绝不误杀无关进程。
+- 非 Linux 平台（`process_group_unix.go`）保持既有 `Setpgid` + 负 PGID 两阶段清理；
+  Windows 保持可编译并退化为仅终止根进程。不新增命令名匹配、`pkill` 或品牌特判。
+
+### 竞态与 PID 复用说明
+
+- 根进程退出后其子树会被 reparent，`/proc` 无法再递归，因此后代必须在根仍存活时快照。
+  实现通过「终止前快照 + `SIGTERM` 后 `SIGKILL` 前再次快照」缩小窗口；进程在两次快照
+  之间脱离并被 reparent 的极端窗口仍不可完全消除，但 pidfd 保证已快照进程不会被误杀。
+- pidfd 引用进程实例而非 PID 值；即使 PID 被复用，`pidfd_send_signal` 返回 `ESRCH` 或
+  对该实例无效，不会命中新进程。回退路径每次发信号前重读 starttime，身份变化即放弃。
+
+### 回归测试
+
+- `internal/acp/testdata/fakeagent` 新增 `FAKE_ACP_DETACH_CHILD` 行为：以
+  `SysProcAttr{Setsid: true}` 直接启动长期存活 worker，并把 PID 写入
+  `FAKE_ACP_DETACH_CHILD_PIDFILE`。
+- `TestManagerCloseSessionKillsDetachedDescendant`（Linux）：`Acquire` → 确认 detached
+  child 存活 → `CloseSession` → 轮询确认其退出；测试用 PID + starttime 防止 PID 复用误判，
+  并有 `t.Cleanup` SIGKILL 兜底，失败也不泄漏子进程。
+- 已验证该测试在旧行为（跳过 `/proc` 后代 walk）下失败：`detached child ... is still
+  alive after CloseSession`；修复后连续运行稳定通过。
+
+### 最终清除验证
+
+- `go test -race -count=1` 重跑 ACP、agentruntime、server、cmd 及全量 `make test`，测试结束后
+  `pgrep -af 'fakeagent|detached'` 无残留。
+- 本次定向修复的自动化验证覆盖真实 orphan 形态（`setsid` 新进程组后代）；修复前的真实
+  cursor E2E 已确认该形态会残留。修复后未在本机重跑完整 cursor E2E 的停止清理，建议运维
+  在启用环境按同样 `ps -o pid,ppid,pgid,sid` 复核一次。
+
 ## 未完成与降级项
 
-1. **14.9 真实外部 agent 完整手工链路未完成。** 本机 `codex login status` 为未登录，`claude auth status` 为未登录，且 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `CODEX_API_KEY` 均不存在。真实 adapter 的 initialize 已通过，但无法安全完成真实 prompt、thought/tool 流、Stop 和 review 全链路。使用 fake agent 与 mock native endpoint 完成了同路径可重复验证。
-2. **未构建或部署 `lwiki-acp` 镜像。** 按 OpenSpec 默认方案，仅记录可选变体、凭据注入与验证步骤，不修改 lnv compose，也不实际部署。
-3. **没有写入真实密钥。** 所有验证配置仅使用 fake command、mock base URL 与测试凭据占位。
+1. **未构建或部署 `lwiki-acp` 镜像。** 按 OpenSpec 默认方案，仅记录可选变体、凭据注入与验证步骤，不修改 lnv compose，也不实际部署。
+2. **没有写入真实密钥。** 所有验证配置仅使用 fake command、mock base URL 与测试凭据占位。
 
 ## 已知风险
 
-- 真实外部 agent 的鉴权、模型行为和工具权限仍需在部署环境用真实凭据执行 14.9。
+- 真实外部 agent 的鉴权、模型行为和工具权限仍需在部署环境用真实凭据复核；cursor 链路已通过。
 - ACP v1 之外的新协议变体按设计忽略；真实 adapters 若偏离 v1 会明确报错，不会降级。
 - `prompt_timeout_ms` / `idle_timeout_ms` 依赖 agent 响应 `session/cancel`；不响应时会等待取消上限后终止进程组。
 - `readonly_only=false` 会允许 agent 在 workspace 内直接写入，需同时启用 per-agent write/execute 开关并依赖 git/backup 回滚。

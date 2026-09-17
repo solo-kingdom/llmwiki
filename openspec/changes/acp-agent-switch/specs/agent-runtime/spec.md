@@ -268,8 +268,10 @@ ACP agent 的 `cwd` SHALL 是绝对路径，且 SHALL 位于 workspace 根目录
 
 #### Scenario: 进程组终止
 - **WHEN** 终止一个 agent 子进程
-- **THEN** 系统 SHALL 对整个进程组发送 `SIGTERM`，3 秒后未退出则发送 `SIGKILL`
+- **THEN** 系统 SHALL 先发送 `SIGTERM`，3 秒后未退出则发送 `SIGKILL`
 - **AND** 由 agent 启动器 fork 的孙进程 SHALL 一并被终止
+- **AND** 在 Linux 上，`setsid` / 新建进程组 / 双重 fork 后改变 PPID 的后代 SHALL 一并被终止，不得残留 PPID=1 的孤儿进程
+- **AND** 非 Linux 平台 SHALL 至少保持既有进程组清理语义
 
 #### Scenario: 崩溃当轮失败
 - **WHEN** 子进程在 turn 期间退出或 stdout 关闭

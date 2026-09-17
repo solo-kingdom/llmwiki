@@ -99,8 +99,12 @@ process group / 双重 fork 的后代。这是真实 E2E 暴露的清理缺陷�
 - `go test -race -count=1` 重跑 ACP、agentruntime、server、cmd 及全量 `make test`，测试结束后
   `pgrep -af 'fakeagent|detached'` 无残留。
 - 本次定向修复的自动化验证覆盖真实 orphan 形态（`setsid` 新进程组后代）；修复前的真实
-  cursor E2E 已确认该形态会残留。修复后未在本机重跑完整 cursor E2E 的停止清理，建议运维
-  在启用环境按同样 `ps -o pid,ppid,pgid,sid` 复核一次。
+  cursor E2E 已确认该形态会残留。
+- 修复后使用 `b8f0338` 重新构建 `lwiki`，再次以真实 `cursor-agent acp` 跑通
+  `thought`/`token` 并执行退出清理复核：停止前记录 `cursor-agent acp` 与
+  `worker-server` PID，SIGINT 后所有本次启动的 PID 均消失，基线外
+  `cursor-agent`/`worker-server` 进程数为 0。首次冷启动在 30s `init_timeout_ms` 内超时，但
+  未留残留；提高 `init_timeout_ms` 到 120s 后重试成功，建议生产配置留足冷启动余量。
 
 ## 未完成与降级项
 

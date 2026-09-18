@@ -142,6 +142,24 @@ function MessageBubble({
                   {msg.warning_message}
                 </p>
               )}
+              {msg.thought_text?.trim() && (
+                <details className="mb-2 rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-muted-foreground">
+                  <summary>{t("chat.agent.thought")}</summary>
+                  <p className="mt-1 whitespace-pre-wrap">{msg.thought_text}</p>
+                </details>
+              )}
+              {msg.plan_entries && msg.plan_entries.length > 0 && (
+                <div className="mb-2 rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs">
+                  <p className="mb-1 font-medium">{t("chat.agent.plan")}</p>
+                  <ol className="list-decimal space-y-0.5 pl-4">
+                    {msg.plan_entries.map((entry, index) => (
+                      <li key={`${index}:${entry.content}`}>
+                        {entry.content} <span className="text-muted-foreground">[{entry.status}]</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
               {!hasContent ? (
                 <Loader2
                   className="size-4 animate-spin text-muted-foreground"
@@ -158,6 +176,24 @@ function MessageBubble({
             <p className="whitespace-pre-wrap text-destructive">{errorText}</p>
           ) : (
             <div>
+              {msg.thought_text?.trim() && (
+                <details className="mb-2 rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-muted-foreground">
+                  <summary>{t("chat.agent.thought")}</summary>
+                  <p className="mt-1 whitespace-pre-wrap">{msg.thought_text}</p>
+                </details>
+              )}
+              {msg.plan_entries && msg.plan_entries.length > 0 && (
+                <div className="mb-2 rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs">
+                  <p className="mb-1 font-medium">{t("chat.agent.plan")}</p>
+                  <ol className="list-decimal space-y-0.5 pl-4">
+                    {msg.plan_entries.map((entry, index) => (
+                      <li key={`${index}:${entry.content}`}>
+                        {entry.content} <span className="text-muted-foreground">[{entry.status}]</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
               {msg.tool_status && (
                 <p className="mb-2 text-xs text-muted-foreground">{msg.tool_status}</p>
               )}
@@ -248,6 +284,8 @@ export function IngestChat() {
     settings,
     instances,
     currentModels,
+    acpAgents,
+    acpConfigError,
     activeSessionId,
     sessions,
     documents,
@@ -263,6 +301,8 @@ export function IngestChat() {
     loadInstances,
     loadModels,
     updateSessionLLM,
+    updateSessionAgent,
+    loadACPAgents,
     loadSettings,
     listSessions,
   } = useApp()
@@ -300,6 +340,7 @@ export function IngestChat() {
           loadInstances(),
           loadSettings(),
           listSessions(),
+          loadACPAgents(),
         ])
       } finally {
         setConfigLoaded(true)
@@ -314,6 +355,7 @@ export function IngestChat() {
     loadInstances,
     loadSettings,
     listSessions,
+    loadACPAgents,
   ])
 
   useEffect(
@@ -403,8 +445,31 @@ export function IngestChat() {
     settings?.last_model ||
     ""
 
+  const effectiveAgentKind = activeSession?.agent_kind ?? settings?.default_agent_kind ?? "native"
+  const effectiveACPAgentId = activeSession?.acp_agent_id || settings?.default_acp_agent_id || ""
+  const selectedACPAgent = acpAgents.find((agent) => agent.id === effectiveACPAgentId)
+
+  let acpUnavailableMessage = ""
+  if (effectiveAgentKind === "acp") {
+    if (acpConfigError) {
+      acpUnavailableMessage = acpConfigError
+    } else if (acpAgents.length === 0) {
+      acpUnavailableMessage = t("chat.agent.no_agents")
+    } else if (!effectiveACPAgentId) {
+      acpUnavailableMessage = t("chat.agent.no_agent_selected")
+    } else if (!selectedACPAgent || !selectedACPAgent.enabled) {
+      acpUnavailableMessage = t("chat.agent.disabled")
+    } else if (!selectedACPAgent.available) {
+      acpUnavailableMessage = t("chat.agent.cli_not_found")
+    }
+  }
+
   const isReady =
-    !!sessionId && !!effectiveInstanceId && !!effectiveModel
+    !!sessionId && (
+      effectiveAgentKind === "acp"
+        ? !!selectedACPAgent && selectedACPAgent.enabled && selectedACPAgent.available
+        : !!effectiveInstanceId && !!effectiveModel
+    )
 
   const selectedInstance = instances.find(
     (i) => i.id === effectiveInstanceId,
@@ -420,12 +485,17 @@ export function IngestChat() {
     [loadModels],
   )
 
-  const handleModelConfirm = async (instanceId: string, modelId: string) => {
-    setSelectedInstanceId(instanceId)
-    setSelectedModel(modelId)
+  const handleModelConfirm = async (runtime: { agentKind: "native" | "acp"; acpAgentId: string; instanceId: string; modelId: string }) => {
+    setSelectedInstanceId(runtime.instanceId)
+    setSelectedModel(runtime.modelId)
     if (sessionId) {
       try {
-        await updateSessionLLM(sessionId, instanceId, modelId)
+        if (runtime.agentKind === "acp") {
+          await updateSessionAgent(sessionId, "acp", runtime.acpAgentId)
+        } else if (runtime.instanceId && runtime.modelId) {
+          await updateSessionLLM(sessionId, runtime.instanceId, runtime.modelId)
+          await updateSessionAgent(sessionId, "native", "")
+        }
       } catch {
         // non-critical
       }
@@ -538,11 +608,13 @@ export function IngestChat() {
             {configLoaded && !isReady && (
               <div className="rounded-lg bg-amber-50 py-8 text-center text-amber-600 dark:bg-amber-950/20">
                 <p className="text-sm">
-                  {instances.length === 0
-                    ? t("chat.no_provider")
-                    : !effectiveInstanceId || !effectiveModel
-                      ? t("chat.select_model_hint")
-                      : "..."}
+                  {effectiveAgentKind === "acp"
+                    ? acpUnavailableMessage
+                    : instances.length === 0
+                      ? t("chat.no_provider")
+                      : !effectiveInstanceId || !effectiveModel
+                        ? t("chat.select_model_hint")
+                        : "..."}
                 </p>
               </div>
             )}
@@ -649,7 +721,17 @@ export function IngestChat() {
                 {t("session.mode_organize")}
               </span>
             )}
-            {(selectedInstance || effectiveModel) && (
+            {effectiveAgentKind === "acp" ? (
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">
+                  ACP
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <Bot className="size-3" />
+                  {selectedACPAgent?.name ?? effectiveACPAgentId}
+                </span>
+              </div>
+            ) : (selectedInstance || effectiveModel) ? (
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                 {selectedInstance && (
                   <span className="inline-flex items-center gap-1">
@@ -664,7 +746,7 @@ export function IngestChat() {
                   </span>
                 )}
               </div>
-            )}
+            ) : null}
           </div>
         )}
         <WikiMentionPicker
@@ -681,7 +763,9 @@ export function IngestChat() {
           className="max-h-40 min-h-[72px] w-full resize-y bg-transparent px-2 py-2 text-sm outline-none"
           placeholder={
             !isReady
-              ? t("chat.select_model_start")
+              ? effectiveAgentKind === "acp" && acpUnavailableMessage
+                ? acpUnavailableMessage
+                : t("chat.select_model_start")
               : t("chat.input_placeholder")
           }
           value={input}
@@ -770,8 +854,11 @@ export function IngestChat() {
         selectedModel={selectedModel}
         lastUsedInstanceId={settings?.last_instance_id}
         lastUsedModel={settings?.last_model}
+        agentKind={effectiveAgentKind}
+        acpAgentId={effectiveACPAgentId}
+        acpAgents={acpAgents}
         onLoadModels={handleLoadModels}
-        onConfirm={(instanceId, modelId) => void handleModelConfirm(instanceId, modelId)}
+        onConfirm={(runtime) => void handleModelConfirm(runtime)}
       />
 
       <MessageDebugDialog

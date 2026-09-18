@@ -7,34 +7,36 @@ import (
 )
 
 type IngestSession struct {
-	ID             string `json:"id"`
-	Title          string `json:"title"`
-	Status         string `json:"status"`
-	StoragePath    string `json:"storage_path"`
-	LLMInstanceID  string `json:"llm_instance_id"`
-	LLMModel       string `json:"llm_model"`
-	Mode           string `json:"mode"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Status        string `json:"status"`
+	StoragePath   string `json:"storage_path"`
+	LLMInstanceID string `json:"llm_instance_id"`
+	LLMModel      string `json:"llm_model"`
+	Mode          string `json:"mode"`
+	AgentKind     string `json:"agent_kind"`
+	ACPAgentID    string `json:"acp_agent_id"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 type IngestSessionMessage struct {
-	ID                   string `json:"id"`
-	SessionID            string `json:"session_id"`
-	Role                 string `json:"role"`
-	Content              string `json:"content"`
-	MessageType          string `json:"message_type"`
-	AttachmentID         string `json:"attachment_id"`
-	StreamStatus         string `json:"stream_status"`
-	WikiRefsJSON         string `json:"wiki_refs_json,omitempty"`
-	ExcludeFromArchive   bool   `json:"exclude_from_archive"`
-	CreatedAt            string `json:"created_at"`
+	ID                 string `json:"id"`
+	SessionID          string `json:"session_id"`
+	Role               string `json:"role"`
+	Content            string `json:"content"`
+	MessageType        string `json:"message_type"`
+	AttachmentID       string `json:"attachment_id"`
+	StreamStatus       string `json:"stream_status"`
+	WikiRefsJSON       string `json:"wiki_refs_json,omitempty"`
+	ExcludeFromArchive bool   `json:"exclude_from_archive"`
+	CreatedAt          string `json:"created_at"`
 }
 
 func scanIngestSession(scanner interface{ Scan(...interface{}) error }, s *IngestSession) error {
 	return scanner.Scan(
 		&s.ID, &s.Title, &s.Status, &s.StoragePath,
-		&s.LLMInstanceID, &s.LLMModel, &s.Mode,
+		&s.LLMInstanceID, &s.LLMModel, &s.Mode, &s.AgentKind, &s.ACPAgentID,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
@@ -62,15 +64,20 @@ func (d *DB) CreateIngestSession(session *IngestSession) error {
 	if session.Mode == "" {
 		session.Mode = "ingest"
 	}
+	if session.AgentKind == "" {
+		session.AgentKind = "native"
+	}
 	_, err := d.db.Exec(`
-		INSERT INTO ingest_sessions (title, status, storage_path, llm_instance_id, llm_model, mode, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		INSERT INTO ingest_sessions (title, status, storage_path, llm_instance_id, llm_model, mode, agent_kind, acp_agent_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		strings.TrimSpace(session.Title),
 		session.Status,
 		strings.TrimSpace(session.StoragePath),
 		session.LLMInstanceID,
 		session.LLMModel,
 		session.Mode,
+		session.AgentKind,
+		strings.TrimSpace(session.ACPAgentID),
 	)
 	if err != nil {
 		return fmt.Errorf("create ingest session: %w", err)
@@ -78,7 +85,7 @@ func (d *DB) CreateIngestSession(session *IngestSession) error {
 	created, err := d.db.Query(`
 		SELECT COALESCE(id,''), COALESCE(title,''), COALESCE(status,''),
 		       COALESCE(storage_path,''), COALESCE(llm_instance_id,''), COALESCE(llm_model,''),
-		       COALESCE(mode,'ingest'),
+		       COALESCE(mode,'ingest'), COALESCE(agent_kind,'native'), COALESCE(acp_agent_id,''),
 		       COALESCE(created_at,''), COALESCE(updated_at,'')
 		FROM ingest_sessions WHERE rowid = last_insert_rowid()`)
 	if err != nil {
@@ -98,7 +105,7 @@ func (d *DB) GetIngestSession(id string) (*IngestSession, error) {
 	err := scanIngestSession(d.db.QueryRow(`
 		SELECT COALESCE(id,''), COALESCE(title,''), COALESCE(status,''),
 		       COALESCE(storage_path,''), COALESCE(llm_instance_id,''), COALESCE(llm_model,''),
-		       COALESCE(mode,'ingest'),
+		       COALESCE(mode,'ingest'), COALESCE(agent_kind,'native'), COALESCE(acp_agent_id,''),
 		       COALESCE(created_at,''), COALESCE(updated_at,'')
 		FROM ingest_sessions WHERE id = ?`, id), s)
 	if err != nil {
@@ -135,6 +142,14 @@ func (d *DB) UpdateIngestSessionMode(id, mode string) error {
 	_, err := d.db.Exec(`
 		UPDATE ingest_sessions SET mode = ?, updated_at = datetime('now') WHERE id = ?`,
 		mode, id)
+	return err
+}
+
+func (d *DB) UpdateIngestSessionAgent(id, agentKind, acpAgentID string) error {
+	_, err := d.db.Exec(`
+		UPDATE ingest_sessions
+		SET agent_kind = ?, acp_agent_id = ?, updated_at = datetime('now')
+		WHERE id = ?`, agentKind, acpAgentID, id)
 	return err
 }
 
@@ -271,7 +286,7 @@ func (d *DB) ListIngestSessions() ([]IngestSession, error) {
 	rows, err := d.db.Query(`
 		SELECT COALESCE(id,''), COALESCE(title,''), COALESCE(status,''),
 		       COALESCE(storage_path,''), COALESCE(llm_instance_id,''), COALESCE(llm_model,''),
-		       COALESCE(mode,'ingest'),
+		       COALESCE(mode,'ingest'), COALESCE(agent_kind,'native'), COALESCE(acp_agent_id,''),
 		       COALESCE(created_at,''), COALESCE(updated_at,'')
 		FROM ingest_sessions
 		ORDER BY datetime(updated_at) DESC`)

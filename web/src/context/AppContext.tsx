@@ -23,6 +23,8 @@ import type {
   ModelInfo,
   SessionListItem,
   WikiRefPayload,
+  ACPAgent,
+  AgentKind,
 } from "@/types"
 import * as api from "@/lib/api"
 import { parseWikiRefsJSON } from "@/components/WikiMentionPicker"
@@ -158,6 +160,8 @@ interface AppState {
   providers: Provider[]
   instances: ProviderInstance[]
   currentModels: ModelInfo[]
+  acpAgents: ACPAgent[]
+  acpConfigError: string | null
 
   selectDocument: (id: string) => void
   search: (q: string) => void
@@ -219,6 +223,8 @@ interface AppState {
     model: string,
   ) => Promise<void>
   updateLastModel: (instanceId: string, model: string) => Promise<void>
+  loadACPAgents: () => Promise<void>
+  updateSessionAgent: (id: string, agentKind: AgentKind, acpAgentId: string) => Promise<void>
 
   toastMessage: string | null
   showToast: (message: string) => void
@@ -272,6 +278,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [providers, setProviders] = useState<Provider[]>([])
   const [instances, setInstances] = useState<ProviderInstance[]>([])
   const [currentModels, setCurrentModels] = useState<ModelInfo[]>([])
+  const [acpAgents, setACPAgents] = useState<ACPAgent[]>([])
+  const [acpConfigError, setACPConfigError] = useState<string | null>(null)
   const loadedModelsProviderRef = useRef<string | null>(null)
   const activeStreamRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -469,7 +477,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const instanceId = settings?.last_instance_id
       const model = settings?.last_model
-      const { session } = await api.createIngestSession()
+      const { session } = await api.createIngestSession(
+        undefined,
+        undefined,
+        settings?.default_agent_kind ?? "native",
+        settings?.default_acp_agent_id ?? "",
+      )
       setSessionId(session.id)
       setActiveSessionId(session.id)
       setSessionMode(session.mode || "ingest")
@@ -524,8 +537,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSessionMessages((prev) =>
           prev.map((m) =>
             isStreamingAssistant(m.id)
-              ? { ...m, content: m.content + tok, tool_status: null }
+              ? { ...m, content: m.content + tok }
               : m,
+          ),
+        )
+      }
+      if (event === "thought" && data && typeof data === "object") {
+        const thought = (data as { content?: string }).content ?? ""
+        setSessionMessages((prev) =>
+          prev.map((m) =>
+            isStreamingAssistant(m.id)
+              ? { ...m, thought_text: (m.thought_text ?? "") + thought }
+              : m,
+          ),
+        )
+      }
+      if (event === "plan" && data && typeof data === "object") {
+        const entries = (data as { entries?: IngestSessionMessage["plan_entries"] }).entries ?? []
+        setSessionMessages((prev) =>
+          prev.map((m) =>
+            isStreamingAssistant(m.id) ? { ...m, plan_entries: entries } : m,
+          ),
+        )
+      }
+      if (event === "permission" && data && typeof data === "object") {
+        const decision = data as { allowed?: boolean; tool_kind?: string; reason?: string }
+        const tool = decision.tool_kind ?? ""
+        const status = decision.allowed
+          ? translate(getCurrentLang(), "chat.agent.permission_allowed", { tool })
+          : translate(getCurrentLang(), "chat.agent.permission_denied", { tool })
+        setSessionMessages((prev) =>
+          prev.map((m) =>
+            isStreamingAssistant(m.id) ? { ...m, tool_status: status } : m,
           ),
         )
       }
@@ -975,6 +1018,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const loadACPAgents = useCallback(async () => {
+    try {
+      const result = await api.listACPAgents()
+      setACPAgents(result.agents ?? [])
+      setACPConfigError(result.config_error ?? null)
+    } catch (e) {
+      setACPConfigError((e as Error).message)
+      setACPAgents([])
+    }
+  }, [])
+
   const createInstanceFn = useCallback(async (payload: {
     name: string
     catalog_id: string
@@ -1024,7 +1078,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const createSession = useCallback(
     async (instanceId?: string, model?: string, mode?: string) => {
-      const { session } = await api.createIngestSession(undefined, mode)
+      const defaultAgentKind = settings?.default_agent_kind ?? "native"
+      const defaultACPAgentID = settings?.default_acp_agent_id ?? ""
+      const { session } = await api.createIngestSession(undefined, mode, defaultAgentKind, defaultACPAgentID)
       if (instanceId && model) {
         try {
           await api.updateIngestSession(session.id, { instance_id: instanceId, model })
@@ -1039,7 +1095,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSessionMessages([])
       await listSessionsInternal()
     },
-    [],
+    [settings],
   )
 
   const switchSession = useCallback(
@@ -1095,7 +1151,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } else {
           const instanceId = settings?.last_instance_id
           const model = settings?.last_model
-          const { session } = await api.createIngestSession()
+          const { session } = await api.createIngestSession(
+            undefined,
+            undefined,
+            settings?.default_agent_kind ?? "native",
+            settings?.default_acp_agent_id ?? "",
+          )
           setSessionId(session.id)
           setActiveSessionId(session.id)
           setSessionMode(session.mode || "ingest")
@@ -1146,6 +1207,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  const updateSessionAgent = useCallback(
+    async (id: string, agentKind: AgentKind, acpAgentId: string) => {
+      const normalizedAgentID = agentKind === "acp" ? acpAgentId : ""
+      await api.updateIngestSession(id, {
+        agent_kind: agentKind,
+        acp_agent_id: normalizedAgentID,
+      })
+      const { sessions: updatedSessions } = await api.listIngestSessions()
+      setSessions(updatedSessions)
+      setSettings((prev) => prev ? {
+        ...prev,
+        default_agent_kind: agentKind,
+        default_acp_agent_id: normalizedAgentID,
+      } : prev)
+    },
+    [],
+  )
+
   const switchSessionMode = useCallback(
     async (mode: string) => {
       if (!sessionId) return
@@ -1178,6 +1257,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         providers,
         instances,
         currentModels,
+        acpAgents,
+        acpConfigError,
         selectDocument,
         search,
         clearSearch,
@@ -1211,6 +1292,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         switchSessionMode,
         updateSessionLLM,
         updateLastModel: updateLastModelFn,
+        loadACPAgents,
+        updateSessionAgent,
         toastMessage,
         showToast,
         dismissToast,

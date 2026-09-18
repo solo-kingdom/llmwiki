@@ -47,6 +47,9 @@ vi.mock("@/lib/api", () => ({
   createTextIngestJob: vi.fn(),
   uploadIngestJobs: vi.fn(),
   listProviders: vi.fn().mockResolvedValue([]),
+  listACPAgents: vi.fn().mockResolvedValue({ agents: [] }),
+  updateIngestSession: vi.fn().mockResolvedValue({ session: {} }),
+  updateLastModel: vi.fn().mockResolvedValue({ status: "ok" }),
 }))
 
 function streamingAssistant(content: string): IngestSessionMessage {
@@ -208,6 +211,42 @@ describe("AppContext tool loop stream errors", () => {
     })
   })
 
+  it("aggregates thought, plan, and permission events and ignores unknown events", async () => {
+    mockStreamIngest.mockImplementation(async (_sid, _content, onEvent) => {
+      onEvent("assistant_start", { id: "msg-assistant" })
+      onEvent("thought", { content: "thinking " })
+      onEvent("thought", { content: "more" })
+      onEvent("plan", { entries: [{ content: "Step 1", status: "in_progress" }] })
+      onEvent("permission", { allowed: false, tool_kind: "execute", reason: "policy_denied" })
+      onEvent("future_unknown_event", { ignored: true })
+      onEvent("token", { content: "answer" })
+    })
+    mockListIngestSessionMessages.mockResolvedValue({ messages: [] })
+
+    let sendFn: ((content: string) => Promise<void>) | null = null
+    let latestMessages: IngestSessionMessage[] = []
+    render(
+      <AppProvider>
+        <Probe
+          onUpdate={(app) => {
+            sendFn = app.sendSessionMessage
+            latestMessages = app.sessionMessages
+          }}
+        />
+      </AppProvider>,
+    )
+    await act(async () => {
+      await sendFn!("hello")
+    })
+    await waitFor(() => {
+      const assistant = latestMessages.find((m) => m.role === "assistant")
+      expect(assistant?.thought_text).toBe("thinking more")
+      expect(assistant?.plan_entries?.[0]?.content).toBe("Step 1")
+      expect(assistant?.tool_status).toMatch(/已拒绝 execute/)
+      expect(assistant?.content).toBe("answer")
+    })
+  })
+
   it("preserves failed state when reload still shows streaming", async () => {
     const streamError = "bad request (HTTP 400): tool type required"
     mockStreamIngest.mockImplementation(async (_sid, _content, onEvent) => {
@@ -306,7 +345,7 @@ describe("AppContext retry session message", () => {
         },
       ],
     })
-    mockStreamRetry.mockImplementation(async (_sid, _aid, onEvent, _signal?) => {
+    mockStreamRetry.mockImplementation(async (_sid, _aid, onEvent) => {
       onEvent("assistant_start", { id: "msg-assistant" })
       onEvent("token", { content: "ok" })
       onEvent("done", {

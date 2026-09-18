@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/solo-kingdom/llmwiki/internal/acp"
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/api"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
@@ -40,6 +41,7 @@ type Config struct {
 	DB            *sqlite.DB
 	LockMgr       *ingest.PageLockManager
 	MCPAllowWrite bool
+	ACPManager    *acp.Manager
 }
 
 // Server is the LLM Wiki HTTP server.
@@ -67,6 +69,7 @@ func New(cfg Config) *Server {
 		srv.api.SetLockManager(cfg.LockMgr)
 	}
 	srv.api.SetPublicWikiEnabled(cfg.PublicWiki)
+	srv.api.SetACPManager(cfg.ACPManager)
 	return srv
 }
 
@@ -195,6 +198,11 @@ func (s *Server) Start() error {
 			r.Post("/{id}/check", s.api.CheckProviderInstance)
 		})
 
+		r.Route("/acp-agents", func(r chi.Router) {
+			r.Get("/", s.api.ListACPAgents)
+			r.Post("/check", s.api.CheckACPAgents)
+		})
+
 		r.Post("/settings/mcp/check", s.api.CheckMCPStatus)
 
 		r.Route("/ingest", func(r chi.Router) {
@@ -271,7 +279,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.watcher != nil {
 		s.watcher.Stop()
 	}
-	return s.http.Shutdown(ctx)
+	var err error
+	if s.http != nil {
+		err = s.http.Shutdown(ctx)
+	}
+	if s.config.ACPManager != nil {
+		s.config.ACPManager.CloseAll()
+	}
+	return err
 }
 
 // spaHandler serves the embedded React SPA, falling back to index.html for client-side routing.
@@ -396,6 +411,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.config.MCPAllowWrite {
 		mcpDefaultPolicy = "readwrite"
 	}
+	acpEnabled := false
+	if s.db != nil {
+		raw, err := s.db.GetConfig("acp_agents_json")
+		if err == nil {
+			if cfg, parseErr := acp.ParseConfig(raw); parseErr == nil {
+				acpEnabled = cfg.HasEnabledAgent()
+			}
+		}
+	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "ok",
@@ -406,11 +430,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"mcp_enabled":   mcpEnabled,
 			"mcp_transport": "rpc-http",
 			"watch_enabled": watchEnabled,
+			"acp_enabled":   acpEnabled,
 		},
-		"mcp_access_model":    "rpc-first",
-		"mcp_auth_required":   authRequired,
-		"mcp_default_policy":  mcpDefaultPolicy,
-		"mcp_compatibility":   "First release focuses on RPC access. Direct Claude Desktop stdio connection is not a release gate.",
+		"mcp_access_model":   "rpc-first",
+		"mcp_auth_required":  authRequired,
+		"mcp_default_policy": mcpDefaultPolicy,
+		"mcp_compatibility":  "First release focuses on RPC access. Direct Claude Desktop stdio connection is not a release gate.",
 	})
 }
 

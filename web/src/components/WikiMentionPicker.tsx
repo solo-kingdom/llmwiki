@@ -37,7 +37,6 @@ export function WikiMentionPicker({
   disabled,
   documents = [],
   textareaRef,
-  inputValue: _inputValue = "",
   onInputChange,
 }: WikiMentionPickerProps) {
   const t = useT()

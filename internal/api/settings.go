@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/solo-kingdom/llmwiki/internal/acp"
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
@@ -26,29 +27,33 @@ func maskKey(key string) string {
 
 // settingsResponse is the response payload for GET /settings.
 type settingsResponse struct {
-	LastInstanceID string `json:"last_instance_id"`
-	LastModel      string `json:"last_model"`
-	JobInstanceID  string `json:"job_instance_id"`
-	JobModel       string `json:"job_model"`
-	Temperature    string `json:"temperature"`
-	MaxTokens      string `json:"max_tokens"`
-	ChunkSize      string `json:"chunk_size"`
-	ChunkOverlap   string `json:"chunk_overlap"`
-	AutoReindex           string `json:"auto_reindex"`
-	WatchSources          string `json:"watch_sources"`
-	ActivityLogsMaxCount     string `json:"activity_logs_max_count"`
-	IngestJobEventsMaxCount            string `json:"ingest_job_events_max_count"`
-	SessionMessageEventsMaxCount       string `json:"session_message_events_max_count"`
-	MCPServersJSON          string `json:"mcp_servers_json"`
-	UILanguage       string `json:"ui_language"`
-	DocLanguage      string `json:"doc_language"`
-	RulesSupplement                    string `json:"rules_supplement"`
-	SessionToolLoopMaxRoundsIngest     string `json:"session_tool_loop_max_rounds_ingest"`
-	SessionToolLoopMaxRoundsQA         string `json:"session_tool_loop_max_rounds_qa"`
-	SessionToolLoopMaxRoundsOrganize   string `json:"session_tool_loop_max_rounds_organize"`
-	SessionToolLoopMaxCallsPerRound    string `json:"session_tool_loop_max_calls_per_round"`
-	BackupIncludeRaw                   string `json:"backup_include_raw"`
-	VCAutoPush                         string `json:"vc_auto_push"`
+	LastInstanceID                   string `json:"last_instance_id"`
+	LastModel                        string `json:"last_model"`
+	JobInstanceID                    string `json:"job_instance_id"`
+	JobModel                         string `json:"job_model"`
+	Temperature                      string `json:"temperature"`
+	MaxTokens                        string `json:"max_tokens"`
+	ChunkSize                        string `json:"chunk_size"`
+	ChunkOverlap                     string `json:"chunk_overlap"`
+	AutoReindex                      string `json:"auto_reindex"`
+	WatchSources                     string `json:"watch_sources"`
+	ActivityLogsMaxCount             string `json:"activity_logs_max_count"`
+	IngestJobEventsMaxCount          string `json:"ingest_job_events_max_count"`
+	SessionMessageEventsMaxCount     string `json:"session_message_events_max_count"`
+	MCPServersJSON                   string `json:"mcp_servers_json"`
+	UILanguage                       string `json:"ui_language"`
+	DocLanguage                      string `json:"doc_language"`
+	RulesSupplement                  string `json:"rules_supplement"`
+	SessionToolLoopMaxRoundsIngest   string `json:"session_tool_loop_max_rounds_ingest"`
+	SessionToolLoopMaxRoundsQA       string `json:"session_tool_loop_max_rounds_qa"`
+	SessionToolLoopMaxRoundsOrganize string `json:"session_tool_loop_max_rounds_organize"`
+	SessionToolLoopMaxCallsPerRound  string `json:"session_tool_loop_max_calls_per_round"`
+	BackupIncludeRaw                 string `json:"backup_include_raw"`
+	VCAutoPush                       string `json:"vc_auto_push"`
+	ACPAgentsJSON                    string `json:"acp_agents_json"`
+	DefaultAgentKind                 string `json:"default_agent_kind"`
+	DefaultACPAgentID                string `json:"default_acp_agent_id"`
+	ACPMaxConcurrentAgents           string `json:"acp_max_concurrent_agents"`
 }
 
 func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
@@ -59,22 +64,22 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, settingsResponse{
-		LastInstanceID: all["last_instance_id"],
-		LastModel:      all["last_model"],
-		JobInstanceID:  all["job_instance_id"],
-		JobModel:       all["job_model"],
-		Temperature:    all["temperature"],
-		MaxTokens:      all["max_tokens"],
-		ChunkSize:      all["chunk_size"],
-		ChunkOverlap:   all["chunk_overlap"],
-		AutoReindex:          all["auto_reindex"],
-		WatchSources:         all["watch_sources"],
-		ActivityLogsMaxCount:      activityLogsMaxCountForResponse(all["activity_logs_max_count"]),
-		IngestJobEventsMaxCount:         jobEventsMaxCountForResponse(all["ingest_job_events_max_count"]),
-		SessionMessageEventsMaxCount:    sessionMsgEventsMaxCountForResponse(all["session_message_events_max_count"]),
-		MCPServersJSON:            mcpServersJSONForResponse(all["mcp_servers_json"]),
-		UILanguage:      languageForResponse(all["ui_language"]),
-		DocLanguage:     languageForResponse(all["doc_language"]),
+		LastInstanceID:                   all["last_instance_id"],
+		LastModel:                        all["last_model"],
+		JobInstanceID:                    all["job_instance_id"],
+		JobModel:                         all["job_model"],
+		Temperature:                      all["temperature"],
+		MaxTokens:                        all["max_tokens"],
+		ChunkSize:                        all["chunk_size"],
+		ChunkOverlap:                     all["chunk_overlap"],
+		AutoReindex:                      all["auto_reindex"],
+		WatchSources:                     all["watch_sources"],
+		ActivityLogsMaxCount:             activityLogsMaxCountForResponse(all["activity_logs_max_count"]),
+		IngestJobEventsMaxCount:          jobEventsMaxCountForResponse(all["ingest_job_events_max_count"]),
+		SessionMessageEventsMaxCount:     sessionMsgEventsMaxCountForResponse(all["session_message_events_max_count"]),
+		MCPServersJSON:                   mcpServersJSONForResponse(all["mcp_servers_json"]),
+		UILanguage:                       languageForResponse(all["ui_language"]),
+		DocLanguage:                      languageForResponse(all["doc_language"]),
 		RulesSupplement:                  all["rules_supplement"],
 		SessionToolLoopMaxRoundsIngest:   mcp.SessionToolLoopMaxRoundsForResponse(all[mcp.ConfigSessionToolLoopMaxRoundsIngest], "ingest"),
 		SessionToolLoopMaxRoundsQA:       mcp.SessionToolLoopMaxRoundsForResponse(all[mcp.ConfigSessionToolLoopMaxRoundsQA], "qa"),
@@ -82,6 +87,10 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		SessionToolLoopMaxCallsPerRound:  mcp.SessionToolLoopMaxCallsForResponse(all[mcp.ConfigSessionToolLoopMaxCallsPerRound]),
 		BackupIncludeRaw:                 backupIncludeRawForResponse(all[sqlite.ConfigBackupIncludeRaw]),
 		VCAutoPush:                       vcAutoPushForResponse(all[sqlite.ConfigVCAutoPush]),
+		ACPAgentsJSON:                    acpAgentsJSONForResponse(all["acp_agents_json"]),
+		DefaultAgentKind:                 defaultAgentKindForResponse(all["default_agent_kind"]),
+		DefaultACPAgentID:                all["default_acp_agent_id"],
+		ACPMaxConcurrentAgents:           acpMaxConcurrentAgentsForResponse(all["acp_max_concurrent_agents"]),
 	})
 }
 
@@ -136,6 +145,36 @@ func sessionMsgEventsMaxCountForResponse(stored string) string {
 	return stored
 }
 
+func acpAgentsJSONForResponse(stored string) string {
+	if strings.TrimSpace(stored) == "" {
+		canonical, _ := acp.CanonicalJSON(acp.DefaultConfig())
+		return canonical
+	}
+	cfg, err := acp.ParseConfig(stored)
+	if err != nil {
+		return stored
+	}
+	canonical, err := acp.CanonicalJSON(cfg)
+	if err != nil {
+		return stored
+	}
+	return canonical
+}
+
+func defaultAgentKindForResponse(stored string) string {
+	if stored == acp.KindACP {
+		return acp.KindACP
+	}
+	return acp.KindNative
+}
+
+func acpMaxConcurrentAgentsForResponse(stored string) string {
+	if strings.TrimSpace(stored) == "" {
+		return strconv.Itoa(acp.DefaultMaxConcurrentAgents)
+	}
+	return stored
+}
+
 func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -147,19 +186,82 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"temperature": true, "max_tokens": true, "chunk_size": true,
 		"chunk_overlap": true, "auto_reindex": true, "watch_sources": true,
 		"job_instance_id": true, "job_model": true,
-		"activity_logs_max_count":      true,
-		"ingest_job_events_max_count": true,
-		"session_message_events_max_count": true,
-		"mcp_servers_json":            true,
-		"ui_language":      true,
-		"doc_language":     true,
-		"rules_supplement": true,
+		"activity_logs_max_count":                  true,
+		"ingest_job_events_max_count":              true,
+		"session_message_events_max_count":         true,
+		"mcp_servers_json":                         true,
+		"ui_language":                              true,
+		"doc_language":                             true,
+		"rules_supplement":                         true,
 		mcp.ConfigSessionToolLoopMaxRoundsIngest:   true,
 		mcp.ConfigSessionToolLoopMaxRoundsQA:       true,
 		mcp.ConfigSessionToolLoopMaxRoundsOrganize: true,
 		mcp.ConfigSessionToolLoopMaxCallsPerRound:  true,
 		sqlite.ConfigBackupIncludeRaw:              true,
-		sqlite.ConfigVCAutoPush:                  true,
+		sqlite.ConfigVCAutoPush:                    true,
+		"acp_agents_json":                          true,
+		"default_agent_kind":                       true,
+		"default_acp_agent_id":                     true,
+		"acp_max_concurrent_agents":                true,
+	}
+
+	pendingACPJSON := ""
+	if raw, ok := req["acp_agents_json"]; ok {
+		value, err := parseSettingsValue(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		pendingACPJSON, err = validateAndCanonicalizeACPJSON(value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if raw, ok := req["default_agent_kind"]; ok {
+		value, err := parseSettingsValue(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if value != acp.KindNative && value != acp.KindACP {
+			writeError(w, http.StatusBadRequest, "default_agent_kind must be native or acp")
+			return
+		}
+	}
+	if raw, ok := req["acp_max_concurrent_agents"]; ok {
+		value, err := parseSettingsValue(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < acp.MinConcurrentAgents || n > acp.MaxConcurrentAgents {
+			writeError(w, http.StatusBadRequest, "acp_max_concurrent_agents must be between 1 and 16")
+			return
+		}
+	}
+	if raw, ok := req["default_acp_agent_id"]; ok {
+		value, err := parseSettingsValue(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if strings.TrimSpace(value) != "" {
+			effectiveJSON := pendingACPJSON
+			if effectiveJSON == "" {
+				effectiveJSON, _ = a.db.GetConfig("acp_agents_json")
+			}
+			cfg, err := acp.ParseConfig(effectiveJSON)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if _, ok := cfg.Agent(value); !ok {
+				writeError(w, http.StatusBadRequest, "default_acp_agent_id references an unknown agent")
+				return
+			}
+		}
 	}
 
 	for key, raw := range req {
@@ -196,6 +298,9 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			value = canonical
+		}
+		if key == "acp_agents_json" {
+			value = pendingACPJSON
 		}
 		if key == "ui_language" || key == "doc_language" {
 			if !isValidLanguage(value) {
@@ -295,6 +400,17 @@ func validateAndCanonicalizeMCPJSON(value string) (string, error) {
 		return "", err
 	}
 	return mcp.CanonicalJSON(cfg)
+}
+
+func validateAndCanonicalizeACPJSON(value string) (string, error) {
+	cfg, err := acp.ParseConfig(value)
+	if err != nil {
+		if ve, ok := err.(*acp.ValidationError); ok {
+			return "", fmt.Errorf("%s", ve.Error())
+		}
+		return "", err
+	}
+	return acp.CanonicalJSON(cfg)
 }
 
 // parseSettingsValue coerces JSON settings values to strings for app_config storage.

@@ -11,6 +11,89 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+func putSettings(t *testing.T, api *API, r chi.Router, payload map[string]interface{}) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestGetSettingsACPDefaults(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var resp settingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ACPAgentsJSON == "" || resp.DefaultAgentKind != "native" || resp.DefaultACPAgentID != "" || resp.ACPMaxConcurrentAgents != "4" {
+		t.Fatalf("unexpected ACP defaults: %+v", resp)
+	}
+}
+
+func TestUpdateSettingsACPConfigCanonical(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+	raw := `{"version":1,"agents":{"x":{"id":"x","name":"X","enabled":true,"command":"echo"}},"defaults":{}}`
+	w := putSettings(t, api, r, map[string]interface{}{"acp_agents_json": raw, "default_agent_kind": "acp", "default_acp_agent_id": "x", "acp_max_concurrent_agents": "8"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", w.Code, w.Body.String())
+	}
+	stored, _ := api.db.GetConfig("acp_agents_json")
+	if !strings.Contains(stored, `"cwd_policy": "workspace"`) {
+		t.Fatalf("stored config not canonical: %s", stored)
+	}
+}
+
+func TestUpdateSettingsACPValidationErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		body map[string]interface{}
+		path string
+	}{
+		{"invalid json", map[string]interface{}{"acp_agents_json": "{"}, ""},
+		{"bad kind", map[string]interface{}{"default_agent_kind": "bogus"}, ""},
+		{"unknown default", map[string]interface{}{"default_acp_agent_id": "missing"}, "unknown"},
+		{"credential args", map[string]interface{}{"acp_agents_json": `{"version":1,"agents":{"x":{"id":"x","name":"X","command":"echo","args":["--api-key","sk-abcdefgh"]}},"defaults":{}}`}, "agents.x.args[1]"},
+		{"env field", map[string]interface{}{"acp_agents_json": `{"version":1,"agents":{"x":{"id":"x","name":"X","command":"echo","env":{"KEY":"secret"}}},"defaults":{}}`}, "agents.x.env"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api, r := setupTestAPI(t)
+			setupSettingsRoutes(api, r)
+			w := putSettings(t, api, r, tt.body)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if tt.path != "" && tt.path != "unknown" && !strings.Contains(w.Body.String(), tt.path) {
+				t.Fatalf("body does not contain path %q: %s", tt.path, w.Body.String())
+			}
+			if tt.path == "unknown" && !strings.Contains(w.Body.String(), "unknown") {
+				t.Fatalf("unexpected body: %s", w.Body.String())
+			}
+		})
+	}
+}
+
+func TestUpdateSettingsCredentialEnvNameAccepted(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+	raw := `{"version":1,"agents":{"x":{"id":"x","name":"X","command":"echo","env_passthrough":["SOME_PROVIDER_API_KEY"]}},"defaults":{}}`
+	w := putSettings(t, api, r, map[string]interface{}{"acp_agents_json": raw})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	stored, _ := api.db.GetConfig("acp_agents_json")
+	if !strings.Contains(stored, "SOME_PROVIDER_API_KEY") {
+		t.Fatalf("credential variable name was not stored: %s", stored)
+	}
+}
+
 func setupSettingsRoutes(api *API, r chi.Router) {
 	r.Get("/api/v1/settings", api.GetSettings)
 	r.Put("/api/v1/settings", api.UpdateSettings)
@@ -428,7 +511,7 @@ func TestUpdateSettingsToolLoopLimits(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{
 		"session_tool_loop_max_rounds_organize": "16",
-		"session_tool_loop_max_calls_per_round":  "8",
+		"session_tool_loop_max_calls_per_round": "8",
 	})
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

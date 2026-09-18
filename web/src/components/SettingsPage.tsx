@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import type { Settings, VCStatus, ProviderCheckResult, MCPServerCheckResult, WorkspaceRuleFilesPreview } from "@/types"
+import type { Settings, VCStatus, ProviderCheckResult, MCPServerCheckResult, WorkspaceRuleFilesPreview, ACPAgentCheckResult } from "@/types"
 import { PageContainer } from "@/components/PageContainer"
 import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff, CheckCircle2, XCircle, Loader2, CircleOff, RefreshCw, ChevronDown } from "lucide-react"
 import {
@@ -21,6 +21,7 @@ import {
   checkProviderInstance,
   checkAllProviderInstances,
   checkMCPStatus,
+  checkACPAgents,
   getWorkspaceRuleFiles,
 } from "@/lib/api"
 import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
@@ -135,6 +136,9 @@ export function SettingsPage() {
     deleteInstance,
     loadModels,
     currentModels,
+    acpAgents,
+    acpConfigError,
+    loadACPAgents,
   } = useApp()
 
   const t = useT()
@@ -154,6 +158,9 @@ export function SettingsPage() {
   const [providerChecking, setProviderChecking] = useState(false)
   const [mcpChecks, setMcpChecks] = useState<MCPServerCheckResult[] | null>(null)
   const [mcpChecking, setMcpChecking] = useState(false)
+  const [acpJsonError, setACPJsonError] = useState<string | null>(null)
+  const [acpChecks, setACPChecks] = useState<ACPAgentCheckResult[] | null>(null)
+  const [acpChecking, setACPChecking] = useState(false)
   const [rulePreview, setRulePreview] = useState<WorkspaceRuleFilesPreview | null>(null)
   const rulesSupplementMax = 2048
 
@@ -161,9 +168,10 @@ export function SettingsPage() {
     void loadSettings()
     void loadProviders()
     void loadInstances()
+    void loadACPAgents()
     void loadVCStatus()
     void getWorkspaceRuleFiles().then(setRulePreview).catch(() => setRulePreview(null))
-  }, [loadSettings, loadProviders, loadInstances])
+  }, [loadSettings, loadProviders, loadInstances, loadACPAgents])
 
   useEffect(() => {
     if (instances.length === 0) return
@@ -260,6 +268,13 @@ export function SettingsPage() {
 
   const jobInstanceId = mergedForm.job_instance_id ?? ""
   const jobModel = mergedForm.job_model ?? ""
+  let acpReadonlyOnly: boolean
+  try {
+    const parsed = JSON.parse(mergedForm.acp_agents_json ?? settings?.acp_agents_json ?? "{}") as { defaults?: { readonly_only?: boolean } }
+    acpReadonlyOnly = parsed.defaults?.readonly_only !== false
+  } catch {
+    acpReadonlyOnly = true
+  }
 
   useEffect(() => {
     if (!jobInstanceId) return
@@ -336,6 +351,21 @@ export function SettingsPage() {
     }
   }
 
+  const runACPCheck = async () => {
+    const raw = mergedForm.acp_agents_json ?? settings?.acp_agents_json ?? ""
+    setACPChecking(true)
+    setACPJsonError(null)
+    setACPChecks(null)
+    try {
+      const resp = await checkACPAgents(raw)
+      setACPChecks(resp.agents)
+    } catch (error) {
+      setACPJsonError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setACPChecking(false)
+    }
+  }
+
   const renderProviderStatus = (instanceId: string) => {
     const check = providerChecks[instanceId]
     if (providerChecking && !check) {
@@ -384,6 +414,30 @@ export function SettingsPage() {
     )
   }
 
+  const renderACPStatusBadge = (result: ACPAgentCheckResult) => {
+    const ok = result.status === "ok"
+    const disabled = result.status === "disabled"
+    return (
+      <div key={result.id} className="flex items-start gap-2 rounded-md border px-3 py-2 text-sm" data-testid={`acp-check-${result.id}`}>
+        {ok ? (
+          <CheckCircle2 className="size-4 text-green-700 shrink-0 mt-0.5" />
+        ) : disabled ? (
+          <CircleOff className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+        ) : (
+          <XCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+        )}
+        <div className="min-w-0">
+          <div className="font-medium truncate">{result.name || result.id}</div>
+          <div className="text-xs text-muted-foreground">
+            {result.message || result.agent_name || result.status}
+            {result.agent_version ? ` / ${result.agent_version}` : ""}
+            {result.protocol_version ? ` / ACP v${result.protocol_version}` : ""}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     setForm((prev) => ({ ...(prev ?? {}), [key]: value }))
 
@@ -407,8 +461,11 @@ export function SettingsPage() {
     setSaved(false)
     try {
       await saveSettings(payload)
+      void loadACPAgents()
       setForm(null)
       setMcpJsonError(null)
+      setACPJsonError(null)
+      setACPChecks(null)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch {
@@ -562,6 +619,7 @@ export function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+
         </SettingsSectionGroup>
 
         <SettingsSectionGroup
@@ -940,6 +998,119 @@ export function SettingsPage() {
                 )}
               </>
             )}
+          </CardContent>
+        </Card>
+        <Card data-testid="settings-acp-agents">
+          <CardHeader>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <CardTitle>{t("settings.acp.title")}</CardTitle>
+                <CardDescription>{t("settings.acp.desc")}</CardDescription>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void runACPCheck()}
+                disabled={acpChecking}
+                data-testid="check-acp-agents"
+              >
+                {acpChecking ? (
+                  <Loader2 className="size-3.5 mr-1 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3.5 mr-1" />
+                )}
+                {t("settings.acp.check_connection")}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <label className="text-sm font-medium">{t("settings.acp.default_runtime")}</label>
+                <select
+                  data-testid="acp-default-agent-kind"
+                  value={mergedForm.default_agent_kind ?? "native"}
+                  onChange={(e) => set("default_agent_kind", e.target.value as "native" | "acp")}
+                  className="mt-1 w-full h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                >
+                  <option value="native">{t("model.runtime.native")}</option>
+                  <option value="acp">ACP</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">{t("settings.acp.default_agent")}</label>
+                <select
+                  value={mergedForm.default_acp_agent_id ?? ""}
+                  onChange={(e) => set("default_acp_agent_id", e.target.value)}
+                  disabled={(mergedForm.default_agent_kind ?? "native") !== "acp"}
+                  className="mt-1 w-full h-9 rounded-md border border-input bg-transparent px-2 text-sm disabled:opacity-50"
+                >
+                  <option value="">{t("settings.acp.select_agent")}</option>
+                  {acpAgents.filter((agent) => agent.enabled).map((agent) => (
+                    <option key={agent.id} value={agent.id}>{agent.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">{t("settings.acp.max_concurrent")}</label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={16}
+                  value={mergedForm.acp_max_concurrent_agents ?? "4"}
+                  onChange={(e) => set("acp_max_concurrent_agents", e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium">{t("settings.acp.json_label")}</label>
+              <textarea
+                data-testid="acp-agents-json"
+                className="mt-1 w-full min-h-[220px] max-w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs overflow-x-auto"
+                value={mergedForm.acp_agents_json ?? settings?.acp_agents_json ?? ""}
+                onChange={(e) => {
+                  set("acp_agents_json", e.target.value)
+                  setACPJsonError(null)
+                  setACPChecks(null)
+                }}
+                spellCheck={false}
+              />
+            </div>
+            {(acpJsonError || acpConfigError) && (
+              <p className="text-xs text-destructive" data-testid="acp-json-error">
+                {acpJsonError || acpConfigError}
+              </p>
+            )}
+            {acpChecks && (
+              <div className="space-y-2" data-testid="acp-check-results">
+                {acpChecks.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("settings.acp.no_agents")}</p>
+                ) : acpChecks.map(renderACPStatusBadge)}
+              </div>
+            )}
+            {acpAgents.length > 0 && (
+              <div className="space-y-2 rounded-md border bg-muted/20 p-3" data-testid="acp-env-statuses">
+                <p className="text-sm font-medium">{t("settings.acp.env_status_title")}</p>
+                {acpAgents.map((agent) => (
+                  <div key={agent.id} className="text-xs">
+                    <span className="font-medium">{agent.name}</span>
+                    <span className="ml-2 text-muted-foreground">
+                      {agent.env_passthrough.length === 0
+                        ? t("settings.acp.no_env_vars")
+                        : agent.env_passthrough.map((env) => `${env.name}: ${env.present ? t("settings.acp.present") : t("settings.acp.missing")}`).join(", ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!acpReadonlyOnly && (
+              <p className="text-xs text-amber-600" data-testid="acp-write-warning">
+                {t("settings.acp.write_warning")}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">{t("settings.acp.credentials_note")}</p>
+            <p className="text-xs text-muted-foreground">{t("settings.acp.save_note")}</p>
           </CardContent>
         </Card>
         </SettingsSectionGroup>

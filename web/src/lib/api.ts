@@ -31,6 +31,9 @@ import type {
   MCPServerCheckResult,
   ActivityLog,
   SessionMessageEventsResponse,
+  ACPAgent,
+  ACPAgentCheckResult,
+  AgentKind,
 } from "@/types"
 
 const BASE = ""
@@ -281,9 +284,11 @@ export function getCapabilities(): Promise<CapabilitiesResponse> {
   return request<CapabilitiesResponse>("/api/v1/capabilities")
 }
 
-export function createIngestSession(title?: string, mode?: string): Promise<{ session: IngestSession }> {
+export function createIngestSession(title?: string, mode?: string, agentKind?: AgentKind, acpAgentId?: string): Promise<{ session: IngestSession }> {
   const body: Record<string, string> = { title: title ?? "" }
   if (mode) body.mode = mode
+  if (agentKind) body.agent_kind = agentKind
+  if (acpAgentId) body.acp_agent_id = acpAgentId
   return request<{ session: IngestSession }>("/api/v1/ingest/sessions", {
     method: "POST",
     body: JSON.stringify(body),
@@ -394,7 +399,7 @@ async function consumeSessionSSE(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (msg.includes("input stream") || msg.includes("network")) {
-      throw new Error(`__i18n:error.connection_interrupted:${msg}`)
+      throw new Error(`__i18n:error.connection_interrupted:${msg}`, { cause: e })
     }
     throw e instanceof Error ? e : new Error(msg)
   }
@@ -649,7 +654,7 @@ export function listIngestSessions(): Promise<{ sessions: SessionListItem[] }> {
 
 export function updateIngestSession(
   id: string,
-  patch: { instance_id?: string; model?: string; title?: string },
+  patch: { instance_id?: string; model?: string; title?: string; agent_kind?: AgentKind; acp_agent_id?: string },
 ): Promise<{ session: IngestSession }> {
   return request<{ session: IngestSession }>(
     `/api/v1/ingest/sessions/${encodeURIComponent(id)}`,
@@ -658,6 +663,17 @@ export function updateIngestSession(
       body: JSON.stringify(patch),
     },
   )
+}
+
+export function listACPAgents(): Promise<{ agents: ACPAgent[]; config_error?: string }> {
+  return request<{ agents: ACPAgent[]; config_error?: string }>("/api/v1/acp-agents")
+}
+
+export function checkACPAgents(acpAgentsJson?: string): Promise<{ agents: ACPAgentCheckResult[] }> {
+  return request<{ agents: ACPAgentCheckResult[] }>("/api/v1/acp-agents/check", {
+    method: "POST",
+    body: acpAgentsJson === undefined ? undefined : JSON.stringify({ acp_agents_json: acpAgentsJson }),
+  })
 }
 
 export function deleteIngestSession(

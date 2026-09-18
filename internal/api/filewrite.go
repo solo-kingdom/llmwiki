@@ -67,8 +67,3 @@ func (a *API) removeWorkspaceFile(canonicalPath string) error {
 	}
 	return nil
 }
-
-// resolveCanonicalPath builds the canonical file path from document metadata.
-func resolveCanonicalPath(relativePath string) string {
-	return strings.TrimPrefix(relativePath, "/")
-}

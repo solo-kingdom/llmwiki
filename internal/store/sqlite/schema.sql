@@ -194,6 +194,8 @@ CREATE TABLE IF NOT EXISTS ingest_sessions (
     llm_instance_id TEXT NOT NULL DEFAULT '',
     llm_model TEXT NOT NULL DEFAULT '',
     mode TEXT NOT NULL DEFAULT 'ingest' CHECK (mode IN ('ingest', 'qa', 'organize')),
+    agent_kind TEXT NOT NULL DEFAULT 'native' CHECK (agent_kind IN ('native', 'acp')),
+    acp_agent_id TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );

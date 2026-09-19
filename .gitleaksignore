@@ -2,3 +2,7 @@
 5cace9994e09931642307509a39342c06a3572db:internal/store/sqlite/provider_instance_test.go:generic-api-key:14
 84134c4b54aa88d57abd8aecbc7a5a25b724d636:internal/acp/config_credentials_test.go:aws-access-token:47
 017c37e1f53eea414c6d1ed08ee7524edf982f61:internal/acp/config_credentials_test.go:aws-access-token:47
+9b32e24efdf8013ba48ea9284a4d9e15ca1e546e:internal/api/integration_test.go:generic-api-key:79
+b6a6ca4b2fcd5bd298141415660e3cba0e2fb04c:internal/api/integration_test.go:generic-api-key:82
+9b32e24efdf8013ba48ea9284a4d9e15ca1e546e:internal/api/settings_test.go:generic-api-key:207
+b6a6ca4b2fcd5bd298141415660e3cba0e2fb04c:internal/store/sqlite/provider_instance_test.go:generic-api-key:14

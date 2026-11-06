@@ -140,7 +140,8 @@ func (s *Server) Start() error {
 	// API routes
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
-		r.Get("/workspace", s.handleWorkspace)
+		r.Get("/workspace", s.api.GetWorkspace)
+		r.Get("/skills", s.handleSkillIndex)
 		r.Post("/reindex", s.handleReindex)
 
 		r.Route("/documents", func(r chi.Router) {
@@ -171,6 +172,7 @@ func (s *Server) Start() error {
 		r.Get("/settings", s.api.GetSettings)
 		r.Put("/settings", s.api.UpdateSettings)
 		r.Get("/workspace/rule-files", s.api.GetWorkspaceRuleFiles)
+		r.Put("/workspace/rule-files", s.api.UpdateWorkspaceRuleFiles)
 		r.Put("/settings/last-model", s.api.UpdateLastModel)
 		r.Get("/logs", s.api.ListActivityLogsHandler)
 		r.Delete("/logs", s.api.DeleteAllActivityLogsHandler)
@@ -250,6 +252,11 @@ func (s *Server) Start() error {
 		r.Post("/mcp", s.mcpHandler)
 		log.Println("MCP RPC endpoint enabled at /mcp")
 	}
+
+	// Agent skill documents: /skill.md is the installable entry, /skills/<name>.md a stage skill.
+	r.Get("/skill.md", s.handleSkillEntry)
+	r.Get("/skills/{name}.md", s.handleSkillDoc)
+	r.Get("/skills/{name}.zh.md", s.handleSkillDocZh)
 
 	// SPA fallback
 	r.Handle("/*", s.spaHandler())
@@ -437,10 +444,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"mcp_default_policy": mcpDefaultPolicy,
 		"mcp_compatibility":  "First release focuses on RPC access. Direct Claude Desktop stdio connection is not a release gate.",
 	})
-}
-
-func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
 }
 
 func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {

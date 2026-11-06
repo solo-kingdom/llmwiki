@@ -1,123 +1,71 @@
 ---
 name: llmwiki-lint
-description: Check and fix LLM Wiki health issues. Use when the user wants to audit the wiki for problems, or when you notice issues during other operations.
+description: Audit and repair an llmwiki vault over HTTP — read lint findings by severity, trace each one to its page, fix it through the document API, then reindex and prove the vault is clean. Use when the user asks for a health check, wants broken links or orphans cleaned up, or a lint run reports errors.
 license: MIT
 metadata:
   author: llmwiki
-  version: "1.0"
+  version: "2.0"
 ---
 
-Check LLM Wiki health — find and fix broken links, orphan pages, frontmatter issues, and structural problems.
+# llmwiki-lint
 
-This skill is the blueprint for health-diagnosis and organization prompts. Deterministic lint is executed by Go code; prompts explain, prioritize, and plan repairs, especially in organize mode and future LLM-assisted quality checks.
+Lint is read-only: it reports what is wrong. Repair happens through `llmwiki-organize` endpoints. `$LLMWIKI_URL` and auth come from the `llmwiki` entry skill.
 
-## When to Use
+## Run it
 
-- User says "check wiki health", "lint the wiki", "audit"
-- Before/after major reorganization
-- After bulk ingestion to verify consistency
-- When you notice dead links or inconsistencies during other operations
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/lint"
+```
 
-## Core Invariants
+```json
+{
+  "issues": [
+    {"severity": "error", "code": "dead_link", "path": "wiki/concepts/attention.md", "message": "死链：目标不存在 \"entities/transformer\""}
+  ],
+  "stats": {"page_count": 42, "source_count": 7, "last_updated": "…"},
+  "checked_at": "…"
+}
+```
 
-- `raw/` is read-only; lint fixes must not modify source material.
-- The filesystem is the source of truth; lint reports are derived from wiki files and rebuildable indexes.
-- Read affected pages before fixing to avoid losing information just to clear a warning.
-- `wiki/log.md` is append-only; format fixes should be minimal and must not delete historical entries.
-- During session diagnosis, report issues and proposed fixes only; archive confirmation moves the workflow into plan/generation steps.
+Severities: `error` (breaks navigation, indexing or the page contract), `warning` (structure drift that a human may accept), `info` (advisory). Start a sweep with `python3 -c` / `jq` to group by `code` — fixing twenty of one code is usually one cause.
 
-## Steps
+## Codes and repairs
 
-1. **Run lint check** using MCP `search`:
-   ```
-   search(query="", mode="lint")
-   ```
+| Code | Severity | Meaning | Repair |
+|---|---|---|---|
+| `missing_frontmatter` | error | `title`, `date` or `type` absent in a typed page | `PUT /documents/{id}/content` with a complete frontmatter block |
+| `type_dir_mismatch` | error | `type` disagrees with the directory | decide which is right; usually move the page into the correct dir (create + delete), otherwise fix `type` |
+| `dead_link` | error | `[[target]]` resolves to nothing | create the target page, or repoint the link to the page that exists |
+| `ghost_index_entry` | error | SQLite has a row whose file no longer exists | `POST /api/v1/reindex` prunes it; if it survives, delete the document row via `DELETE /documents/{id}` |
+| `misplaced_wiki_page` | warning | business page sits at `wiki/*.md` | move it into its typed subdir; only `overview.md`, `index.md`, `log.md` belong at the wiki root |
+| `orphan_page` | warning | no other wiki page links here | link it from a related page; `index.md` is generated, so editing it does nothing |
+| `duplicate_page` | warning | two pages in one dir share a normalized filename | merge into one, repoint inbound links, delete the loser |
+| `entity_concept_coupling` | warning | a concept page's title is bound to one entity | rename/generalize the concept and link the entity case as `[[entities/…]]` |
+| `log_format_invalid` | error | `wiki/log.md` entry breaks `## [YYYY-MM-DD] action \| description` | rewrite that one entry; never reorder the log |
+| `log_date_decreasing` | warning | log entries out of chronological order | reorder entries, keep every one |
 
-2. **Review the report** — issues are categorized by severity:
+`wiki/templates/` is scaffolding and is skipped by every check — a freshly initialised vault lints clean. If it does not, the vault itself is broken.
 
-   | Severity | Issues | Action |
-   |:--------:|--------|--------|
-   | **error** | Dead links, missing frontmatter, log format errors | Fix immediately |
-   | **warning** | Orphan pages, type mismatches, misplaced pages, entity-concept coupling | Evaluate and fix |
+Frontmatter is not validated beyond presence and directory agreement: an odd `date` value passes lint but displays wrong, so check dates when you touch a page anyway.
 
-3. **Fix error-level issues first**:
+`page_count` / `source_count` in `stats` are the fastest sanity check after a bulk import: a sudden drop means reindex pruned files that are actually gone from disk.
 
-   **Dead links** (`dead_link`):
-   - Find the link target — was the page renamed or deleted?
-   - Either create the missing page or update the link to point to the correct target
-   - Use `read` to see the page, `write` to fix the link
+## Sweep protocol
 
-   **Missing frontmatter** (`missing_frontmatter`):
-   - Read the page, determine its type and title
-   - Add proper frontmatter using `write`
+1. `GET /lint`. If `issues` is empty, report the stats and stop — do not "improve" pages nobody asked about.
+2. Group by `code`; pick the code with the largest count and a mechanical fix (frontmatter and dates first — they are cheap and unambiguous).
+3. Resolve `path` to a document: `GET /documents?source_kind=wiki&exclude_hidden=true`, match `relative_path`, or `GET /api/v1/search?q=<filename>`. Then `GET /documents/{id}/content`.
+4. Fix with `PUT /documents/{id}/content` (full body) — the only write that keeps file and index in sync. Structural moves follow `llmwiki-organize`.
+5. After each batch: `POST /api/v1/reindex`, then `GET /lint` again and diff the issue list. Count going *up* means your fix introduced something (usually a link you forgot to repoint).
+6. Stop when the remaining issues are ones only the user can decide (for example: two pages that both look correct and need a subject-matter call). Report them with paths instead of guessing.
 
-   **Log format errors** (`log_format_invalid`, `log_date_decreasing`):
-   - Read `wiki/log.md`
-   - Fix entry format to match spec: `## [YYYY-MM-DD] action | description`
-   - Ensure dates are non-decreasing (append-only; do not delete historical entries)
+## Report
 
-4. **Fix warning-level issues**:
+Give: issues by severity before → after, the files changed, anything deliberately left, and the commands to reproduce. Quote exact `code` values and paths so the user can re-check. If you ran `POST /api/v1/vcs/backup`, include the commit sha.
 
-   **Orphan pages** (`orphan_page`):
-   - Read the page to understand its content
-   - Find related pages that should link to it
-   - Add `[[wikilinks]]` from those pages
+## Never
 
-   **Type mismatch** (`type_dir_mismatch`):
-   - Either move the page to the correct directory, or update its `type` field
-
-   **Misplaced pages** (`misplaced_wiki_page`):
-   - Move to the correct typed subdirectory
-
-   **Entity-concept coupling** (`entity_concept_coupling`):
-   - Read the concept page and confirm the title binds a concrete entity name to an abstract concept
-   - Rename to a neutral concept title (e.g. `组织裁剪方法论`) while preserving body content
-   - Link the entity as a case via `[[Entity Name]]` in the concept body; update related links on the entity page
-   - After move/rename, update wikilinks pointing to the old path to avoid dead links
-
-5. **Re-run lint** to verify all fixes
-   ```
-   search(query="", mode="lint")
-   ```
-   If errors remain, continue fixing. Warnings may be consciously deferred with an explanation.
-
-## Lint Checks Reference
-
-| Code | Severity | What it checks |
-|------|:--------:|----------------|
-| `dead_link` | error | `[[link]]` or `[text](path)` target doesn't exist |
-| `missing_frontmatter` | error | Missing required fields: title, type, date |
-| `log_format_invalid` | error | `log.md` entry format doesn't match spec |
-| `log_date_decreasing` | error | Log entries not in chronological order |
-| `type_dir_mismatch` | warning | Page `type` doesn't match its directory |
-| `misplaced_wiki_page` | warning | Business page not in typed subdirectory |
-| `entity_concept_coupling` | warning | Concept title appears to bind an entity name to an abstract concept |
-| `orphan_page` | warning | No incoming links from other wiki pages |
-
-## Fix Strategy
-
-- **Dead links**: first check for renamed pages or slug differences; if uncertain, ask or mark an open question before creating a placeholder page.
-- **Frontmatter**: infer type from directory, but do not casually change identity fields; if date is missing, use the current repair date.
-- **Orphan pages**: decide whether the orphan is legitimate, such as a source summary or temporary query page; otherwise add links from related overview, entity, or concept pages.
-- **Misplaced / type mismatch**: prefer keeping type and directory consistent; after moving pages, update links pointing to old paths.
-- **Entity-concept coupling**: split into a neutral concept page plus entity case links; do not delete concept content just to clear the warning.
-- **Log issues**: fix format and ordering problems only; do not rewrite historical meaning.
-
-## Guardrails
-
-- Always run lint AFTER making changes, not just before
-- Fix errors before warnings
-- When fixing dead links, prefer creating the missing page over removing the link
-- Never modify `raw/` directory
-- Log format in `wiki/log.md` is strictly append-only — only fix format, never delete entries; entry prefixes are `## [YYYY-MM-DD] action | description`
-- If a page has multiple issues, fix them all in one pass
-- `overview.md`, `index.md`, and `log.md` are system pages; do not move or delete them as ordinary business pages
-
-## Done Criteria
-
-- [ ] Lint report shows 0 errors
-- [ ] All dead links resolved (pages created or links updated)
-- [ ] All pages have valid frontmatter
-- [ ] `wiki/log.md` format is valid and dates are ascending
-- [ ] Warning-level issues reviewed and either fixed or consciously deferred
-- [ ] Key repaired pages were read back to confirm old information was not lost
+- Edit `wiki/index.md`, `.llmwiki/`, or `raw/` to silence a finding.
+- Delete a page with inbound links before repointing them.
+- Mass-delete "orphans" — an orphan is often a page that simply needs one link, and deleting user knowledge to make a number go down is not a fix.
+- Claim a clean vault without a post-fix `GET /lint`.

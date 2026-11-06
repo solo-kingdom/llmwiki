@@ -1,124 +1,72 @@
 ---
 name: llmwiki-lint
-description: 检查并修复 LLM Wiki 的健康问题。当用户需要诊断 wiki 问题，或在其他操作中发现异常时使用。
+description: 通过 HTTP 体检并修复 llmwiki 知识库——按严重度读 lint 结果、把每条问题定位到页面、经文档接口修好，再 reindex 证明库已干净。用户要求体检、清理死链与孤立页，或 lint 报错时使用。
 license: MIT
 metadata:
   author: llmwiki
-  version: "1.0"
+  version: "2.0"
   lang: zh
 ---
 
-检查 LLM Wiki 健康 — 发现并修复死链、孤立页面、frontmatter 问题和结构性问题。
+# llmwiki-lint
 
-本 skill 是健康诊断与整理类 prompts 的蓝本，主要影响 organize 模式、lint 报告解释、以及后续 LLM 参与的质量检查提示。确定性 lint 由 Go 代码执行；prompt 负责解释、排序和提出修复方案。
+Lint 只读：它报问题。修复走 `llmwiki-organize` 里的接口。`$LLMWIKI_URL` 和鉴权头来自入口 skill `llmwiki`。
 
-## 何时使用
+## 跑一次
 
-- 用户说"检查 wiki 健康"、"lint"、"诊断"
-- 重大重组前后
-- 批量摄入后验证一致性
-- 在其他操作中发现死链或不一致时
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/lint"
+```
 
-## 核心不变量
+```json
+{
+  "issues": [
+    {"severity": "error", "code": "dead_link", "path": "wiki/concepts/attention.md", "message": "死链：目标不存在 \"entities/transformer\""}
+  ],
+  "stats": {"page_count": 42, "source_count": 7, "last_updated": "…"},
+  "checked_at": "…"
+}
+```
 
-- `raw/` 只读，lint 修复不能改源材料。
-- 文件系统是真理源；lint 报告来自 wiki 文件和可重建索引。
-- 修复前先读取受影响页面，避免为消除告警而丢失信息。
-- `wiki/log.md` 仅追加；格式修复应最小化，不删除历史条目。
-- Session 诊断阶段只报告问题和修复建议；归档确认后才进入计划/生成步骤。
+严重度：`error`（破坏导航、索引或页面契约）、`warning`（结构性偏差，人可以接受）、`info`（提示）。先用 `jq` 之类按 `code` 分组——同一种 code 出现二十次通常是一个原因。
 
-## 步骤
+## code 与修法
 
-1. **运行 lint 检查**，使用 MCP `search`：
-   ```
-   search(query="", mode="lint")
-   ```
+| Code | 严重度 | 含义 | 修法 |
+|---|---|---|---|
+| `missing_frontmatter` | error | 类型页面缺 `title`/`date`/`type` | 用 `PUT /documents/{id}/content` 补全 frontmatter |
+| `type_dir_mismatch` | error | `type` 与目录不符 | 判断哪边对：通常移动页面（新建+删除），否则改 `type` |
+| `dead_link` | error | `[[target]]` 指向不存在的页面 | 补建目标页，或把链接改到真实存在的页面 |
+| `ghost_index_entry` | error | 数据库有记录但文件已不存在 | `POST /api/v1/reindex` 会清掉；仍存在就 `DELETE /documents/{id}` |
+| `misplaced_wiki_page` | warning | 业务页放在 `wiki/*.md` | 移到对应类型子目录；顶层只允许 `overview.md`、`index.md`、`log.md` |
+| `orphan_page` | warning | 没有其他 wiki 页面链过来 | 从相关页面加一条链接；`index.md` 是生成的，改它无效 |
+| `duplicate_page` | warning | 同目录下归一化文件名重复 | 合并成一页，改写入链，删掉多余页 |
+| `entity_concept_coupling` | warning | 概念页标题绑定到某个实体 | 把概念页标题改中性，用 `[[entities/…]]` 链案例 |
+| `log_format_invalid` | error | `wiki/log.md` 条目不符合 `## [YYYY-MM-DD] action \| description` | 改这一条；不要重排日志 |
+| `log_date_decreasing` | warning | 日志条目时间倒序 | 重排条目，一条都不能丢 |
 
-2. **审阅报告** — 问题按严重度分类：
+`wiki/templates/` 是脚手架，所有检查都会跳过它——刚初始化的库 lint 应当是空的；不是空就说明库本身有问题。
 
-   | 严重度 | 问题类型 | 处理方式 |
-   |:---:|------|------|
-   | **error** | 死链、缺少 frontmatter、日志格式错误 | 立即修复 |
-   | **warning** | 孤立页面、类型不匹配、错位页面、实体-概念混绑 | 评估后修复 |
+frontmatter 只校验「存在」和「与目录一致」：`date` 写错格式能过 lint，但显示会错，改页面时顺手核对。
 
-3. **优先修复 error 级问题**：
+`stats.page_count` / `source_count` 是批量导入后最快的体检指标：数量突然下降说明 reindex 清掉了确实消失的文件。
 
-   **死链**（`dead_link`）：
-   - 查找链接目标 — 页面是否被重命名或删除？
-   - 创建缺失的页面，或更新链接指向正确目标
-   - 用 `read` 查看页面，用 `write` 修复链接
+## 体检流程
 
-   **缺少 frontmatter**（`missing_frontmatter`）：
-   - 读取页面，确定其类型和标题
-   - 使用 `write` 添加正确的 frontmatter
+1. `GET /lint`。`issues` 为空就报 stats 收工——不要顺手"改进"没人要求的页面。
+2. 按 `code` 分组，先挑数量最多、修法最机械的一类（frontmatter 和日期优先，便宜且无歧义）。
+3. 把 `path` 映射到文档：`GET /documents?source_kind=wiki&exclude_hidden=true` 里按 `relative_path` 匹配，或用 `GET /api/v1/search?q=<文件名>`；再 `GET /documents/{id}/content`。
+4. 用 `PUT /documents/{id}/content`（整体正文）修复——只有它能同时改文件和索引。结构性搬移按 `llmwiki-organize` 做。
+5. 每批之后：`POST /api/v1/reindex`，再 `GET /lint`，对比问题列表。数量变多说明你的改动引入了新问题（通常是漏改的链接）。
+6. 剩下只有用户能定的问题（例如两页都看似正确、需要业务判断）就停下，带路径报告，不要替用户猜。
 
-   **日志格式错误**（`log_format_invalid`、`log_date_decreasing`）：
-   - 读取 `wiki/log.md`
-   - 修复条目格式以匹配规范：`## [YYYY-MM-DD] action | description`
-   - 确保日期非递减（仅追加；不要删除历史条目）
+## 汇报
 
-4. **修复 warning 级问题**：
+给出：修复前后按严重度的数量、改动过的文件、有意留下的问题、复现命令。`code` 和路径照抄，方便用户复核。跑过 `POST /api/v1/vcs/backup` 时附上 commit sha。
 
-   **孤立页面**（`orphan_page`）：
-   - 读取页面了解其内容
-   - 找到应链接到它的相关页面
-   - 从那些页面添加 `[[wikilinks]]`
+## 禁止
 
-   **类型不匹配**（`type_dir_mismatch`）：
-   - 将页面移到正确目录，或更新其 `type` 字段
-
-   **错位页面**（`misplaced_wiki_page`）：
-   - 移到正确的类型子目录
-
-   **实体-概念混绑**（`entity_concept_coupling`）：
-   - 读取概念页，确认标题是否把具体实体名与抽象概念绑在一起
-   - 将概念页重命名为中性标题（如 `组织裁剪方法论`），保留正文内容
-   - 在概念页正文中通过 `[[实体名]]` 链接案例；同步更新实体页中的相关概念链接
-   - 移动/重命名后更新所有指向旧路径的 wikilink，避免产生死链
-
-5. **重新运行 lint** 验证所有修复
-   ```
-   search(query="", mode="lint")
-   ```
-   如果仍有 error，继续修复；warning 可在说明原因后延后处理。
-
-## Lint 检查项参考
-
-| 检查码 | 严重度 | 检查内容 |
-|------|:---:|------|
-| `dead_link` | error | `[[链接]]` 或 `[文本](路径)` 的目标不存在 |
-| `missing_frontmatter` | error | 缺少必需字段：title、type、date |
-| `log_format_invalid` | error | `log.md` 条目格式不符合规范 |
-| `log_date_decreasing` | error | 日志条目日期未按升序排列 |
-| `type_dir_mismatch` | warning | 页面 `type` 与所在目录不匹配 |
-| `misplaced_wiki_page` | warning | 业务页面不在类型子目录中 |
-| `entity_concept_coupling` | warning | 概念标题疑似绑定已有实体名与抽象概念 |
-| `orphan_page` | warning | 没有其他页面链接到此页面 |
-
-## 修复策略
-
-- **死链**：优先确认是否有重命名页面或 slug 差异；无法确认时，创建占位页前先询问或标记 open question。
-- **Frontmatter**：按目录推断 type，但不要随意改业务身份字段；缺日期时使用当前修复日期。
-- **孤立页**：先判断是否是合法孤立（如 source 摘要或临时查询页）；否则从相关总览、实体或概念页增加链接。
-- **错位页 / type mismatch**：优先让 type 与目录保持一致；移动页面后同步更新指向旧路径的链接。
-- **实体-概念混绑**：拆为中性概念页 + 实体案例链接；不要为消除 warning 而删除概念内容。
-- **日志问题**：只修格式和顺序问题；不得重写历史含义。
-
-## 约束
-
-- 变更后必须重新运行 lint，不能只在变更前运行
-- 先修复 error，再处理 warning
-- 修复死链时，优先创建缺失页面，而非删除链接
-- 绝不修改 `raw/` 目录
-- `wiki/log.md` 严格仅追加 — 只修复格式，绝不删除条目；标准条目前缀为 `## [YYYY-MM-DD] action | description`
-- 如果一个页面有多个问题，一次性全部修复
-- `overview.md`、`index.md`、`log.md` 是系统页，避免作为普通业务页移动或删除
-
-## 完成标准
-
-- [ ] Lint 报告显示 0 个 error
-- [ ] 所有死链已解决（已创建页面或已更新链接）
-- [ ] 所有页面 frontmatter 有效
-- [ ] `wiki/log.md` 格式正确且日期升序
-- [ ] warning 级问题已审阅，已修复或明确推迟
-- [ ] 修复后已回读关键页面，确认没有丢失旧信息
+- 为了消灭一条问题去改 `wiki/index.md`、`.llmwiki/` 或 `raw/`。
+- 在有入链的情况下先删页面、后改链接。
+- 批量删"孤立页"——孤立页往往只差一条链接，为了让数字好看而删用户知识不是修复。
+- 不做修复后的 `GET /lint` 就声称库已干净。

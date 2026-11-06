@@ -86,7 +86,7 @@ Karpathy LLM Wiki 模式
 
 ## 二、本项目架构与 Skill 定位
 
-### 2.1 为什么不使用 SKILL.md
+### 2.1 服务内 Prompt 与对外 SKILL.md 的分工
 
 本项目的 LLM 不是通过读取 SKILL.md 文件来工作的，而是通过代码内 `ComposeSystemPrompt()` 函数按步骤分发 prompt。这与 llm-wiki-skill、LLM-Wiki-Skilled、OmegaWiki 的模式根本不同：
 
@@ -96,7 +96,12 @@ Karpathy LLM Wiki 模式
   （LLM 是外部 Agent）            （LLM 是服务内嵌的执行引擎）
 ```
 
-因此，本项目不需要 `.opencode/skills/` 下的 SKILL.md 文件。LLM 的行为由以下机制控制：
+这解释的是**服务内**摄取/整理流水线为什么不读 SKILL.md。它不适用于外部 Agent：
+
+- **服务内 LLM（摄取作业、会话）**：由代码内 prompt 驱动，不读 `skills/`。
+- **外部 Agent**：通过 `GET /skill.md` 与 `GET /skills/<name>.md`（中文 `/skills/<name>.zh.md`）安装技能，用 HTTP API 完成 guide / query / organize / ingest / lint 五类操作。`skills/` 目录被 `go:embed` 打进二进制，服务端自描述，无需克隆仓库。
+
+因此，服务内 LLM 的行为由以下机制控制：
 
 1. **代码内 Prompt**（`internal/ingest/prompts.go`）：9 个 PromptStep，中英双语
 2. **工作区配置文件**：`purpose.md`（研究目标）、`rules.md`（写作规则）、`.llmwiki/prompts.yaml`（步骤追加）

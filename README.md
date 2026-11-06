@@ -221,6 +221,7 @@ Version info is injected via ldflags: `main.Version`, `main.Commit`, `main.Build
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/health` | Health check |
+| GET | `/api/v1/workspace` | Workspace overview: root, layout, counts, page types, per-directory page counts |
 | GET | `/api/v1/documents` | List documents |
 | GET | `/api/v1/documents/{id}` | Get document metadata |
 | GET | `/api/v1/documents/{id}/content` | Get document content |
@@ -234,8 +235,12 @@ Version info is injected via ldflags: `main.Version`, `main.Commit`, `main.Build
 | GET | `/api/v1/graph/forward/{id}` | Forward references |
 | GET | `/api/v1/graph/uncited` | Uncited sources |
 | GET | `/api/v1/graph/stale` | Stale pages |
+| GET | `/api/v1/lint` | Wiki health report (links, orphans, frontmatter, log, ghost index rows) |
+| POST | `/api/v1/reindex` | Rebuild the SQLite index from files |
 | GET | `/api/v1/settings` | Get settings |
-| PUT | `/api/v1/settings` | Update settings |
+| PUT | `/api/v1/settings` | Update settings (partial) |
+| GET | `/api/v1/workspace/rule-files` | Read `purpose.md` / `rules.md` |
+| PUT | `/api/v1/workspace/rule-files` | Write `purpose.md` / `rules.md` and reindex |
 | GET | `/api/v1/acp-agents` | List configured ACP agents with redacted environment status |
 | POST | `/api/v1/acp-agents/check` | Probe saved or unsaved ACP agent configuration |
 | GET | `/api/v1/capabilities` | Server capabilities |
@@ -246,6 +251,19 @@ Version info is injected via ldflags: `main.Version`, `main.Commit`, `main.Build
 | POST | `/api/v1/ingest/jobs/conversation` | Create ingest job from conversation draft |
 | POST | `/api/v1/ingest/jobs/text` | Create ingest job from direct text |
 | POST | `/api/v1/ingest/jobs/upload` | Create ingest jobs from uploaded files |
+
+### Agent skills
+
+The binary embeds the `skills/` directory and serves it, so an agent can install its operating instructions without the source tree:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/skill.md` | Entry skill (installable), routes to the five stage skills |
+| GET | `/api/v1/skills` | Skill index: name, description, English and Chinese URLs |
+| GET | `/skills/{name}.md` | One stage skill (`llmwiki-guide`, `-query`, `-organize`, `-ingest`, `-lint`) |
+| GET | `/skills/{name}.zh.md` | Chinese mirror of a stage skill |
+
+Every skill drives the HTTP API only; no filesystem access to the vault is required. When the server runs with `--token`, these routes need the same `Authorization: Bearer <token>` header.
 
 ## License
 

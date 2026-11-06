@@ -1,109 +1,108 @@
 ---
 name: llmwiki-guide
-description: Explore and understand an LLM Wiki workspace. Use when you need to understand the workspace's purpose, structure, existing pages, or current state before performing any action.
+description: Set up and operate an llmwiki server through HTTP — check the vault, configure the model instance used by ingest and sessions, rebuild the index, and manage git snapshots. Use when the wiki is unreachable, freshly deployed, missing model config, gives stale search results, or when the user asks to back up, push or restore the vault.
 license: MIT
 metadata:
   author: llmwiki
-  version: "1.0"
+  version: "2.0"
 ---
 
-Explore an LLM Wiki workspace — understand its purpose, structure, and current state.
+# llmwiki-guide
 
-This skill is a blueprint for the Go runtime prompts. External LLM Wiki references are distilled into `skills/` first, then mapped into `internal/ingest/prompts.go`, `internal/mcp/tools.go`, and related runtime prompts. It is a design source, not a runtime command surface.
+Setup and operation. Every step is one HTTP call; nothing here needs shell access to the vault.
 
-## When to Use
+`$LLMWIKI_URL` and the optional `Authorization` header come from the `llmwiki` entry skill.
 
-- First interaction with a workspace ("what's in this wiki?")
-- Before planning ingestion or reorganization
-- When asked "what do we know about X?"
-- As a prerequisite before `/llmwiki-ingest`, `/llmwiki-query`, or `/llmwiki-lint`
+## 1. Is it alive and does it have a vault?
 
-## Core Invariants
-
-- `raw/` is the immutable source layer. Read it, never edit it.
-- `wiki/` is the persistent knowledge layer maintained by the LLM and governed by `purpose.md` and `rules.md`.
-- The filesystem is the source of truth; `.llmwiki/index.db` / SQLite FTS5 is rebuildable.
-- Search and read before writing; read back after writing.
-- `wiki/log.md` is append-only. Entries use `## [YYYY-MM-DD] action | description`.
-
-## Steps
-
-1. **Call the MCP `guide` tool** to get workspace overview
-   - Current implementation returns an architecture note, top-level `wiki/` Markdown files, `raw/sources/` files, and the MCP tool list.
-   - It is a fast entry point, not a full directory tree and not proof that `purpose.md` / `rules.md` have been read.
-
-2. **Read workspace conventions**
-   ```
-   read(path="purpose.md")
-   read(path="rules.md")
-   read(path="wiki/overview.md")
-   read(path="wiki/index.md")
-   ```
-   If a file is missing, say so explicitly instead of assuming rules.
-
-3. **Explore content more deeply** with MCP `search`:
-   ```
-   search(query="", mode="list")  → all wiki pages
-   search(query="topic", mode="search")  → full-text search
-   search(query="document-id", mode="references")  → citation/link graph
-   ```
-
-4. **For specific pages**, use MCP `read` tool:
-   ```
-   read(path="wiki/entities/some-entity.md")
-   ```
-
-5. **Route to the next skill**:
-   - New materials, files, URLs, or conversation to digest → `/llmwiki-ingest`
-   - Questions over existing wiki knowledge or reorganization → `/llmwiki-query`
-   - Broken links, frontmatter, orphan pages, or log format checks → `/llmwiki-lint`
-
-6. **Summarize** what you found:
-   - Workspace purpose and scope
-   - Page count by type (entities, concepts, sources, etc.)
-   - Key topics covered
-   - Any notable patterns or gaps
-
-## Workspace Structure
-
-```
-~/research/
-├── purpose.md          # Research goals (human + LLM read)
-├── rules.md            # Writing and citation rules
-├── wiki/               # LLM-maintained structured Markdown
-│   ├── entities/       # People, orgs, products
-│   ├── concepts/       # Terms and ideas
-│   ├── sources/        # Source summaries
-│   ├── synthesis/      # Cross-source analysis
-│   ├── comparisons/    # Comparisons
-│   ├── queries/        # Archived Q&A
-│   ├── templates/      # System page templates (not business content)
-│   ├── overview.md     # Global overview
-│   ├── index.md        # Directory listing (auto-rebuilt after apply)
-│   └── log.md          # Append-only operation log
-├── raw/                # Immutable sources (read-only, outside wiki/)
-│   └── sources/
-└── .llmwiki/
-    └── index.db        # SQLite FTS5 index (rebuildable)
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/health"
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/workspace"
 ```
 
-Canonical layout: `docs/workspace-layout.md`.
+Read the workspace payload before anything else:
 
-## MCP Tools Available
+| Field | Meaning | Action when it looks wrong |
+|---|---|---|
+| `root` | vault path on the server | report it; never assume it locally |
+| `layout.purpose` / `layout.rules` | `purpose.md` / `rules.md` present | missing ⇒ the vault is uninitialised; tell the user to run `llmwiki init` on the server (there is no HTTP init) |
+| `layout.wiki` / `layout.raw_sources` | content dirs present | missing ⇒ same as above |
+| `layout.index_db` | `.llmwiki/index.db` exists | `false` ⇒ `POST /api/v1/reindex` |
+| `counts` | documents / wiki pages / sources | all zero with files presumably present ⇒ reindex |
+| `page_types` | pages per type (entity, concept, …) | mismatch with `wiki_dirs` hints at misplacement — see `llmwiki-lint` |
+| `wiki_dirs` | markdown files per `wiki/` subdir, `""` = top level | empty subdirs mean the vault has no content yet |
 
-| Tool | Purpose |
-|------|---------|
-| `guide` | Fast workspace overview and tool list |
-| `search` | List pages / full-text search / references / lint |
-| `read` | Read a wiki page |
-| `write` | Create or update wiki pages (documents the MCP contract; built-in ingest primarily writes through FILE blocks and the pipeline) |
-| `delete` | Remove documents (`overview.md` and `log.md` are MCP-protected; treat `index.md` as a system page too) |
-| `ping` | Test MCP connectivity |
+`503` here means the server was started without `--workspace`. Stop and report; retrying cannot fix it.
 
-## Guardrails
+## 2. Rebuild the derived index
 
-- Always call `guide` first when exploring a new workspace
-- Read `purpose.md` and `rules.md` before any write operation
-- The filesystem is the source of truth; `index.db` is rebuildable
-- Never modify files under `raw/` — they are immutable sources
-- Do not treat `guide` output as complete state; use `search`, `read`, `references`, or `/llmwiki-lint` for deeper work
+```bash
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"
+```
+
+Response: `{"indexed": <n>, "status": "ok"}`. It is synchronous, and the server kills any non-streaming request after 60s — on a large vault a timeout does not necessarily mean the run failed. Check `GET /api/v1/workspace` counts and `GET /api/v1/lint` before retrying. Reindex walks the vault, re-reads frontmatter and links, prunes rows whose files disappeared, and regenerates `wiki/index.md`. Run it after changes made outside the write API and after restoring files.
+
+## 3. Configure the model used by ingest and sessions
+
+Ingest jobs and ingest sessions need one provider instance plus a model, stored in settings as `job_instance_id` / `job_model`.
+
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/providers"                       # catalog: id, name, api_base
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/providers/{catalog_id}/models"   # known models for that catalog entry
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/provider-instances" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"main","catalog_id":"<id>","api_key":"<key>","base_url":"<optional override>"}'
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/provider-instances/{instance_id}/check"  # live connectivity probe
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/settings"
+curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
+  -H 'Content-Type: application/json' \
+  -d '{"job_instance_id":"<instance_id>","job_model":"<model id>"}'
+```
+
+`PUT /api/v1/settings` is a partial update: send only the keys you change. Accepted keys include `job_instance_id`, `job_model`, `temperature`, `max_tokens`, `chunk_size`, `chunk_overlap`, `auto_reindex`, `watch_sources`, `doc_language` (`zh`/`en`), `ui_language`, `rules_supplement`, `backup_include_raw`, `vc_auto_push`, `default_agent_kind`, `default_acp_agent_id`. Unknown keys are ignored — verify by re-reading settings.
+
+Secrets: never echo an `api_key` back to the user or into a report.
+
+## 4. Know what the server can parse
+
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/capabilities"
+```
+
+Returns `file_types[]` with `tier`, `can_extract`, `can_chunk`, `missing_deps`, `remediation`, plus `runtime_dependencies[]`. If a requested format has `missing_deps`, tell the user which dependency is missing instead of queueing an ingest job that will fail.
+
+`GET /api/v1/vcs/status` also reports git availability; without git, snapshots and ingest apply cannot commit.
+
+## 5. House rules (`rules.md`)
+
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/workspace/rule-files"   # current purpose.md / rules.md content
+```
+
+Read this before ingest or organize work: it carries the user's conventions. Purpose and rules are written through the same endpoint:
+
+```bash
+curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/workspace/rule-files" \
+  -H 'Content-Type: application/json' \
+  -d '{"rules": "# 约定\n- 中文页面，实体页必须链接来源页\n"}'
+```
+
+`PUT` accepts `purpose` and/or `rules` (markdown, non-empty); it writes the file and reindexes it. Only change these when the user asks to change house rules — they steer every future LLM step. Extra one-off instructions belong in `rules_supplement` via `PUT /api/v1/settings`. Do not paste long policies into pages.
+
+## 6. Git snapshots
+
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/vcs/status"    # initialised, remote, dirty, ahead/behind
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/vcs/log?limit=20"
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/vcs/diff/{sha}"
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/vcs/init"                      # first time only
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/vcs/remote" -d '{"url":"<remote>"}' -H 'Content-Type: application/json'
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/vcs/backup"                    # commit snapshot → {"status":"ok","commit_sha":"…"}
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/vcs/push"
+```
+
+`backup` exports settings, stages the vault and commits; it returns an empty `commit_sha` when nothing changed. `push` needs a configured remote. Restoring an older state is `POST /api/v1/ingest/rollback {"commit_sha": "…"}`, which queues a rollback job — poll it like any ingest job.
+
+## 7. Finish
+
+Report: vault `root`, counts after reindex, the configured `job_instance_id`/`job_model`, and the snapshot sha if you committed. Skip fields you did not touch.

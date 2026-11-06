@@ -60,6 +60,10 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
 
 `PUT /api/v1/settings` 是部分更新，只发要改的键。可用键包括 `job_instance_id`、`job_model`、`temperature`、`max_tokens`、`chunk_size`、`chunk_overlap`、`auto_reindex`、`watch_sources`、`doc_language`（`zh`/`en`）、`ui_language`、`rules_supplement`、`backup_include_raw`、`vc_auto_push`、`default_agent_kind`、`default_acp_agent_id`。未知键会被忽略，改完重新读 settings 确认。
 
+查 provider 实例时只返回 `api_key_masked`，不会回传密钥；`PUT /api/v1/provider-instances/{id}` 可换字段，包括 key。
+
+约有 25 个目录里的 provider 自身没有 `api_base`（如 `openai`、`groq`、`xai`），这类实例必须自己传 `base_url` 才能用；否则 check 会报「未设置 Base URL」。
+
 密钥：不要把 `api_key` 回显给用户，也不要写进报告。
 
 ## 4. 服务端能解析什么

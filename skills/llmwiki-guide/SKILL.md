@@ -61,6 +61,10 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
 
 `PUT /api/v1/settings` is a partial update: send only the keys you change. Accepted keys include `job_instance_id`, `job_model`, `temperature`, `max_tokens`, `chunk_size`, `chunk_overlap`, `auto_reindex`, `watch_sources`, `doc_language` (`zh`/`en`), `ui_language`, `rules_supplement`, `backup_include_raw`, `vc_auto_push`, `default_agent_kind`, `default_acp_agent_id`. Unknown keys are ignored — verify by re-reading settings.
 
+`GET` on provider instances returns `api_key_masked` only, never the key. `PUT /api/v1/provider-instances/{id}` replaces fields, including the key.
+
+About 25 catalog providers ship with an empty `api_base` (e.g. `openai`, `groq`, `xai`) — the instance is unusable until you pass `base_url` yourself. `check` says `未设置 Base URL` in that case.
+
 Secrets: never echo an `api_key` back to the user or into a report.
 
 ## 4. Know what the server can parse

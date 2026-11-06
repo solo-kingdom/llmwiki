@@ -24,7 +24,7 @@ curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/workspace"   # server address + vaul
 
 `GET /api/v1/workspace` is the first call of every task. It returns `root`, `layout` (which parts of the vault exist), `counts`, `page_types`, `wiki_dirs`. Empty counts + `layout.index_db: false` means a fresh or unindexed vault: run `POST /api/v1/reindex` before anything else.
 
-When a token is configured, every `/api/v1/*` call needs the `Authorization` header. Only `/api/v1/health` and `/api/public/wiki/status` are unauthenticated.
+When a token is configured, every `/api/v1/*` call needs the `Authorization` header. Only `/api/v1/health` and `/api/public/wiki/status` are unauthenticated. The token comes from Settings (`api_token`) or the server `--token` flag; the flag wins. `GET /api/v1/settings` reports `api_token_source` (`flag` / `settings` / `none`) — never print the token itself.
 
 ## Install the skills
 

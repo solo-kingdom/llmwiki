@@ -25,7 +25,7 @@ curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/workspace"   # 服务地址 + 知识
 
 每次都先调 `GET /api/v1/workspace`。它返回 `root`、`layout`（知识库各部分是否存在）、`counts`、`page_types`、`wiki_dirs`。计数全 0 且 `layout.index_db: false` 表示知识库是新库或没建索引，先跑 `POST /api/v1/reindex`。
 
-服务端配了 token 时，所有 `/api/v1/*` 都要带 `Authorization`；只有 `/api/v1/health` 和 `/api/public/wiki/status` 免鉴权。
+服务端配了 token 时，所有 `/api/v1/*` 都要带 `Authorization`；只有 `/api/v1/health` 和 `/api/public/wiki/status` 免鉴权。令牌来自设置项 `api_token` 或启动参数 `--token`，带参数时以参数为准；`GET /api/v1/settings` 的 `api_token_source`（`flag` / `settings` / `none`）说明当前来源，令牌本身不要回显。
 
 ## 安装 skill
 

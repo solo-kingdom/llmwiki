@@ -550,3 +550,56 @@ func TestUpdateSettingsToolLoopLimitsValidation(t *testing.T) {
 		t.Fatalf("expected 400, got %d; body=%s", w.Code, w.Body.String())
 	}
 }
+
+func getSettings(t *testing.T, r chi.Router) settingsResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp settingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return resp
+}
+
+func TestUpdateSettingsAPIToken(t *testing.T) {
+	api, r := setupTestAPI(t)
+	setupSettingsRoutes(api, r)
+
+	// Short tokens are rejected.
+	if w := putSettings(t, api, r, map[string]interface{}{"api_token": "short"}); w.Code != http.StatusBadRequest {
+		t.Fatalf("short token status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	if w := putSettings(t, api, r, map[string]interface{}{"api_token": "  bearer-token-abc  "}); w.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", w.Code, w.Body.String())
+	}
+	stored, _ := api.db.GetConfig("api_token")
+	if stored != "bearer-token-abc" {
+		t.Fatalf("stored = %q, want trimmed token", stored)
+	}
+
+	got := getSettings(t, r)
+	if !got.APITokenSet || got.APITokenSource != "settings" || strings.Contains(got.APITokenMasked, "bearer-token-abc") {
+		t.Fatalf("api token not masked in response: %+v", got)
+	}
+
+	// Clearing the token turns auth off unless --token is set.
+	if w := putSettings(t, api, r, map[string]interface{}{"api_token": ""}); w.Code != http.StatusOK {
+		t.Fatalf("clear status=%d body=%s", w.Code, w.Body.String())
+	}
+	got = getSettings(t, r)
+	if got.APITokenSet || got.APITokenSource != "none" {
+		t.Fatalf("token still reported after clearing: %+v", got)
+	}
+
+	// The flag wins and is reported as the source.
+	api.SetFlagToken("flag-token-abc")
+	got = getSettings(t, r)
+	if got.APITokenSource != "flag" {
+		t.Fatalf("source = %q, want flag", got.APITokenSource)
+	}
+}

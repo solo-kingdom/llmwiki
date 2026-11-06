@@ -65,6 +65,16 @@ const en: Record<MessageKey, string> = {
   "settings.language.zh": "中文",
   "settings.language.en": "English",
 
+  "settings.access.title": "API Access",
+  "settings.access.desc": "Bearer token required by /api/v1 and the skill endpoints. Empty means no authentication.",
+  "settings.access.token": "API token",
+  "settings.access.source_flag": "Active token comes from the server --token flag; the value here is ignored.",
+  "settings.access.source_settings": "Active token is stored here ({masked}).",
+  "settings.access.source_none": "No token configured — the API is open to anyone who can reach it.",
+  "settings.access.placeholder": "At least 12 characters",
+  "settings.access.placeholder_set": "Empty clears the token",
+  "settings.access.hint": "Applies immediately, no restart. Saving an empty field turns authentication off.",
+
   "settings.rules.title": "Wiki Rules",
   "settings.rules.desc": "Primary rules live in workspace purpose.md and rules.md (edit in Obsidian or your editor). This field only appends temporary supplements after file rules.",
   "settings.rules.supplement": "Supplement rules",

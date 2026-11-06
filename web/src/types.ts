@@ -183,6 +183,11 @@ export interface Settings {
   default_agent_kind?: AgentKind
   default_acp_agent_id?: string
   acp_max_concurrent_agents?: string | number
+  // Write-only: the server never returns the token, only its mask and where it comes from.
+  api_token?: string
+  api_token_set?: boolean
+  api_token_masked?: string
+  api_token_source?: "flag" | "settings" | "none"
 }
 
 export interface WorkspaceRuleFilesPreview {

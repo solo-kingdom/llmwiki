@@ -54,6 +54,10 @@ type settingsResponse struct {
 	DefaultAgentKind                 string `json:"default_agent_kind"`
 	DefaultACPAgentID                string `json:"default_acp_agent_id"`
 	ACPMaxConcurrentAgents           string `json:"acp_max_concurrent_agents"`
+	// APIToken is never returned; callers see whether one is set and where it comes from.
+	APITokenSet    bool   `json:"api_token_set"`
+	APITokenMasked string `json:"api_token_masked"`
+	APITokenSource string `json:"api_token_source"`
 }
 
 func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +95,35 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		DefaultAgentKind:                 defaultAgentKindForResponse(all["default_agent_kind"]),
 		DefaultACPAgentID:                all["default_acp_agent_id"],
 		ACPMaxConcurrentAgents:           acpMaxConcurrentAgentsForResponse(all["acp_max_concurrent_agents"]),
+		APITokenSet:                      all[sqlite.ConfigAPIToken] != "",
+		APITokenMasked:                   maskKey(all[sqlite.ConfigAPIToken]),
+		APITokenSource:                   apiTokenSource(a, all[sqlite.ConfigAPIToken]),
 	})
+}
+
+// apiTokenSource reports which token protects the API: the --token flag wins over Settings.
+func apiTokenSource(a *API, stored string) string {
+	if a.flagToken != "" {
+		return "flag"
+	}
+	if stored != "" {
+		return "settings"
+	}
+	return "none"
+}
+
+// validateAPIToken rejects tokens that cannot work as a Bearer credential. Empty clears it.
+func validateAPIToken(token string) error {
+	if token == "" {
+		return nil
+	}
+	if len(token) < 12 {
+		return fmt.Errorf("api_token must be at least 12 characters")
+	}
+	if strings.ContainsAny(token, " \t\r\n\"'") {
+		return fmt.Errorf("api_token must not contain whitespace or quotes")
+	}
+	return nil
 }
 
 func backupIncludeRawForResponse(stored string) string {
@@ -203,6 +235,7 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"default_agent_kind":                       true,
 		"default_acp_agent_id":                     true,
 		"acp_max_concurrent_agents":                true,
+		sqlite.ConfigAPIToken:                      true,
 	}
 
 	pendingACPJSON := ""
@@ -337,6 +370,13 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if key == sqlite.ConfigVCAutoPush {
 			if value != "true" && value != "false" {
 				writeError(w, http.StatusBadRequest, "vc_auto_push must be 'true' or 'false'")
+				return
+			}
+		}
+		if key == sqlite.ConfigAPIToken {
+			value = strings.TrimSpace(value)
+			if err := validateAPIToken(value); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 		}

@@ -70,7 +70,7 @@ When ingesting into an existing wiki page, the pipeline merges instead of blind 
 |------|---------|-------------|
 | `--bind` | `127.0.0.1` | Bind address |
 | `--port` | `8868` | HTTP port |
-| `--token` | | API token for authentication (optional) |
+| `--token` | | API token for authentication (optional); overrides the token stored in Settings |
 | `--public-wiki` | `false` | Enable public read-only Wiki at `/wiki` and `/api/public/wiki/*` |
 | `--no-mcp` | `false` | Disable MCP server |
 | `--no-watch` | `false` | Disable file watcher |
@@ -263,7 +263,17 @@ The binary embeds the `skills/` directory and serves it, so an agent can install
 | GET | `/skills/{name}.md` | One stage skill (`llmwiki-guide`, `-query`, `-organize`, `-ingest`, `-lint`) |
 | GET | `/skills/{name}.zh.md` | Chinese mirror of a stage skill |
 
-Every skill drives the HTTP API only; no filesystem access to the vault is required. When the server runs with `--token`, these routes need the same `Authorization: Bearer <token>` header.
+Every skill drives the HTTP API only; no filesystem access to the vault is required.
+
+## Authentication
+
+Management routes under `/api/v1` (and the skill endpoints above) accept an optional Bearer token:
+
+- Set it in **Settings → API Access** or via `PUT /api/v1/settings {"api_token": "…"}`. It takes effect immediately, no restart. Clearing it turns authentication off.
+- `llmwiki serve --token <secret>` still works and wins over the stored value, so an operator can always get back in after a lockout.
+- `GET /api/v1/settings` never returns the token, only `api_token_set`, `api_token_masked` and `api_token_source` (`flag`, `settings` or `none`).
+- Exempt: `/api/v1/health`, `/api/public/wiki/status`, and all `/api/public/wiki/*` when `--public-wiki` is enabled.
+- Binding to a non-loopback address with MCP enabled still requires `--token` at startup.
 
 ## License
 

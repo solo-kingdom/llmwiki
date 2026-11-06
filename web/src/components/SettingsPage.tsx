@@ -620,6 +620,35 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("settings.access.title")}</CardTitle>
+            <CardDescription>{t("settings.access.desc")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">{t("settings.access.token")}</label>
+              <p className="text-xs text-muted-foreground mb-1">
+                {mergedForm.api_token_source === "flag"
+                  ? t("settings.access.source_flag")
+                  : mergedForm.api_token_set
+                    ? t("settings.access.source_settings", { masked: mergedForm.api_token_masked ?? "" })
+                    : t("settings.access.source_none")}
+              </p>
+              <Input
+                data-testid="api-token"
+                type="password"
+                autoComplete="new-password"
+                value={mergedForm.api_token ?? ""}
+                onChange={(e) => set("api_token", e.target.value)}
+                placeholder={mergedForm.api_token_set ? t("settings.access.placeholder_set") : t("settings.access.placeholder")}
+                className="max-w-md"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">{t("settings.access.hint")}</p>
+            </div>
+          </CardContent>
+        </Card>
+
         </SettingsSectionGroup>
 
         <SettingsSectionGroup

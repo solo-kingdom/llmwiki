@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -69,6 +70,7 @@ func New(cfg Config) *Server {
 		srv.api.SetLockManager(cfg.LockMgr)
 	}
 	srv.api.SetPublicWikiEnabled(cfg.PublicWiki)
+	srv.api.SetFlagToken(cfg.Token)
 	srv.api.SetACPManager(cfg.ACPManager)
 	return srv
 }
@@ -124,6 +126,10 @@ func (s *Server) Start() error {
 		MaxAge:           300,
 	}))
 
+	// Optional token auth for management APIs. The middleware is always installed so a
+	// token set from Settings takes effect without a restart; it no-ops while none is set.
+	r.Use(authMiddleware(s.effectiveAPIToken, s.config.PublicWiki))
+
 	// Public wiki read-only API (no management token required when enabled)
 	r.Route("/api/public/wiki", func(r chi.Router) {
 		r.Get("/status", s.api.PublicWikiStatus)
@@ -132,15 +138,11 @@ func (s *Server) Start() error {
 		r.Get("/search", s.api.SearchPublicWiki)
 	})
 
-	// Optional token auth for management APIs
-	if s.config.Token != "" {
-		r.Use(authMiddleware(s.config.Token, s.config.PublicWiki))
-	}
-
 	// API routes
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
-		r.Get("/workspace", s.handleWorkspace)
+		r.Get("/workspace", s.api.GetWorkspace)
+		r.Get("/skills", s.handleSkillIndex)
 		r.Post("/reindex", s.handleReindex)
 
 		r.Route("/documents", func(r chi.Router) {
@@ -171,6 +173,7 @@ func (s *Server) Start() error {
 		r.Get("/settings", s.api.GetSettings)
 		r.Put("/settings", s.api.UpdateSettings)
 		r.Get("/workspace/rule-files", s.api.GetWorkspaceRuleFiles)
+		r.Put("/workspace/rule-files", s.api.UpdateWorkspaceRuleFiles)
 		r.Put("/settings/last-model", s.api.UpdateLastModel)
 		r.Get("/logs", s.api.ListActivityLogsHandler)
 		r.Delete("/logs", s.api.DeleteAllActivityLogsHandler)
@@ -250,6 +253,11 @@ func (s *Server) Start() error {
 		r.Post("/mcp", s.mcpHandler)
 		log.Println("MCP RPC endpoint enabled at /mcp")
 	}
+
+	// Agent skill documents: /skill.md is the installable entry, /skills/<name>.md a stage skill.
+	r.Get("/skill.md", s.handleSkillEntry)
+	r.Get("/skills/{name}.md", s.handleSkillDoc)
+	r.Get("/skills/{name}.zh.md", s.handleSkillDocZh)
 
 	// SPA fallback
 	r.Handle("/*", s.spaHandler())
@@ -377,10 +385,31 @@ func isIngestSessionStream(r *http.Request) bool {
 		strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 }
 
-// authMiddleware provides optional token-based authentication.
-func authMiddleware(token string, publicWiki bool) func(http.Handler) http.Handler {
+// effectiveAPIToken returns the token required by the management API, empty when auth is off.
+// The --token flag wins so an operator can always get back in after locking themselves out
+// with a token stored in Settings.
+func (s *Server) effectiveAPIToken() string {
+	if s.config.Token != "" {
+		return s.config.Token
+	}
+	if s.db != nil {
+		if v, err := s.db.GetConfig(sqlite.ConfigAPIToken); err == nil {
+			return v
+		}
+	}
+	return ""
+}
+
+// authMiddleware provides optional token-based authentication. tokenFn is read per request
+// so changing the token in Settings applies without restarting the server.
+func authMiddleware(tokenFn func() string, publicWiki bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token := tokenFn()
+			if token == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/public/wiki/status" {
 				next.ServeHTTP(w, r)
 				return
@@ -390,7 +419,8 @@ func authMiddleware(token string, publicWiki bool) func(http.Handler) http.Handl
 				return
 			}
 			auth := r.Header.Get("Authorization")
-			if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != token {
+			if !strings.HasPrefix(auth, "Bearer ") ||
+				subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(auth, "Bearer ")), []byte(token)) != 1 {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
@@ -406,7 +436,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	mcpEnabled := s.mcpHandler != nil
 	watchEnabled := s.watcher != nil
-	authRequired := s.config.Token != ""
+	authRequired := s.effectiveAPIToken() != ""
 	mcpDefaultPolicy := "readonly"
 	if s.config.MCPAllowWrite {
 		mcpDefaultPolicy = "readwrite"
@@ -437,10 +467,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"mcp_default_policy": mcpDefaultPolicy,
 		"mcp_compatibility":  "First release focuses on RPC access. Direct Claude Desktop stdio connection is not a release gate.",
 	})
-}
-
-func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, `{"error":"not implemented"}`, http.StatusNotImplemented)
 }
 
 func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {

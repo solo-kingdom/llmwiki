@@ -83,6 +83,11 @@ func LintWorkspace(workspace string) (*LintReport, error) {
 		text := string(content)
 		pageContents[page.relPath] = text
 
+		// Templates are scaffolding: their placeholder links are not real references.
+		if page.isSystem {
+			continue
+		}
+
 		if page.inTypedSubdir {
 			fm := ParseFrontmatter(text)
 			report.Issues = append(report.Issues, ValidateFrontmatter(page.relPath, fm, page.subdir)...)
@@ -460,6 +465,9 @@ func computeLintStats(workspace string, pages []wikiPage) LintStats {
 
 	var lastDate string
 	for _, page := range pages {
+		if page.isSystem {
+			continue
+		}
 		data, err := os.ReadFile(page.absPath)
 		if err != nil {
 			continue

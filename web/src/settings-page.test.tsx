@@ -148,3 +148,24 @@ describe("SettingsPage layout and save UX", () => {
     })
   })
 })
+
+describe("API token setting", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockSaveSettings.mockResolvedValue({ ui_language: "zh" })
+    mockGetVCStatus.mockResolvedValue({ enabled: false, git_available: true })
+  })
+
+  it("saves the token typed by the user and explains the active source", async () => {
+    render(<SettingsPage />)
+
+    expect(screen.getByText(/尚未设置令牌/)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId("api-token"), { target: { value: "bearer-token-abc" } })
+    fireEvent.click(screen.getByRole("button", { name: /保存/ }))
+
+    await waitFor(() =>
+      expect(mockSaveSettings).toHaveBeenCalledWith(expect.objectContaining({ api_token: "bearer-token-abc" })),
+    )
+  })
+})

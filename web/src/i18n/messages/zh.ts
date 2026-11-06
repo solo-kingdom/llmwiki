@@ -63,6 +63,16 @@ const zh = {
   "settings.language.zh": "中文",
   "settings.language.en": "English",
 
+  "settings.access.title": "接口访问",
+  "settings.access.desc": "/api/v1 与技能端点要求的 Bearer 令牌。留空表示不校验。",
+  "settings.access.token": "接口令牌",
+  "settings.access.source_flag": "当前生效的是服务启动参数 --token，这里的值不生效。",
+  "settings.access.source_settings": "当前令牌存在此处（{masked}）。",
+  "settings.access.source_none": "尚未设置令牌——能访问到端口的人都能调用接口。",
+  "settings.access.placeholder": "至少 12 个字符",
+  "settings.access.placeholder_set": "留空即清除令牌",
+  "settings.access.hint": "改完立即生效，无需重启。保存空值即关闭鉴权。",
+
   "settings.rules.title": "Wiki 规则",
   "settings.rules.desc": "主规则保存在工作区 purpose.md 与 rules.md（请在 Obsidian 或编辑器中修改）。此处仅追加临时补充，会附加在文件规则之后。",
   "settings.rules.supplement": "补充规则",

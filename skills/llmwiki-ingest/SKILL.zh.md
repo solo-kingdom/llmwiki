@@ -1,159 +1,130 @@
 ---
 name: llmwiki-ingest
-description: 将源材料摄入 LLM Wiki。当用户需要从文件、文本、URL 或对话中提取知识写入 wiki 时使用。
+description: 通过 HTTP 把文件、文本或对话喂进 llmwiki 知识库——排队摄取作业、走会话/计划/批准流水线、回滚提交。用户想加原始材料、摄取文档、把对话整理进 wiki，或撤销上次摄取时使用。
 license: MIT
 metadata:
   author: llmwiki
-  version: "1.0"
+  version: "2.0"
   lang: zh
 ---
 
-将源材料摄入 LLM Wiki — 分析内容、生成 wiki 页面、更新交叉引用。
+# llmwiki-ingest
 
-本 skill 是摄入类 Go prompts 的蓝本，主要映射到 `StepAnalysis`、`StepGeneration`、`StepMergeBody` 和 `StepRollback`。`skills/` 先沉淀外部资料中的工作流与约束，`internal/ingest/prompts.go` 再把这些原则转化为运行时提示。
+摄取把原始材料变成知识库内容：服务端抽取文本、落到 `raw/`，由配置的模型起草来源摘要与页面改动，审核流程下只在批准后提交。`$LLMWIKI_URL` 和鉴权头来自入口 skill `llmwiki`。
 
-## 何时使用
+前置条件：必须配好 `job_instance_id` 与 `job_model`（见 `llmwiki-guide` §3），否则作业会因配置缺失失败。
 
-- 用户提供文件、文本或 URL 要求摄入
-- 用户说"把这个加到 wiki"、"消化一下"、"摄入"
-- 用户想用新信息更新已有 wiki 页面
+## 快路径：一个来源一个作业
 
-## 前置条件
+```bash
+# 粘贴文本或小文档
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/jobs/text" \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"<正文>","title":"<标题>","filename":"note.md","source_ref":"user-paste"}'
+# → 201 {"job":{"id":"…","status":"queued",…}}
 
-- 如果是首次接触该工作区，先运行 `/llmwiki-guide`
-- 阅读 `purpose.md` 和 `rules.md` 以了解写作规范
-- 确认材料属于 `purpose.md` 范围；超出范围时先向用户说明
-- 摄入前做隐私和敏感信息自查，具体保留/脱敏策略遵循 `rules.md`
+# 文件（multipart，多个文件就重复 -F files=@…）
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/jobs/upload" \
+  -F "files=@./paper.pdf" -F "source_ref=user-upload"
+```
 
-## 核心不变量
+执行器会在几秒内取走排队作业，状态走 `queued → running → succeeded | failed`。轮询：
 
-- `raw/` 只读；不要编辑、移动或重写源文件。
-- 文件系统是真理源；SQLite/FTS5 索引可重建。
-- 每个事实性论断必须能追溯到源材料或已有 wiki 页面。
-- 写入已有页面前必须 `read` 原页面，合并时保留旧信息。
-- `wiki/log.md` 仅追加，条目格式为 `## [YYYY-MM-DD] action | description`。
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/ingest/jobs/{id}"
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/ingest/jobs/{id}/events"   # 分步进度
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/ingest/jobs/{id}/source"   # 落盘的来源正文
+```
 
-## 步骤
+- `succeeded`：`result_summary` 里写了新建或更新了哪些页面。用 `llmwiki-query` 核实，别只信摘要。
+- `failed`：看 `error_code`、`error_message`、`missing_dependency`、`remediation`。缺依赖（如 PDF/OCR 工具）由 `GET /api/v1/capabilities` 报出——告诉用户，不要重试。
+- `POST /api/v1/ingest/jobs/{id}/retry` 重排失败作业（受 `max_retries` 限制）；`POST /{id}/cancel` 取消排队或运行中的作业。
 
-1. **理解源材料**
-   - 文件：读取其内容
-   - URL：抓取并提取文本
-   - 纯文本：审阅其中的关键实体、概念和关系
-   - 对话：总结需要摄入的要点
-   - 大材料：分块处理，并记录每一块与来源的对应关系
+不要密集轮询。查一次，之后间隔 10–30s，几分钟仍无结果就带着 job id 和最后一条事件汇报。
 
-2. **搜索已有的相关页面**，使用 MCP `search`：
-   ```
-   search(query="主题名称", mode="search")
-   search(query="别名或英文/中文变体", mode="search")
-   ```
-   用 `read` 读取匹配页面，避免重复创建。对重要实体/概念至少尝试别名、缩写、中文/英文变体。
+`POST /api/v1/ingest/jobs/conversation` 是旧的一次性路径（粘贴即作业）。用户想先讨论、修改、审阅再落地时，用下面的会话流程。
 
-3. **规划要创建/更新的内容**
-   - 从源材料中识别实体、概念和关系
-   - 确定页面类型（entity/concept/source/synthesis/comparison/query）
-   - 为源材料创建或更新 `wiki/sources/` 摘要页
-   - 对于已有页面：列出新增事实、需保留旧事实、需增加的交叉引用
+## 审核路径：会话 → 归档 → 计划 → 批准
 
-4. **生成 wiki 页面**，运行时使用 FILE 块：
-   ```
-   ---FILE: wiki/entities/new-entity.md
-   ...
-   ---END FILE---
-   ```
-   如果在 MCP 文档或外部工具说明中描述写入，`write` 的 `path` 是目标目录，文件名由 `title` 生成；但代码内摄入 prompt 应优先描述 FILE 块协议。
+```
+POST /ingest/sessions                          → 会话 id
+POST /ingest/sessions/{id}/messages (stream)   ← 讨论、修改、传附件
+POST /ingest/sessions/{id}/archive             → review(id)，状态 "planning"，同时排计划作业
+GET  /ingest/reviews/{review_id}/plans         → 各版本计划（plan_markdown + plan_json）
+POST /ingest/reviews/{id}/feedback             → 提修改意见，再 /replan
+POST /ingest/reviews/{id}/approve              → 落地作业，合入知识库
+GET  /ingest/jobs/{apply_job_id}               → succeeded 后读 review.merge_commit_sha
+```
 
-   每个页面必须包含 frontmatter：
-   ```yaml
-   ---
-   title: 页面标题
-   type: entity
-   date: 2026-05-29
-   tags: [标签1, 标签2]
-   sources: [来源标识]
-   ---
-   ```
+### 会话
 
-   注意：生成 prompt 不应假设可以覆盖旧页。更新已有页面时，先通过 `read` 获取旧内容，并在 FILE 块中保留旧信息、增量整合新信息。
+```bash
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/sessions" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"季报要点","mode":"ingest"}'
+```
 
-5. **交叉引用与证据**
-   - 在相关页面之间添加 `[[wikilinks]]`
-   - 在来源摘要页列出关键观点、涉及实体/概念、后续问题
-   - 对实体/概念页新增事实时，标明来自哪个 source 或已有页面
-   - 遇到冲突事实时保留冲突上下文，不要直接用新材料覆盖旧说法
+`mode` 为 `ingest`（默认）、`qa`、`organize`；`agent_kind` 默认 `native`（本服务的 LLM 运行时），可设 `acp` 配 `acp_agent_id` 交给外部 agent——用户没要求就别改。
 
-6. **验证**
-   - 回读已写入页面确认 frontmatter、正文、链接和来源都正确
-   - 运行 `search(query="", mode="lint")` 检查死链、frontmatter、日志格式等问题
-   - 如修改了系统页或结构页，确认 `wiki/index.md` / `wiki/log.md` 仍符合约定
+消息：
 
-## 页面类型 → 目录映射
+```bash
+# 只存消息，不调模型
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/sessions/{id}/messages" \
+  -H 'Content-Type: application/json' -d '{"content":"…"}'
 
-| 类型 | 目录 | 用途 |
-|------|------|------|
-| entity | `wiki/entities/` | 人物、组织、产品 |
-| concept | `wiki/concepts/` | 概念与术语 |
-| source | `wiki/sources/` | 源文件摘要 |
-| synthesis | `wiki/synthesis/` | 跨源综合分析 |
-| comparison | `wiki/comparisons/` | 对比分析 |
-| query | `wiki/queries/` | 归档的问答 |
+# 流式拿模型回复（SSE）
+curl -fsS -N "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/sessions/{id}/messages?stream=1" \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"请把这份纪要整理成 wiki/sources 下的来源页","wiki_refs":[{"path":"wiki/concepts/foo.md"}]}'
+```
 
-## 实体 / 概念 / 关系判定
+SSE 事件：`user_message`、`assistant_start`、`token`、`thought`、`tool_start`、`tool_done`、`plan`、`permission`、`warning`、`done`（最终消息对象）、`error`。同一会话同时只能有一个流——第二个请求返回 `409`。附件上传是 `POST /ingest/sessions/{id}/attachments`（multipart `file`），附件会随会话一起归档。
 
-摄入前先区分三类对象，再规划页面：
+### 归档 → 审核
 
-| 类型 | 定义 | 示例 | 目录 |
-|------|------|------|------|
-| entity | 可唯一指代的具体对象（人、组织、产品、项目） | `AppLovin`、`Adam Foroughi` | `wiki/entities/` |
-| concept | 可跨对象复用的术语、方法、框架、机制、理论 | `组织裁剪方法论`、`A Player文化` | `wiki/concepts/` |
-| relation | 实体与概念之间的案例、采用、提出、体现关系 | `AppLovin` 实践 `组织裁剪方法论` | 通过 wikilink 表达，不单独建混绑页 |
+```bash
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/sessions/{id}/archive" \
+  -H 'Content-Type: application/json' -d '{"title":"季报要点","deep_organize":false}'
+# → 201 {"review_id":"…","status":"planning","source_path":"raw/sources/…","plan_job_id":"…"}
+```
 
-**命名规则**
+会话记录会变成 `raw/sources/` 下的一个来源文件，审核再规划怎么合进 wiki。`deep_organize: true` 允许规划器改动已有页面，而不只是新增。
 
-- 概念页标题默认保持中性，不要把具体实体名焊进概念标题。
-- 实体与概念的关系放在正文和 wikilink 中表达，而不是拼成一个概念名。
-- 只有当源材料明确把整体短语当作固定专有名词时，才允许保留组合标题，并在正文中说明命名依据。
+审核状态：`planning → ready_for_review → (revising ⇄) → approved → applying → succeeded | failed | cancelled`。看计划、提修改：
 
-**反模式示例**
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/ingest/reviews/{id}"          # 含 current_plan_version
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/ingest/reviews/{id}/plans"    # [{version, plan_markdown, plan_json}]
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/reviews/{id}/feedback" \
+  -H 'Content-Type: application/json' -d '{"content":"合并到现有 attention 页，不要新建"}'
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/reviews/{id}/replan"   # 202，重新生成计划
+```
 
-- ❌ `AppLovin组织裁剪方法论` 作为概念页 — 把公司（实体）和方法论（概念）绑在一起
-- ✅ 实体页 `AppLovin` + 概念页 `组织裁剪方法论` + 概念页链接 `[[AppLovin]]` 作为案例
-- ❌ `工程师必备工具_ClaudeCode_Cursor` 若只是 AppLovin 的工具栈 — 应拆为中性概念 + 实体案例链接
-- ✅ 若源中明确命名且不可拆分，保留组合标题并在正文标注来源依据
+批准前把 `plan_markdown` 给用户看——这是知识库被改动前最后一道关卡。`approve` 只在 `ready_for_review` 接受，返回 `202` 和落地作业 id；写入在 worktree 中完成后再合并，知识库不会写到一半。
 
-规划页面时，对每个候选短语自问：
+### 验证
 
-1. 这是具体对象还是可复用抽象？
-2. 标题里是否混入了已有实体名？
-3. 若同时出现实体和概念，是否应拆成两个页面并用链接关联？
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/ingest/reviews/{id}"     # succeeded + merge_commit_sha
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/lint"
+```
 
-## 合并策略
+然后用新页面回答用户原来的问题，并给出页面路径。
 
-服务内置摄入 pipeline 有三层合并保护（锁定字段、数组 union、正文 LLM 合并）。prompt 仍必须主动要求模型生成可合并内容，而不是依赖后处理兜底：
+## 回滚
 
-- **先读旧页**：更新前通过工具读取目标页面和相关页面。
-- **保留锁定语义**：不要随意改变 `type`、`title`、`created` 等身份字段。
-- **合并数组字段**：`tags`、`sources`、`related` 应去重合并。
-- **合并正文**：保留旧信息，追加或整合新事实；不确定时标记冲突或 open question。
+```bash
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/rollback" \
+  -H 'Content-Type: application/json' -d '{"commit_sha":"<来自 review 或 /vcs/log 的 sha>"}'
+```
 
-## 约束
+排一个回滚作业：回退提交、移除这些页面的索引、其余重建。像普通作业一样轮询，之后 reindex 并 lint。不要回滚你在 `GET /api/v1/vcs/log` 里认不出的提交。
 
-- 写入前必须搜索，避免创建重复页面
-- 遵循 `purpose.md` 的研究范围 — 不摄入超出研究领域的主题
-- 遵循 `rules.md` 的写作规范 — 语气、引用风格、语言
-- 每个论断必须可追溯到来源或已有 wiki 页面（禁止编造）
-- 使用 `[[wikilinks]]` 进行内部引用，而非纯文本名称
-- `wiki/log.md` 仅支持追加 — 绝不重排或删除条目
-- 绝不修改 `raw/` 目录的内容
-- 源文件摘要应放在 `wiki/sources/`，而非直接写在 entity/concept 页面中
-- 在 `StepPlan` 阶段只给出计划 JSON，不输出 FILE 块；在 `StepGeneration` 阶段才输出 FILE 块
+## 规则
 
-## 完成标准
-
-- [ ] 源材料中的所有关键实体和概念都有对应的 wiki 页面
-- [ ] 相关页面之间已添加交叉引用（`[[wikilinks]]`）
-- [ ] 没有创建重复页面（已通过搜索确认）
-- [ ] Frontmatter 完整（title、type、date、tags）
-- [ ] 如从文件摄入，`wiki/sources/` 中存在源文件摘要页
-- [ ] 更新已有页面时已保留旧信息和旧来源
-- [ ] 已回读写入页面并运行 lint，error 级问题已修复
+- 一个会话只装一件事。一个会话归档成一个来源文件，混装的材料会让计划无法合并。
+- 用户没看过的计划不许批准，也不许重复批准——第二次返回 `409`。
+- 作业因缺依赖或模型不可用失败时，停下报告；重试解决不了配置问题。
+- 摄取自己会写 `raw/` 和 `wiki/`。作业运行期间不要手改这些文件。

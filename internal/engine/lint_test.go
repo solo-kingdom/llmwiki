@@ -190,3 +190,23 @@ func TestLintReportHasErrors(t *testing.T) {
 		t.Fatal("expected HasErrors true")
 	}
 }
+
+func TestLintSkipsTemplateScaffolding(t *testing.T) {
+	dir := t.TempDir()
+	writeWikiFile(t, dir, "wiki/overview.md", "---\ntitle: 概览\ndate: 2025-01-01\ntype: overview\n---\n\n# 概览\n")
+	writeWikiFile(t, dir, "wiki/templates/concept.md", "---\ntitle: 示例概念\ntype: concept\ndate: YYYY-MM-DD\n---\n\n# 定义\n\n- [[相关实体]]\n")
+
+	report, err := LintWorkspace(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Issues) != 0 {
+		t.Errorf("issues = %+v, want none (templates are scaffolding)", report.Issues)
+	}
+	if report.Stats.PageCount != 1 {
+		t.Errorf("page_count = %d, want 1", report.Stats.PageCount)
+	}
+	if report.Stats.LastUpdated != "2025-01-01" {
+		t.Errorf("last_updated = %q, want 2025-01-01", report.Stats.LastUpdated)
+	}
+}

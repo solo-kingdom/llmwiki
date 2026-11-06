@@ -3,6 +3,9 @@ package sqlite
 import "database/sql"
 
 // GetConfig reads a single config value from app_config table.
+// ConfigAPIToken stores the optional management API token set from Settings.
+const ConfigAPIToken = "api_token"
+
 func (d *DB) GetConfig(key string) (string, error) {
 	var value string
 	err := d.db.QueryRow(

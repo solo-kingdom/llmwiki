@@ -1,134 +1,71 @@
 ---
 name: llmwiki-query
-description: Query and reorganize the LLM Wiki. Use when the user asks questions about the wiki's content, or wants to restructure, merge, or optimize the wiki.
+description: Answer questions from an llmwiki vault and inspect its structure over HTTP — search chunks, read pages, walk backlinks/forward links, and find uncited or stale material. Use when the user asks what the wiki knows about a topic, wants a summary grounded in wiki pages, or asks how pages relate.
 license: MIT
 metadata:
   author: llmwiki
-  version: "1.0"
+  version: "2.0"
 ---
 
-Query existing wiki knowledge or reorganize the wiki structure.
+# llmwiki-query
 
-This skill is the blueprint for query and organization Go prompts, especially `StepSessionQA`, `StepPlanQA`, `StepSessionOrganize`, and `StepPlanOrganize`. `skills/` distills workflows from external references; `internal/ingest/prompts.go` implements them at runtime.
+Answer from the vault, never from memory. `$LLMWIKI_URL` and the optional auth header come from the `llmwiki` entry skill.
 
-## When to Use
+## Search
 
-- User asks a question about topics in the wiki
-- User says "what do we know about X?", "how are X and Y related?"
-- User wants to restructure, merge, or reorganize pages
-- User says "clean up the wiki", "merge duplicates", "reorganize"
+```bash
+curl -fsS -G "${AUTH[@]}" "$LLMWIKI_URL/api/v1/search" \
+  --data-urlencode "q=attention mechanism" \
+  --data-urlencode "limit=10" \
+  --data-urlencode "filter=wiki" \
+  --data-urlencode "types=concept"
+```
 
-## Core Invariants
+- `q` is required; an empty `q` returns `400`.
+- `filter=wiki` (default) searches wiki pages only and skips hidden dirs (`wiki/sources/`, `wiki/templates/`).
+- `filter=sources` searches source material (`raw/…`, ingested originals).
+- `filter` with any other value searches everything.
+- `types` is repeatable (`types=concept&types=entity`) and narrows by page type.
+- Results are chunks: `{document_id, content, header_breadcrumb, chunk_index, filename, title, path, file_type, score}`.
+- `path` is the **directory** with leading and trailing slash (`/wiki/concepts/`). The page path you cite is `path + filename` → `wiki/concepts/attention.md`.
 
-- Answers must be grounded in existing wiki pages, source summaries, or material provided in the current turn.
-- If evidence is missing, say the wiki does not cover it yet; do not invent facts.
-- Read pages before reorganizing; after merging or moving, verify links and frontmatter.
-- `raw/` is read-only. `wiki/log.md` is append-only and uses `## [YYYY-MM-DD] action | description`.
+Search behaviour that matters:
 
-## Two Modes
+- FTS5 handles Latin terms; CJK recall is weaker, so try the Chinese term and its English/alias variant before concluding "not covered".
+- Metadata (title, filename, path) is matched too.
+- Zero results from one phrasing is not proof of absence: broaden, then check `GET /api/v1/documents?source_kind=source` for raw material.
 
-### QA Mode (Answer Questions)
+## Read pages
 
-1. **Search** for relevant pages:
-   ```
-   search(query="topic", mode="search")
-   search(query="alias / abbreviation / English or Chinese variant", mode="search")
-   ```
-   If the first search returns nothing, broaden or vary the terms. FTS5 recall for CJK content can depend on tokenizer behavior, so do not rely on one exact search.
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents/{id}/content"
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents?source_kind=wiki&exclude_hidden=true"
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents?source_kind=wiki&types=entity&types=concept"
+```
 
-2. **Read** the most relevant pages:
-   ```
-   read(path="wiki/entities/topic.md")
-   ```
+`GET /api/v1/documents` returns full rows (including `content`) — prefer `/documents/{id}/content` when you only need the body. Enumerate with `exclude_hidden=true` unless you specifically want `wiki/sources/` provenance pages.
 
-3. **Inspect references**:
-   ```
-   search(query="document-id", mode="references")
-   ```
-   `references` currently queries by document ID; if the current context does not expose an ID, prompts should allow the model to use `search` / `read` instead. In Local tools contexts, use `references(query="document-id")`.
+## Structure and relations
 
-4. **Synthesize** an answer grounded in wiki content
-   - Cite specific pages: "According to [[Entity Name]]..."
-   - If the wiki doesn't cover it fully, say so explicitly
-   - Optionally suggest creating a new page for the gap
-   - If pages conflict, list the conflicting sources and uncertainty
+```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/graph?limit=300"        # {nodes, edges, total_nodes, truncated}
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/graph/backlinks/{id}"   # who links here
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/graph/forward/{id}"     # what this page links to
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/graph/uncited"          # sources no page cites
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/graph/stale"            # pages needing refresh
+```
 
-5. **Archive** valuable Q&A (if user wants):
-   ```
-   StepPlanQA → plan JSON → StepGeneration → FILE block under wiki/queries/
-   ```
-   Before archiving, state that it will be written to `wiki/queries/`. Planning steps produce plans only; generation steps write FILE blocks.
+Nodes carry `{id, document_id, title, type, link_count}`; edges carry `{source, target, type}` and are keyed by page path, not document id. Backlink and forward rows use the same `path`-is-a-directory convention plus `filename`. `truncated: true` means the graph is cut to `limit` nodes — raise `limit` only when you really need the full picture.
 
-### Organize Mode (Restructure)
+## Answer protocol
 
-1. **Get directory structure** and **audit health**:
-   ```
-   search(query="", mode="list")    → all pages
-   search(query="", mode="lint")    → health check
-   ```
-   Runtime organize prompts should prefer:
-   ```
-   structure()  → directory tree, page counts, empty directories
-   audit()      → dead links, orphan pages, metadata, statistics
-   gaps()       → missing pages or uncited sources
-   similar()    → similar page candidates
-   references() → link graph
-   ```
+1. Search 2–3 phrasings before deciding a topic is missing.
+2. Read the top 2–5 pages fully; the snippet is not the page.
+3. Check `backlinks` for pages that contradict or qualify the answer.
+4. Answer in the user's language, citing page paths (`wiki/concepts/attention.md`) for every claim.
+5. If the vault does not cover it, say so plainly, name what is missing, and offer `llmwiki-ingest` to add a source. Do not fill the gap with general knowledge unless the user asked for it and you label it as outside the vault.
+6. When sources and pages disagree, present both and name the conflict instead of picking one silently.
 
-   **Structure fidelity**: when presenting wiki layout, quote the raw `structure()` tool output (starts with `# Wiki 目录结构`, paths use `wiki/` prefix). Do not invent `wiki/skills/`, singular `entity/`, `wiki/raw/`, or placeholder filenames. See `docs/workspace-layout.md`.
+## Read-only guard
 
-2. **Identify issues**:
-   - Duplicate or highly similar pages
-   - Orphan pages (no incoming links)
-   - Misplaced pages (wrong directory)
-   - Missing cross-references
-   - Dead links
-
-3. **Plan reorganization**:
-   - Which pages to merge
-   - Which to move/rename
-   - What new cross-references to add
-   - What gaps to fill
-
-4. **Plan or execute changes**
-   - `read` all affected pages before updating
-   - Before deleting, confirm the page is not a system page and not the only page carrying a source's information
-   - Treat `overview.md`, `index.md`, and `log.md` as system pages, not ordinary deletion targets
-   - `StepPlanOrganize` outputs plan JSON only; after confirmation, `StepGeneration` outputs FILE blocks
-
-5. **Verify** the restructured wiki passes lint checks
-
-## Search Tips
-
-- Use specific entity/concept names for best results
-- The search uses SQLite FTS5 — supports phrase queries (`"exact phrase"`)
-- If first search returns nothing, try synonyms, aliases, casing, English/Chinese variants, or broader queries
-- For Chinese, Japanese, and other CJK content, do not assume tokenization is always ideal; use shorter terms, keyword combinations, page listing, and references as backup
-
-## Guardrails
-
-- Answers MUST be grounded in existing wiki content — never fabricate facts
-- If the wiki doesn't contain relevant info, say "The wiki does not yet cover this topic"
-- When reorganizing, always read pages before merging — understand what you're combining
-- Never delete `wiki/overview.md`, `wiki/index.md`, or `wiki/log.md`
-- When merging pages, preserve all unique information from both sources
-- Keep frontmatter consistent after reorganization
-- Log major structural changes in the conversation for user awareness
-- Session steps answer, diagnose, and plan only; archive confirmation moves the workflow into plan/generation steps
-
-## Done Criteria
-
-### QA Mode
-- [ ] Searched thoroughly for relevant pages
-- [ ] Read and understood the relevant content
-- [ ] Answer is grounded in wiki content with citations
-- [ ] Acknowledged any gaps in wiki coverage
-- [ ] If Q&A was archived, it was written to `wiki/queries/` and read back
-
-### Organize Mode
-- [ ] Audited wiki health (lint check)
-- [ ] Identified all structural issues
-- [ ] Executed reorganization plan
-- [ ] Verified no dead links or broken references after changes
-- [ ] All pages have correct frontmatter after moves/merges
-- [ ] Major structural changes were explained to the user, and index/log updates were considered when needed
+Query work never writes. If answering requires a new page or a merge, hand off to `llmwiki-organize` and keep the user's question answered from what already exists.

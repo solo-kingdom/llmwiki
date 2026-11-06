@@ -23,6 +23,7 @@ type API struct {
 	indexer           *engine.WorkspaceFileIndexer
 	publicWikiEnabled bool
 	acpMgr            *acp.Manager
+	flagToken         string // --token value; overrides the token stored in settings
 }
 
 func New(db *sqlite.DB) *API {
@@ -49,6 +50,11 @@ func (a *API) SetPublicWikiEnabled(enabled bool) {
 // SetFileIndexer sets the workspace file indexer for search index updates.
 func (a *API) SetFileIndexer(indexer *engine.WorkspaceFileIndexer) {
 	a.indexer = indexer
+}
+
+// SetFlagToken records the --token value so settings can report which token is active.
+func (a *API) SetFlagToken(token string) {
+	a.flagToken = token
 }
 
 func (a *API) SetACPManager(mgr *acp.Manager) {

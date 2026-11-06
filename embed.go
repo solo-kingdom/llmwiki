@@ -10,6 +10,9 @@ import (
 //go:embed all:web/dist
 var webAssets embed.FS
 
+//go:embed all:skills
+var skillAssets embed.FS
+
 func init() {
 	sub, err := fs.Sub(webAssets, "web/dist")
 	if err != nil {
@@ -19,4 +22,13 @@ func init() {
 		f.Close()
 		server.WebAssets = sub
 	}
+}
+
+func init() {
+	// Skills travel with the binary so /skill.md works without a source checkout.
+	sub, err := fs.Sub(skillAssets, "skills")
+	if err != nil {
+		return
+	}
+	server.SkillAssets = sub
 }

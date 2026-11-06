@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path"
+	"path/filepath"
+	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
@@ -101,16 +104,30 @@ func (a *API) CreateDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Path decides the document kind, matching reindex: wiki/ pages are wiki pages,
+	// everything else is source material. Without this, agent-written wiki pages
+	// would be indexed as sources until the next full reindex.
+	relPath := strings.TrimPrefix(path.Join("/", req.Path, req.Filename), "/")
+	sourceKind := "source"
+	if strings.HasPrefix(relPath, "wiki/") {
+		sourceKind = "wiki"
+	}
+	// Directory keeps the leading and trailing slash, matching what reindex stores.
+	dir := path.Dir("/" + relPath)
+	if !strings.HasSuffix(dir, "/") {
+		dir += "/"
+	}
+
 	doc := &sqlite.Document{
-		Filename:     req.Filename,
-		Path:         req.Path,
+		Filename:     path.Base(relPath),
+		Path:         dir,
 		Content:      req.Content,
 		Title:        req.Title,
 		Tags:         req.Tags,
 		Status:       "ready",
-		SourceKind:   "source",
-		FileType:     "md",
-		RelativePath: req.Path + "/" + req.Filename,
+		SourceKind:   sourceKind,
+		FileType:     strings.TrimPrefix(filepath.Ext(relPath), "."),
+		RelativePath: relPath,
 	}
 
 	// Acquire page-level lock for same-page serialization
@@ -253,17 +270,32 @@ func (a *API) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	n, err := a.db.ArchiveDocuments([]string{id})
+	doc, err := a.db.GetDocument(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if n == 0 {
+	if doc == nil {
 		writeError(w, http.StatusNotFound, "document not found")
 		return
 	}
-	activity.LogDocument(a.db, "deleted", id, "", "api")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+
+	// Remove the file before the index row: a stale file would be resurrected by reindex.
+	relPath := doc.RelativePath
+	if relPath == "" && doc.Filename != "" {
+		relPath = strings.TrimSuffix(doc.Path, "/") + "/" + doc.Filename
+	}
+	if err := a.removeWorkspaceFile(relPath); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if _, err := a.db.ArchiveDocuments([]string{id}); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	activity.LogDocument(a.db, "deleted", id, relPath, "api")
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "path": strings.TrimPrefix(relPath, "/")})
 }
 
 func (a *API) BulkDeleteDocuments(w http.ResponseWriter, r *http.Request) {
@@ -275,6 +307,21 @@ func (a *API) BulkDeleteDocuments(w http.ResponseWriter, r *http.Request) {
 	if len(req.IDs) == 0 {
 		writeError(w, http.StatusBadRequest, "ids array is required")
 		return
+	}
+
+	for _, id := range req.IDs {
+		doc, err := a.db.GetDocument(id)
+		if err != nil || doc == nil {
+			continue
+		}
+		relPath := doc.RelativePath
+		if relPath == "" && doc.Filename != "" {
+			relPath = strings.TrimSuffix(doc.Path, "/") + "/" + doc.Filename
+		}
+		if err := a.removeWorkspaceFile(relPath); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	n, err := a.db.ArchiveDocuments(req.IDs)

@@ -8,12 +8,12 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/agentruntime"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type sseEventSink struct {
 	sendEvent      func(string, interface{})
-	db             *sqlite.DB
+	db             store.Store
 	assistantMsgID string
 	recorder       *ingest.SessionMessageRecorder
 
@@ -23,7 +23,7 @@ type sseEventSink struct {
 	lastFlushAt int
 }
 
-func newSSEEventSink(sendEvent func(string, interface{}), db *sqlite.DB, assistantMsgID string, recorder *ingest.SessionMessageRecorder) *sseEventSink {
+func newSSEEventSink(sendEvent func(string, interface{}), db store.Store, assistantMsgID string, recorder *ingest.SessionMessageRecorder) *sseEventSink {
 	return &sseEventSink{sendEvent: sendEvent, db: db, assistantMsgID: assistantMsgID, recorder: recorder, lastFlush: time.Now()}
 }
 

@@ -54,7 +54,11 @@ func (d *DB) ApplyChangeSet(cs *store.ChangeSet, writes []store.PageWrite) error
 		if err := insertChangeSet(ctx, tx, cs); err != nil {
 			return err
 		}
-		for _, w := range writes {
+		for i := range writes {
+			if writes[i].Document != nil && writes[i].Document.ID == "" {
+				writes[i].Document.ID = uuid.New().String()
+			}
+			w := writes[i]
 			if err := applyPageWrite(ctx, tx, cs.ID, cs.Kind, w); err != nil {
 				return fmt.Errorf("apply page %s: %w", writePath(w), err)
 			}

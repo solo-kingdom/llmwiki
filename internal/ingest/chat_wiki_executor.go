@@ -9,7 +9,7 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 const maxSessionWikiRefs = 5
@@ -21,7 +21,7 @@ type WikiRefRequest struct {
 }
 
 // ParseWikiRefRequests validates and normalizes wiki refs from the client.
-func ParseWikiRefRequests(db *sqlite.DB, refs []WikiRefRequest) ([]WikiRefInput, error) {
+func ParseWikiRefRequests(db store.Store, refs []WikiRefRequest) ([]WikiRefInput, error) {
 	if len(refs) > maxSessionWikiRefs {
 		return nil, fmt.Errorf("at most %d wiki_refs allowed", maxSessionWikiRefs)
 	}
@@ -49,14 +49,14 @@ func ParseWikiRefRequests(db *sqlite.DB, refs []WikiRefRequest) ([]WikiRefInput,
 // ChatWikiExecutor runs readonly wiki tools for session chat.
 type ChatWikiExecutor struct {
 	workspace  string
-	db         *sqlite.DB
+	db         store.Store
 	sessionID  string
 	router     *mcp.Router
 	mode       string
 	onToolRead func(documentID, relativePath, title string)
 }
 
-func NewChatWikiExecutor(workspace string, db *sqlite.DB, sessionID string, router *mcp.Router, mode string, onToolRead func(string, string, string)) *ChatWikiExecutor {
+func NewChatWikiExecutor(workspace string, db store.Store, sessionID string, router *mcp.Router, mode string, onToolRead func(string, string, string)) *ChatWikiExecutor {
 	return &ChatWikiExecutor{
 		workspace:  workspace,
 		db:         db,
@@ -407,7 +407,7 @@ func truncateForEvent(s string, max int) string {
 	return s[:max] + "…"
 }
 
-func RecordSessionReferences(db *sqlite.DB, sessionID string, refs []WikiRefInput, source string) {
+func RecordSessionReferences(db store.Store, sessionID string, refs []WikiRefInput, source string) {
 	if db == nil || sessionID == "" {
 		return
 	}
@@ -416,11 +416,11 @@ func RecordSessionReferences(db *sqlite.DB, sessionID string, refs []WikiRefInpu
 	}
 }
 
-func RecordToolReadReference(db *sqlite.DB, sessionID, documentID, relativePath, title string) {
+func RecordToolReadReference(db store.Store, sessionID, documentID, relativePath, title string) {
 	if db == nil || sessionID == "" || documentID == "" {
 		return
 	}
-	_ = db.UpsertSessionReference(sessionID, documentID, relativePath, title, sqlite.SessionRefSourceToolRead)
+	_ = db.UpsertSessionReference(sessionID, documentID, relativePath, title, store.SessionRefSourceToolRead)
 }
 
 func WikiRefsJSONFromInputs(refs []WikiRefInput) string {

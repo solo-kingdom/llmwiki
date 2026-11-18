@@ -24,9 +24,11 @@ type DocumentStore interface {
 	GetDocument(id string) (*Document, error)
 	FindDocumentByName(name string) (*Document, error)
 	GetDocumentByPath(filename, dirPath string) (*Document, error)
+	GetDocumentByRelativePath(relativePath string) (*Document, error)
 	GetWikiDocumentByID(id string) (*Document, error)
 	UpdateDocument(id, content, title string, tags []string, date, metadata string) error
 	ArchiveDocuments(ids []string) (int64, error)
+	ClearDerivedIndex() error
 	ListDocuments() ([]Document, error)
 	ListDocumentsFiltered(f ListDocumentsFilter) ([]Document, error)
 	ListDocumentsWithContent() ([]Document, error)
@@ -94,6 +96,9 @@ type JobStore interface {
 	ListIngestJobs(limit int) ([]IngestJob, error)
 	UpdateIngestJobStatus(id, status string) error
 	UpdateIngestJobFailure(id, errorCode, message, missingDep, remediation string) error
+	MarkIngestJobSucceeded(id, summary string) error
+	ResetIngestJobToQueued(id string) error
+	DeleteIngestJob(id string) error
 	GetJobLineage(id string) ([]IngestJob, error)
 	CancelIngestJob(id string) (bool, error)
 	RetryIngestJob(id string) (*IngestJob, error)
@@ -121,6 +126,7 @@ type SessionStore interface {
 	UpdateIngestSessionMode(id, mode string) error
 	UpdateIngestSessionAgent(id, agentKind, acpAgentID string) error
 	UpdateIngestSessionLLM(id, instanceID, model string) error
+	UpdateIngestSessionStatusAndTitle(id, status, title string) error
 	DeleteIngestSession(id string) error
 
 	CreateIngestSessionMessage(msg *IngestSessionMessage) error

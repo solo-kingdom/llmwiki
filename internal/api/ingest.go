@@ -12,7 +12,7 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 var imageSourceExtensions = map[string]string{
@@ -43,7 +43,7 @@ type createTextIngestRequest struct {
 }
 
 type ingestJobResponse struct {
-	Job *sqlite.IngestJob `json:"job"`
+	Job *store.IngestJob `json:"job"`
 }
 
 type uploadAcceptedItem struct {
@@ -90,8 +90,8 @@ func (a *API) requireWorkspaceForIngest(w http.ResponseWriter) bool {
 	return true
 }
 
-func (a *API) createQueuedIngestJob(inputType, sourcePath, sourceRef string) (*sqlite.IngestJob, error) {
-	job := &sqlite.IngestJob{
+func (a *API) createQueuedIngestJob(inputType, sourcePath, sourceRef string) (*store.IngestJob, error) {
+	job := &store.IngestJob{
 		InputType:  inputType,
 		SourcePath: sourcePath,
 		SourceRef:  sourceRef,
@@ -306,7 +306,7 @@ func (a *API) GetIngestJob(w http.ResponseWriter, r *http.Request) {
 }
 
 type ingestJobEventsResponse struct {
-	Events []sqlite.IngestJobEvent `json:"events"`
+	Events []store.IngestJobEvent `json:"events"`
 }
 
 func (a *API) GetIngestJobEvents(w http.ResponseWriter, r *http.Request) {
@@ -331,7 +331,7 @@ func (a *API) GetIngestJobEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if events == nil {
-		events = []sqlite.IngestJobEvent{}
+		events = []store.IngestJobEvent{}
 	}
 	writeJSON(w, http.StatusOK, ingestJobEventsResponse{Events: events})
 }
@@ -344,7 +344,7 @@ func (a *API) ListIngestJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if jobs == nil {
-		jobs = []sqlite.IngestJob{}
+		jobs = []store.IngestJob{}
 	}
 	writeJSON(w, http.StatusOK, jobs)
 }

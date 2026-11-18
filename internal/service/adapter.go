@@ -4,20 +4,20 @@ import (
 	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type StoreAdapter struct {
-	db *sqlite.DB
+	db store.Store
 }
 
-func NewStoreAdapter(db *sqlite.DB) *StoreAdapter {
+func NewStoreAdapter(db store.Store) *StoreAdapter {
 	return &StoreAdapter{db: db}
 }
 
 func (a *StoreAdapter) CreateDocument(doc *engine.DocData) error {
 	relPath := strings.TrimPrefix(doc.Path, "/") + doc.Filename
-	sqliteDoc := &sqlite.Document{
+	sqliteDoc := &store.Document{
 		ID:           doc.ID,
 		UserID:       "default",
 		Filename:     doc.Filename,
@@ -129,9 +129,9 @@ func (a *StoreAdapter) ArchiveDocument(docID string) error {
 }
 
 func (a *StoreAdapter) StoreChunks(docID string, chunks []engine.ChunkData) error {
-	sqliteChunks := make([]sqlite.Chunk, len(chunks))
+	sqliteChunks := make([]store.Chunk, len(chunks))
 	for i, c := range chunks {
-		sqliteChunks[i] = sqlite.Chunk{
+		sqliteChunks[i] = store.Chunk{
 			DocumentID:      c.DocumentID,
 			ChunkIndex:      c.ChunkIndex,
 			Content:         c.Content,
@@ -145,9 +145,9 @@ func (a *StoreAdapter) StoreChunks(docID string, chunks []engine.ChunkData) erro
 }
 
 func (a *StoreAdapter) ReplaceReferencesInTx(sourceDocID string, edges []engine.RefEdge) error {
-	sqliteEdges := make([]sqlite.RefEdge, len(edges))
+	sqliteEdges := make([]store.RefEdge, len(edges))
 	for i, e := range edges {
-		sqliteEdges[i] = sqlite.RefEdge{
+		sqliteEdges[i] = store.RefEdge{
 			SourceID: e.SourceID,
 			TargetID: e.TargetID,
 			RefType:  e.RefType,

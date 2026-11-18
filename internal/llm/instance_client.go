@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 const defaultRequestTimeout = 30 * time.Minute
@@ -13,7 +13,7 @@ const defaultStreamIdleTimeout = 2 * time.Minute
 
 // ClientFromInstance builds an LLM client from a provider instance and model name.
 // Instance base_url takes precedence over catalog api_base.
-func ClientFromInstance(db *sqlite.DB, instanceID, model string) (*Client, error) {
+func ClientFromInstance(db store.Store, instanceID, model string) (*Client, error) {
 	instanceID = strings.TrimSpace(instanceID)
 	model = strings.TrimSpace(model)
 	if instanceID == "" || model == "" {

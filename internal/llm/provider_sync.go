@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 const modelsDevURL = "https://models.dev/api.json"
@@ -52,7 +52,7 @@ type ModelsDevModel struct {
 }
 
 // SyncModelsDev fetches provider/model data from models.dev and writes to cache.
-func SyncModelsDev(ctx context.Context, db *sqlite.DB) error {
+func SyncModelsDev(ctx context.Context, db store.Store) error {
 	ctx, cancel := context.WithTimeout(ctx, syncTimeout)
 	defer cancel()
 
@@ -99,9 +99,9 @@ func SyncModelsDev(ctx context.Context, db *sqlite.DB) error {
 }
 
 // convertModelsDev maps raw models.dev data into our cache types.
-func convertModelsDev(raw map[string]ModelsDevProvider) ([]sqlite.ProviderInfo, []sqlite.ModelInfo) {
-	var providers []sqlite.ProviderInfo
-	var models []sqlite.ModelInfo
+func convertModelsDev(raw map[string]ModelsDevProvider) ([]store.ProviderInfo, []store.ModelInfo) {
+	var providers []store.ProviderInfo
+	var models []store.ModelInfo
 
 	for _, p := range raw {
 		apiFormat := "openai"
@@ -117,7 +117,7 @@ func convertModelsDev(raw map[string]ModelsDevProvider) ([]sqlite.ProviderInfo, 
 			envKey = p.Env[0]
 		}
 
-		providers = append(providers, sqlite.ProviderInfo{
+		providers = append(providers, store.ProviderInfo{
 			ID:        p.ID,
 			Name:      p.Name,
 			APIBase:   p.API,
@@ -133,7 +133,7 @@ func convertModelsDev(raw map[string]ModelsDevProvider) ([]sqlite.ProviderInfo, 
 				costOutput = m.Cost.Output
 			}
 			modalities, _ := json.Marshal(m.Modalities)
-			models = append(models, sqlite.ModelInfo{
+			models = append(models, store.ModelInfo{
 				ProviderID:   p.ID,
 				ModelID:      m.ID,
 				Name:         m.Name,

@@ -11,8 +11,8 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
-	"github.com/solo-kingdom/llmwiki/internal/vcs"
+	"github.com/solo-kingdom/llmwiki/internal/store"
+	"github.com/solo-kingdom/llmwiki/internal/workspace"
 )
 
 func maskKey(key string) string {
@@ -48,8 +48,6 @@ type settingsResponse struct {
 	SessionToolLoopMaxRoundsQA       string `json:"session_tool_loop_max_rounds_qa"`
 	SessionToolLoopMaxRoundsOrganize string `json:"session_tool_loop_max_rounds_organize"`
 	SessionToolLoopMaxCallsPerRound  string `json:"session_tool_loop_max_calls_per_round"`
-	BackupIncludeRaw                 string `json:"backup_include_raw"`
-	VCAutoPush                       string `json:"vc_auto_push"`
 	ACPAgentsJSON                    string `json:"acp_agents_json"`
 	DefaultAgentKind                 string `json:"default_agent_kind"`
 	DefaultACPAgentID                string `json:"default_acp_agent_id"`
@@ -89,15 +87,13 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		SessionToolLoopMaxRoundsQA:       mcp.SessionToolLoopMaxRoundsForResponse(all[mcp.ConfigSessionToolLoopMaxRoundsQA], "qa"),
 		SessionToolLoopMaxRoundsOrganize: mcp.SessionToolLoopMaxRoundsForResponse(all[mcp.ConfigSessionToolLoopMaxRoundsOrganize], "organize"),
 		SessionToolLoopMaxCallsPerRound:  mcp.SessionToolLoopMaxCallsForResponse(all[mcp.ConfigSessionToolLoopMaxCallsPerRound]),
-		BackupIncludeRaw:                 backupIncludeRawForResponse(all[sqlite.ConfigBackupIncludeRaw]),
-		VCAutoPush:                       vcAutoPushForResponse(all[sqlite.ConfigVCAutoPush]),
 		ACPAgentsJSON:                    acpAgentsJSONForResponse(all["acp_agents_json"]),
 		DefaultAgentKind:                 defaultAgentKindForResponse(all["default_agent_kind"]),
 		DefaultACPAgentID:                all["default_acp_agent_id"],
 		ACPMaxConcurrentAgents:           acpMaxConcurrentAgentsForResponse(all["acp_max_concurrent_agents"]),
-		APITokenSet:                      all[sqlite.ConfigAPIToken] != "",
-		APITokenMasked:                   maskKey(all[sqlite.ConfigAPIToken]),
-		APITokenSource:                   apiTokenSource(a, all[sqlite.ConfigAPIToken]),
+		APITokenSet:                      all[store.ConfigAPIToken] != "",
+		APITokenMasked:                   maskKey(all[store.ConfigAPIToken]),
+		APITokenSource:                   apiTokenSource(a, all[store.ConfigAPIToken]),
 	})
 }
 
@@ -126,20 +122,6 @@ func validateAPIToken(token string) error {
 	return nil
 }
 
-func backupIncludeRawForResponse(stored string) string {
-	if stored == "false" {
-		return "false"
-	}
-	return "true"
-}
-
-func vcAutoPushForResponse(stored string) string {
-	if stored == "true" {
-		return "true"
-	}
-	return "false"
-}
-
 func mcpServersJSONForResponse(stored string) string {
 	if strings.TrimSpace(stored) == "" {
 		canonical, _ := mcp.CanonicalJSON(mcp.DefaultConfig())
@@ -158,7 +140,7 @@ func mcpServersJSONForResponse(stored string) string {
 
 func jobEventsMaxCountForResponse(stored string) string {
 	if strings.TrimSpace(stored) == "" {
-		return strconv.Itoa(sqlite.DefaultJobEventsMaxCount)
+		return strconv.Itoa(store.DefaultJobEventsMaxCount)
 	}
 	return stored
 }
@@ -172,7 +154,7 @@ func activityLogsMaxCountForResponse(stored string) string {
 
 func sessionMsgEventsMaxCountForResponse(stored string) string {
 	if strings.TrimSpace(stored) == "" {
-		return strconv.Itoa(sqlite.DefaultSessionMsgEventsMaxCount)
+		return strconv.Itoa(store.DefaultSessionMsgEventsMaxCount)
 	}
 	return stored
 }
@@ -229,13 +211,11 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		mcp.ConfigSessionToolLoopMaxRoundsQA:       true,
 		mcp.ConfigSessionToolLoopMaxRoundsOrganize: true,
 		mcp.ConfigSessionToolLoopMaxCallsPerRound:  true,
-		sqlite.ConfigBackupIncludeRaw:              true,
-		sqlite.ConfigVCAutoPush:                    true,
 		"acp_agents_json":                          true,
 		"default_agent_kind":                       true,
 		"default_acp_agent_id":                     true,
 		"acp_max_concurrent_agents":                true,
-		sqlite.ConfigAPIToken:                      true,
+		store.ConfigAPIToken:                       true,
 	}
 
 	pendingACPJSON := ""
@@ -313,13 +293,13 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if key == "ingest_job_events_max_count" {
-			if _, err := sqlite.ParseJobEventsMaxCount(value); err != nil {
+			if _, err := store.ParseJobEventsMaxCount(value); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 		}
 		if key == "session_message_events_max_count" {
-			if _, err := sqlite.ParseSessionMsgEventsMaxCount(value); err != nil {
+			if _, err := store.ParseSessionMsgEventsMaxCount(value); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
@@ -361,19 +341,7 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if key == sqlite.ConfigBackupIncludeRaw {
-			if value != "true" && value != "false" {
-				writeError(w, http.StatusBadRequest, "backup_include_raw must be 'true' or 'false'")
-				return
-			}
-		}
-		if key == sqlite.ConfigVCAutoPush {
-			if value != "true" && value != "false" {
-				writeError(w, http.StatusBadRequest, "vc_auto_push must be 'true' or 'false'")
-				return
-			}
-		}
-		if key == sqlite.ConfigAPIToken {
+		if key == store.ConfigAPIToken {
 			value = strings.TrimSpace(value)
 			if err := validateAPIToken(value); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
@@ -399,7 +367,7 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		maxN, err := sqlite.ParseJobEventsMaxCount(value)
+		maxN, err := store.ParseJobEventsMaxCount(value)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -410,18 +378,9 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if raw, ok := req[sqlite.ConfigBackupIncludeRaw]; ok {
-		if v, err := parseSettingsValue(raw); err == nil && a.workspace != "" {
-			repo := vcs.NewGitRepo(a.workspace)
-			if repo.IsInitialized() {
-				_ = repo.EnsureGitignoreForBackup(v != "false")
-			}
-		}
-	}
-
-	// Export settings file and backup commit after any successful settings update
+	// Export the non-secret settings snapshot for recovery on a fresh workspace.
 	if a.workspace != "" {
-		if _, err := a.runWorkspaceBackup(); err != nil {
+		if err := workspace.ExportSettings(a.db, a.workspace); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

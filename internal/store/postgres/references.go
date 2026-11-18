@@ -36,7 +36,7 @@ func (d *DB) GetBacklinks(docID string) ([]store.ReferenceSummary, error) {
 		SELECT d.path, d.filename, d.title, dr.reference_type
 		FROM document_references dr
 		JOIN documents d ON dr.source_document_id = d.id
-		WHERE dr.target_document_id = $1 AND d.status != 'failed' AND d.deleted_at IS NULL
+		WHERE dr.target_document_id = $1 AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
 		ORDER BY d.path, d.filename`, docID)
 	if err != nil {
 		return nil, fmt.Errorf("get backlinks: %w", err)
@@ -63,7 +63,7 @@ func (d *DB) GetForwardReferences(docID string) ([]store.ReferenceSummary, error
 		SELECT d.filename, d.title, d.path, dr.reference_type, dr.page
 		FROM document_references dr
 		JOIN documents d ON dr.target_document_id = d.id
-		WHERE dr.source_document_id = $1 AND d.status != 'failed' AND d.deleted_at IS NULL
+		WHERE dr.source_document_id = $1 AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
 		ORDER BY dr.reference_type, d.path, d.filename`, docID)
 	if err != nil {
 		return nil, fmt.Errorf("get forward references: %w", err)
@@ -93,7 +93,7 @@ func (d *DB) FindUncitedSources() ([]store.UncitedSource, error) {
 	rows, err := d.pool.Query(context.Background(), `
 		SELECT d.filename, d.title, d.path, d.file_type
 		FROM documents d
-		WHERE d.source_kind != 'wiki' AND d.status != 'failed' AND d.deleted_at IS NULL
+		WHERE d.source_kind != 'wiki' AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
 		  AND NOT EXISTS (
 			SELECT 1 FROM document_references dr
 			WHERE dr.target_document_id = d.id AND dr.reference_type = 'cites'
@@ -123,7 +123,7 @@ func (d *DB) FindStalePages() ([]store.StalePage, error) {
 	rows, err := d.pool.Query(context.Background(), `
 		SELECT d.filename, d.title, d.path, d.stale_since
 		FROM documents d
-		WHERE d.status != 'failed' AND d.deleted_at IS NULL AND d.stale_since IS NOT NULL
+		WHERE d.status != 'failed' AND COALESCE(d.deleted_at, '') = '' AND d.stale_since IS NOT NULL
 		ORDER BY d.stale_since DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("find stale: %w", err)
@@ -151,7 +151,7 @@ func (d *DB) PropagateStaleness(docID string) error {
 		WHERE id IN (
 			SELECT source_document_id FROM document_references
 			WHERE target_document_id = $1 AND reference_type = 'links_to'
-		) AND stale_since IS NULL AND deleted_at IS NULL`, docID)
+		) AND stale_since IS NULL AND COALESCE(deleted_at, '') = ''`, docID)
 	return err
 }
 

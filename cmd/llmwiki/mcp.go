@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/spf13/cobra"
 )
 
 func newMCPCmd() *cobra.Command {
@@ -30,9 +29,9 @@ func runMCP(dir string) error {
 		return err
 	}
 
-	db, err := sqlite.Open(workspaceIndexPath(ws))
+	db, err := openDatabase()
 	if err != nil {
-		return fmt.Errorf("open database: %w", err)
+		return err
 	}
 	defer db.Close()
 

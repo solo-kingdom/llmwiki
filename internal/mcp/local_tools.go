@@ -6,7 +6,7 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // Base tool definitions shared across modes.
@@ -114,7 +114,7 @@ func ToolChoiceForMode(mode string, round int) string {
 }
 
 // ExecuteLocalReadonlyTool runs builtin search or read against the workspace index.
-func ExecuteLocalReadonlyTool(workspace string, db *sqlite.DB, name string, args map[string]interface{}) (string, error) {
+func ExecuteLocalReadonlyTool(workspace string, db store.Store, name string, args map[string]interface{}) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case DefaultToolWebFetch:
 		return executeWebFetch(workspace, args)
@@ -158,7 +158,7 @@ func ExecuteLocalReadonlyTool(workspace string, db *sqlite.DB, name string, args
 	}
 }
 
-func executeLocalSearch(workspace string, db *sqlite.DB, args map[string]interface{}) (string, error) {
+func executeLocalSearch(workspace string, db store.Store, args map[string]interface{}) (string, error) {
 	mode := "list"
 	if m, ok := args["mode"].(string); ok && m != "" {
 		mode = m
@@ -238,7 +238,7 @@ func executeLocalSearch(workspace string, db *sqlite.DB, args map[string]interfa
 	}
 }
 
-func executeLocalReferences(db *sqlite.DB, args map[string]interface{}) (string, error) {
+func executeLocalReferences(db store.Store, args map[string]interface{}) (string, error) {
 	query, _ := args["query"].(string)
 	if strings.TrimSpace(query) == "" {
 		return "Error: query (document ID) is required for references mode", nil
@@ -263,7 +263,7 @@ func executeLocalReferences(db *sqlite.DB, args map[string]interface{}) (string,
 	return sb.String(), nil
 }
 
-func executeLocalRead(db *sqlite.DB, args map[string]interface{}) (string, error) {
+func executeLocalRead(db store.Store, args map[string]interface{}) (string, error) {
 	path, _ := args["path"].(string)
 	if strings.TrimSpace(path) == "" {
 		return "Error: path is required", nil

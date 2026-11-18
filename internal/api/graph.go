@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // KnowledgeGraph returns wiki page nodes and links_to edges for visualization.
@@ -32,10 +32,10 @@ func (a *API) KnowledgeGraph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if data.Nodes == nil {
-		data.Nodes = []sqlite.GraphNode{}
+		data.Nodes = []store.GraphNode{}
 	}
 	if data.Edges == nil {
-		data.Edges = []sqlite.GraphEdge{}
+		data.Edges = []store.GraphEdge{}
 	}
 	writeJSON(w, http.StatusOK, data)
 }
@@ -53,7 +53,7 @@ func (a *API) Backlinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if refs == nil {
-		refs = []sqlite.ReferenceSummary{}
+		refs = []store.ReferenceSummary{}
 	}
 	writeJSON(w, http.StatusOK, refs)
 }
@@ -71,7 +71,7 @@ func (a *API) ForwardReferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if refs == nil {
-		refs = []sqlite.ReferenceSummary{}
+		refs = []store.ReferenceSummary{}
 	}
 	writeJSON(w, http.StatusOK, refs)
 }
@@ -83,7 +83,7 @@ func (a *API) UncitedSources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sources == nil {
-		sources = []sqlite.UncitedSource{}
+		sources = []store.UncitedSource{}
 	}
 	writeJSON(w, http.StatusOK, sources)
 }
@@ -95,7 +95,7 @@ func (a *API) StalePages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if pages == nil {
-		pages = []sqlite.StalePage{}
+		pages = []store.StalePage{}
 	}
 	writeJSON(w, http.StatusOK, pages)
 }

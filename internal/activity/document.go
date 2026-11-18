@@ -3,11 +3,11 @@ package activity
 import (
 	"fmt"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // LogDocument records a document CRUD event.
-func LogDocument(db *sqlite.DB, action, docID, relPath, source string) {
+func LogDocument(db store.Store, action, docID, relPath, source string) {
 	if db == nil {
 		return
 	}

@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // LogSession records a session archive or stream event.
-func LogSession(db *sqlite.DB, action, sessionID, message, status, source string, details map[string]interface{}) {
+func LogSession(db store.Store, action, sessionID, message, status, source string, details map[string]interface{}) {
 	if db == nil {
 		return
 	}
@@ -38,7 +38,7 @@ func LogSession(db *sqlite.DB, action, sessionID, message, status, source string
 }
 
 // LogMCPTool records an MCP tool invocation.
-func LogMCPTool(db *sqlite.DB, toolName string) {
+func LogMCPTool(db store.Store, toolName string) {
 	if db == nil || toolName == "" {
 		return
 	}
@@ -88,7 +88,7 @@ func sanitizeRemoteAddr(addr string) string {
 
 // LogMCPRemoteToolCall records a structured audit log for a remote MCP tool call.
 // It ensures no sensitive data (tokens, full args, full results) is logged.
-func LogMCPRemoteToolCall(db *sqlite.DB, info MCPToolCallInfo) {
+func LogMCPRemoteToolCall(db store.Store, info MCPToolCallInfo) {
 	if db == nil {
 		return
 	}

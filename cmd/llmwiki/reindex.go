@@ -3,10 +3,10 @@ package main
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
+	"github.com/spf13/cobra"
 )
 
 func newReindexCmd() *cobra.Command {
@@ -30,14 +30,9 @@ func runReindex(dir string) error {
 		return err
 	}
 
-	dbPath, _, err := storesvc.DiscoverWorkspace(ws)
+	db, err := openDatabase()
 	if err != nil {
 		return err
-	}
-
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("open database: %w", err)
 	}
 	defer db.Close()
 
@@ -56,12 +51,6 @@ func runReindex(dir string) error {
 	return nil
 }
 
-func clearDerivedIndex(db *sqlite.DB) error {
-	_, err := db.DB().Exec(`
-		DELETE FROM document_references;
-		DELETE FROM document_chunks;
-		DELETE FROM document_pages;
-		DELETE FROM documents;
-	`)
-	return err
+func clearDerivedIndex(db store.Store) error {
+	return db.ClearDerivedIndex()
 }

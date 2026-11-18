@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type createDocumentRequest struct {
@@ -36,7 +36,7 @@ type bulkDeleteRequest struct {
 }
 
 func (a *API) ListDocuments(w http.ResponseWriter, r *http.Request) {
-	filter := sqlite.ListDocumentsFilter{
+	filter := store.ListDocumentsFilter{
 		SourceKind:    r.URL.Query().Get("source_kind"),
 		PageTypes:     r.URL.Query()["type"],
 		ExcludeHidden: r.URL.Query().Get("exclude_hidden") == "true",
@@ -50,7 +50,7 @@ func (a *API) ListDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if docs == nil {
-		docs = []sqlite.Document{}
+		docs = []store.Document{}
 	}
 	writeJSON(w, http.StatusOK, docs)
 }
@@ -118,7 +118,7 @@ func (a *API) CreateDocument(w http.ResponseWriter, r *http.Request) {
 		dir += "/"
 	}
 
-	doc := &sqlite.Document{
+	doc := &store.Document{
 		Filename:     path.Base(relPath),
 		Path:         dir,
 		Content:      req.Content,
@@ -136,22 +136,12 @@ func (a *API) CreateDocument(w http.ResponseWriter, r *http.Request) {
 		defer a.lockMgr.Unlock(doc.RelativePath)
 	}
 
-	// FILE-FIRST: Write canonical content to filesystem before DB insert
-	if doc.RelativePath != "" && doc.Content != "" {
-		if err := a.writeFileFirst(doc.RelativePath, doc.Content); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("file write failed: %v", err))
-			return
-		}
-	}
-
-	if err := a.db.CreateDocument(doc); err != nil {
+	if err := a.applyPageWrite("manual", "create page", doc, store.RevisionCreate); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if doc.RelativePath != "" {
-		a.indexDocumentRelPath(doc.RelativePath)
-	} else {
-		a.indexDocumentContent(doc.ID, doc.Content)
+	if saved, _ := a.db.GetDocument(doc.ID); saved != nil {
+		doc = saved
 	}
 	activity.LogDocument(a.db, "created", doc.ID, doc.RelativePath, "api")
 	writeJSON(w, http.StatusCreated, doc)
@@ -187,24 +177,11 @@ func (a *API) UpdateDocumentContent(w http.ResponseWriter, r *http.Request) {
 		defer a.lockMgr.Unlock(doc.RelativePath)
 	}
 
-	// FILE-FIRST: Write canonical content to filesystem before DB update
-	if doc.RelativePath != "" {
-		if err := a.writeFileFirst(doc.RelativePath, req.Content); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("file write failed: %v", err))
-			return
-		}
-	}
-
-	// Now update the DB index (derived data)
-	if err := a.db.UpdateDocument(id, req.Content, "", nil, "", ""); err != nil {
+	doc.Content = req.Content
+	doc.ContentHash = contentHash(req.Content)
+	if err := a.applyPageWrite("manual", "update page content", doc, store.RevisionUpdate); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-
-	if doc.RelativePath != "" {
-		a.indexDocumentRelPath(doc.RelativePath)
-	} else {
-		a.indexDocumentContent(id, req.Content)
 	}
 
 	updated, err := a.db.GetDocument(id)
@@ -247,15 +224,13 @@ func (a *API) UpdateDocumentMetadata(w http.ResponseWriter, r *http.Request) {
 	date := req.Date
 	metadata := req.Metadata
 
-	if err := a.db.UpdateDocument(id, existing.Content, title, tags, date, metadata); err != nil {
+	existing.Title = title
+	existing.Tags = tags
+	existing.Date = date
+	existing.Metadata = metadata
+	if err := a.applyPageWrite("manual", "update page metadata", existing, store.RevisionUpdate); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-
-	if existing.RelativePath != "" {
-		a.indexDocumentRelPath(existing.RelativePath)
-	} else {
-		a.indexDocumentContent(id, existing.Content)
 	}
 
 	doc, _ := a.db.GetDocument(id)
@@ -280,17 +255,11 @@ func (a *API) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Remove the file before the index row: a stale file would be resurrected by reindex.
 	relPath := doc.RelativePath
 	if relPath == "" && doc.Filename != "" {
 		relPath = strings.TrimSuffix(doc.Path, "/") + "/" + doc.Filename
 	}
-	if err := a.removeWorkspaceFile(relPath); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	if _, err := a.db.ArchiveDocuments([]string{id}); err != nil {
+	if err := a.applyPageDelete("manual", "delete page", relPath); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -309,26 +278,25 @@ func (a *API) BulkDeleteDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var relPaths []string
 	for _, id := range req.IDs {
 		doc, err := a.db.GetDocument(id)
 		if err != nil || doc == nil {
 			continue
 		}
-		relPath := doc.RelativePath
-		if relPath == "" && doc.Filename != "" {
-			relPath = strings.TrimSuffix(doc.Path, "/") + "/" + doc.Filename
+		rel := doc.RelativePath
+		if rel == "" && doc.Filename != "" {
+			rel = strings.TrimSuffix(doc.Path, "/") + "/" + doc.Filename
 		}
-		if err := a.removeWorkspaceFile(relPath); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
+		if rel != "" {
+			relPaths = append(relPaths, rel)
 		}
 	}
-
-	n, err := a.db.ArchiveDocuments(req.IDs)
-	if err != nil {
+	if err := a.applyPageDeletes("manual", "bulk delete", relPaths); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	n := int64(len(relPaths))
 	activity.Record(a.db, activity.Entry{
 		Level:    "info",
 		Category: "document",

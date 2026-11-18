@@ -1,20 +1,20 @@
 package ingest
 
 import (
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // SessionMessageRecorder records prompt debug events for a chat session message.
 type SessionMessageRecorder struct {
-	db        *sqlite.DB
+	db        store.Store
 	messageID string
 	maxN      int
 }
 
 // NewSessionMessageRecorder creates a recorder for the given message.
 // All methods are nil-safe: a nil recorder is a no-op.
-func NewSessionMessageRecorder(db *sqlite.DB, messageID string) *SessionMessageRecorder {
-	maxN := sqlite.DefaultSessionMsgEventsMaxCount
+func NewSessionMessageRecorder(db store.Store, messageID string) *SessionMessageRecorder {
+	maxN := store.DefaultSessionMsgEventsMaxCount
 	if db != nil {
 		maxN = db.GetSessionMsgEventsMaxCount()
 	}

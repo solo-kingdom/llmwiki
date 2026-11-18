@@ -55,7 +55,7 @@ func (d *DB) SearchVector(vector []float32, model string, limit int, pathFilter 
 		FROM chunk_embeddings ce
 		JOIN document_chunks dc ON dc.id = ce.chunk_id
 		JOIN documents d ON dc.document_id = d.id
-		WHERE ce.model = $2 AND d.status != 'failed' AND d.deleted_at IS NULL `
+		WHERE ce.model = $2 AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = '' `
 	sqlStr += pathFilterClause(pathFilter)
 	sqlStr += "ORDER BY ce.embedding <=> $1::vector LIMIT $3"
 
@@ -87,7 +87,7 @@ func (d *DB) ChunksMissingEmbedding(model string, limit int) ([]store.Chunk, err
 		FROM document_chunks dc
 		JOIN documents d ON dc.document_id = d.id
 		LEFT JOIN chunk_embeddings ce ON ce.chunk_id = dc.id AND ce.model = $1
-		WHERE ce.chunk_id IS NULL AND d.status != 'failed' AND d.deleted_at IS NULL
+		WHERE ce.chunk_id IS NULL AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
 		ORDER BY dc.document_id, dc.chunk_index
 		LIMIT $2`, model, limit)
 	if err != nil {

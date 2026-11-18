@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // PublicWikiListItem is the safe document summary exposed on public read-only routes.
@@ -47,7 +47,7 @@ type PublicWikiSearchResult struct {
 	Score            float64 `json:"score"`
 }
 
-func toPublicListItem(doc sqlite.Document) PublicWikiListItem {
+func toPublicListItem(doc store.Document) PublicWikiListItem {
 	return PublicWikiListItem{
 		ID:           doc.ID,
 		Filename:     doc.Filename,
@@ -62,7 +62,7 @@ func toPublicListItem(doc sqlite.Document) PublicWikiListItem {
 	}
 }
 
-func toPublicDocument(doc *sqlite.Document) PublicWikiDocument {
+func toPublicDocument(doc *store.Document) PublicWikiDocument {
 	tags := doc.Tags
 	if tags == nil {
 		tags = []string{}
@@ -80,7 +80,7 @@ func toPublicDocument(doc *sqlite.Document) PublicWikiDocument {
 	}
 }
 
-func toPublicSearchResult(chunk sqlite.SearchChunk) PublicWikiSearchResult {
+func toPublicSearchResult(chunk store.SearchChunk) PublicWikiSearchResult {
 	return PublicWikiSearchResult{
 		DocumentID:       chunk.DocumentID,
 		Content:          chunk.Content,
@@ -118,7 +118,7 @@ func (a *API) ListPublicWikiDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filter := sqlite.ListDocumentsFilter{
+	filter := store.ListDocumentsFilter{
 		SourceKind:    "wiki",
 		ExcludeHidden: true,
 	}

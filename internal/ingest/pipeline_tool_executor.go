@@ -7,7 +7,7 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // PipelineToolExecutor provides local search/read tools for the ingest pipeline,
@@ -15,13 +15,13 @@ import (
 // when a DB is present; external MCP tools are appended when configured.
 type PipelineToolExecutor struct {
 	workspace string
-	db        *sqlite.DB
+	db        store.Store
 	mcpExec   *pipelineMCPExecutor
 	toolMode  string // session mode for local tool set: "", "qa", "organize"
 }
 
 // NewPipelineToolExecutor creates a tool executor with local tools and optional MCP.
-func NewPipelineToolExecutor(workspace string, db *sqlite.DB, mcpExec *pipelineMCPExecutor, toolMode string) *PipelineToolExecutor {
+func NewPipelineToolExecutor(workspace string, db store.Store, mcpExec *pipelineMCPExecutor, toolMode string) *PipelineToolExecutor {
 	return &PipelineToolExecutor{
 		workspace: workspace,
 		db:        db,

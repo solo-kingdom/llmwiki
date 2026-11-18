@@ -17,7 +17,7 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/agentruntime"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type appendMessageRequest struct {
@@ -31,16 +31,16 @@ type archiveSessionRequest struct {
 }
 
 type sessionResponse struct {
-	Session      *sqlite.IngestSession       `json:"session"`
-	ActiveReview *sqlite.ActiveReviewSummary `json:"active_review,omitempty"`
+	Session      *store.IngestSession       `json:"session"`
+	ActiveReview *store.ActiveReviewSummary `json:"active_review,omitempty"`
 }
 
 type messagesResponse struct {
-	Messages []sqlite.IngestSessionMessage `json:"messages"`
+	Messages []store.IngestSessionMessage `json:"messages"`
 }
 
 type messageResponse struct {
-	Message *sqlite.IngestSessionMessage `json:"message"`
+	Message *store.IngestSessionMessage `json:"message"`
 }
 
 type archiveResponse struct {
@@ -106,7 +106,7 @@ func (a *API) CreateIngestSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	session := &sqlite.IngestSession{
+	session := &store.IngestSession{
 		Title:         title,
 		Status:        "active",
 		LLMInstanceID: instanceID,
@@ -170,12 +170,12 @@ func (a *API) GetIngestSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	var activeReview *sqlite.ActiveReviewSummary
+	var activeReview *store.ActiveReviewSummary
 	if review, err := a.db.GetLatestIngestReviewBySessionID(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	} else {
-		activeReview = sqlite.ActiveReviewSummaryFromReview(review)
+		activeReview = store.ActiveReviewSummaryFromReview(review)
 	}
 	writeJSON(w, http.StatusOK, sessionResponse{Session: session, ActiveReview: activeReview})
 }
@@ -197,7 +197,7 @@ func (a *API) ListIngestSessionMessages(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if msgs == nil {
-		msgs = []sqlite.IngestSessionMessage{}
+		msgs = []store.IngestSessionMessage{}
 	}
 	writeJSON(w, http.StatusOK, messagesResponse{Messages: msgs})
 }
@@ -233,7 +233,7 @@ func (a *API) AppendIngestSessionMessage(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	userMsg := &sqlite.IngestSessionMessage{
+	userMsg := &store.IngestSessionMessage{
 		SessionID:    sessionID,
 		Role:         "user",
 		Content:      req.Content,
@@ -245,7 +245,7 @@ func (a *API) AppendIngestSessionMessage(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ingest.RecordSessionReferences(a.db, sessionID, wikiRefs, sqlite.SessionRefSourceUserMention)
+	ingest.RecordSessionReferences(a.db, sessionID, wikiRefs, store.SessionRefSourceUserMention)
 	writeJSON(w, http.StatusCreated, messageResponse{Message: userMsg})
 }
 
@@ -367,12 +367,12 @@ func (a *API) ListIngestSessionReferences(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if refs == nil {
-		refs = []sqlite.IngestSessionReference{}
+		refs = []store.IngestSessionReference{}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"references": refs})
 }
 
-func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session *sqlite.IngestSession, userContent string, wikiRefs []ingest.WikiRefInput) {
+func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session *store.IngestSession, userContent string, wikiRefs []ingest.WikiRefInput) {
 	runtime, err := a.sessionAgentRuntime(session)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, runtimeErrorMessage(err))
@@ -397,7 +397,7 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 
-	userMsg := &sqlite.IngestSessionMessage{
+	userMsg := &store.IngestSessionMessage{
 		SessionID:    session.ID,
 		Role:         "user",
 		Content:      userContent,
@@ -409,7 +409,7 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ingest.RecordSessionReferences(a.db, session.ID, wikiRefs, sqlite.SessionRefSourceUserMention)
+	ingest.RecordSessionReferences(a.db, session.ID, wikiRefs, store.SessionRefSourceUserMention)
 
 	llmUserContent, err := a.buildLLMUserContent(r.Context(), userContent, wikiRefs)
 	if err != nil {
@@ -417,7 +417,7 @@ func (a *API) streamSessionReply(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 
-	assistantMsg := &sqlite.IngestSessionMessage{
+	assistantMsg := &store.IngestSessionMessage{
 		SessionID:    session.ID,
 		Role:         "assistant",
 		Content:      "",
@@ -447,14 +447,14 @@ func (a *API) buildLLMUserContent(_ context.Context, userText string, wikiRefs [
 func (a *API) streamAssistantReply(
 	w http.ResponseWriter,
 	r *http.Request,
-	session *sqlite.IngestSession,
+	session *store.IngestSession,
 	runtime agentruntime.Runtime,
-	history []sqlite.IngestSessionMessage,
+	history []store.IngestSessionMessage,
 	llmUserContent string,
 	displayUserContent string,
 	wikiRefs []ingest.WikiRefInput,
-	assistantMsg *sqlite.IngestSessionMessage,
-	userMsg *sqlite.IngestSessionMessage,
+	assistantMsg *store.IngestSessionMessage,
+	userMsg *store.IngestSessionMessage,
 ) {
 	if runtime == nil {
 		var err error
@@ -548,7 +548,7 @@ func streamStatusForStopReason(stopReason string) string {
 	}
 }
 
-func sessionHasStreamingAssistant(msgs []sqlite.IngestSessionMessage) bool {
+func sessionHasStreamingAssistant(msgs []store.IngestSessionMessage) bool {
 	for _, m := range msgs {
 		if m.Role == "assistant" && m.StreamStatus == "streaming" {
 			return true
@@ -557,7 +557,7 @@ func sessionHasStreamingAssistant(msgs []sqlite.IngestSessionMessage) bool {
 	return false
 }
 
-func findPairedUserMessage(msgs []sqlite.IngestSessionMessage, assistantID string) *sqlite.IngestSessionMessage {
+func findPairedUserMessage(msgs []store.IngestSessionMessage, assistantID string) *store.IngestSessionMessage {
 	idx := -1
 	for i, m := range msgs {
 		if m.ID == assistantID {
@@ -576,8 +576,8 @@ func findPairedUserMessage(msgs []sqlite.IngestSessionMessage, assistantID strin
 	return nil
 }
 
-func filterHistoryForRetry(history []sqlite.IngestSessionMessage, assistantID, userID string) []sqlite.IngestSessionMessage {
-	out := make([]sqlite.IngestSessionMessage, 0, len(history))
+func filterHistoryForRetry(history []store.IngestSessionMessage, assistantID, userID string) []store.IngestSessionMessage {
+	out := make([]store.IngestSessionMessage, 0, len(history))
 	for _, m := range history {
 		if m.ID == assistantID || m.ID == userID {
 			continue
@@ -632,7 +632,7 @@ func (a *API) UploadIngestSessionAttachment(w http.ResponseWriter, r *http.Reque
 	}
 
 	summary := a.summarizeAttachment(r.Context(), header.Filename, relPath, data)
-	msg := &sqlite.IngestSessionMessage{
+	msg := &store.IngestSessionMessage{
 		SessionID:    sessionID,
 		Role:         "assistant",
 		Content:      summary,
@@ -709,7 +709,7 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
-func (a *API) archiveResponseForReview(review *sqlite.IngestReview) archiveResponse {
+func (a *API) archiveResponseForReview(review *store.IngestReview) archiveResponse {
 	resp := archiveResponse{
 		ReviewID:   review.ID,
 		Status:     review.Status,
@@ -726,7 +726,7 @@ func (a *API) archiveResponseForReview(review *sqlite.IngestReview) archiveRespo
 	return resp
 }
 
-func (a *API) tryReturnExistingArchive(w http.ResponseWriter, session *sqlite.IngestSession) bool {
+func (a *API) tryReturnExistingArchive(w http.ResponseWriter, session *store.IngestSession) bool {
 	existing, err := a.db.GetLatestIngestReviewBySessionID(session.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -742,7 +742,7 @@ func (a *API) tryReturnExistingArchive(w http.ResponseWriter, session *sqlite.In
 		return true
 	}
 
-	if existing != nil && sqlite.IsActiveIngestReviewStatus(existing.Status) {
+	if existing != nil && store.IsActiveIngestReviewStatus(existing.Status) {
 		job, err := a.db.GetIngestJobBySourceRef(
 			ingest.ReviewSourceRef(existing.ID),
 			string(ingest.InputKindReviewPlan),
@@ -853,7 +853,7 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	review := &sqlite.IngestReview{
+	review := &store.IngestReview{
 		SessionID:         sessionID,
 		ArchiveSourcePath: normalized.CanonicalPath,
 		Status:            "planning",
@@ -874,36 +874,7 @@ func (a *API) ArchiveIngestSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := a.db.DB().Begin()
-	if err != nil {
-		a.rollbackArchiveAttempt(review.ID, normalized.CanonicalPath, planJob.ID)
-		a.logArchiveFailed(sessionID, err.Error())
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if _, err := tx.Exec(
-		`UPDATE ingest_sessions SET status = ?, updated_at = datetime('now') WHERE id = ?`,
-		"archived", sessionID,
-	); err != nil {
-		_ = tx.Rollback()
-		a.rollbackArchiveAttempt(review.ID, normalized.CanonicalPath, planJob.ID)
-		a.logArchiveFailed(sessionID, err.Error())
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if title != session.Title {
-		if _, err := tx.Exec(
-			`UPDATE ingest_sessions SET title = ?, updated_at = datetime('now') WHERE id = ?`,
-			title, sessionID,
-		); err != nil {
-			_ = tx.Rollback()
-			a.rollbackArchiveAttempt(review.ID, normalized.CanonicalPath, planJob.ID)
-			a.logArchiveFailed(sessionID, err.Error())
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	if err := tx.Commit(); err != nil {
+	if err := a.db.UpdateIngestSessionStatusAndTitle(sessionID, "archived", title); err != nil {
 		a.rollbackArchiveAttempt(review.ID, normalized.CanonicalPath, planJob.ID)
 		a.logArchiveFailed(sessionID, err.Error())
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -942,7 +913,7 @@ func (a *API) logArchiveFailed(sessionID, message string) {
 
 func (a *API) rollbackArchiveAttempt(reviewID, archivePath, planJobID string) {
 	if planJobID != "" {
-		_, _ = a.db.DB().Exec(`DELETE FROM ingest_jobs WHERE id = ?`, planJobID)
+		_ = a.db.DeleteIngestJob(planJobID)
 	}
 	if reviewID != "" {
 		_ = a.db.DeleteIngestReview(reviewID)
@@ -950,7 +921,7 @@ func (a *API) rollbackArchiveAttempt(reviewID, archivePath, planJobID string) {
 	_ = a.removeWorkspaceFile(archivePath)
 }
 
-func (a *API) loadSession(id string, w http.ResponseWriter) (*sqlite.IngestSession, error) {
+func (a *API) loadSession(id string, w http.ResponseWriter) (*store.IngestSession, error) {
 	session, err := a.db.GetIngestSession(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -970,7 +941,7 @@ func (a *API) ListIngestSessionsHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if sessions == nil {
-		sessions = []sqlite.IngestSession{}
+		sessions = []store.IngestSession{}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"sessions": sessions,
@@ -1106,7 +1077,7 @@ func (a *API) DeleteIngestSessionHandler(w http.ResponseWriter, r *http.Request)
 }
 
 type sessionMessageEventsResponse struct {
-	Events []sqlite.SessionMessageEvent `json:"events"`
+	Events []store.SessionMessageEvent `json:"events"`
 }
 
 func (a *API) GetSessionMessageEvents(w http.ResponseWriter, r *http.Request) {
@@ -1139,7 +1110,7 @@ func (a *API) GetSessionMessageEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if events == nil {
-		events = []sqlite.SessionMessageEvent{}
+		events = []store.SessionMessageEvent{}
 	}
 	writeJSON(w, http.StatusOK, sessionMessageEventsResponse{Events: events})
 }

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 //go:embed providers_snapshot.json
@@ -34,14 +34,14 @@ type SnapshotModel struct {
 
 // LoadSnapshot parses the embedded provider snapshot and returns
 // slices suitable for writing to the cache tables.
-func LoadSnapshot() ([]sqlite.ProviderInfo, []sqlite.ModelInfo, error) {
+func LoadSnapshot() ([]store.ProviderInfo, []store.ModelInfo, error) {
 	var providers map[string]SnapshotProvider
 	if err := json.Unmarshal(snapshotJSON, &providers); err != nil {
 		return nil, nil, fmt.Errorf("parse snapshot: %w", err)
 	}
 
-	var pInfo []sqlite.ProviderInfo
-	var mInfo []sqlite.ModelInfo
+	var pInfo []store.ProviderInfo
+	var mInfo []store.ModelInfo
 
 	for _, sp := range providers {
 		apiFormat := sp.APIFormat
@@ -52,7 +52,7 @@ func LoadSnapshot() ([]sqlite.ProviderInfo, []sqlite.ModelInfo, error) {
 		if len(sp.Env) > 0 {
 			envKey = sp.Env[0]
 		}
-		pInfo = append(pInfo, sqlite.ProviderInfo{
+		pInfo = append(pInfo, store.ProviderInfo{
 			ID:        sp.ID,
 			Name:      sp.Name,
 			APIBase:   sp.APIBase,
@@ -60,7 +60,7 @@ func LoadSnapshot() ([]sqlite.ProviderInfo, []sqlite.ModelInfo, error) {
 			EnvKey:    envKey,
 		})
 		for _, sm := range sp.Models {
-			mInfo = append(mInfo, sqlite.ModelInfo{
+			mInfo = append(mInfo, store.ModelInfo{
 				ProviderID:   sp.ID,
 				ModelID:      sm.ID,
 				Name:         sm.Name,

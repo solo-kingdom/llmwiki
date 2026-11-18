@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 const watcherDebounce = 700 * time.Millisecond
@@ -16,7 +16,7 @@ var (
 )
 
 // RecordWatcherModify debounces modify events per relative path (700ms).
-func RecordWatcherModify(db *sqlite.DB, relPath string) {
+func RecordWatcherModify(db store.Store, relPath string) {
 	if db == nil || relPath == "" {
 		return
 	}
@@ -46,7 +46,7 @@ func RecordWatcherModify(db *sqlite.DB, relPath string) {
 }
 
 // RecordWatcherEvent logs immediate watcher create/delete events.
-func RecordWatcherEvent(db *sqlite.DB, action, relPath string) {
+func RecordWatcherEvent(db store.Store, action, relPath string) {
 	if db == nil || relPath == "" {
 		return
 	}
@@ -73,7 +73,7 @@ func RecordWatcherEvent(db *sqlite.DB, action, relPath string) {
 }
 
 // RecordIndexFailed logs watcher/indexer failures.
-func RecordIndexFailed(db *sqlite.DB, relPath string, err error) {
+func RecordIndexFailed(db store.Store, relPath string, err error) {
 	if db == nil {
 		return
 	}

@@ -17,7 +17,7 @@ func (d *DB) ListWikiGraphEdges() ([]store.GraphEdge, error) {
 		JOIN documents tgt ON dr.target_document_id = tgt.id
 		WHERE dr.reference_type = 'links_to'
 		  AND src.status != 'failed' AND tgt.status != 'failed'
-		  AND src.deleted_at IS NULL AND tgt.deleted_at IS NULL
+		  AND COALESCE(src.deleted_at, '') = '' AND COALESCE(tgt.deleted_at, '') = ''
 		  AND src.source_kind = 'wiki' AND tgt.source_kind = 'wiki'
 		  AND src.relative_path != '' AND tgt.relative_path != ''`)
 	if err != nil {
@@ -52,7 +52,7 @@ func (d *DB) BuildKnowledgeGraph(limit int) (*store.GraphData, error) {
 			(dr.source_document_id = d.id OR dr.target_document_id = d.id)
 			AND dr.reference_type = 'links_to'
 		)
-		WHERE d.source_kind = 'wiki' AND d.status != 'failed' AND d.deleted_at IS NULL
+		WHERE d.source_kind = 'wiki' AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
 		  AND d.relative_path != ''
 		`+hiddenExclude+`
 		GROUP BY d.relative_path
@@ -97,7 +97,7 @@ func (d *DB) BuildKnowledgeGraph(limit int) (*store.GraphData, error) {
 		var docID, title string
 		err := d.pool.QueryRow(ctx,
 			`SELECT id, COALESCE(title, '') FROM documents d
-			 WHERE d.relative_path = $1 AND d.deleted_at IS NULL`, r.relPath,
+			 WHERE d.relative_path = $1 AND COALESCE(d.deleted_at, '') = ''`, r.relPath,
 		).Scan(&docID, &title)
 		if err != nil {
 			return nil, fmt.Errorf("get doc for %s: %w", r.relPath, err)
@@ -119,7 +119,7 @@ func (d *DB) BuildKnowledgeGraph(limit int) (*store.GraphData, error) {
 		JOIN documents tgt ON dr.target_document_id = tgt.id
 		WHERE dr.reference_type = 'links_to'
 		  AND src.status != 'failed' AND tgt.status != 'failed'
-		  AND src.deleted_at IS NULL AND tgt.deleted_at IS NULL
+		  AND COALESCE(src.deleted_at, '') = '' AND COALESCE(tgt.deleted_at, '') = ''
 		  AND src.source_kind = 'wiki' AND tgt.source_kind = 'wiki'
 		  AND src.relative_path != '' AND tgt.relative_path != ''
 		  AND NOT (`+hiddenSubdirsWhere("src.relative_path")+`)

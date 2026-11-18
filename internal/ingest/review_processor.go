@@ -10,11 +10,10 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
-	"github.com/solo-kingdom/llmwiki/internal/vcs"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
-func (p *JobProcessor) processReviewPlanJob(ctx context.Context, job *sqlite.IngestJob) error {
+func (p *JobProcessor) processReviewPlanJob(ctx context.Context, job *store.IngestJob) error {
 	reviewID, ok := ParseReviewIDFromRef(job.SourceRef)
 	if !ok {
 		return p.failJob(job.ID, "pipeline_error", "invalid review source_ref", "", "")
@@ -50,7 +49,7 @@ func (p *JobProcessor) processReviewPlanJob(ctx context.Context, job *sqlite.Ing
 	if err != nil {
 		return p.failReviewPlanFailed(reviewID, job.ID, "pipeline_error", err)
 	}
-	rp := &sqlite.IngestReviewPlan{
+	rp := &store.IngestReviewPlan{
 		ReviewID:     reviewID,
 		Version:      version,
 		PlanMarkdown: plan.PlanMarkdown,
@@ -61,7 +60,7 @@ func (p *JobProcessor) processReviewPlanJob(ctx context.Context, job *sqlite.Ing
 	}
 	_ = p.db.SetIngestReviewPlanVersion(reviewID, version)
 
-	summaryMsg := &sqlite.IngestReviewMessage{
+	summaryMsg := &store.IngestReviewMessage{
 		ReviewID:    reviewID,
 		Role:        "assistant",
 		MessageType: "plan_summary",
@@ -81,15 +80,10 @@ func (p *JobProcessor) processReviewPlanJob(ctx context.Context, job *sqlite.Ing
 	}
 	p.logReviewEvent(reviewID, review.SessionID, "review_ready", "plan ready for review", "success")
 
-	_, updateErr := p.db.DB().Exec(`
-		UPDATE ingest_jobs
-		SET status = 'succeeded', result_summary = ?, runner_id = '', heartbeat_at = '',
-		    updated_at = datetime('now')
-		WHERE id = ?`, fmt.Sprintf("plan v%d generated", version), job.ID)
-	return updateErr
+	return p.db.MarkIngestJobSucceeded(job.ID, fmt.Sprintf("plan v%d generated", version))
 }
 
-func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.IngestJob) error {
+func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *store.IngestJob) error {
 	reviewID, ok := ParseReviewIDFromRef(job.SourceRef)
 	if !ok {
 		return p.failJob(job.ID, "pipeline_error", "invalid review source_ref", "", "")
@@ -125,90 +119,26 @@ func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.In
 		return p.failReviewApplyFailed(reviewID, job.ID, "normalize_failed", err)
 	}
 
-	repo := p.gitRepoIfEnabled()
-	var applyResult ApplyWikiResult
-	var mergeSHA string
-	cleanupWorktree := repo != nil
-	if repo != nil {
-		defer func() {
-			if cleanupWorktree {
-				if err := repo.RemoveWorktree(job.ID); err != nil {
-					log.Printf("review apply: cleanup worktree for job %s: %v", job.ID, err)
-				}
-			}
-		}()
-
-		worktreeDir, wtErr := repo.CreateWorktree(job.ID)
-		if wtErr != nil {
-			return p.failReviewApplyFailed(reviewID, job.ID, "worktree_failed", wtErr)
-		}
-		_ = worktreeDir
-
-		prevTarget := p.pipeline.targetDir
-		p.pipeline.SetTargetDir(worktreeDir)
-		defer p.pipeline.SetTargetDir(prevTarget)
-
-		applyResult, err = p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
-		if err != nil {
-			code := classifyPipelineError(err)
-			return p.failReviewApplyFailed(reviewID, job.ID, code, err)
-		}
-		if len(applyResult.Written) == 0 && len(applyResult.Deleted) == 0 {
-			return p.failReviewApplyFailed(reviewID, job.ID, "no_wiki_files_written", errNoWikiFilesWritten)
-		}
-
-		p.runPostApplyMaintenance(worktreeDir, job.SourcePath, plan.PlanJSON, applyResult, nil)
-
-		commitMsg := vcs.BuildCommitMessage(
-			filepath.Base(normalized.CanonicalPath),
-			job.ID,
-			string(InputKindReviewApply),
-			string(normalized.Content),
-		)
-		if _, commitErr := repo.CommitInWorktree(worktreeDir, commitMsg); commitErr != nil {
-			return p.failReviewApplyFailed(reviewID, job.ID, "commit_failed", commitErr)
-		}
-
-		llmClient, _ := p.resolveLLMClientForReview(review)
-		mergeSHA, err = p.mergeWorktreeJobBranch(ctx, repo, job.ID, applyResult.Written, llmClient, nil)
-		if err != nil {
-			code := "merge_failed"
-			if strings.Contains(err.Error(), "conflict resolution") {
-				code = "merge_conflict"
-			}
-			return p.failReviewApplyFailed(reviewID, job.ID, code, err)
-		}
-
-		cleanupWorktree = false
-		if err := repo.RemoveWorktree(job.ID); err != nil {
-			log.Printf("review apply: cleanup worktree for job %s: %v", job.ID, err)
-		}
-	} else {
-		applyResult, err = p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
-		if err != nil {
-			code := classifyPipelineError(err)
-			return p.failReviewApplyFailed(reviewID, job.ID, code, err)
-		}
-		if len(applyResult.Written) == 0 && len(applyResult.Deleted) == 0 {
-			return p.failReviewApplyFailed(reviewID, job.ID, "no_wiki_files_written", errNoWikiFilesWritten)
-		}
+	p.pipeline.SetChangeSetMeta("review_apply", job.ID, reviewID, filepath.Base(normalized.CanonicalPath), string(normalized.Content))
+	applyResult, err := p.pipeline.ApplyFromPlan(ctx, normalized, plan.PlanJSON)
+	if err != nil {
+		code := classifyPipelineError(err)
+		return p.failReviewApplyFailed(reviewID, job.ID, code, err)
+	}
+	if len(applyResult.Written) == 0 && len(applyResult.Deleted) == 0 {
+		return p.failReviewApplyFailed(reviewID, job.ID, "no_wiki_files_written", errNoWikiFilesWritten)
 	}
 
 	p.finalizeWikiApply(job.ID, job.SourcePath, plan.PlanJSON, applyResult)
 
-	if mergeSHA != "" {
-		_ = p.db.SetIngestReviewMergeCommitSHA(reviewID, mergeSHA)
-	}
 	_ = p.db.SetIngestReviewFinalJob(reviewID, job.ID)
+	if csID := p.pipeline.LastChangeSetID(); csID != "" {
+		_ = p.db.SetIngestReviewChangeSet(reviewID, csID)
+	}
 
 	summary := fmt.Sprintf("applied %d wiki page(s) from approved plan v%d", len(applyResult.Written), review.ApprovedPlanVersion)
-	_, updateErr := p.db.DB().Exec(`
-		UPDATE ingest_jobs
-		SET status = 'succeeded', result_summary = ?, runner_id = '', heartbeat_at = '',
-		    updated_at = datetime('now')
-		WHERE id = ?`, summary, job.ID)
-	if updateErr != nil {
-		return updateErr
+	if err := p.db.MarkIngestJobSucceeded(job.ID, summary); err != nil {
+		return err
 	}
 	if err := p.db.UpdateIngestReviewStatus(reviewID, "succeeded"); err != nil {
 		log.Printf("review %s: mark succeeded: %v", reviewID, err)
@@ -222,7 +152,7 @@ func (p *JobProcessor) processReviewApplyJob(ctx context.Context, job *sqlite.In
 	return nil
 }
 
-func (p *JobProcessor) preparePipelineForReviewJob(job *sqlite.IngestJob, review *sqlite.IngestReview) error {
+func (p *JobProcessor) preparePipelineForReviewJob(job *store.IngestJob, review *store.IngestReview) error {
 	client, err := p.resolveLLMClientForReview(review)
 	if err != nil {
 		_ = p.failJob(job.ID, "llm_config_invalid", err.Error(), "", remediationForCode("llm_config_invalid"))
@@ -235,7 +165,7 @@ func (p *JobProcessor) preparePipelineForReviewJob(job *sqlite.IngestJob, review
 	return nil
 }
 
-func (p *JobProcessor) resolveLLMClientForReview(review *sqlite.IngestReview) (*llm.Client, error) {
+func (p *JobProcessor) resolveLLMClientForReview(review *store.IngestReview) (*llm.Client, error) {
 	if review != nil && review.SessionID != "" {
 		session, err := p.db.GetIngestSession(review.SessionID)
 		if err != nil {
@@ -281,7 +211,7 @@ func (p *JobProcessor) collectDeepOrganizeContext() string {
 	if err != nil {
 		return ""
 	}
-	var wikiDocs []sqlite.Document
+	var wikiDocs []store.Document
 	for _, d := range docs {
 		if d.SourceKind == "wiki" {
 			wikiDocs = append(wikiDocs, d)
@@ -371,11 +301,11 @@ func (p *JobProcessor) logReviewEvent(reviewID, sessionID, action, message, stat
 }
 
 // EnqueueReviewPlanJob queues a background plan generation job for a review.
-func EnqueueReviewPlanJob(db *sqlite.DB, workspace string, review *sqlite.IngestReview) (*sqlite.IngestJob, error) {
+func EnqueueReviewPlanJob(db store.Store, workspace string, review *store.IngestReview) (*store.IngestJob, error) {
 	if review == nil {
 		return nil, fmt.Errorf("nil review")
 	}
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  string(InputKindReviewPlan),
 		SourcePath: review.ArchiveSourcePath,
 		SourceRef:  ReviewSourceRef(review.ID),
@@ -391,11 +321,11 @@ func EnqueueReviewPlanJob(db *sqlite.DB, workspace string, review *sqlite.Ingest
 }
 
 // EnqueueReviewApplyJob queues apply execution after approval.
-func EnqueueReviewApplyJob(db *sqlite.DB, workspace string, review *sqlite.IngestReview) (*sqlite.IngestJob, error) {
+func EnqueueReviewApplyJob(db store.Store, workspace string, review *store.IngestReview) (*store.IngestJob, error) {
 	if review == nil {
 		return nil, fmt.Errorf("nil review")
 	}
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  string(InputKindReviewApply),
 		SourcePath: review.ArchiveSourcePath,
 		SourceRef:  ReviewSourceRef(review.ID),

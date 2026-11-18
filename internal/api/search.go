@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func (a *API) Search(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +26,7 @@ func (a *API) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if results == nil {
-		results = []sqlite.SearchChunk{}
+		results = []store.SearchChunk{}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

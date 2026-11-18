@@ -137,7 +137,7 @@ func (d *DB) searchFTS(ctx context.Context, query string, limit int, pathFilter 
 			 + similarity(dc.content, $1)) AS score
 		FROM document_chunks dc
 		JOIN documents d ON dc.document_id = d.id
-		WHERE d.status != 'failed' AND d.deleted_at IS NULL
+		WHERE d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
 		  AND (to_tsvector('simple', dc.content) @@ websearch_to_tsquery('simple', $1)
 		       OR dc.content ILIKE '%' || $1 || '%') `
 	sqlStr += pathFilterClause(pathFilter)
@@ -170,7 +170,7 @@ func (d *DB) searchLIKE(ctx context.Context, query string, limit int, pathFilter
 			0.0 AS score
 		FROM document_chunks dc
 		JOIN documents d ON dc.document_id = d.id
-		WHERE dc.content ILIKE '%' || $1 || '%' AND d.status != 'failed' AND d.deleted_at IS NULL `
+		WHERE dc.content ILIKE '%' || $1 || '%' AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = '' `
 	sqlStr += pathFilterClause(pathFilter)
 	sqlStr += "LIMIT $2"
 
@@ -188,7 +188,7 @@ func (d *DB) searchMetadata(ctx context.Context, query string, limit int, pathFi
 			d.filename, d.title, d.path, d.file_type,
 			0.0 AS score
 		FROM documents d
-		WHERE d.status != 'failed' AND d.deleted_at IS NULL
+		WHERE d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
 		  AND (d.filename ILIKE '%' || $1 || '%'
 		       OR d.title ILIKE '%' || $1 || '%'
 		       OR d.path ILIKE '%' || $1 || '%') `

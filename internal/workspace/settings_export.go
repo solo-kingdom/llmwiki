@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 const settingsExportRelPath = ".llmwiki/workspace-settings.json"
@@ -30,12 +30,10 @@ var exportKeys = []string{
 	mcp.ConfigSessionToolLoopMaxRoundsQA,
 	mcp.ConfigSessionToolLoopMaxRoundsOrganize,
 	mcp.ConfigSessionToolLoopMaxCallsPerRound,
-	sqlite.ConfigBackupIncludeRaw,
-	sqlite.ConfigVCAutoPush,
 }
 
 // ExportSettings writes non-secret app_config values to workspace-settings.json.
-func ExportSettings(db *sqlite.DB, workspace string) error {
+func ExportSettings(db store.Store, workspace string) error {
 	if db == nil || workspace == "" {
 		return nil
 	}
@@ -62,7 +60,7 @@ func ExportSettings(db *sqlite.DB, workspace string) error {
 }
 
 // ImportSettingsIfEmpty imports from export file when app_config has no core settings.
-func ImportSettingsIfEmpty(db *sqlite.DB, workspace string) error {
+func ImportSettingsIfEmpty(db store.Store, workspace string) error {
 	if db == nil || workspace == "" {
 		return nil
 	}
@@ -75,7 +73,7 @@ func ImportSettingsIfEmpty(db *sqlite.DB, workspace string) error {
 }
 
 // ImportSettings loads values from workspace-settings.json into app_config.
-func ImportSettings(db *sqlite.DB, workspace string) error {
+func ImportSettings(db store.Store, workspace string) error {
 	path := filepath.Join(workspace, settingsExportRelPath)
 	data, err := os.ReadFile(path)
 	if err != nil {

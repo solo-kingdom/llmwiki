@@ -5,15 +5,15 @@ import (
 	"strconv"
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type activityLogsListResponse struct {
-	Logs    []sqlite.ActivityLog `json:"logs"`
-	Total   int                  `json:"total"`
-	Limit   int                  `json:"limit"`
-	Offset  int                  `json:"offset"`
-	HasMore bool                 `json:"has_more"`
+	Logs    []store.ActivityLog `json:"logs"`
+	Total   int                 `json:"total"`
+	Limit   int                 `json:"limit"`
+	Offset  int                 `json:"offset"`
+	HasMore bool                `json:"has_more"`
 }
 
 type deleteActivityLogsResponse struct {
@@ -27,7 +27,7 @@ func (a *API) ListActivityLogsHandler(w http.ResponseWriter, r *http.Request) {
 	category := r.URL.Query().Get("category")
 	level := r.URL.Query().Get("level")
 
-	filter := sqlite.ActivityLogListFilter{
+	filter := store.ActivityLogListFilter{
 		Limit:    limit,
 		Offset:   offset,
 		Category: category,

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
+	"github.com/spf13/cobra"
 )
 
 func newLintCmd() *cobra.Command {

@@ -102,7 +102,7 @@ func (d *DB) CreateIngestJob(job *store.IngestJob) error {
 	if job == nil {
 		return fmt.Errorf("nil ingest job")
 	}
-	if job.SourcePath == "" {
+	if job.SourcePath == "" && job.InputType != "rollback" {
 		return fmt.Errorf("source_path is required")
 	}
 	if job.InputType == "" {

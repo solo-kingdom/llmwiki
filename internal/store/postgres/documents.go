@@ -116,10 +116,25 @@ func (d *DB) FindDocumentByName(name string) (*store.Document, error) {
 	doc, err := scanDocumentRow(d.pool.QueryRow(context.Background(),
 		"SELECT "+documentSelect+` FROM documents d
 		WHERE (lower(d.filename) = lower($1) OR lower(d.title) = lower($1))
-		  AND d.status != 'failed' AND d.deleted_at IS NULL
+		  AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
 		LIMIT 1`, name))
 	if err != nil {
 		return nil, fmt.Errorf("find document: %w", err)
+	}
+	return doc, nil
+}
+
+// GetDocumentByRelativePath finds a live document by workspace-relative path.
+func (d *DB) GetDocumentByRelativePath(relativePath string) (*store.Document, error) {
+	doc, err := scanDocumentRow(d.pool.QueryRow(context.Background(),
+		"SELECT "+documentSelect+` FROM documents d
+		WHERE d.relative_path = $1 AND COALESCE(d.deleted_at, '') = ''
+		LIMIT 1`, relativePath))
+	if err != nil {
+		if isNoRows(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get document by relative path: %w", err)
 	}
 	return doc, nil
 }
@@ -128,7 +143,7 @@ func (d *DB) FindDocumentByName(name string) (*store.Document, error) {
 func (d *DB) GetDocumentByPath(filename, dirPath string) (*store.Document, error) {
 	doc, err := scanDocumentRow(d.pool.QueryRow(context.Background(),
 		"SELECT "+documentSelect+` FROM documents d
-		WHERE d.filename = $1 AND d.path = $2 AND d.status != 'failed' AND d.deleted_at IS NULL
+		WHERE d.filename = $1 AND d.path = $2 AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
 		LIMIT 1`, filename, dirPath))
 	if err != nil {
 		return nil, fmt.Errorf("get document by path: %w", err)
@@ -176,7 +191,7 @@ func (d *DB) ArchiveDocuments(ids []string) (int64, error) {
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE documents SET deleted_at = `+nowText+`
-		WHERE id = ANY($1::text[]) AND deleted_at IS NULL`, ids)
+		WHERE id = ANY($1::text[]) AND COALESCE(deleted_at, '') = ''`, ids)
 	if err != nil {
 		return 0, fmt.Errorf("archive documents: %w", err)
 	}
@@ -205,7 +220,7 @@ func (d *DB) ListDocumentsFiltered(f store.ListDocumentsFilter) ([]store.Documen
 	sqlStr := `
 		SELECT id, filename, title, path, file_type, COALESCE(page_count, 0), COALESCE(updated_at, ''),
 			COALESCE(relative_path, ''), COALESCE(source_kind, '')
-		FROM documents WHERE status != 'failed' AND deleted_at IS NULL `
+		FROM documents WHERE status != 'failed' AND COALESCE(deleted_at, '') = '' `
 	var args []any
 	if f.SourceKind != "" {
 		args = append(args, f.SourceKind)
@@ -269,7 +284,7 @@ func (d *DB) ListDocumentsWithContent() ([]store.Document, error) {
 			COALESCE(relative_path, ''), COALESCE(tags, '[]'), COALESCE(date, ''),
 			COALESCE(metadata, ''), COALESCE(stale_since, ''), COALESCE(highlights, '[]'),
 			COALESCE(version, 0)
-		FROM documents WHERE status != 'failed' AND deleted_at IS NULL ORDER BY path, filename`)
+		FROM documents WHERE status != 'failed' AND COALESCE(deleted_at, '') = '' ORDER BY path, filename`)
 	if err != nil {
 		return nil, fmt.Errorf("list documents with content: %w", err)
 	}

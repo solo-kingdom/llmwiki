@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // toolLoopTestServer creates an httptest.Server that simulates LLM responses.
@@ -400,19 +400,16 @@ func TestToolLoopRecordsErrorOnAPIFailure(t *testing.T) {
 		},
 	}
 
-	// Use a real recorder backed by an in-memory SQLite DB.
-	db, err := sqlite.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
+	// Use a real recorder backed by the test PostgreSQL store.
+	db := openTestDB(t)
 	// Seed a provider so session creation works.
-	_ = db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	_ = db.UpsertProviderInfo([]store.ProviderInfo{
 		{ID: "openai", Name: "OpenAI", APIFormat: "openai"},
 	})
-	_ = db.CreateProviderInstance(&sqlite.ProviderInstance{
+	_ = db.CreateProviderInstance(&store.ProviderInstance{
 		ID: "inst-test", Name: "Test", CatalogID: "openai", APIKey: "k",
 	})
-	sess := &sqlite.IngestSession{
+	sess := &store.IngestSession{
 		LLMInstanceID: "inst-test",
 		LLMModel:      "test-model",
 		Mode:          "organize",
@@ -420,7 +417,7 @@ func TestToolLoopRecordsErrorOnAPIFailure(t *testing.T) {
 	if err := db.CreateIngestSession(sess); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	msg := &sqlite.IngestSessionMessage{
+	msg := &store.IngestSessionMessage{
 		SessionID:    sess.ID,
 		Role:         "assistant",
 		Content:      "",
@@ -432,7 +429,7 @@ func TestToolLoopRecordsErrorOnAPIFailure(t *testing.T) {
 	}
 	rec := NewSessionMessageRecorder(db, msg.ID)
 
-	_, err = RunSessionChatToolLoop(
+	_, err := RunSessionChatToolLoop(
 		context.Background(),
 		client,
 		executor,

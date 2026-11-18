@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func resolveWorkspaceDir(arg string) (string, error) {
@@ -17,18 +15,9 @@ func resolveWorkspaceDir(arg string) (string, error) {
 		}
 		dir = cwd
 	}
-	_, ws, err := storesvc.DiscoverWorkspace(dir)
+	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve workspace path: %w", err)
 	}
-	return ws, nil
-}
-
-func workspaceIndexPath(ws string) string {
-	return filepath.Join(ws, ".llmwiki", "index.db")
-}
-
-func isWorkspaceInitialized(ws string) bool {
-	_, err := os.Stat(workspaceIndexPath(ws))
-	return err == nil
+	return abs, nil
 }

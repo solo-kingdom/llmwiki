@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func openAIStreamChunk(content string) string {
@@ -265,9 +265,9 @@ func TestCacheHitRecordsEvent(t *testing.T) {
 	}
 }
 
-func seedProcessorOpenAIProviderWithBase(t *testing.T, db *sqlite.DB, apiBase string) *sqlite.ProviderInstance {
+func seedProcessorOpenAIProviderWithBase(t *testing.T, db store.Store, apiBase string) *store.ProviderInstance {
 	t.Helper()
-	if err := db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	if err := db.UpsertProviderInfo([]store.ProviderInfo{
 		{
 			ID:        "openai",
 			Name:      "OpenAI",
@@ -277,7 +277,7 @@ func seedProcessorOpenAIProviderWithBase(t *testing.T, db *sqlite.DB, apiBase st
 	}); err != nil {
 		t.Fatalf("UpsertProviderInfo: %v", err)
 	}
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name:      "OpenAI Work",
 		CatalogID: "openai",
 		APIKey:    "sk-test-key",
@@ -288,14 +288,10 @@ func seedProcessorOpenAIProviderWithBase(t *testing.T, db *sqlite.DB, apiBase st
 	return inst
 }
 
-func setupProcessorCacheHitTest(t *testing.T, inputType, sourcePath, sourceRef string, content []byte) (*JobProcessor, *sqlite.DB, *sqlite.IngestJob, *atomic.Int32) {
+func setupProcessorCacheHitTest(t *testing.T, inputType, sourcePath, sourceRef string, content []byte) (*JobProcessor, store.Store, *store.IngestJob, *atomic.Int32) {
 	t.Helper()
 
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open db: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := openTestDB(t)
 
 	ws := t.TempDir()
 	fullSource := filepath.Join(ws, sourcePath)
@@ -342,7 +338,7 @@ func setupProcessorCacheHitTest(t *testing.T, inputType, sourcePath, sourceRef s
 	processor := NewJobProcessor(db, ws)
 	_ = client
 
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  inputType,
 		SourcePath: sourcePath,
 		SourceRef:  sourceRef,
@@ -391,11 +387,7 @@ func TestProcessorCacheHitUploadJob(t *testing.T) {
 }
 
 func TestProcessorCacheHitSessionArchiveJob(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open db: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := openTestDB(t)
 
 	ws := t.TempDir()
 	content := []byte("# Session Archive\nCached content")
@@ -410,7 +402,7 @@ func TestProcessorCacheHitSessionArchiveJob(t *testing.T) {
 
 	_, calls, baseURL := newCountingLLMClient(t, "should not be called")
 	inst := seedProcessorOpenAIProviderWithBase(t, db, baseURL)
-	session := &sqlite.IngestSession{
+	session := &store.IngestSession{
 		Title:         "Archive Session",
 		StoragePath:   "raw/sources/web-ingest/sessions/sess123",
 		LLMInstanceID: inst.ID,
@@ -438,7 +430,7 @@ func TestProcessorCacheHitSessionArchiveJob(t *testing.T) {
 
 	processor := NewJobProcessor(db, ws)
 
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  string(InputKindSessionArchive),
 		SourcePath: sourcePath,
 		SourceRef:  "session:" + session.ID,

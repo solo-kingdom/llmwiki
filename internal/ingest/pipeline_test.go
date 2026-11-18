@@ -272,7 +272,7 @@ func TestPipelineSetJobRecorder(t *testing.T) {
 
 func TestLanguageInstructionForPipeline(t *testing.T) {
 	tests := []struct {
-		lang       string
+		lang         string
 		wantContains string
 	}{
 		{"zh", "中文"},

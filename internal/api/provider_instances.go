@@ -8,15 +8,15 @@ import (
 	"fmt"
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type instanceResponse struct {
-	Instance *sqlite.ProviderInstance `json:"instance"`
+	Instance *store.ProviderInstance `json:"instance"`
 }
 
 type instanceListResponse struct {
-	Instances []sqlite.ProviderInstance `json:"instances"`
+	Instances []store.ProviderInstance `json:"instances"`
 }
 
 func (a *API) CreateProviderInstance(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +54,7 @@ func (a *API) CreateProviderInstance(w http.ResponseWriter, r *http.Request) {
 		req.Name = pInfo.Name
 	}
 
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name:      req.Name,
 		CatalogID: req.CatalogID,
 		APIKey:    req.APIKey,
@@ -94,7 +94,7 @@ func (a *API) ListProviderInstances(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if instances == nil {
-		instances = []sqlite.ProviderInstance{}
+		instances = []store.ProviderInstance{}
 	}
 
 	// Mask API keys in response

@@ -1,19 +1,72 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
-	"github.com/solo-kingdom/llmwiki/internal/vcs"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres"
 )
 
+// setupTestDatabase creates an isolated schema in LLMWIKI_TEST_DATABASE_URL and
+// returns a DSN that scopes connections to it. The schema is dropped on cleanup.
+func setupTestDatabase(t *testing.T) string {
+	t.Helper()
+	base := os.Getenv("LLMWIKI_TEST_DATABASE_URL")
+	if base == "" {
+		t.Fatalf("LLMWIKI_TEST_DATABASE_URL is not set")
+	}
+
+	schema := fmt.Sprintf("llmwiki_cmd_test_%d", time.Now().UnixNano())
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, base)
+	if err != nil {
+		t.Fatalf("connect postgres: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `CREATE SCHEMA "`+schema+`"`); err != nil {
+		_ = conn.Close(ctx)
+		t.Fatalf("create schema: %v", err)
+	}
+	_ = conn.Close(ctx)
+	t.Cleanup(func() {
+		c, err := pgx.Connect(context.Background(), base)
+		if err != nil {
+			return
+		}
+		_, _ = c.Exec(context.Background(), `DROP SCHEMA IF EXISTS "`+schema+`" CASCADE`)
+		_ = c.Close(context.Background())
+	})
+
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatalf("parse database url: %v", err)
+	}
+	q := u.Query()
+	q.Set("search_path", schema)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// initTestDB returns a DSN scoped to a fresh schema and points runInit at it.
+func initTestDB(t *testing.T) string {
+	t.Helper()
+	dsn := setupTestDatabase(t)
+	t.Setenv("LLMWIKI_DATABASE_URL", dsn)
+	return dsn
+}
+
 func TestInitCreatesFullDirectoryStructure(t *testing.T) {
+	initTestDB(t)
 	ws := t.TempDir()
-	if err := runInit(ws); err != nil {
+	if err := runInit(ws, ""); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -30,8 +83,9 @@ func TestInitCreatesFullDirectoryStructure(t *testing.T) {
 }
 
 func TestInitScaffoldLanguageChinese(t *testing.T) {
+	initTestDB(t)
 	ws := t.TempDir()
-	if err := runInit(ws); err != nil {
+	if err := runInit(ws, ""); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -87,17 +141,26 @@ func TestInitDoesNotOverwriteExistingScaffold(t *testing.T) {
 	}
 }
 
-func TestInitRepairModePreservesDatabase(t *testing.T) {
+func TestInitRepairModePreservesWorkspace(t *testing.T) {
+	dsn := initTestDB(t)
 	ws := t.TempDir()
 
-	if err := runInit(ws); err != nil {
+	if err := runInit(ws, ""); err != nil {
 		t.Fatalf("first runInit: %v", err)
 	}
 
-	dbPath := workspaceIndexPath(ws)
-	before, err := os.ReadFile(dbPath)
+	db, err := postgres.Open(context.Background(), dsn)
 	if err != nil {
-		t.Fatalf("ReadFile db: %v", err)
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+
+	before, err := db.GetWorkspace()
+	if err != nil {
+		t.Fatalf("GetWorkspace before repair: %v", err)
+	}
+	if before == nil {
+		t.Fatal("expected workspace row after init")
 	}
 
 	// Remove a directory and scaffold to simulate partial workspace
@@ -111,7 +174,7 @@ func TestInitRepairModePreservesDatabase(t *testing.T) {
 		t.Fatalf("RemoveAll templates: %v", err)
 	}
 
-	if err := runInit(ws); err != nil {
+	if err := runInit(ws, ""); err != nil {
 		t.Fatalf("second runInit (repair): %v", err)
 	}
 
@@ -125,18 +188,24 @@ func TestInitRepairModePreservesDatabase(t *testing.T) {
 		t.Errorf("repair should recreate wiki/templates: %v", err)
 	}
 
-	after, err := os.ReadFile(dbPath)
+	after, err := db.GetWorkspace()
 	if err != nil {
-		t.Fatalf("ReadFile db after repair: %v", err)
+		t.Fatalf("GetWorkspace after repair: %v", err)
 	}
-	if string(before) != string(after) {
-		t.Error("repair mode should not reset database")
+	if after == nil || after.ID != before.ID {
+		t.Errorf("repair should preserve the workspace row: before=%+v after=%+v", before, after)
+	}
+	if doc, err := db.GetDocumentByPath("index.md", "/wiki/"); err != nil {
+		t.Fatalf("GetDocumentByPath: %v", err)
+	} else if doc == nil {
+		t.Error("repair should preserve the indexed wiki index")
 	}
 }
 
 func TestInitCreatesWikiPageTemplates(t *testing.T) {
+	initTestDB(t)
 	ws := t.TempDir()
-	if err := runInit(ws); err != nil {
+	if err := runInit(ws, ""); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -162,8 +231,9 @@ func TestInitCreatesWikiPageTemplates(t *testing.T) {
 }
 
 func TestInitCreatesObsidianConfig(t *testing.T) {
+	initTestDB(t)
 	ws := t.TempDir()
-	if err := runInit(ws); err != nil {
+	if err := runInit(ws, ""); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -176,17 +246,29 @@ func TestInitCreatesObsidianConfig(t *testing.T) {
 	}
 }
 
-func TestInitIndexesWikiIndexInDatabase(t *testing.T) {
+func TestInitRegistersWorkspaceAndIndexesWikiIndex(t *testing.T) {
+	dsn := initTestDB(t)
 	ws := t.TempDir()
-	if err := runInit(ws); err != nil {
+	if err := runInit(ws, ""); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
-	db, err := sqlite.Open(workspaceIndexPath(ws))
+	db, err := postgres.Open(context.Background(), dsn)
 	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
+		t.Fatalf("open database: %v", err)
 	}
 	defer db.Close()
+
+	workspace, err := db.GetWorkspace()
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if workspace == nil {
+		t.Fatal("expected workspace row after init")
+	}
+	if workspace.Name != filepath.Base(ws) {
+		t.Errorf("workspace name = %q, want %q", workspace.Name, filepath.Base(ws))
+	}
 
 	doc, err := db.GetDocumentByPath("index.md", "/wiki/")
 	if err != nil {
@@ -194,68 +276,5 @@ func TestInitIndexesWikiIndexInDatabase(t *testing.T) {
 	}
 	if doc == nil {
 		t.Fatal("expected wiki/index.md in database after init")
-	}
-}
-
-func TestInitCreatesGitRepository(t *testing.T) {
-	if !vcs.IsGitAvailable().Available {
-		t.Skip("git not available")
-	}
-
-	ws := t.TempDir()
-	if err := runInit(ws); err != nil {
-		t.Fatalf("runInit: %v", err)
-	}
-
-	gitDir := filepath.Join(ws, ".git")
-	if info, err := os.Stat(gitDir); err != nil {
-		t.Fatalf("missing .git after init: %v", err)
-	} else if !info.IsDir() {
-		t.Fatal(".git is not a directory")
-	}
-
-	repo := vcs.NewGitRepo(ws)
-	count, err := repo.CommitCount()
-	if err != nil {
-		t.Fatalf("CommitCount: %v", err)
-	}
-	if count < 1 {
-		t.Errorf("expected at least 1 commit after init, got %d", count)
-	}
-}
-
-func TestInitRepairAddsGitRepository(t *testing.T) {
-	if !vcs.IsGitAvailable().Available {
-		t.Skip("git not available")
-	}
-
-	ws := t.TempDir()
-	if err := runInit(ws); err != nil {
-		t.Fatalf("first runInit: %v", err)
-	}
-
-	if err := os.RemoveAll(filepath.Join(ws, ".git")); err != nil {
-		t.Fatalf("RemoveAll .git: %v", err)
-	}
-
-	if err := runInit(ws); err != nil {
-		t.Fatalf("repair runInit: %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(ws, ".git")); err != nil {
-		t.Fatalf("repair should recreate .git: %v", err)
-	}
-}
-
-func TestEnsureVersionControlRequiresGit(t *testing.T) {
-	if vcs.IsGitAvailable().Available {
-		t.Skip("git is available; cannot test missing-git path without isolation")
-	}
-
-	ws := t.TempDir()
-	if err := ensureVersionControl(ws); err == nil {
-		t.Fatal("expected error when git is unavailable")
-	} else if !strings.Contains(err.Error(), "git is not installed") {
-		t.Errorf("unexpected error: %v", err)
 	}
 }

@@ -12,7 +12,12 @@ export function parseGitCommitTimestamp(ts: string): Date | null {
     return Number.isNaN(date.getTime()) ? null : date
   }
 
-  const fallback = new Date(trimmed.includes(" ") ? trimmed.replace(" ", "T") : trimmed)
+  let candidate = trimmed.includes(" ") ? trimmed.replace(" ", "T") : trimmed
+  // PostgreSQL stores UTC without an offset; treat bare timestamps as UTC.
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(candidate)) {
+    candidate += "Z"
+  }
+  const fallback = new Date(candidate)
   return Number.isNaN(fallback.getTime()) ? null : fallback
 }
 

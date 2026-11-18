@@ -61,10 +61,10 @@ func runMCPConfig(dir, bind string, port int, token string) error {
 		"mcpServers": map[string]interface{}{
 			"llmwiki": serverCfg,
 		},
-		"workspace":          ws,
-		"endpoint":           endpoint,
-		"defaultToolPolicy":  "readonly",
-		"transport":          "http-post-jsonrpc",
+		"workspace":         ws,
+		"endpoint":          endpoint,
+		"defaultToolPolicy": "readonly",
+		"transport":         "http-post-jsonrpc",
 	}
 
 	out, err := json.MarshalIndent(cfg, "", "  ")

@@ -106,8 +106,8 @@ export function workbenchViewHref(view: WorkbenchView): string {
   }
 }
 
-export function timelineCommitHref(sha: string): string {
-  return `/timeline?commit=${encodeURIComponent(sha)}`
+export function timelineChangeHref(changeSetId: string): string {
+  return `/timeline?change=${encodeURIComponent(changeSetId)}`
 }
 
 function subscribePath(cb: () => void) {

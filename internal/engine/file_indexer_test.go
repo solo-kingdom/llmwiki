@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
 // TestIndexFileSyncsReferences verifies that indexing a wiki page with links
@@ -32,12 +32,7 @@ func TestIndexFileSyncsReferences(t *testing.T) {
 	}
 
 	// Set up DB and indexer
-	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	defer db.Close()
+	db := pgtest.Open(t)
 
 	adapter := storesvc.NewStoreAdapter(db)
 	indexer := engine.NewWorkspaceFileIndexer(adapter, ws)
@@ -96,12 +91,7 @@ func TestIndexFileSkipsReferencesForNonWiki(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	defer db.Close()
+	db := pgtest.Open(t)
 
 	adapter := storesvc.NewStoreAdapter(db)
 	indexer := engine.NewWorkspaceFileIndexer(adapter, ws)
@@ -148,12 +138,7 @@ func TestIndexFileUpdateSyncsReferences(t *testing.T) {
 		t.Fatalf("WriteFile source: %v", err)
 	}
 
-	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	defer db.Close()
+	db := pgtest.Open(t)
 
 	adapter := storesvc.NewStoreAdapter(db)
 	indexer := engine.NewWorkspaceFileIndexer(adapter, ws)
@@ -185,7 +170,7 @@ func TestIndexFileUpdateSyncsReferences(t *testing.T) {
 	}
 
 	// Verify reference was created
-	refs, err = db.GetForwardReferences(sourceDoc.ID)
+	refs, err := db.GetForwardReferences(sourceDoc.ID)
 	if err != nil {
 		t.Fatalf("GetForwardReferences: %v", err)
 	}
@@ -213,12 +198,7 @@ func TestRemoveFileArchivesDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := pgtest.Open(t)
 
 	adapter := storesvc.NewStoreAdapter(db)
 	indexer := engine.NewWorkspaceFileIndexer(adapter, ws)

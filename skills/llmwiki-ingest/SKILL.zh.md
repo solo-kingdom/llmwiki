@@ -53,7 +53,7 @@ POST /ingest/sessions/{id}/archive             → review(id)，状态 "planning
 GET  /ingest/reviews/{review_id}/plans         → 各版本计划（plan_markdown + plan_json）
 POST /ingest/reviews/{id}/feedback             → 提修改意见，再 /replan
 POST /ingest/reviews/{id}/approve              → 落地作业，合入知识库
-GET  /ingest/jobs/{apply_job_id}               → succeeded 后读 review.merge_commit_sha
+GET  /ingest/jobs/{apply_job_id}               → succeeded 后读 review.change_set_id
 ```
 
 ### 会话
@@ -106,7 +106,7 @@ curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/reviews/{id}/replan" 
 ### 验证
 
 ```bash
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/ingest/reviews/{id}"     # succeeded + merge_commit_sha
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/ingest/reviews/{id}"     # succeeded + change_set_id
 curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/lint"
 ```
@@ -117,10 +117,10 @@ curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/lint"
 
 ```bash
 curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/rollback" \
-  -H 'Content-Type: application/json' -d '{"commit_sha":"<来自 review 或 /vcs/log 的 sha>"}'
+  -H 'Content-Type: application/json' -d '{"change_set_id":"<来自 review>"}'
 ```
 
-排一个回滚作业：回退提交、移除这些页面的索引、其余重建。像普通作业一样轮询，之后 reindex 并 lint。不要回滚你在 `GET /api/v1/vcs/log` 里认不出的提交。
+排一个确定性回滚作业：change set 内每个页面恢复到父修订，新建页面软删。像普通作业一样轮询。不要回滚你在 `GET /api/v1/history` 里认不出的 change set。
 
 ## 规则
 

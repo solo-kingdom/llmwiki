@@ -21,7 +21,7 @@
                     │       └──────┬─────┴──────────┘     │
                     │         Core Service                │
                     │   摄取引擎 · 搜索 · 引用图 · 监视     │
-                    │         SQLite + Filesystem         │
+                    │         PostgreSQL + pgvector        │
                     │   Embedded React/Vite/TS Web UI     │
                     └─────────────────────────────────────┘
 ```
@@ -60,10 +60,9 @@ var webAssets embed.FS
 
 ---
 
-## 决策 2: 文件即真理，SQLite 仅作索引
+## 决策 2: 文件即真理，SQLite 仅作索引（已被取代）
 
-### 原则
-> 所有用户数据以明文存储在文件中，SQLite 仅用于提升搜索和查询性能。删库后可从文件系统完全重建。
+> **2026-11-18 更新**：该决策已被 PostgreSQL 单一真源取代。页面正文、修订历史、分块、引用、设置都存 PostgreSQL；工作区文件降级为可选的 `llmwiki export` 产物。下述分类仅保留为历史设计记录。
 
 ### 数据分类
 
@@ -110,9 +109,9 @@ type ChatRequest struct {
 
 ---
 
-## 决策 4: 搜索引擎用 SQLite FTS5
+## 决策 4: 搜索引擎用 SQLite FTS5（已被取代）
 
-### 选择：SQLite FTS5（Porter stemming）
+> **2026-11-18 更新**：搜索改为 PostgreSQL `tsvector` + `pg_trgm` 关键词检索，加 pgvector 语义检索与 RRF 混合排序。
 
 **理由**：
 - 与 SQLite 元数据库在同一进程中，无额外依赖
@@ -157,7 +156,7 @@ SQLite FTS5 (关键词，BM25 rank)
 │   ├── synthesis/          ← 综合分析
 │   └── comparisons/        ← 对比分析
 └── .llmwiki/
-    ├── index.db            ← SQLite 索引
+    ├── workspace-settings.json ← 非密设置快照（可选）
     └── cache/              ← 衍生缓存（PDF 转换等）
 ```
 

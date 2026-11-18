@@ -1,7 +1,7 @@
 package activity
 
 import (
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // Indexer wraps a file indexer and records index_failed on errors.
@@ -11,7 +11,7 @@ type Indexer struct {
 		UpdateFile(relPath string) error
 		RemoveFile(relPath string) error
 	}
-	DB *sqlite.DB
+	DB store.Store
 }
 
 func (w *Indexer) IndexFile(relPath string) error {

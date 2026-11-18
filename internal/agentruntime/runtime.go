@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 const (
@@ -54,7 +54,7 @@ type PromptRequest struct {
 	DocLang            string
 	UserContent        string
 	DisplayUserContent string
-	History            []sqlite.IngestSessionMessage
+	History            []store.IngestSessionMessage
 	WikiRefs           []ingest.WikiRefInput
 	Recorder           *ingest.SessionMessageRecorder
 }

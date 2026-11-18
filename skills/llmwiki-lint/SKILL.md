@@ -61,7 +61,7 @@ Frontmatter is not validated beyond presence and directory agreement: an odd `da
 
 ## Report
 
-Give: issues by severity before → after, the files changed, anything deliberately left, and the commands to reproduce. Quote exact `code` values and paths so the user can re-check. If you ran `POST /api/v1/vcs/backup`, include the commit sha.
+Give: issues by severity before → after, the files changed, anything deliberately left, and the commands to reproduce. Quote exact `code` values and paths so the user can re-check. If the user asked to roll back, include the change set id.
 
 ## Never
 

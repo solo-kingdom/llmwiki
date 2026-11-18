@@ -105,7 +105,7 @@ workspace/                   ← 灵活的，不要求特定目录结构
 │   ├── overview.md
 │   └── log.md
 ├── .llmwiki/
-│   ├── index.db            ⚙️ SQLite 索引
+│   ├── workspace-settings.json ⚙️ 非密设置快照（可选）
 │   └── cache/              ⚙️ 衍生缓存 (PDF 转换, 图片)
 └── (任意其他目录结构)        ← 没有硬性要求
 ```
@@ -173,7 +173,7 @@ project/
 │   ├── comparisons/         📄 对比分析
 │   └── templates/           ⚙️ 页面模板（系统目录）
 └── .llmwiki/
-    ├── index.db            ⚙️ SQLite 索引
+    ├── workspace-settings.json ⚙️ 非密设置快照（可选）
     └── cache/              ⚙️ 衍生缓存
 ```
 
@@ -251,7 +251,7 @@ wiki/
 │    └── outputs/ (图表/幻灯片)                              │
 │                                                          │
 │  .llmwiki/ 层 (衍生数据，不入 Git)                          │
-│    ├── index.db (SQLite 索引)                             │
+│    ├── workspace-settings.json (可选)                     │
 │    └── cache/ (PDF 转换, OCR 结果)                        │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -327,7 +327,7 @@ wiki/
 
 ```
 ✅ 好的做法:
-  .llmwiki/index.db    — SQLite 索引 (可重建)
+  PostgreSQL           — 页面、修订、索引（唯一真源）
   .llmwiki/cache/      — PDF 转换结果 (衍生)
   wiki/graph/          — 自动生成的图文件 (只在 OmegaWiki)
 

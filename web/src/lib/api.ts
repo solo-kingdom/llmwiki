@@ -25,8 +25,13 @@ import type {
   ModelInfo,
   PublicWikiDocument,
   SessionListItem,
-  VCStatus,
-  VCLogEntry,
+  ChangeSet,
+  PageRevision,
+  HistoryListResponse,
+  HistoryDetailResponse,
+  PageHistoryResponse,
+  RollbackResponse,
+  SearchMode,
   ProviderCheckResult,
   MCPServerCheckResult,
   ActivityLog,
@@ -79,12 +84,14 @@ export function searchDocuments(
   q: string,
   limit = 10,
   types?: string[],
+  mode?: SearchMode,
 ): Promise<SearchResponse> {
   const params = new URLSearchParams({
     q,
     limit: String(limit),
   })
   for (const t of types ?? []) params.append("types", t)
+  if (mode) params.set("mode", mode)
   return request<SearchResponse>(`/api/v1/search/?${params.toString()}`)
 }
 
@@ -685,55 +692,62 @@ export function deleteIngestSession(
   )
 }
 
-// Version Control API
+// Revision history API (PostgreSQL-backed change sets)
 
-export function initVC(): Promise<{
-  status: string
-  commit_sha?: string
-  commit_count: number
-}> {
-  return request("/api/v1/vcs/init", { method: "POST" })
+export function listHistory(
+  limit = 50,
+  before?: string,
+): Promise<HistoryListResponse> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (before) params.set("before", before)
+  return request<HistoryListResponse>(`/api/v1/history?${params.toString()}`)
 }
 
-export function getVCStatus(): Promise<VCStatus> {
-  return request<VCStatus>("/api/v1/vcs/status")
-}
-
-export function getVCLog(limit = 50): Promise<VCLogEntry[]> {
-  return request<VCLogEntry[]>(`/api/v1/vcs/log?limit=${limit}`)
-}
-
-export function getVCDiff(sha: string): Promise<{ sha: string; diff: string }> {
-  return request<{ sha: string; diff: string }>(
-    `/api/v1/vcs/diff/${encodeURIComponent(sha)}`,
+export function getHistory(id: string): Promise<HistoryDetailResponse> {
+  return request<HistoryDetailResponse>(
+    `/api/v1/history/${encodeURIComponent(id)}`,
   )
 }
 
-export function createRollback(
-  commitSHA: string,
-): Promise<{ status: string; job: IngestJob }> {
-  return request<{ status: string; job: IngestJob }>(
-    "/api/v1/ingest/rollback",
-    {
-      method: "POST",
-      body: JSON.stringify({ commit_sha: commitSHA }),
-    },
+export function getHistoryDiff(id: string): Promise<{ diff: string }> {
+  return request<{ diff: string }>(
+    `/api/v1/history/${encodeURIComponent(id)}/diff`,
   )
 }
 
-export function setVCSRemote(url: string): Promise<VCStatus> {
-  return request<VCStatus>("/api/v1/vcs/remote", {
+export function rollbackHistory(id: string): Promise<RollbackResponse> {
+  return request<RollbackResponse>(
+    `/api/v1/history/${encodeURIComponent(id)}/rollback`,
+    { method: "POST" },
+  )
+}
+
+export function rollbackChangeSet(
+  changeSetId: string,
+): Promise<RollbackResponse> {
+  return request<RollbackResponse>("/api/v1/ingest/rollback", {
     method: "POST",
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ change_set_id: changeSetId }),
   })
 }
 
-export function pushVC(): Promise<{ status: string }> {
-  return request<{ status: string }>("/api/v1/vcs/push", { method: "POST" })
+export function listPageHistory(
+  path: string,
+  limit = 100,
+): Promise<PageHistoryResponse> {
+  const params = new URLSearchParams({ path, limit: String(limit) })
+  return request<PageHistoryResponse>(
+    `/api/v1/pages/history?${params.toString()}`,
+  )
 }
 
-export function backupVC(): Promise<{ status: string; commit_sha?: string }> {
-  return request<{ status: string; commit_sha?: string }>("/api/v1/vcs/backup", {
-    method: "POST",
-  })
+export function getRevision(id: string): Promise<PageRevision> {
+  return request<PageRevision>(`/api/v1/revisions/${encodeURIComponent(id)}`)
+}
+
+export function restoreRevision(id: string): Promise<ChangeSet> {
+  return request<ChangeSet>(
+    `/api/v1/revisions/${encodeURIComponent(id)}/restore`,
+    { method: "POST" },
+  )
 }

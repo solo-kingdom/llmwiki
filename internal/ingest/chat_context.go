@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 const (
@@ -31,7 +31,7 @@ type RelatedSubsetEntry struct {
 
 // ContextResolver computes a ranked wiki subset for session chat.
 type ContextResolver struct {
-	DB        *sqlite.DB
+	DB        store.Store
 	Workspace string
 }
 
@@ -253,7 +253,7 @@ type WikiPageBody struct {
 const maxWikiRefInjectLen = 120000
 
 // LoadWikiPageBodies reads full wiki content for refs.
-func LoadWikiPageBodies(db *sqlite.DB, refs []WikiRefInput) ([]WikiPageBody, error) {
+func LoadWikiPageBodies(db store.Store, refs []WikiRefInput) ([]WikiPageBody, error) {
 	out := make([]WikiPageBody, 0, len(refs))
 	for _, ref := range refs {
 		doc, err := db.GetWikiDocumentByID(ref.DocumentID)

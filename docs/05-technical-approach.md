@@ -5,8 +5,8 @@
 | 层 | 技术 | 原因 |
 |----|------|------|
 | 后端 | Go 1.22+ | 单二进制、并发模型、HTTP server、交叉编译 |
-| 数据库 | SQLite + FTS5 | 无服务依赖，与 Go 进程内运行 |
-| SQLite 驱动 | modernc.org/sqlite（优先）或 mattn/go-sqlite3 | 纯 Go 避免 CGO |
+| 数据库 | PostgreSQL 16+ + pgvector + pg_trgm | 单一真源、修订历史、全文与语义检索 |
+| 数据库驱动 | jackc/pgx v5 | 原生 PG 协议、连接池、批量与 COPY |
 | 前端 | React 19 + TypeScript + Vite | 现代化 SPA，构建产物小 |
 | UI 框架 | shadcn/ui 或纯 Tailwind + Radix | 组件化，Tree-shakeable |
 | MCP | JSON-RPC 2.0 over stdio/SSE | MCP 标准协议 |
@@ -48,7 +48,7 @@ llmwiki/
 │   │       ├── write.go
 │   │       └── delete.go
 │   ├── store/
-│   │   ├── sqlite/
+│   │   ├── postgres/
 │   │   │   ├── db.go            # 连接管理
 │   │   │   ├── documents.go     # documents CRUD
 │   │   │   ├── chunks.go        # 分块存储 + FTS
@@ -181,7 +181,7 @@ llmwiki serve
 
 三种模式：
 - `list`: 浏览文件和文件夹（path glob 匹配）
-- `search`: 关键词全文搜索（FTS5）
+- `search`: 关键词 + pgvector 语义混合搜索
 - `references`: 引用图查询（backlinks, forward, uncited, stale）
 
 ```json

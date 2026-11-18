@@ -6,9 +6,9 @@ Single Go binary with embedded React web UI, REST API, and MCP (Model Context Pr
 
 ## Prerequisites
 
-- Go 1.21+
+- Go 1.25+
 - Node.js 18+ (for building the web UI)
-- **git CLI** (required for `llmwiki init`, which bootstraps version control for the workspace)
+- **PostgreSQL 16+ with the `pgvector` and `pg_trgm` extensions** (the single source of truth)
 - Optional: a local ACP-compatible agent CLI when using the external agent runtime
 
 ## Quick Start
@@ -17,26 +17,29 @@ Single Go binary with embedded React web UI, REST API, and MCP (Model Context Pr
 # Build (requires Go 1.21+ and Node.js 18+)
 make build
 
-# Initialize a workspace (requires git CLI)
-./llmwiki init ~/research
+# Point at PostgreSQL (or pass --database-url to each command)
+export LLMWIKI_DATABASE_URL='postgres://postgres:secret@127.0.0.1:5432/llmwiki'
 
-# Start the server
-./llmwiki serve ~/research
+# Create the schema and workspace row
+./llmwiki init --name research
+
+# Start the server (optional workspace dir is used for prompts/rules and file exports)
+./llmwiki serve --port 8868
 
 # Open http://127.0.0.1:8868
 ```
 
-### Restore on a new machine
+### Migrate an existing workspace
 
 ```bash
-git clone <your-remote-url> ~/research
-cd ~/research
-llmwiki init ~/research    # repair: import .llmwiki/workspace-settings.json, reindex
-llmwiki serve ~/research
-# Re-enter API keys in Settings (keys are never stored in git)
+# Import files + legacy SQLite settings into PostgreSQL; the source directory is left untouched
+llmwiki migrate --workspace ~/research
+
+# Optional: export pages back to a directory at any time
+llmwiki export --out ~/research-export --include-raw
 ```
 
-Wiki history uses ingest commits on track A; workspace config and optional `raw/` backups use separate `backup:` commits. Configure remote URL and push/backup in **Settings → Version Control**.
+Page history, rollback and search live in PostgreSQL. There is no git repository inside the workspace and no remote push/backup track. Use PostgreSQL backups (pg_dump or your provider's snapshots) for durability.
 
 For development without building the web frontend:
 
@@ -48,9 +51,12 @@ make dev
 
 | Command | Description |
 |---------|-------------|
-| `llmwiki init <dir>` | Initialize a workspace with scaffold files, git repo (wiki/ only), and SQLite index |
+| `llmwiki init [dir]` | Create the PostgreSQL schema/workspace; optionally import scaffold files from `dir` |
 | `llmwiki serve [dir]` | Start HTTP API server with embedded web UI |
-| `llmwiki reindex [dir]` | Force full rebuild of the SQLite index from filesystem |
+| `llmwiki migrate --workspace <dir>` | Import an existing file + SQLite workspace into PostgreSQL |
+| `llmwiki export --out <dir>` | Export pages (and optionally raw sources) from PostgreSQL |
+| `llmwiki embed` | Backfill chunk embeddings with the configured embedding model |
+| `llmwiki reindex [dir]` | Rebuild derived chunks/references from workspace files (import tooling) |
 | `llmwiki mcp [dir]` | Run MCP JSON-RPC 2.0 server on stdin/stdout (legacy local mode) |
 | `llmwiki mcp-config` | Print MCP configuration JSON for Claude Desktop / Claude Code |
 | `llmwiki version` | Print version, commit, and build date |
@@ -73,7 +79,6 @@ When ingesting into an existing wiki page, the pipeline merges instead of blind 
 | `--token` | | API token for authentication (optional); overrides the token stored in Settings |
 | `--public-wiki` | `false` | Enable public read-only Wiki at `/wiki` and `/api/public/wiki/*` |
 | `--no-mcp` | `false` | Disable MCP server |
-| `--no-watch` | `false` | Disable file watcher |
 
 ## Project Structure
 
@@ -87,9 +92,9 @@ llmwiki/
 │   ├── llm/              # LLM client (OpenAI/Anthropic compatible)
 │   ├── mcp/              # MCP JSON-RPC 2.0 server (stdio)
 │   ├── server/           # HTTP server (chi router, SPA fallback)
-│   ├── store/            # Storage layer (SQLite adapter, document service)
-│   │   └── sqlite/       # SQLite driver (modernc.org/sqlite, FTS5)
-│   └── watcher/          # File system watcher (fsnotify)
+│   ├── store/            # Persistence contract + DTOs
+│   │   └── postgres/     # pgx/pgvector implementation and migrations
+│   ├── migrate/          # Legacy SQLite + files import
 ├── web/                  # React 19 + Vite + TypeScript frontend
 ├── docs/                 # Design documents
 ├── embed.go              # Embeds web/dist/ into the binary
@@ -118,7 +123,7 @@ After `llmwiki init ~/research`:
 ├── raw/
 │   └── sources/          # Source documents (immutable)
 └── .llmwiki/
-    └── index.db          # SQLite index (rebuildable from files)
+    └── workspace-settings.json  # optional non-secret settings snapshot
 ```
 
 See `docs/workspace-layout.md` for the canonical layout and common anti-patterns.
@@ -131,12 +136,11 @@ See `docs/workspace-layout.md` for the canonical layout and common anti-patterns
 2. **MCP RPC Endpoint** — JSON-RPC 2.0 over HTTP POST at `/mcp`. This is the primary MCP access model.
 3. **Embedded Web UI** — React 19 + Vite + TypeScript, served with SPA fallback.
 4. **CLI** — For humans and scripts. Powered by cobra.
-5. **File Watcher** — Automatic index updates on file changes.
-6. **Agent Runtime** — Session chat runs through either the built-in native LLM path or an optional external ACP agent over stdio.
+5. **Agent Runtime** — Session chat runs through either the built-in native LLM path or an optional external ACP agent over stdio.
 
-**Data model**: Files are the source of truth. SQLite is an index only — deleting the database and running `reindex` fully rebuilds it. FTS5 provides full-text search with BM25 ranking (trigram tokenizer for Chinese/CJK substring matching).
+**Data model**: PostgreSQL is the single source of truth for pages, revisions, chunks, references and settings. Workspace files are optional exports. Search combines PostgreSQL full-text (`tsvector` + `pg_trgm` for CJK substrings) with pgvector semantic search; configure an OpenAI-compatible embedding provider in Settings to enable `mode=semantic`/`hybrid`.
 
-> **Upgrading from an older index?** After pulling a version with CJK search improvements, run `llmwiki reindex [dir]` once so the FTS5 index is rebuilt with the trigram tokenizer.
+Every write creates a change set and per-page revisions, exposed at `/api/v1/history`; rollback restores parent revisions deterministically without calling an LLM.
 
 **Web UI**: React 19 + Vite + TypeScript, embedded via `go:embed` into the binary. SPA with client-side routing, served with index.html fallback.
 
@@ -236,7 +240,7 @@ Version info is injected via ldflags: `main.Version`, `main.Commit`, `main.Build
 | GET | `/api/v1/graph/uncited` | Uncited sources |
 | GET | `/api/v1/graph/stale` | Stale pages |
 | GET | `/api/v1/lint` | Wiki health report (links, orphans, frontmatter, log, ghost index rows) |
-| POST | `/api/v1/reindex` | Rebuild the SQLite index from files |
+| POST | `/api/v1/reindex` | Rebuild derived index rows from workspace files (import tooling) |
 | GET | `/api/v1/settings` | Get settings |
 | PUT | `/api/v1/settings` | Update settings (partial) |
 | GET | `/api/v1/workspace/rule-files` | Read `purpose.md` / `rules.md` |

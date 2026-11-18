@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func setupProviderCheckRoutes(api *API, r chi.Router) {
@@ -20,13 +20,13 @@ func TestCheckProviderInstanceMissingKey(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupProviderCheckRoutes(api, r)
 
-	err := api.db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	err := api.db.UpsertProviderInfo([]store.ProviderInfo{
 		{ID: "openai", Name: "OpenAI", APIBase: "https://api.openai.com/v1", APIFormat: "openai"},
 	})
 	if err != nil {
 		t.Fatalf("seed provider: %v", err)
 	}
-	inst := &sqlite.ProviderInstance{Name: "Test", CatalogID: "openai", BaseURL: "https://api.openai.com/v1"}
+	inst := &store.ProviderInstance{Name: "Test", CatalogID: "openai", BaseURL: "https://api.openai.com/v1"}
 	if err := api.db.CreateProviderInstance(inst); err != nil {
 		t.Fatalf("create instance: %v", err)
 	}
@@ -60,13 +60,13 @@ func TestCheckProviderInstanceReachable(t *testing.T) {
 	}))
 	defer mock.Close()
 
-	err := api.db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	err := api.db.UpsertProviderInfo([]store.ProviderInfo{
 		{ID: "openai", Name: "OpenAI", APIBase: mock.URL, APIFormat: "openai"},
 	})
 	if err != nil {
 		t.Fatalf("seed provider: %v", err)
 	}
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name: "Test", CatalogID: "openai", APIKey: "sk-test", BaseURL: mock.URL,
 	}
 	if err := api.db.CreateProviderInstance(inst); err != nil {

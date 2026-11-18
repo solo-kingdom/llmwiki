@@ -10,8 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // Tool definitions for organize mode diagnostics.
@@ -87,7 +87,7 @@ var similarTool = Tool{
 
 // --- audit implementation ---
 
-func executeLocalAudit(workspace string, db *sqlite.DB, args map[string]interface{}) (string, error) {
+func executeLocalAudit(workspace string, db store.Store, args map[string]interface{}) (string, error) {
 	focus := "all"
 	if f, ok := args["focus"].(string); ok && f != "" {
 		focus = f
@@ -211,7 +211,7 @@ func executeLocalAudit(workspace string, db *sqlite.DB, args map[string]interfac
 
 // --- structure implementation ---
 
-func executeLocalStructure(workspace string, db *sqlite.DB, _ map[string]interface{}) (string, error) {
+func executeLocalStructure(workspace string, db store.Store, _ map[string]interface{}) (string, error) {
 	if workspace == "" {
 		return "Error: workspace not configured", nil
 	}
@@ -229,7 +229,7 @@ func executeLocalStructure(workspace string, db *sqlite.DB, _ map[string]interfa
 	}
 
 	// Build directory tree with counts
-	dirPages := make(map[string][]sqlite.Document)
+	dirPages := make(map[string][]store.Document)
 	for _, d := range wikiDocs {
 		dir := filepath.Dir(d.RelativePath)
 		dir = strings.TrimPrefix(dir, "wiki/")
@@ -245,8 +245,8 @@ func executeLocalStructure(workspace string, db *sqlite.DB, _ map[string]interfa
 	sb.WriteString("数据来源：SQLite index（与文件系统不一致时请运行 `llmwiki reindex`，将自动清理幽灵索引）\n\n")
 	sb.WriteString(fmt.Sprintf("总计 %d 个 wiki 文档（%d 个业务内容页）\n\n", len(wikiDocs), contentCount))
 
-	reserved := []sqlite.Document{}
-	misplaced := []sqlite.Document{}
+	reserved := []store.Document{}
+	misplaced := []store.Document{}
 	if rootPages, ok := dirPages[""]; ok {
 		for _, d := range rootPages {
 			switch engine.ClassifyWikiPath(d.RelativePath) {
@@ -376,7 +376,7 @@ func executeLocalStructure(workspace string, db *sqlite.DB, _ map[string]interfa
 
 // --- gaps implementation ---
 
-func executeLocalGaps(workspace string, db *sqlite.DB, args map[string]interface{}) (string, error) {
+func executeLocalGaps(workspace string, db store.Store, args map[string]interface{}) (string, error) {
 	mode := "all"
 	if m, ok := args["mode"].(string); ok && m != "" {
 		mode = m
@@ -464,8 +464,8 @@ func extractQuotedTarget(msg string) string {
 	return msg[start+1 : start+1+end]
 }
 
-func findUncitedSources(db *sqlite.DB, sourceDocs []sqlite.Document) []sqlite.Document {
-	var uncited []sqlite.Document
+func findUncitedSources(db store.Store, sourceDocs []store.Document) []store.Document {
+	var uncited []store.Document
 	for _, d := range sourceDocs {
 		bl, err := db.GetBacklinks(d.ID)
 		if err == nil && len(bl) == 0 {
@@ -485,7 +485,7 @@ type similarPair struct {
 	Score    float64
 }
 
-func executeLocalSimilar(db *sqlite.DB, args map[string]interface{}) (string, error) {
+func executeLocalSimilar(db store.Store, args map[string]interface{}) (string, error) {
 	if db == nil {
 		return "Error: database not connected", nil
 	}
@@ -512,7 +512,7 @@ func executeLocalSimilar(db *sqlite.DB, args map[string]interface{}) (string, er
 		candidates = nil
 		for _, d := range wikiDocs {
 			if d.RelativePath == specificPath || d.Filename == specificPath {
-				candidates = []sqlite.Document{d}
+				candidates = []store.Document{d}
 				break
 			}
 		}
@@ -583,8 +583,8 @@ func executeLocalSimilar(db *sqlite.DB, args map[string]interface{}) (string, er
 
 // --- helpers ---
 
-func filterBySourceKind(docs []sqlite.Document, kind string) []sqlite.Document {
-	var out []sqlite.Document
+func filterBySourceKind(docs []store.Document, kind string) []store.Document {
+	var out []store.Document
 	for _, d := range docs {
 		if d.SourceKind == kind {
 			out = append(out, d)
@@ -602,7 +602,7 @@ func sortedKeys(m map[string]int) []string {
 	return keys
 }
 
-func pathToTitle(path string, docs []sqlite.Document) string {
+func pathToTitle(path string, docs []store.Document) string {
 	for _, d := range docs {
 		if d.RelativePath == path {
 			if d.Title != "" {

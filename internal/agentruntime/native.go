@@ -9,18 +9,18 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type nativeRuntime struct {
-	db        *sqlite.DB
+	db        store.Store
 	workspace string
-	session   *sqlite.IngestSession
+	session   *store.IngestSession
 	client    *llm.Client
 	model     string
 }
 
-func newNativeRuntime(db *sqlite.DB, workspace string, session *sqlite.IngestSession) (*nativeRuntime, error) {
+func newNativeRuntime(db store.Store, workspace string, session *store.IngestSession) (*nativeRuntime, error) {
 	if session == nil {
 		return nil, fmt.Errorf("%w: session is nil", ErrNoProviderInstance)
 	}
@@ -127,7 +127,7 @@ func (r *nativeRuntime) Prompt(ctx context.Context, req PromptRequest, sink Even
 	return PromptResult{Text: finalText, StopReason: "end_turn"}, nil
 }
 
-func sessionChatRouter(db *sqlite.DB) *mcp.Router {
+func sessionChatRouter(db store.Store) *mcp.Router {
 	raw, _ := db.GetConfig("mcp_servers_json")
 	reg, err := mcp.NewRegistry(raw)
 	if err != nil {

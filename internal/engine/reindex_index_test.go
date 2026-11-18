@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
 func TestReindexRebuildsWikiIndex(t *testing.T) {
@@ -27,15 +27,7 @@ date: "2024-05-02"
 ---
 # Bar`)
 
-	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	defer db.Close()
+	db := pgtest.Open(t)
 
 	adapter := storesvc.NewStoreAdapter(db)
 	reindexer := engine.NewReindexer(adapter, ws)

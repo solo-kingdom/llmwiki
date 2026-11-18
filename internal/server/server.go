@@ -21,9 +21,7 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
-	"github.com/solo-kingdom/llmwiki/internal/watcher"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // WebAssets holds the embedded web frontend filesystem.
@@ -37,9 +35,8 @@ type Config struct {
 	Token         string
 	PublicWiki    bool
 	NoMCP         bool
-	NoWatch       bool
 	Workspace     string
-	DB            *sqlite.DB
+	DB            store.Store
 	LockMgr       *ingest.PageLockManager
 	MCPAllowWrite bool
 	ACPManager    *acp.Manager
@@ -50,10 +47,9 @@ type Config struct {
 type Server struct {
 	config     Config
 	http       *http.Server
-	db         *sqlite.DB
+	db         store.Store
 	api        *api.API
 	mcpHandler http.HandlerFunc
-	watcher    *watcher.Watcher
 }
 
 // New creates a new Server with shared dependency context.
@@ -78,11 +74,6 @@ func New(cfg Config) *Server {
 // SetMCPHandler sets the MCP RPC handler (HTTP POST JSON-RPC 2.0).
 func (s *Server) SetMCPHandler(h http.HandlerFunc) {
 	s.mcpHandler = h
-}
-
-// SetWatcher sets the file watcher for automatic index updates.
-func (s *Server) SetWatcher(w *watcher.Watcher) {
-	s.watcher = w
 }
 
 // SetFileIndexer sets the workspace file indexer for API-driven search updates.
@@ -179,14 +170,19 @@ func (s *Server) Start() error {
 		r.Delete("/logs", s.api.DeleteAllActivityLogsHandler)
 		r.Get("/capabilities", s.api.GetCapabilities)
 
-		// Version Control
-		r.Post("/vcs/init", s.api.VCSInit)
-		r.Get("/vcs/status", s.api.VCSStatus)
-		r.Get("/vcs/log", s.api.VCSLog)
-		r.Get("/vcs/diff/{sha}", s.api.VCSDiff)
-		r.Post("/vcs/remote", s.api.VCSRemote)
-		r.Post("/vcs/push", s.api.VCSPush)
-		r.Post("/vcs/backup", s.api.VCSBackup)
+		r.Route("/history", func(r chi.Router) {
+			r.Get("/", s.api.ListHistory)
+			r.Get("/{id}", s.api.GetHistory)
+			r.Get("/{id}/diff", s.api.HistoryDiff)
+			r.Post("/{id}/rollback", s.api.RollbackHistory)
+		})
+		r.Route("/pages", func(r chi.Router) {
+			r.Get("/history", s.api.PageHistory)
+		})
+		r.Route("/revisions", func(r chi.Router) {
+			r.Get("/{id}", s.api.GetRevision)
+			r.Post("/{id}/restore", s.api.RestoreRevision)
+		})
 
 		r.Get("/providers", s.api.ListProviders)
 		r.Get("/providers/{id}/models", s.api.ListProviderModels)
@@ -209,7 +205,7 @@ func (s *Server) Start() error {
 		r.Post("/settings/mcp/check", s.api.CheckMCPStatus)
 
 		r.Route("/ingest", func(r chi.Router) {
-			r.Post("/rollback", s.api.VCSRollback)
+			r.Post("/rollback", s.api.IngestRollback)
 			r.Route("/sessions", func(r chi.Router) {
 				r.Get("/", s.api.ListIngestSessionsHandler)
 				r.Post("/", s.api.CreateIngestSession)
@@ -271,22 +267,12 @@ func (s *Server) Start() error {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Start watcher in background
-	if s.watcher != nil {
-		if err := s.watcher.Start(); err != nil {
-			log.Printf("Warning: watcher start failed: %v", err)
-		}
-	}
-
-	log.Printf("LLM Wiki server starting on http://%s (single-process: API + Web + MCP RPC + watcher)", addr)
+	log.Printf("LLM Wiki server starting on http://%s (single-process: API + Web + MCP RPC)", addr)
 	return s.http.ListenAndServe()
 }
 
 // Shutdown gracefully stops the server and watcher.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.watcher != nil {
-		s.watcher.Stop()
-	}
 	var err error
 	if s.http != nil {
 		err = s.http.Shutdown(ctx)
@@ -393,7 +379,7 @@ func (s *Server) effectiveAPIToken() string {
 		return s.config.Token
 	}
 	if s.db != nil {
-		if v, err := s.db.GetConfig(sqlite.ConfigAPIToken); err == nil {
+		if v, err := s.db.GetConfig(store.ConfigAPIToken); err == nil {
 			return v
 		}
 	}
@@ -435,7 +421,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	mcpEnabled := s.mcpHandler != nil
-	watchEnabled := s.watcher != nil
+	watchEnabled := false
 	authRequired := s.effectiveAPIToken() != ""
 	mcpDefaultPolicy := "readonly"
 	if s.config.MCPAllowWrite {
@@ -474,8 +460,8 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
-	if s.db == nil || s.config.Workspace == "" {
-		http.Error(w, `{"error":"workspace not configured"}`, http.StatusInternalServerError)
+	if s.db == nil {
+		http.Error(w, `{"error":"database not configured"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -489,9 +475,7 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		Source:   "api",
 	})
 
-	adapter := storesvc.NewStoreAdapter(s.db)
-	reindexer := engine.NewReindexer(adapter, s.config.Workspace)
-	count, err := reindexer.Rebuild("default")
+	count, err := ingest.RebuildDerived(s.db)
 	if err != nil {
 		activity.Record(s.db, activity.Entry{
 			Level:    "error",
@@ -513,7 +497,7 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		Level:    "info",
 		Category: "system",
 		Action:   "reindex_completed",
-		Message:  fmt.Sprintf("索引重建完成，共索引 %d 个文件", count),
+		Message:  fmt.Sprintf("索引重建完成，共处理 %d 个文档", count),
 		Status:   "success",
 		Source:   "api",
 		Details: map[string]interface{}{

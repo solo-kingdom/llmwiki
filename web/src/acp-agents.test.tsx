@@ -37,10 +37,6 @@ vi.mock("@/context/AppContext", () => ({
 }))
 
 vi.mock("@/lib/api", () => ({
-  getVCStatus: vi.fn().mockResolvedValue({ enabled: false, git_available: true }),
-  setVCSRemote: vi.fn(),
-  backupVC: vi.fn(),
-  pushVC: vi.fn(),
   checkProviderInstance: vi.fn(),
   checkAllProviderInstances: vi.fn().mockResolvedValue({ instances: [] }),
   checkMCPStatus: vi.fn().mockResolvedValue({ servers: [] }),

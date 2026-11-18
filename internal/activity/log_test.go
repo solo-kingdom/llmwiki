@@ -1,22 +1,16 @@
 package activity
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
-func testDB(t *testing.T) *sqlite.DB {
+func testDB(t *testing.T) store.Store {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := sqlite.Open(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
+	return pgtest.Open(t)
 }
 
 func TestSanitizeDetails(t *testing.T) {
@@ -51,36 +45,11 @@ func TestRecordSyncAndAsync(t *testing.T) {
 	})
 	time.Sleep(50 * time.Millisecond)
 
-	logs, err := db.ListActivityLogs(sqlite.ActivityLogListFilter{Limit: 10})
+	logs, err := db.ListActivityLogs(store.ActivityLogListFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(logs) < 2 {
 		t.Fatalf("expected >=2 logs, got %d", len(logs))
-	}
-}
-
-func TestWatcherDebounceMerge(t *testing.T) {
-	db := testDB(t)
-	ResetDebounce()
-	RecordWatcherModify(db, "wiki/a.md")
-	RecordWatcherModify(db, "wiki/a.md")
-	RecordWatcherModify(db, "wiki/a.md")
-	time.Sleep(900 * time.Millisecond)
-
-	logs, err := db.ListActivityLogs(sqlite.ActivityLogListFilter{
-		Limit: 10, Category: "watcher",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	modified := 0
-	for _, l := range logs {
-		if l.Action == "file_modified" {
-			modified++
-		}
-	}
-	if modified != 1 {
-		t.Fatalf("file_modified count = %d, want 1 (debounced)", modified)
 	}
 }

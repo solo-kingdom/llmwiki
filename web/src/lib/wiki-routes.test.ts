@@ -8,7 +8,7 @@ import {
   isAddContextRequested,
   isDirectIngestRequested,
   isWikiGraphPath,
-  timelineCommitHref,
+  timelineChangeHref,
   wikiGraphHref,
   workbenchViewHref,
 } from "@/lib/wiki-routes"
@@ -41,8 +41,8 @@ describe("wiki-routes workbench views", () => {
     expect(clearDirectIngestQuery("?directIngest=1&foo=bar")).toBe("/?foo=bar")
   })
 
-  it("builds timeline commit deep link", () => {
-    expect(timelineCommitHref("abc123")).toBe("/timeline?commit=abc123")
+  it("builds timeline change set deep link", () => {
+    expect(timelineChangeHref("abc123")).toBe("/timeline?change=abc123")
   })
 
   it("maps other workbench paths", () => {

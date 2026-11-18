@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 const maxPayloadPreviewBytes = 32 * 1024
@@ -16,13 +16,13 @@ type JobRecorder interface {
 
 // SQLiteJobRecorder writes events to ingest_job_events.
 type SQLiteJobRecorder struct {
-	db    *sqlite.DB
+	db    store.Store
 	jobID string
 	maxN  int
 }
 
-func NewSQLiteJobRecorder(db *sqlite.DB, jobID string) *SQLiteJobRecorder {
-	maxN := sqlite.DefaultJobEventsMaxCount
+func NewSQLiteJobRecorder(db store.Store, jobID string) *SQLiteJobRecorder {
+	maxN := store.DefaultJobEventsMaxCount
 	if db != nil {
 		maxN = db.GetJobEventsMaxCount()
 	}

@@ -14,7 +14,6 @@ const CATEGORIES = [
   "all",
   "ingest",
   "document",
-  "vcs",
   "provider",
   "session",
   "system",

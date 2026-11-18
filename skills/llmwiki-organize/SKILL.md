@@ -114,10 +114,10 @@ Format is fixed: `## [YYYY-MM-DD] <action> | <description>`. Actions in use: `cr
 ```bash
 curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"     # regenerates wiki/index.md + graph
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/lint"                # must have no error-severity issue you caused
-curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/vcs/backup"  # only when the user wants a snapshot
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/history?limit=1"  # change set id for the write you just made
 ```
 
-Report the changed paths, the lint summary, and the commit sha if you committed.
+Report the changed paths, the lint summary, and the change set id if you rolled back.
 
 ## Never
 

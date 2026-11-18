@@ -5,7 +5,7 @@
 - **WHEN** 数据库 schema 初始化或迁移
 - **THEN** `activity_logs` 表 SHALL 包含字段：`id`、`created_at`、`level`、`category`、`action`、`message`、`resource_type`、`resource_id`、`status`、`details`（JSON 字符串）、`source`
 - **AND** `level` SHALL 限制为 `debug`、`info`、`warn`、`error`
-- **AND** `category` SHALL 支持 `ingest`、`document`、`vcs`、`provider`、`session`、`system`、`mcp`、`watcher`
+- **AND** `category` SHALL 支持 `ingest`、`document`、`history`、`provider`、`session`、`system`、`mcp`
 
 #### Scenario: Reindex 保留日志
 - **WHEN** 用户执行 workspace reindex
@@ -44,16 +44,12 @@
 - **WHEN** 通过 API 或 MCP 更新、删除或批量删除文档
 - **THEN** 系统 SHALL 写入对应 `updated`、`deleted` 或 `bulk_deleted` 日志
 
-### Requirement: VCS 事件记录
-系统 SHALL 记录版本控制相关操作。
-
-#### Scenario: 版本控制启停
-- **WHEN** 用户启用或禁用版本控制
-- **THEN** 系统 SHALL 写入 `category=vcs, action=init` 或 `disable` 日志
+### Requirement: History 事件记录
+系统 SHALL 记录修订历史相关操作。
 
 #### Scenario: Rollback 操作
 - **WHEN** 用户触发 rollback 或 rollback job 完成/失败
-- **THEN** 系统 SHALL 写入 rollback 开始、成功或失败日志，包含 commit SHA（如有）
+- **THEN** 系统 SHALL 写入 `category=history` 的开始、成功或失败日志，包含 change set id
 
 ### Requirement: Provider 事件记录
 系统 SHALL 记录 Provider instance 配置变更。

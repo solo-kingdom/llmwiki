@@ -9,16 +9,16 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
-// mcpAuditAdapter bridges *sqlite.DB to the AuditDB interface for MCP server audit logging.
+// mcpAuditAdapter bridges store.Store to the AuditDB interface for MCP server audit logging.
 type mcpAuditAdapter struct {
-	db *sqlite.DB
+	db store.Store
 }
 
 // NewAuditAdapter creates an AuditDB adapter for the given SQLite database.
-func NewAuditAdapter(db *sqlite.DB) AuditDB {
+func NewAuditAdapter(db store.Store) AuditDB {
 	return &mcpAuditAdapter{db: db}
 }
 
@@ -36,7 +36,7 @@ func (a *mcpAuditAdapter) RecordMCPToolCall(toolName, remoteAddr, clientAgent st
 	})
 }
 
-func RunLocalMCP(workspace string, db *sqlite.DB) error {
+func RunLocalMCP(workspace string, db store.Store) error {
 	server := NewServer("LLM Wiki",
 		"You are connected to an LLM Wiki workspace. Call the `guide` tool first to see available knowledge bases and learn the full workflow.",
 	)
@@ -46,7 +46,7 @@ func RunLocalMCP(workspace string, db *sqlite.DB) error {
 	return server.Run()
 }
 
-func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *engine.WorkspaceFileIndexer) {
+func RegisterTools(server *Server, workspace string, db store.Store, indexer *engine.WorkspaceFileIndexer) {
 	registerTool := func(tool Tool, handler ToolHandler) {
 		server.RegisterTool(tool, func(args map[string]interface{}) (string, error) {
 			activity.LogMCPTool(db, tool.Name)
@@ -255,7 +255,7 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *eng
 			return "Error: path is required", nil
 		}
 
-		var doc *sqlite.Document
+		var doc *store.Document
 		var err error
 
 		doc, err = db.GetDocument(path)
@@ -361,7 +361,7 @@ func RegisterTools(server *Server, workspace string, db *sqlite.DB, indexer *eng
 			}
 		}
 
-		doc := &sqlite.Document{
+		doc := &store.Document{
 			Filename:     filename,
 			Title:        title,
 			Path:         dirPath,

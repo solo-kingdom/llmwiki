@@ -14,11 +14,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/solo-kingdom/llmwiki/internal/activity"
-	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
-	"github.com/solo-kingdom/llmwiki/internal/vcs"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // JobProcessor polls the database for queued ingest jobs and runs them
@@ -27,28 +25,12 @@ import (
 // When parallel execution is enabled (VCS + git worktree), jobs run concurrently
 // in isolated worktrees and merge back serially. Otherwise, jobs run serially.
 type JobProcessor struct {
-	db        *sqlite.DB
+	db        store.Store
 	workspace string
 	pipeline  *Pipeline
-	gitRepo   *vcs.GitRepo // nil when workspace has no .git repository
-	indexer   *engine.WorkspaceFileIndexer
 	stop      chan struct{}
 	runnerID  string
-
-	// Parallel execution
-	mergeQueue chan *completedJob
-	workers    sync.WaitGroup
-}
-
-// completedJob represents a job that has finished pipeline execution in a worktree
-// and is ready to be merged back to main.
-type completedJob struct {
-	jobID       string
-	worktreeDir string
-	sourcePath  string
-	files       []string
-	normalized  *NormalizedSource
-	recorder    JobRecorder
+	workers   sync.WaitGroup
 }
 
 func newRunnerID() string {
@@ -61,7 +43,7 @@ func newRunnerID() string {
 
 // NewJobProcessor creates a new processor. It needs the main DB (not the
 // legacy queue DB) so it can read/write the unified ingest_jobs table.
-func NewJobProcessor(db *sqlite.DB, workspace string) *JobProcessor {
+func NewJobProcessor(db store.Store, workspace string) *JobProcessor {
 	return &JobProcessor{
 		db:        db,
 		workspace: workspace,
@@ -69,29 +51,6 @@ func NewJobProcessor(db *sqlite.DB, workspace string) *JobProcessor {
 		stop:      make(chan struct{}),
 		runnerID:  newRunnerID(),
 	}
-}
-
-// SetGitRepo sets an optional git repo override (mainly for tests).
-// Production code resolves the repo at runtime via gitRepoIfEnabled.
-func (p *JobProcessor) SetGitRepo(repo *vcs.GitRepo) {
-	p.gitRepo = repo
-}
-
-// gitRepoIfEnabled returns a GitRepo when the workspace has an initialized .git directory.
-func (p *JobProcessor) gitRepoIfEnabled() *vcs.GitRepo {
-	if p.gitRepo != nil {
-		return p.gitRepo
-	}
-	repo := vcs.NewGitRepo(p.workspace)
-	if !repo.IsInitialized() {
-		return nil
-	}
-	return repo
-}
-
-// SetFileIndexer sets the workspace file indexer for post-ingest search indexing.
-func (p *JobProcessor) SetFileIndexer(indexer *engine.WorkspaceFileIndexer) {
-	p.indexer = indexer
 }
 
 // Start begins the background processing loop. It polls every pollInterval.
@@ -102,17 +61,7 @@ func (p *JobProcessor) Start(pollInterval time.Duration) {
 		pollInterval = 3 * time.Second
 	}
 	p.recoverStaleJobs()
-
-	if p.parallelEnabled() {
-		p.startParallel(pollInterval)
-	} else {
-		p.startSerial(pollInterval)
-	}
-}
-
-// parallelEnabled reports whether parallel worktree-based execution should be used.
-func (p *JobProcessor) parallelEnabled() bool {
-	return p.db.ParallelEnabled() && p.gitRepoIfEnabled() != nil
+	p.startSerial(pollInterval)
 }
 
 // startSerial launches a single goroutine that processes jobs one at a time.
@@ -131,70 +80,6 @@ func (p *JobProcessor) startSerial(pollInterval time.Duration) {
 			}
 		}
 	}()
-}
-
-// startParallel launches N worker goroutines and a merge queue goroutine.
-func (p *JobProcessor) startParallel(pollInterval time.Duration) {
-	maxWorkers := p.db.MaxConcurrentJobs()
-	p.mergeQueue = make(chan *completedJob, maxWorkers)
-
-	// Start merger goroutine (serial merge back to main)
-	p.workers.Add(1)
-	go func() {
-		defer p.workers.Done()
-		p.mergerLoop()
-	}()
-
-	// Start worker goroutines
-	for i := 0; i < maxWorkers; i++ {
-		p.workers.Add(1)
-		go func(workerID int) {
-			defer p.workers.Done()
-			p.workerLoop(pollInterval, workerID)
-		}(i)
-	}
-
-	log.Printf("ingest processor: parallel mode enabled (%d workers)", maxWorkers)
-}
-
-// workerLoop polls for jobs and executes them in worktrees.
-func (p *JobProcessor) workerLoop(pollInterval time.Duration, workerID int) {
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-p.stop:
-			return
-		case <-ticker.C:
-			job, err := p.claimNextJob()
-			if err != nil {
-				log.Printf("worker %d: claim error: %v", workerID, err)
-				continue
-			}
-			if job == nil {
-				continue // no queued jobs
-			}
-
-			p.processJobInWorktree(context.Background(), job, workerID)
-		}
-	}
-}
-
-// mergerLoop processes completed jobs from the merge queue, merging them
-// back to main and updating the search index.
-func (p *JobProcessor) mergerLoop() {
-	for {
-		select {
-		case <-p.stop:
-			return
-		case completed := <-p.mergeQueue:
-			if completed == nil {
-				return
-			}
-			p.mergeCompletedJob(context.Background(), completed)
-		}
-	}
 }
 
 // Stop signals the processor to stop and waits for workers to finish.
@@ -246,11 +131,6 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		return p.processReviewApplyJob(ctx, job)
 	}
 
-	// Check if this is a commit_failed retry — skip pipeline, just redo git commit
-	if job.ErrorCode == "commit_failed" {
-		return p.retryCommitOnly(job)
-	}
-
 	normalized, err := NormalizeJobSource(p.workspace, job.InputType, job.SourcePath, job.SourceRef)
 	if err != nil {
 		return p.failJob(job.ID, "normalize_failed",
@@ -260,6 +140,7 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 	if err := p.preparePipelineForJob(job); err != nil {
 		return err
 	}
+	p.pipeline.SetChangeSetMeta("ingest", job.ID, "", filepath.Base(normalized.CanonicalPath), string(normalized.Content))
 	defer p.pipeline.SetMCPRouter(nil)
 	p.checkRulesDrift(job.ID)
 
@@ -270,283 +151,23 @@ func (p *JobProcessor) processNext(ctx context.Context) error {
 		return p.failJob(job.ID, errCode, err.Error(), "", remediationForCode(errCode))
 	}
 
-	// Git commit (if version control is enabled)
 	p.finalizeWikiApply(job.ID, job.SourcePath, "", ApplyWikiResult{Written: files})
-
-	if repo := p.gitRepoIfEnabled(); repo != nil {
-		commitMsg := vcs.BuildCommitMessage(
-			filepath.Base(normalized.CanonicalPath),
-			job.ID,
-			job.InputType,
-			string(normalized.Content),
-		)
-		sha, err := repo.AddCommit(commitMsg)
-		if err != nil {
-			rec.Record("git_commit", "error", err.Error(), map[string]any{"message": commitMsg})
-			return p.failJob(job.ID, "commit_failed",
-				fmt.Sprintf("git commit failed: %v", err), "", "")
-		}
-		rec.Record("git_commit", "complete", "git commit succeeded", map[string]any{
-			"sha":     sha,
-			"message": commitMsg,
-		})
-		// Store last commit SHA
-		if sha != "" {
-			_ = p.db.SetVCLastCommit(sha)
-		}
-		vcs.TryAutoPush(repo, p.db)
-	}
-
 	// Mark job succeeded
 	p.markJobSucceeded(job.ID, files)
 
 	return nil
 }
 
-// processJobInWorktree runs a job in an isolated git worktree.
-// After the pipeline completes, it commits to the job branch and sends
-// the result to the merge queue.
-func (p *JobProcessor) processJobInWorktree(ctx context.Context, job *sqlite.IngestJob, workerID int) {
-	repo := p.gitRepoIfEnabled()
-	if repo == nil {
-		// VCS disabled during execution, fall back to serial path
-		p.processNext(ctx)
-		return
-	}
-
-	stopHeartbeat := p.startHeartbeat(job.ID)
-	defer stopHeartbeat()
-
-	rec := NewSQLiteJobRecorder(p.db, job.ID)
-	defer p.db.ClearIngestJobLease(job.ID)
-
-	// Create worktree
-	worktreeDir, err := repo.CreateWorktree(job.ID)
-	if err != nil {
-		log.Printf("worker %d: create worktree for job %s: %v", workerID, job.ID, err)
-		_ = p.failJob(job.ID, "worktree_failed",
-			fmt.Sprintf("failed to create worktree: %v", err), "", "")
-		return
-	}
-
-	// Ensure cleanup on error
-	cleanup := true
-	defer func() {
-		if cleanup {
-			if err := repo.RemoveWorktree(job.ID); err != nil {
-				log.Printf("worker %d: cleanup worktree for job %s: %v", workerID, job.ID, err)
-			}
-		}
-	}()
-
-	// Normalize source
-	normalized, err := NormalizeJobSource(p.workspace, job.InputType, job.SourcePath, job.SourceRef)
-	if err != nil {
-		_ = p.failJob(job.ID, "normalize_failed",
-			fmt.Sprintf("normalization failed: %v", err), "", "")
-		return
-	}
-
-	// Create a per-job pipeline pointing to the worktree
-	jobPipeline := NewPipelineWithDB(worktreeDir, p.db, nil)
-	jobPipeline.SetJobRecorder(rec)
-	jobPipeline.SetTargetDir(worktreeDir)
-
-	// Prepare LLM client and settings
-	client, err := p.resolveLLMClientForJob(job)
-	if err != nil {
-		_ = p.failJob(job.ID, "llm_config_invalid", err.Error(), "", remediationForCode("llm_config_invalid"))
-		return
-	}
-	jobPipeline.SetLLMClient(client)
-	docLang := resolveDocLang(p.db)
-	jobPipeline.SetDocLanguage(docLang)
-	jobPipeline.SetRulesSupplement(ResolveRulesSupplement(p.db))
-
-	// Attach MCP router
-	raw, _ := p.db.GetConfig("mcp_servers_json")
-	if reg, regErr := mcp.NewRegistry(raw); regErr == nil {
-		router := mcp.NewRouter(reg, &mcpRecorderAdapter{jobRec: rec, db: p.db})
-		jobPipeline.SetMCPRouter(router)
-		defer jobPipeline.SetMCPRouter(nil)
-	}
-
-	// Run pipeline
-	files, err := jobPipeline.IngestNormalized(ctx, normalized)
-	if err != nil {
-		errCode := classifyPipelineError(err)
-		_ = p.failJob(job.ID, errCode, err.Error(), "", remediationForCode(errCode))
-		return
-	}
-
-	// Rebuild wiki/index.md in the worktree before commit.
-	p.runPostApplyMaintenance(worktreeDir, job.SourcePath, "", ApplyWikiResult{Written: files}, nil)
-
-	// Commit in worktree
-	commitMsg := vcs.BuildCommitMessage(
-		filepath.Base(normalized.CanonicalPath),
-		job.ID,
-		job.InputType,
-		string(normalized.Content),
-	)
-	sha, err := repo.CommitInWorktree(worktreeDir, commitMsg)
-	if err != nil {
-		rec.Record("git_commit", "error", err.Error(), map[string]any{"message": commitMsg})
-		_ = p.failJob(job.ID, "commit_failed",
-			fmt.Sprintf("worktree commit failed: %v", err), "", "")
-		return
-	}
-	rec.Record("git_commit", "complete", "worktree commit succeeded", map[string]any{
-		"sha":     sha,
-		"message": commitMsg,
-	})
-
-	// Submit to merge queue (cleanup will happen in merger)
-	cleanup = false
-	p.mergeQueue <- &completedJob{
-		jobID:       job.ID,
-		worktreeDir: worktreeDir,
-		sourcePath:  job.SourcePath,
-		files:       files,
-		normalized:  normalized,
-		recorder:    rec,
-	}
-}
-
-// mergeWorktreeJobBranch merges a completed job branch into main, resolves conflicts,
-// updates the search index, and returns the resulting merge commit SHA.
-func (p *JobProcessor) mergeWorktreeJobBranch(
-	ctx context.Context,
-	repo *vcs.GitRepo,
-	jobID string,
-	files []string,
-	llmClient *llm.Client,
-	rec JobRecorder,
-) (string, error) {
-	if _, err := repo.CommitWikiMaintenance(wikiMaintenanceCommitMsg); err != nil {
-		return "", fmt.Errorf("commit pending wiki maintenance: %w", err)
-	}
-
-	result, err := repo.MergeBranch(jobID)
-	if err != nil {
-		_ = repo.AbortMerge()
-		return "", fmt.Errorf("merge failed: %w", err)
-	}
-
-	if len(result.Conflicts) > 0 {
-		mc := &vcs.MergeConflictContext{
-			LLMClient: llmClient,
-			DocLang:   resolveDocLang(p.db),
-		}
-		if err := vcs.ResolveMergeConflicts(ctx, repo, jobID, mc); err != nil {
-			_ = repo.AbortMerge()
-			return "", fmt.Errorf("LLM conflict resolution failed: %w", err)
-		}
-		if rec != nil {
-			rec.Record("merge", "complete",
-				fmt.Sprintf("LLM resolved %d conflict(s)", len(result.Conflicts)),
-				map[string]any{"conflicts": result.Conflicts})
-		}
-	}
-
-	sha, err := repo.LastCommitSHA()
-	if err != nil {
-		return "", err
-	}
-	if sha != "" {
-		_ = p.db.SetVCLastCommit(sha)
-	}
-	vcs.TryAutoPush(repo, p.db)
-
-	p.indexGeneratedWikiFiles(files, jobID)
-	return sha, nil
-}
-
-// mergeCompletedJob merges a completed job's worktree branch back to main,
-// handles conflicts with LLM resolution, updates the search index, and
-// marks the job as succeeded.
-func (p *JobProcessor) mergeCompletedJob(ctx context.Context, completed *completedJob) {
-	repo := p.gitRepoIfEnabled()
-	if repo == nil {
-		p.markJobSucceeded(completed.jobID, completed.files)
-		return
-	}
-
-	llmClient, _ := p.resolveLLMClientForJob(&sqlite.IngestJob{ID: completed.jobID})
-	sha, err := p.mergeWorktreeJobBranch(ctx, repo, completed.jobID, completed.files, llmClient, completed.recorder)
-	if err != nil {
-		log.Printf("merger: merge failed for job %s: %v", completed.jobID, err)
-		errCode := "merge_failed"
-		if strings.Contains(err.Error(), "conflict resolution") {
-			errCode = "merge_conflict"
-		}
-		_ = p.failJob(completed.jobID, errCode, err.Error(), "", "")
-		_ = repo.RemoveWorktree(completed.jobID)
-		return
-	}
-
-	if sha != "" && completed.recorder != nil {
-		completed.recorder.Record("git_commit", "complete", "merged to main", map[string]any{"sha": sha})
-	}
-
-	p.finalizeWikiApply(completed.jobID, completed.sourcePath, "", ApplyWikiResult{Written: completed.files})
-
-	p.markJobSucceeded(completed.jobID, completed.files)
-
-	if err := repo.RemoveWorktree(completed.jobID); err != nil {
-		log.Printf("merger: cleanup worktree for job %s: %v", completed.jobID, err)
-	}
-}
-
 // markJobSucceeded marks a job as succeeded with a result summary.
 func (p *JobProcessor) markJobSucceeded(jobID string, files []string) {
 	summary := fmt.Sprintf("generated %d wiki page(s)", len(files))
-	if _, updateErr := p.db.DB().Exec(`
-		UPDATE ingest_jobs
-		SET status = 'succeeded', result_summary = ?,
-		    runner_id = '', heartbeat_at = '', updated_at = datetime('now')
-		WHERE id = ?`, summary, jobID); updateErr != nil {
-		log.Printf("processor: failed to mark job %s succeeded: %v", jobID, updateErr)
+	if err := p.db.MarkIngestJobSucceeded(jobID, summary); err != nil {
+		log.Printf("processor: failed to mark job %s succeeded: %v", jobID, err)
 	}
 	if updated, _ := p.db.GetIngestJob(jobID); updated != nil {
 		activity.LogIngestJob(p.db, updated, "succeeded", "processor")
 		p.logSessionArchiveOutcome(updated, "archive_succeeded", "success")
 	}
-}
-
-// retryCommitOnly retries only the git commit for a job that previously failed at the commit stage.
-func (p *JobProcessor) retryCommitOnly(job *sqlite.IngestJob) error {
-	repo := p.gitRepoIfEnabled()
-	if repo == nil {
-		// Version control was disabled, just mark as succeeded
-		_, err := p.db.DB().Exec(`
-			UPDATE ingest_jobs
-			SET status = 'succeeded', updated_at = datetime('now')
-			WHERE id = ?`, job.ID)
-		return err
-	}
-
-	commitMsg := vcs.BuildCommitMessage(
-		filepath.Base(job.SourcePath),
-		job.ID,
-		"upload", // retry jobs may not preserve original input_type; use a default
-		"",
-	)
-	sha, err := repo.AddCommit(commitMsg)
-	if err != nil {
-		return p.failJob(job.ID, "commit_failed",
-			fmt.Sprintf("git commit retry failed: %v", err), "", "")
-	}
-	if sha != "" {
-		_ = p.db.SetVCLastCommit(sha)
-	}
-	vcs.TryAutoPush(repo, p.db)
-
-	_, updateErr := p.db.DB().Exec(`
-		UPDATE ingest_jobs
-		SET status = 'succeeded', result_summary = 'commit retry succeeded', updated_at = datetime('now')
-		WHERE id = ?`, job.ID)
-	return updateErr
 }
 
 func (p *JobProcessor) recoverStaleJobs() {
@@ -559,58 +180,10 @@ func (p *JobProcessor) recoverStaleJobs() {
 	for _, id := range ids {
 		rec := NewSQLiteJobRecorder(p.db, id)
 		rec.Record("system", "stale_recovered", "job requeued after heartbeat timeout", map[string]any{
-			"threshold_seconds": sqlite.StaleHeartbeatSeconds,
+			"threshold_seconds": store.StaleHeartbeatSeconds,
 		})
 	}
 
-	// Clean up residual worktrees from crashed jobs
-	p.cleanupStaleWorktrees()
-}
-
-// cleanupStaleWorktrees removes worktree directories left behind by crashed processes.
-func (p *JobProcessor) cleanupStaleWorktrees() {
-	repo := p.gitRepoIfEnabled()
-	if repo == nil {
-		return
-	}
-
-	staleIDs, err := repo.ListStaleWorktrees()
-	if err != nil {
-		log.Printf("ingest processor: list stale worktrees: %v", err)
-		return
-	}
-	if len(staleIDs) == 0 {
-		return
-	}
-
-	for _, jobID := range staleIDs {
-		// Check if the job is still running with a valid heartbeat
-		job, err := p.db.GetIngestJob(jobID)
-		if err != nil {
-			log.Printf("ingest processor: check stale worktree job %s: %v", jobID, err)
-			// Can't look up job, clean up worktree anyway
-		}
-
-		// If job exists and is running, recover it first
-		if job != nil && job.Status == "running" {
-			// Force recover: clear runner, set to queued
-			_, _ = p.db.DB().Exec(`
-				UPDATE ingest_jobs SET
-					status = 'queued',
-					error = '', error_code = '', error_message = '',
-					runner_id = '', heartbeat_at = '',
-					updated_at = datetime('now')
-				WHERE id = ? AND status = 'running'`, jobID)
-			log.Printf("ingest processor: recovered stale running job %s with residual worktree", jobID)
-		}
-
-		// Remove the worktree and branch (orphaned or recovered)
-		if err := repo.RemoveWorktree(jobID); err != nil {
-			log.Printf("ingest processor: cleanup worktree %s: %v", jobID, err)
-		} else {
-			log.Printf("ingest processor: cleaned up residual worktree for job %s", jobID)
-		}
-	}
 }
 
 func (p *JobProcessor) startHeartbeat(jobID string) func() {
@@ -638,7 +211,7 @@ func (p *JobProcessor) startHeartbeat(jobID string) func() {
 }
 
 // claimNextJob atomically transitions the next queued job to "running".
-func (p *JobProcessor) claimNextJob() (*sqlite.IngestJob, error) {
+func (p *JobProcessor) claimNextJob() (*store.IngestJob, error) {
 	job, err := p.db.ClaimNextIngestJob(p.runnerID)
 	if err != nil {
 		return nil, err
@@ -660,17 +233,17 @@ func (p *JobProcessor) failJob(id, errorCode, message, missingDep, remediation s
 			sha := failed.SourceRef
 			activity.Record(p.db, activity.Entry{
 				Level:        "error",
-				Category:     "vcs",
+				Category:     "history",
 				Action:       "rollback_failed",
 				Message:      fmt.Sprintf("回滚失败：%s", sha),
-				ResourceType: "commit",
+				ResourceType: "change_set",
 				ResourceID:   sha,
 				Status:       "failure",
 				Source:       "processor",
 				Details: map[string]interface{}{
-					"commit_sha": sha,
-					"job_id":     failed.ID,
-					"error":      failed.ErrorMessage,
+					"change_set_id": sha,
+					"job_id":        failed.ID,
+					"error":         failed.ErrorMessage,
 				},
 			})
 		}
@@ -678,7 +251,7 @@ func (p *JobProcessor) failJob(id, errorCode, message, missingDep, remediation s
 	return err
 }
 
-func (p *JobProcessor) logSessionArchiveOutcome(job *sqlite.IngestJob, action, status string) {
+func (p *JobProcessor) logSessionArchiveOutcome(job *store.IngestJob, action, status string) {
 	if job == nil || job.InputType != string(InputKindSessionArchive) {
 		return
 	}
@@ -699,12 +272,12 @@ func (p *JobProcessor) logSessionArchiveOutcome(job *sqlite.IngestJob, action, s
 }
 
 // ClaimNextQueuedJob is a convenience for tests to claim and return a job.
-func (p *JobProcessor) ClaimNextQueuedJob(ctx context.Context) (*sqlite.IngestJob, error) {
+func (p *JobProcessor) ClaimNextQueuedJob(ctx context.Context) (*store.IngestJob, error) {
 	return p.claimNextJob()
 }
 
 // RunPipelineForJob runs the pipeline for an already-claimed job (for test use).
-func (p *JobProcessor) RunPipelineForJob(ctx context.Context, job *sqlite.IngestJob) error {
+func (p *JobProcessor) RunPipelineForJob(ctx context.Context, job *store.IngestJob) error {
 	if _, err := os.Stat(filepath.Join(p.workspace, job.SourcePath)); err != nil {
 		_ = p.failJob(job.ID, "source_read_failed",
 			fmt.Sprintf("failed to read source file: %v", err),
@@ -721,6 +294,7 @@ func (p *JobProcessor) RunPipelineForJob(ctx context.Context, job *sqlite.Ingest
 	if err := p.preparePipelineForJob(job); err != nil {
 		return err
 	}
+	p.pipeline.SetChangeSetMeta("ingest", job.ID, "", filepath.Base(normalized.CanonicalPath), string(normalized.Content))
 
 	files, err := p.pipeline.IngestNormalized(ctx, normalized)
 	if err != nil {
@@ -729,48 +303,8 @@ func (p *JobProcessor) RunPipelineForJob(ctx context.Context, job *sqlite.Ingest
 		return err
 	}
 
-	// Git commit (if version control is enabled)
-	if repo := p.gitRepoIfEnabled(); repo != nil {
-		commitMsg := vcs.BuildCommitMessage(
-			filepath.Base(normalized.CanonicalPath),
-			job.ID,
-			job.InputType,
-			string(normalized.Content),
-		)
-		sha, commitErr := repo.AddCommit(commitMsg)
-		if commitErr != nil {
-			_ = p.failJob(job.ID, "commit_failed",
-				fmt.Sprintf("git commit failed: %v", commitErr), "", "")
-			return commitErr
-		}
-		if sha != "" {
-			_ = p.db.SetVCLastCommit(sha)
-		}
-		vcs.TryAutoPush(repo, p.db)
-	}
-
-	p.indexGeneratedWikiFiles(files, job.ID)
-
-	summary := fmt.Sprintf("generated %d wiki page(s)", len(files))
-	_, updateErr := p.db.DB().Exec(`
-		UPDATE ingest_jobs
-		SET status = 'succeeded', result_summary = ?, updated_at = datetime('now')
-		WHERE id = ?`, summary, job.ID)
-	return updateErr
-}
-
-func (p *JobProcessor) indexGeneratedWikiFiles(files []string, jobID string) {
-	if p.indexer == nil {
-		return
-	}
-	for _, rel := range files {
-		if err := p.indexer.IndexFile(rel); err != nil {
-			log.Printf("processor: index %s after job %s: %v", rel, jobID, err)
-			activity.RecordIndexFailed(p.db, rel, err)
-			rec := NewSQLiteJobRecorder(p.db, jobID)
-			rec.Record("index", "error", err.Error(), map[string]any{"path": rel})
-		}
-	}
+	p.markJobSucceeded(job.ID, files)
+	return nil
 }
 
 // classifyPipelineError maps a pipeline error to a structured error code.
@@ -824,7 +358,7 @@ func remediationForCode(code string) string {
 	}
 }
 
-func (p *JobProcessor) preparePipelineForJob(job *sqlite.IngestJob) error {
+func (p *JobProcessor) preparePipelineForJob(job *store.IngestJob) error {
 	client, err := p.resolveLLMClientForJob(job)
 	if err != nil {
 		_ = p.failJob(job.ID, "llm_config_invalid", err.Error(), "", remediationForCode("llm_config_invalid"))
@@ -846,14 +380,14 @@ func (p *JobProcessor) preparePipelineForJob(job *sqlite.IngestJob) error {
 }
 
 // RecordRulesSnapshot writes rules_hash at job enqueue time.
-func RecordRulesSnapshot(db *sqlite.DB, jobID, workspace string) {
+func RecordRulesSnapshot(db store.Store, jobID, workspace string) {
 	if db == nil || jobID == "" {
 		return
 	}
 	hash := ComputeRulesHash(workspace, ResolveRulesSupplement(db))
-	maxN := sqlite.DefaultJobEventsMaxCount
+	maxN := store.DefaultJobEventsMaxCount
 	if v, err := db.GetConfig("ingest_job_events_max_count"); err == nil {
-		if n, err := sqlite.ParseJobEventsMaxCount(v); err == nil {
+		if n, err := store.ParseJobEventsMaxCount(v); err == nil {
 			maxN = n
 		}
 	}
@@ -877,7 +411,7 @@ func (p *JobProcessor) checkRulesDrift(jobID string) {
 	}
 }
 
-func queuedRulesHash(db *sqlite.DB, jobID string) string {
+func queuedRulesHash(db store.Store, jobID string) string {
 	events, err := db.ListIngestJobEvents(jobID, 50)
 	if err != nil {
 		return ""
@@ -918,7 +452,7 @@ func (p *JobProcessor) attachMCPRouter() {
 	p.pipeline.SetMCPRouter(router)
 }
 
-func (p *JobProcessor) resolveLLMClientForJob(job *sqlite.IngestJob) (*llm.Client, error) {
+func (p *JobProcessor) resolveLLMClientForJob(job *store.IngestJob) (*llm.Client, error) {
 	instanceID := ""
 	model := ""
 

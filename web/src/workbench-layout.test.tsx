@@ -77,15 +77,7 @@ vi.mock("@/lib/api", () => ({
     purpose_preview: "",
     rules_preview: "",
   }),
-  getVCStatus: vi.fn().mockResolvedValue({
-    enabled: false,
-    commit_count: 0,
-    git_available: false,
-    git_version: "",
-    tracked_dirs: [],
-    excluded_dirs: [],
-  }),
-  getVCLog: vi.fn().mockResolvedValue([]),
+  listHistory: vi.fn().mockResolvedValue({ changes: [] }),
   listActivityLogs: vi.fn().mockResolvedValue({
     logs: [],
     total: 0,

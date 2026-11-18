@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
 func TestLintGhostIndexEntries(t *testing.T) {
@@ -17,12 +17,7 @@ func TestLintGhostIndexEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := pgtest.Open(t)
 
 	adapter := storesvc.NewStoreAdapter(db)
 	if err := adapter.CreateDocument(&engine.DocData{

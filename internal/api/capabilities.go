@@ -15,13 +15,13 @@ type capabilitiesResponse struct {
 }
 
 type fileTypeCapability struct {
-	Extension    string   `json:"extension"`
-	MIMEType     string   `json:"mime_type"`
-	Tier         string   `json:"tier"`
-	CanExtract   bool     `json:"can_extract"`
-	CanChunk     bool     `json:"can_chunk"`
-	MissingDeps  []string `json:"missing_deps,omitempty"`
-	Remediation  string   `json:"remediation,omitempty"`
+	Extension   string   `json:"extension"`
+	MIMEType    string   `json:"mime_type"`
+	Tier        string   `json:"tier"`
+	CanExtract  bool     `json:"can_extract"`
+	CanChunk    bool     `json:"can_chunk"`
+	MissingDeps []string `json:"missing_deps,omitempty"`
+	Remediation string   `json:"remediation,omitempty"`
 }
 
 type processingTier struct {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useT } from "@/i18n"
 import { MarkdownContent } from "@/components/MarkdownContent"
 import type { MessageKey } from "@/i18n"
-import { navigateTo, timelineCommitHref } from "@/lib/wiki-routes"
+import { navigateTo, timelineChangeHref } from "@/lib/wiki-routes"
 import * as api from "@/lib/api"
 import type { IngestJob, IngestReview, IngestReviewPlan } from "@/types"
 import { Button } from "@/components/ui/button"
@@ -241,12 +241,12 @@ export function ArchiveReviewCard({ reviewId }: ArchiveReviewCardProps) {
               ? t("chat.review.apply_success_count", { count: appliedCount })
               : t("chat.review.apply_success")}
           </p>
-          {review.merge_commit_sha ? (
+          {review.change_set_id ? (
             <Button
               size="sm"
               variant="outline"
               className="mt-2"
-              onClick={() => navigateTo(timelineCommitHref(review.merge_commit_sha!))}
+              onClick={() => navigateTo(timelineChangeHref(review.change_set_id!))}
             >
               <Eye className="mr-1 size-3.5" />
               {t("chat.review.view_diff")}

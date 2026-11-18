@@ -13,11 +13,11 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type API struct {
-	db                *sqlite.DB
+	db                store.Store
 	workspace         string // workspace root directory for file-first writes
 	lockMgr           *ingest.PageLockManager
 	indexer           *engine.WorkspaceFileIndexer
@@ -26,7 +26,7 @@ type API struct {
 	flagToken         string // --token value; overrides the token stored in settings
 }
 
-func New(db *sqlite.DB) *API {
+func New(db store.Store) *API {
 	return &API{
 		db: db,
 	}
@@ -61,7 +61,7 @@ func (a *API) SetACPManager(mgr *acp.Manager) {
 	a.acpMgr = mgr
 }
 
-func (a *API) sessionAgentRuntime(session *sqlite.IngestSession) (agentruntime.Runtime, error) {
+func (a *API) sessionAgentRuntime(session *store.IngestSession) (agentruntime.Runtime, error) {
 	return agentruntime.Resolve(a.db, a.workspace, a.acpMgr, session)
 }
 

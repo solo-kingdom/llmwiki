@@ -3,7 +3,7 @@ package ingest
 import (
 	"testing"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func TestSessionMessageRecorderNilSafe(t *testing.T) {
@@ -13,18 +13,14 @@ func TestSessionMessageRecorderNilSafe(t *testing.T) {
 }
 
 func TestSessionMessageRecorderRecords(t *testing.T) {
-	db, err := sqlite.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := openTestDB(t)
 
 	// Create session + message for FK
-	session := &sqlite.IngestSession{Title: "recorder test"}
+	session := &store.IngestSession{Title: "recorder test"}
 	if err := db.CreateIngestSession(session); err != nil {
 		t.Fatalf("CreateIngestSession: %v", err)
 	}
-	msg := &sqlite.IngestSessionMessage{
+	msg := &store.IngestSessionMessage{
 		SessionID:    session.ID,
 		Role:         "assistant",
 		Content:      "test",
@@ -64,5 +60,3 @@ func TestSessionMessageRecorderRecords(t *testing.T) {
 		}
 	}
 }
-
-

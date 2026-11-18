@@ -8,30 +8,30 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type reviewResponse struct {
-	Review *sqlite.IngestReview `json:"review"`
+	Review *store.IngestReview `json:"review"`
 }
 
 type reviewsListResponse struct {
-	Reviews []sqlite.IngestReview `json:"reviews"`
+	Reviews []store.IngestReview `json:"reviews"`
 }
 
 type reviewPlansResponse struct {
-	Plans []sqlite.IngestReviewPlan `json:"plans"`
+	Plans []store.IngestReviewPlan `json:"plans"`
 }
 
 type reviewMessageResponse struct {
-	Message *sqlite.IngestReviewMessage `json:"message"`
+	Message *store.IngestReviewMessage `json:"message"`
 }
 
 type reviewActionResponse struct {
-	Review  *sqlite.IngestReview `json:"review"`
-	JobID   string               `json:"job_id,omitempty"`
-	Status  string               `json:"status"`
-	Message string               `json:"message,omitempty"`
+	Review  *store.IngestReview `json:"review"`
+	JobID   string              `json:"job_id,omitempty"`
+	Status  string              `json:"status"`
+	Message string              `json:"message,omitempty"`
 }
 
 type feedbackRequest struct {
@@ -45,7 +45,7 @@ func (a *API) ListIngestReviews(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if reviews == nil {
-		reviews = []sqlite.IngestReview{}
+		reviews = []store.IngestReview{}
 	}
 	writeJSON(w, http.StatusOK, reviewsListResponse{Reviews: reviews})
 }
@@ -81,7 +81,7 @@ func (a *API) ListIngestReviewPlans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if plans == nil {
-		plans = []sqlite.IngestReviewPlan{}
+		plans = []store.IngestReviewPlan{}
 	}
 	writeJSON(w, http.StatusOK, reviewPlansResponse{Plans: plans})
 }
@@ -106,7 +106,7 @@ func (a *API) AddIngestReviewFeedback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
-	msg := &sqlite.IngestReviewMessage{
+	msg := &store.IngestReviewMessage{
 		ReviewID:    id,
 		Role:        "user",
 		MessageType: "feedback",
@@ -185,7 +185,7 @@ func (a *API) ApproveIngestReview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *API) loadReview(id string, w http.ResponseWriter) (*sqlite.IngestReview, error) {
+func (a *API) loadReview(id string, w http.ResponseWriter) (*store.IngestReview, error) {
 	review, err := a.db.GetIngestReview(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

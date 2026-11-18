@@ -3,11 +3,11 @@ package activity
 import (
 	"fmt"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // LogIngestJob records an ingest job lifecycle event.
-func LogIngestJob(db *sqlite.DB, job *sqlite.IngestJob, action, source string) {
+func LogIngestJob(db store.Store, job *store.IngestJob, action, source string) {
 	if db == nil || job == nil {
 		return
 	}

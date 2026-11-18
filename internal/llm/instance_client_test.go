@@ -4,22 +4,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
-func openInstanceTestDB(t *testing.T) *sqlite.DB {
+func openInstanceTestDB(t *testing.T) store.Store {
 	t.Helper()
-	db, err := sqlite.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("open test db: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
+	return pgtest.Open(t)
 }
 
-func seedOpenAIProvider(t *testing.T, db *sqlite.DB) {
+func seedOpenAIProvider(t *testing.T, db store.Store) {
 	t.Helper()
-	if err := db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	if err := db.UpsertProviderInfo([]store.ProviderInfo{
 		{
 			ID:        "openai",
 			Name:      "OpenAI",
@@ -36,7 +32,7 @@ func TestClientFromInstanceUsesCatalogBaseURL(t *testing.T) {
 	db := openInstanceTestDB(t)
 	seedOpenAIProvider(t, db)
 
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name:      "OpenAI Work",
 		CatalogID: "openai",
 		APIKey:    "sk-test-key",
@@ -61,7 +57,7 @@ func TestClientFromInstancePrefersInstanceBaseURL(t *testing.T) {
 	db := openInstanceTestDB(t)
 	seedOpenAIProvider(t, db)
 
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name:      "Custom Gateway",
 		CatalogID: "openai",
 		APIKey:    "sk-test-key",
@@ -82,13 +78,13 @@ func TestClientFromInstancePrefersInstanceBaseURL(t *testing.T) {
 
 func TestClientFromInstanceMissingBaseURL(t *testing.T) {
 	db := openInstanceTestDB(t)
-	if err := db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	if err := db.UpsertProviderInfo([]store.ProviderInfo{
 		{ID: "custom", Name: "Custom", APIFormat: "openai"},
 	}); err != nil {
 		t.Fatalf("UpsertProviderInfo: %v", err)
 	}
 
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name:      "Custom",
 		CatalogID: "custom",
 		APIKey:    "sk-test-key",
@@ -110,7 +106,7 @@ func TestClientFromInstanceMissingAPIKey(t *testing.T) {
 	db := openInstanceTestDB(t)
 	seedOpenAIProvider(t, db)
 
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name:      "OpenAI Work",
 		CatalogID: "openai",
 	}

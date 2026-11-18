@@ -1,6 +1,6 @@
 ## 快速开始
 
-1. **初始化工作区**（需要本机安装 git CLI）：
+1. **初始化工作区**：
 
 ```bash
 llmwiki init ~/research
@@ -100,7 +100,7 @@ Workbench 顶栏导航：
 |------|------|
 | **摄入** | 多轮对话探索主题；「添加上下文」粘贴纯文本（不触发 AI 回复）；附件上传；「归档」提交审核 |
 | **任务** | 查看 ingest 任务状态（queued / running / succeeded / failed），重试或取消 |
-| **时间线** | 查看 wiki 的 git 提交历史与 diff（需 init 时启用版本控制） |
+| **时间线** | 查看 wiki 的变更历史、差异与回滚（PostgreSQL 修订历史） |
 | **日志** | 系统活动日志 |
 | **设置** | Provider、界面/文档语言、Wiki 规则补充、MCP 配置等 |
 | **Wiki** | 只读阅读器：目录树、全文搜索（⌘K / Ctrl+K）、知识图谱 |
@@ -184,7 +184,7 @@ Lint 检查帮助发现 Wiki 中的问题。当前支持以下检查项：
 
 | 命令 | 说明 |
 |------|------|
-| `llmwiki init <dir>` | 初始化工作区 scaffold、git（wiki/）、SQLite 索引 |
+| `llmwiki init <dir>` | 初始化工作区 scaffold 与 PostgreSQL 修订历史 |
 | `llmwiki serve [dir]` | 启动 HTTP API 与嵌入式 Web UI（默认 `127.0.0.1:8868`） |
 | `llmwiki ingest <file>` | 将源文件摄入 Wiki（支持合并保护） |
 | `llmwiki reindex [dir]` | 从文件系统强制重建索引 |

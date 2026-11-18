@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/acp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
-func Resolve(db *sqlite.DB, workspace string, mgr *acp.Manager, session *sqlite.IngestSession) (Runtime, error) {
+func Resolve(db store.Store, workspace string, mgr *acp.Manager, session *store.IngestSession) (Runtime, error) {
 	if session != nil && strings.EqualFold(session.AgentKind, KindACP) {
 		raw, err := db.GetConfig("acp_agents_json")
 		if err != nil {

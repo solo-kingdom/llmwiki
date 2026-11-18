@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 const (
@@ -39,7 +39,7 @@ var (
 )
 
 type writeReq struct {
-	db    *sqlite.DB
+	db    store.Store
 	entry Entry
 }
 
@@ -114,7 +114,7 @@ func worker() {
 }
 
 // Record enqueues an activity log write (non-blocking).
-func Record(db *sqlite.DB, entry Entry) {
+func Record(db store.Store, entry Entry) {
 	if db == nil {
 		return
 	}
@@ -134,14 +134,14 @@ func Record(db *sqlite.DB, entry Entry) {
 }
 
 // RecordSync writes immediately (for system events that must land before response).
-func RecordSync(db *sqlite.DB, entry Entry) {
+func RecordSync(db store.Store, entry Entry) {
 	if db == nil {
 		return
 	}
 	writeOne(db, entry)
 }
 
-func writeOne(db *sqlite.DB, entry Entry) {
+func writeOne(db store.Store, entry Entry) {
 	details := SanitizeDetails(entry.Details)
 	detailsJSON := ""
 	if len(details) > 0 {
@@ -150,7 +150,7 @@ func writeOne(db *sqlite.DB, entry Entry) {
 			detailsJSON = string(b)
 		}
 	}
-	row := &sqlite.ActivityLog{
+	row := &store.ActivityLog{
 		Level:        entry.Level,
 		Category:     entry.Category,
 		Action:       entry.Action,
@@ -167,7 +167,7 @@ func writeOne(db *sqlite.DB, entry Entry) {
 }
 
 // TrimActivityLogsIfNeeded trims when count exceeds maxCount; returns deleted count.
-func TrimActivityLogsIfNeeded(db *sqlite.DB, maxCount int) (int64, error) {
+func TrimActivityLogsIfNeeded(db store.Store, maxCount int) (int64, error) {
 	if db == nil {
 		return 0, nil
 	}
@@ -175,7 +175,7 @@ func TrimActivityLogsIfNeeded(db *sqlite.DB, maxCount int) (int64, error) {
 }
 
 // GetMaxCount reads activity_logs_max_count from config with defaults and bounds.
-func GetMaxCount(db *sqlite.DB) int {
+func GetMaxCount(db store.Store) int {
 	if db == nil {
 		return DefaultMaxCount
 	}
@@ -207,7 +207,7 @@ func ParseMaxCount(s string) (int, error) {
 }
 
 // LogTrimmed records a system logs_trimmed event when rows were deleted.
-func LogTrimmed(db *sqlite.DB, deletedCount int64, maxCount, remaining int) {
+func LogTrimmed(db store.Store, deletedCount int64, maxCount, remaining int) {
 	if deletedCount <= 0 {
 		return
 	}

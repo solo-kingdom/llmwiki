@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // setupIntegrationRoutes wires all routes needed for the backend integration test.
@@ -45,7 +45,7 @@ func TestBackendIntegration(t *testing.T) {
 	setupIntegrationRoutes(api, r)
 
 	// Step 1: Seed provider cache (simulates models.dev sync)
-	err := api.db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	err := api.db.UpsertProviderInfo([]store.ProviderInfo{
 		{ID: "openai", Name: "OpenAI", APIBase: "https://api.openai.com/v1", APIFormat: "openai", EnvKey: "OPENAI_API_KEY"},
 		{ID: "anthropic", Name: "Anthropic", APIBase: "https://api.anthropic.com", APIFormat: "anthropic", EnvKey: "ANTHROPIC_API_KEY"},
 	})
@@ -53,7 +53,7 @@ func TestBackendIntegration(t *testing.T) {
 		t.Fatalf("seed providers: %v", err)
 	}
 
-	err = api.db.UpsertModels([]sqlite.ModelInfo{
+	err = api.db.UpsertModels([]store.ModelInfo{
 		{ProviderID: "openai", ModelID: "gpt-4o", Name: "GPT-4o", Family: "GPT-4", ContextLimit: 128000, OutputLimit: 16384, CostInput: 2.5, CostOutput: 10.0, Reasoning: true, ToolCall: true},
 		{ProviderID: "openai", ModelID: "gpt-4o-mini", Name: "GPT-4o Mini", Family: "GPT-4", ContextLimit: 128000},
 		{ProviderID: "anthropic", ModelID: "claude-3-5-sonnet", Name: "Claude 3.5 Sonnet", Family: "Claude", ContextLimit: 200000, Reasoning: true, ToolCall: true},
@@ -225,7 +225,7 @@ func TestBackendIntegrationStreamingGuard(t *testing.T) {
 	setupIntegrationRoutes(api, r)
 
 	// Seed provider
-	api.db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	api.db.UpsertProviderInfo([]store.ProviderInfo{
 		{ID: "openai", Name: "OpenAI", APIFormat: "openai", EnvKey: "OPENAI_API_KEY"},
 	})
 

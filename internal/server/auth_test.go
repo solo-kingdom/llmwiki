@@ -3,11 +3,11 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
 func authTestRouter(tokenFn func() string, publicWiki bool) http.Handler {
@@ -76,13 +76,8 @@ func TestAuthMiddlewareExemptions(t *testing.T) {
 }
 
 func TestEffectiveAPITokenPrefersFlag(t *testing.T) {
-	dir := t.TempDir()
-	db, err := sqlite.Open(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := db.SetConfig(sqlite.ConfigAPIToken, "stored-token-123"); err != nil {
+	db := pgtest.Open(t)
+	if err := db.SetConfig(store.ConfigAPIToken, "stored-token-123"); err != nil {
 		t.Fatalf("SetConfig: %v", err)
 	}
 
@@ -97,7 +92,7 @@ func TestEffectiveAPITokenPrefersFlag(t *testing.T) {
 	}
 
 	s.config.Token = ""
-	if err := db.SetConfig(sqlite.ConfigAPIToken, ""); err != nil {
+	if err := db.SetConfig(store.ConfigAPIToken, ""); err != nil {
 		t.Fatalf("SetConfig: %v", err)
 	}
 	if got := s.effectiveAPIToken(); got != "" {

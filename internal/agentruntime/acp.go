@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/solo-kingdom/llmwiki/internal/acp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type acpRuntime struct {
@@ -186,7 +186,7 @@ func (s *trackingSink) Debug(step, phase, message string, payload map[string]any
 	s.inner.Debug(step, phase, message, payload)
 }
 
-func renderACPHistory(history []sqlite.IngestSessionMessage, current string) string {
+func renderACPHistory(history []store.IngestSessionMessage, current string) string {
 	type rendered struct {
 		role    string
 		content string

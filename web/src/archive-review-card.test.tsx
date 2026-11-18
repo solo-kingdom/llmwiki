@@ -51,7 +51,7 @@ describe("ArchiveReviewCard", () => {
     expect(screen.getByRole("button", { name: "确认计划并执行" })).toBeInTheDocument()
   })
 
-  it("shows diff link when merge commit exists", async () => {
+  it("shows diff link when change set exists", async () => {
     vi.mocked(api.getIngestReview).mockResolvedValue({
       id: "review-1",
       session_id: "sess-1",
@@ -60,7 +60,7 @@ describe("ArchiveReviewCard", () => {
       current_plan_version: 1,
       approved_plan_version: 1,
       final_job_id: "job-apply-1",
-      merge_commit_sha: "abc123def",
+      change_set_id: "abc123def",
       created_at: "",
       updated_at: "",
     })
@@ -140,7 +140,7 @@ describe("ArchiveReviewCard", () => {
     expect(screen.getByRole("button", { name: "重新规划" })).toBeInTheDocument()
   })
 
-  it("hides diff link when version control was off", async () => {
+  it("hides diff link when no change set was recorded", async () => {
     vi.mocked(api.getIngestReview).mockResolvedValue({
       id: "review-1",
       session_id: "sess-1",
@@ -158,7 +158,7 @@ describe("ArchiveReviewCard", () => {
       </I18nTestProvider>,
     )
 
-    expect(await screen.findByText(/git 仓库未初始化/)).toBeInTheDocument()
+    expect(await screen.findByText(/未记录变更集/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "查看变更" })).not.toBeInTheDocument()
   })
 })

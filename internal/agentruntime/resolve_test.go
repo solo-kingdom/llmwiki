@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/solo-kingdom/llmwiki/internal/acp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func fakeRuntimeAgentPath(t *testing.T) string {
@@ -20,7 +20,7 @@ func fakeRuntimeAgentPath(t *testing.T) string {
 	return out
 }
 
-func seedRuntimeACPConfig(t *testing.T, db *sqlite.DB, agentJSON string) {
+func seedRuntimeACPConfig(t *testing.T, db store.Store, agentJSON string) {
 	t.Helper()
 	if err := db.SetConfig("acp_agents_json", agentJSON); err != nil {
 		t.Fatalf("SetConfig: %v", err)
@@ -36,29 +36,29 @@ func TestResolveAgentKindsAndACPErrors(t *testing.T) {
 	t.Cleanup(mgr.CloseAll)
 
 	for _, kind := range []string{"", KindNative} {
-		_, err := Resolve(db, t.TempDir(), mgr, &sqlite.IngestSession{AgentKind: kind})
+		_, err := Resolve(db, t.TempDir(), mgr, &store.IngestSession{AgentKind: kind})
 		if !errors.Is(err, ErrNoProviderInstance) {
 			t.Fatalf("kind %q error = %v, want native provider error", kind, err)
 		}
 	}
-	_, err := Resolve(db, t.TempDir(), mgr, &sqlite.IngestSession{AgentKind: KindACP, ACPAgentID: "missing"})
+	_, err := Resolve(db, t.TempDir(), mgr, &store.IngestSession{AgentKind: KindACP, ACPAgentID: "missing"})
 	if !errors.Is(err, ErrNoACPAgent) {
 		t.Fatalf("missing agent error = %v", err)
 	}
 	disabled := `{"version":1,"agents":{"fake":{"id":"fake","name":"Fake","enabled":false,"command":"` + command + `"}},"defaults":{"readonly_only":true,"on_unavailable":"error"}}`
 	seedRuntimeACPConfig(t, db, disabled)
-	_, err = Resolve(db, t.TempDir(), mgr, &sqlite.IngestSession{AgentKind: KindACP, ACPAgentID: "fake"})
+	_, err = Resolve(db, t.TempDir(), mgr, &store.IngestSession{AgentKind: KindACP, ACPAgentID: "fake"})
 	if !errors.Is(err, ErrACPAgentDisabled) {
 		t.Fatalf("disabled agent error = %v", err)
 	}
 	invalid := `{"version":1,"agents":{"fake":{"id":"fake","name":"Fake","enabled":true,"command":"definitely-missing-runtime-cli"}},"defaults":{"readonly_only":true,"on_unavailable":"error"}}`
 	seedRuntimeACPConfig(t, db, invalid)
-	_, err = Resolve(db, t.TempDir(), mgr, &sqlite.IngestSession{AgentKind: KindACP, ACPAgentID: "fake"})
+	_, err = Resolve(db, t.TempDir(), mgr, &store.IngestSession{AgentKind: KindACP, ACPAgentID: "fake"})
 	if !errors.Is(err, ErrACPCLINotFound) {
 		t.Fatalf("missing CLI error = %v", err)
 	}
 	seedRuntimeACPConfig(t, db, "{")
-	_, err = Resolve(db, t.TempDir(), mgr, &sqlite.IngestSession{AgentKind: KindACP, ACPAgentID: "fake"})
+	_, err = Resolve(db, t.TempDir(), mgr, &store.IngestSession{AgentKind: KindACP, ACPAgentID: "fake"})
 	if !errors.Is(err, ErrACPConfigInvalid) {
 		t.Fatalf("invalid config error = %v", err)
 	}

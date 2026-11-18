@@ -172,24 +172,23 @@ The system SHALL expose active ingest review metadata on session detail response
 - **WHEN** client requests `GET /api/v1/ingest/sessions/{id}`
 - **AND** the session has an associated ingest review in a non-terminal state (`planning`, `ready_for_review`, `revising`, `approved`, `applying`) or recently succeeded review linked to the session
 - **THEN** the response SHALL include an `active_review` object with at minimum: `review_id`, `status`, `current_plan_version`
-- **AND** when apply has completed with VCS enabled SHALL include `merge_commit_sha`
+- **AND** when apply has completed SHALL include `change_set_id`
 
 #### Scenario: Session without review
 - **WHEN** client requests session detail for a session with no ingest review
 - **THEN** `active_review` SHALL be omitted or null
 
-### Requirement: Review detail merge commit SHA
-The system SHALL return merge commit SHA on review detail when review apply completed with version control enabled.
+### Requirement: Review detail change set
+The system SHALL return the change set id on review detail when review apply completed.
 
-#### Scenario: Succeeded review returns commit SHA
+#### Scenario: Succeeded review returns change set id
 - **WHEN** client requests `GET /api/v1/ingest/reviews/{id}`
 - **AND** review status is `succeeded`
-- **AND** apply merged to main via git
-- **THEN** the response SHALL include `merge_commit_sha`
+- **THEN** the response SHALL include `change_set_id`
 
-#### Scenario: Non-VCS apply omits commit SHA
-- **WHEN** review succeeded without version control
-- **THEN** `merge_commit_sha` SHALL be omitted or empty
+#### Scenario: Review without apply
+- **WHEN** review has not been applied
+- **THEN** `change_set_id` SHALL be omitted or empty
 
 ### Requirement: Context-only session message append
 The system SHALL support appending a user message to an ingest session without triggering an assistant LLM reply when the client posts a message without streaming.

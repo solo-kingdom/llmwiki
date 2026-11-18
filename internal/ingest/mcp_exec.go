@@ -8,13 +8,13 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // mcpRecorderAdapter bridges mcp.EventRecorder to JobRecorder and activity logs.
 type mcpRecorderAdapter struct {
 	jobRec JobRecorder
-	db     *sqlite.DB
+	db     store.Store
 }
 
 func (a *mcpRecorderAdapter) RecordMCP(step, phase, message string, payload map[string]any) {

@@ -10,21 +10,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import type { Settings, VCStatus, ProviderCheckResult, MCPServerCheckResult, WorkspaceRuleFilesPreview, ACPAgentCheckResult } from "@/types"
+import type { Settings, ProviderCheckResult, MCPServerCheckResult, WorkspaceRuleFilesPreview, ACPAgentCheckResult } from "@/types"
 import { PageContainer } from "@/components/PageContainer"
-import { Key, Plus, Pencil, Trash2, X, ExternalLink, GitBranch, History, ShieldOff, CheckCircle2, XCircle, Loader2, CircleOff, RefreshCw, ChevronDown } from "lucide-react"
+import { Key, Plus, Pencil, Trash2, X, ExternalLink, CheckCircle2, XCircle, Loader2, CircleOff, RefreshCw, ChevronDown } from "lucide-react"
 import {
-  getVCStatus,
-  setVCSRemote,
-  pushVC,
-  backupVC,
   checkProviderInstance,
   checkAllProviderInstances,
   checkMCPStatus,
   checkACPAgents,
   getWorkspaceRuleFiles,
 } from "@/lib/api"
-import { navigateTo, workbenchViewHref } from "@/lib/wiki-routes"
 import { useI18n } from "@/i18n"
 import { cn } from "@/lib/utils"
 
@@ -150,9 +145,6 @@ export function SettingsPage() {
   const [addForm, setAddForm] = useState<AddFormState>({ mode: false })
   const [editForm, setEditForm] = useState<EditFormState>({ mode: false })
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>(null)
-  const [vcStatus, setVCStatus] = useState<VCStatus | null>(null)
-  const [remoteURL, setRemoteURL] = useState("")
-  const [vcActionBusy, setVcActionBusy] = useState<string | null>(null)
   const [mcpJsonError, setMcpJsonError] = useState<string | null>(null)
   const [providerChecks, setProviderChecks] = useState<Record<string, ProviderCheckResult>>({})
   const [providerChecking, setProviderChecking] = useState(false)
@@ -169,7 +161,6 @@ export function SettingsPage() {
     void loadProviders()
     void loadInstances()
     void loadACPAgents()
-    void loadVCStatus()
     void getWorkspaceRuleFiles().then(setRulePreview).catch(() => setRulePreview(null))
   }, [loadSettings, loadProviders, loadInstances, loadACPAgents])
 
@@ -177,53 +168,6 @@ export function SettingsPage() {
     if (instances.length === 0) return
     void runProviderChecks()
   }, [instances.length])
-
-  const loadVCStatus = async () => {
-    try {
-      const status = await getVCStatus()
-      setVCStatus(status)
-      setRemoteURL(status.remote_url ?? "")
-    } catch {
-      // ignore
-    }
-  }
-
-  const settingFlag = (v: string | boolean | undefined, defaultOn: boolean) => {
-    if (v === undefined || v === "") return defaultOn
-    return v === true || v === "true"
-  }
-
-  const handleSaveRemote = async () => {
-    if (!remoteURL.trim()) return
-    setVcActionBusy("remote")
-    try {
-      const status = await setVCSRemote(remoteURL.trim())
-      setVCStatus(status)
-      setRemoteURL(status.remote_url ?? remoteURL.trim())
-    } finally {
-      setVcActionBusy(null)
-    }
-  }
-
-  const handlePushNow = async () => {
-    setVcActionBusy("push")
-    try {
-      await pushVC()
-      await loadVCStatus()
-    } finally {
-      setVcActionBusy(null)
-    }
-  }
-
-  const handleBackupNow = async () => {
-    setVcActionBusy("backup")
-    try {
-      await backupVC()
-      await loadVCStatus()
-    } finally {
-      setVcActionBusy(null)
-    }
-  }
 
   const runProviderChecks = async () => {
     if (instances.length === 0) return
@@ -1142,6 +1086,89 @@ export function SettingsPage() {
             <p className="text-xs text-muted-foreground">{t("settings.acp.save_note")}</p>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("settings.embedding.title")}</CardTitle>
+            <CardDescription>{t("settings.embedding.desc")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-2 text-sm" data-testid="embedding-status">
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+                  mergedForm.embedding_configured
+                    ? "bg-green-100 text-green-800"
+                    : "bg-muted text-muted-foreground",
+                )}
+              >
+                {mergedForm.embedding_configured ? (
+                  <CheckCircle2 className="size-3" />
+                ) : (
+                  <CircleOff className="size-3" />
+                )}
+                {mergedForm.embedding_configured
+                  ? t("settings.embedding.configured")
+                  : t("settings.embedding.not_configured")}
+              </span>
+            </div>
+            <div>
+              <label className="text-sm font-medium">
+                {t("settings.embedding.instance")}
+              </label>
+              <p className="mb-1 text-xs text-muted-foreground">
+                {t("settings.embedding.instance_desc")}
+              </p>
+              <select
+                value={mergedForm.embedding_instance_id ?? ""}
+                onChange={(e) => set("embedding_instance_id", e.target.value)}
+                className="h-9 w-full max-w-xs rounded-md border border-input bg-transparent px-2 text-sm"
+                data-testid="embedding-instance"
+              >
+                <option value="">{t("settings.embedding.instance_none")}</option>
+                {instances.map((inst) => (
+                  <option key={inst.id} value={inst.id}>
+                    {inst.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="text-sm font-medium">
+                  {t("settings.embedding.model")}
+                </label>
+                <Input
+                  data-testid="embedding-model"
+                  value={mergedForm.embedding_model ?? ""}
+                  onChange={(e) => set("embedding_model", e.target.value)}
+                  placeholder={t("settings.embedding.model_placeholder")}
+                  className="mt-1 max-w-xs"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">
+                  {t("settings.embedding.dim")}
+                </label>
+                <p className="mb-1 text-xs text-muted-foreground">
+                  {t("settings.embedding.dim_desc")}
+                </p>
+                <Input
+                  data-testid="embedding-dim"
+                  type="number"
+                  min={1}
+                  max={8192}
+                  value={mergedForm.embedding_dim ?? ""}
+                  onChange={(e) => set("embedding_dim", e.target.value)}
+                  className="mt-1 max-w-xs"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("settings.embedding.hint")}
+            </p>
+          </CardContent>
+        </Card>
         </SettingsSectionGroup>
 
         <SettingsSectionGroup
@@ -1187,147 +1214,6 @@ export function SettingsPage() {
                 })}
               </p>
             </div>
-          </CardContent>
-        </Card>
-        </SettingsSectionGroup>
-
-        <SettingsSectionGroup
-          id="settings-group-vc"
-          titleKey="settings.groups.vc.title"
-          descKey="settings.groups.vc.desc"
-        >
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <GitBranch className="size-4" />
-              {t("settings.vc.title")}
-            </CardTitle>
-            <CardDescription>
-              {t("settings.vc.desc")}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {!vcStatus?.enabled ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <ShieldOff className="size-4" />
-                  <span>{t("settings.vc.not_ready")}</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {t("settings.vc.repair_hint")}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
-                    {t("settings.vc.active")}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {t("settings.vc.commits", { count: vcStatus.commit_count })}
-                  </span>
-                </div>
-                <div className="text-xs text-muted-foreground space-y-1">
-                  <div>{t("settings.vc.tracked")}: <code className="bg-muted px-1 rounded">{vcStatus.tracked_dirs.join(", ")}</code></div>
-                  {vcStatus.backup_dirs && vcStatus.backup_dirs.length > 0 && (
-                    <div>{t("settings.vc.backup")}: <code className="bg-muted px-1 rounded">{vcStatus.backup_dirs.join(", ")}</code></div>
-                  )}
-                  <div>{t("settings.vc.excluded")}: <code className="bg-muted px-1 rounded">{vcStatus.excluded_dirs.join(", ")}</code></div>
-                </div>
-
-                <div className="space-y-2 pt-2 border-t">
-                  <label className="text-sm font-medium">{t("settings.vc.remote_url")}</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm"
-                      value={remoteURL}
-                      onChange={(e) => setRemoteURL(e.target.value)}
-                      placeholder="https://github.com/user/repo.git 或 git@host:user/repo.git"
-                      data-testid="vc-remote-url"
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={vcActionBusy !== null || !remoteURL.trim()}
-                      onClick={() => void handleSaveRemote()}
-                    >
-                      {t("settings.vc.remote_save")}
-                    </Button>
-                  </div>
-                  {vcStatus.remote_configured && (
-                    <p className="text-xs text-muted-foreground">
-                      {t("settings.vc.remote_status", {
-                        branch: vcStatus.branch ?? "main",
-                        ahead: String(vcStatus.ahead ?? 0),
-                        behind: String(vcStatus.behind ?? 0),
-                      })}
-                    </p>
-                  )}
-                  {vcStatus.last_push_error && (
-                    <p className="text-xs text-destructive" data-testid="vc-push-error">
-                      {vcStatus.last_push_error}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-2 text-sm">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settingFlag(
-                        mergedForm.backup_include_raw ?? settings?.backup_include_raw,
-                        vcStatus.backup_include_raw ?? true,
-                      )}
-                      onChange={(e) => set("backup_include_raw", e.target.checked)}
-                    />
-                    <span>{t("settings.vc.backup_raw")}</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settingFlag(
-                        mergedForm.vc_auto_push ?? settings?.vc_auto_push,
-                        false,
-                      )}
-                      onChange={(e) => set("vc_auto_push", e.target.checked)}
-                    />
-                    <span>{t("settings.vc.auto_push")}</span>
-                  </label>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={vcActionBusy !== null}
-                    onClick={() => void handleBackupNow()}
-                    data-testid="vc-backup-now"
-                  >
-                    {t("settings.vc.backup_now")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={vcActionBusy !== null || !vcStatus.remote_configured}
-                    onClick={() => void handlePushNow()}
-                    data-testid="vc-push-now"
-                  >
-                    {t("settings.vc.push_now")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => navigateTo(workbenchViewHref("timeline"))}
-                  >
-                    <History className="size-3.5 mr-1" />
-                    {t("settings.vc.view_history")}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">{t("settings.vc.api_key_hint")}</p>
-              </div>
-            )}
           </CardContent>
         </Card>
         </SettingsSectionGroup>

@@ -10,17 +10,16 @@ import (
 	"testing"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
-	"github.com/solo-kingdom/llmwiki/internal/vcs"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // mockLLMClient is a test double for the LLM client that returns canned responses.
 type mockLLMClient struct {
-	analyzeResp string
+	analyzeResp  string
 	generateResp string
-	analyzeErr  error
-	generateErr error
-	callCount   int
+	analyzeErr   error
+	generateErr  error
+	callCount    int
 }
 
 func (m *mockLLMClient) StreamChat(ctx context.Context, messages []llm.Message, temperature float64, maxTokens int) (<-chan llm.StreamEvent, error) {
@@ -149,13 +148,7 @@ func TestRemediationForCode(t *testing.T) {
 }
 
 func TestProcessorClaimNextJob(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	ws := t.TempDir()
 	processor := NewJobProcessor(db, ws)
@@ -170,7 +163,7 @@ func TestProcessorClaimNextJob(t *testing.T) {
 	}
 
 	// Create a queued job
-	queuedJob := &sqlite.IngestJob{
+	queuedJob := &store.IngestJob{
 		InputType:  "text",
 		SourcePath: "raw/sources/web-ingest/test.md",
 		SourceRef:  "text",
@@ -204,19 +197,13 @@ func TestProcessorClaimNextJob(t *testing.T) {
 }
 
 func TestProcessorFailJob(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	ws := t.TempDir()
 	processor := NewJobProcessor(db, ws)
 
 	// Create and claim a job
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  "upload",
 		SourcePath: "raw/sources/web-ingest/upload.pdf",
 		SourceRef:  "upload",
@@ -258,19 +245,13 @@ func TestProcessorFailJob(t *testing.T) {
 }
 
 func TestProcessorRunPipelineForJobMissingFile(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	ws := t.TempDir()
 	processor := NewJobProcessor(db, ws)
 
 	// Create a job that references a file that doesn't exist
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  "text",
 		SourcePath: "raw/sources/web-ingest/nonexistent.md",
 		SourceRef:  "text",
@@ -282,7 +263,7 @@ func TestProcessorRunPipelineForJobMissingFile(t *testing.T) {
 	}
 
 	// Running pipeline for this job should fail
-	err = processor.RunPipelineForJob(context.Background(), job)
+	err := processor.RunPipelineForJob(context.Background(), job)
 	if err == nil {
 		t.Fatal("expected error for missing source file")
 	}
@@ -303,13 +284,7 @@ func TestProcessorRunPipelineForJobMissingFile(t *testing.T) {
 func TestProcessorRunPipelineForJobSuccess(t *testing.T) {
 	clearLLMEnv(t)
 
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	ws := t.TempDir()
 
@@ -324,7 +299,7 @@ func TestProcessorRunPipelineForJobSuccess(t *testing.T) {
 	}
 
 	// Create a running job referencing the source
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  "text",
 		SourcePath: "raw/sources/web-ingest/test.md",
 		SourceRef:  "text",
@@ -337,7 +312,7 @@ func TestProcessorRunPipelineForJobSuccess(t *testing.T) {
 
 	// Without provider instance or workspace LLM config, job should fail early.
 	processor := NewJobProcessor(db, ws)
-	err = processor.RunPipelineForJob(context.Background(), job)
+	err := processor.RunPipelineForJob(context.Background(), job)
 
 	if err == nil {
 		t.Fatal("expected error without LLM configuration")
@@ -356,16 +331,10 @@ func TestProcessorRunPipelineForJobSuccess(t *testing.T) {
 }
 
 func TestJobLineage(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	// Create original job
-	original := &sqlite.IngestJob{
+	original := &store.IngestJob{
 		InputType:  "text",
 		SourcePath: "raw/sources/web-ingest/original.md",
 		SourceRef:  "text",
@@ -444,13 +413,7 @@ func TestMockLLMClientStreamsEvents(t *testing.T) {
 }
 
 func TestProcessorProcessAllEmpty(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	ws := t.TempDir()
 	processor := NewJobProcessor(db, ws)
@@ -462,16 +425,10 @@ func TestProcessorProcessAllEmpty(t *testing.T) {
 }
 
 func TestRemediationFullChain(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	// Create job, fail it, retry, verify lineage and remediation
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  "conversation",
 		SourcePath: "raw/sources/web-ingest/conv.md",
 		SourceRef:  "chatgpt",
@@ -506,16 +463,10 @@ func TestRemediationFullChain(t *testing.T) {
 }
 
 func TestRetryOnlyFailedJobs(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	// Try to retry a queued job → should fail
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  "text",
 		SourcePath: "raw/sources/web-ingest/test.md",
 		SourceRef:  "text",
@@ -526,214 +477,25 @@ func TestRetryOnlyFailedJobs(t *testing.T) {
 		t.Fatalf("CreateIngestJob: %v", err)
 	}
 
-	_, err = db.RetryIngestJob(job.ID)
-	if err == nil {
+	if _, err := db.RetryIngestJob(job.ID); err == nil {
 		t.Fatal("expected error when retrying non-failed job")
 	}
 }
 
-func TestProcessorWithGitCommit(t *testing.T) {
-	if !vcs.IsGitAvailable().Available {
-		t.Skip("git not available")
-	}
-
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	// Set up workspace with git repo
-	ws := t.TempDir()
-	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
-	os.MkdirAll(filepath.Join(ws, "raw", "sources", "web-ingest"), 0o755)
-
-	repo, err := vcs.InitRepo(ws)
-	if err != nil {
-		t.Fatalf("InitRepo: %v", err)
-	}
-
-	// Create a source file
-	sourceContent := []byte("# Test\nHello world")
-	os.WriteFile(filepath.Join(ws, "raw", "sources", "web-ingest", "test.md"), sourceContent, 0o644)
-	processor := NewJobProcessor(db, ws)
-	processor.SetGitRepo(repo)
-
-	// Create a running job
-	job := &sqlite.IngestJob{
-		InputType:  "text",
-		SourcePath: "raw/sources/web-ingest/test.md",
-		SourceRef:  "text",
-		Status:     "running",
-		MaxRetries: 3,
-	}
-	if err := db.CreateIngestJob(job); err != nil {
-		t.Fatalf("CreateIngestJob: %v", err)
-	}
-
-	// Run pipeline - will fail because LLM client is nil, but the job should be
-	// marked as failed with pipeline_error, not commit_failed
-	err = processor.RunPipelineForJob(context.Background(), job)
-	if err == nil {
-		t.Fatal("expected error with nil LLM client")
-	}
-
-	failed, _ := db.GetIngestJob(job.ID)
-	if failed.ErrorCode == "commit_failed" {
-		t.Error("should not be commit_failed since pipeline failed first")
-	}
-}
-
-func TestProcessorWithoutGitCommit(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	ws := t.TempDir()
-	processor := NewJobProcessor(db, ws)
-	// No git repo set - version control disabled
-
-	// Create a running job
-	job := &sqlite.IngestJob{
-		InputType:  "text",
-		SourcePath: "raw/sources/web-ingest/test.md",
-		SourceRef:  "text",
-		Status:     "running",
-		MaxRetries: 3,
-	}
-	if err := db.CreateIngestJob(job); err != nil {
-		t.Fatalf("CreateIngestJob: %v", err)
-	}
-
-	// Run pipeline should fail at LLM call (nil client), not at git
-	err = processor.RunPipelineForJob(context.Background(), job)
-	if err == nil {
-		t.Fatal("expected error with nil LLM client")
-	}
-}
-
-func TestGitRepoIfEnabled(t *testing.T) {
-	if !vcs.IsGitAvailable().Available {
-		t.Skip("git not available")
-	}
-
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	ws := t.TempDir()
-	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
-	if _, err := vcs.InitRepo(ws); err != nil {
-		t.Fatalf("InitRepo: %v", err)
-	}
-
-	processor := NewJobProcessor(db, ws)
-
-	if repo := processor.gitRepoIfEnabled(); repo == nil {
-		t.Error("expected non-nil when .git exists")
-	}
-
-	wsNoGit := t.TempDir()
-	os.MkdirAll(filepath.Join(wsNoGit, "wiki"), 0o755)
-	processorNoGit := NewJobProcessor(db, wsNoGit)
-	if repo := processorNoGit.gitRepoIfEnabled(); repo != nil {
-		t.Error("expected nil when .git is missing")
-	}
-}
-
-func TestProcessorSetGitRepo(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	ws := t.TempDir()
-	processor := NewJobProcessor(db, ws)
-
-	// Should be nil initially
-	if processor.gitRepo != nil {
-		t.Error("expected nil gitRepo initially")
-	}
-
-	// Set to non-nil
-	repo := vcs.NewGitRepo(ws)
-	processor.SetGitRepo(repo)
-	if processor.gitRepo == nil {
-		t.Error("expected non-nil gitRepo after SetGitRepo")
-	}
-
-	// Set back to nil
-	processor.SetGitRepo(nil)
-	if processor.gitRepo != nil {
-		t.Error("expected nil gitRepo after setting nil")
-	}
-}
-
-func TestParallelEnabled(t *testing.T) {
-	if !vcs.IsGitAvailable().Available {
-		t.Skip("git not available")
-	}
-
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	ws := t.TempDir()
-	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
-	os.WriteFile(filepath.Join(ws, "wiki", "index.md"), []byte("# Index"), 0o644)
-	if _, err := vcs.InitRepo(ws); err != nil {
-		t.Fatalf("InitRepo: %v", err)
-	}
-
-	processor := NewJobProcessor(db, ws)
-
-	if processor.parallelEnabled() {
-		t.Error("expected parallel disabled without job_parallel_enabled")
-	}
-
-	if err := db.SetConfig("job_parallel_enabled", "true"); err != nil {
-		t.Fatalf("SetConfig: %v", err)
-	}
-
-	if !processor.parallelEnabled() {
-		t.Error("expected parallel enabled with git repo and job_parallel_enabled")
-	}
-}
-
 func TestConcurrentJobClaiming(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
-	// Set max concurrent to 2
+	// Enable parallel claims and cap concurrency at 2.
+	if err := db.SetConfig("job_parallel_enabled", "true"); err != nil {
+		t.Fatalf("SetConfig job_parallel_enabled: %v", err)
+	}
 	if err := db.SetConfig("job_max_concurrent", "2"); err != nil {
-		t.Fatalf("SetConfig: %v", err)
+		t.Fatalf("SetConfig job_max_concurrent: %v", err)
 	}
 
 	// Create 3 queued jobs
 	for i := 0; i < 3; i++ {
-		job := &sqlite.IngestJob{
+		job := &store.IngestJob{
 			InputType:  "text",
 			SourcePath: fmt.Sprintf("raw/sources/web-ingest/test%d.md", i),
 			SourceRef:  "text",
@@ -776,7 +538,11 @@ func TestConcurrentJobClaiming(t *testing.T) {
 
 	// Complete job1, now job3 should be claimable
 	db.ClearIngestJobLease(job1.ID)
-	_, _ = db.DB().Exec(`UPDATE ingest_jobs SET status = 'succeeded', runner_id = '', heartbeat_at = '' WHERE id = ?`, job1.ID)
+	if _, err := db.Pool().Exec(context.Background(),
+		`UPDATE ingest_jobs SET status = 'succeeded', runner_id = '', heartbeat_at = '' WHERE id = $1`,
+		job1.ID); err != nil {
+		t.Fatalf("mark job1 succeeded: %v", err)
+	}
 
 	job3, err = processor.ClaimNextQueuedJob(context.Background())
 	if err != nil {
@@ -784,77 +550,6 @@ func TestConcurrentJobClaiming(t *testing.T) {
 	}
 	if job3 == nil {
 		t.Fatal("expected job3 after releasing job1")
-	}
-}
-
-func TestWorktreeCleanupOnStartup(t *testing.T) {
-	if !vcs.IsGitAvailable().Available {
-		t.Skip("git not available")
-	}
-
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	ws := t.TempDir()
-	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
-	os.WriteFile(filepath.Join(ws, "wiki", "index.md"), []byte("# Index"), 0o644)
-	repo, err := vcs.InitRepo(ws)
-	if err != nil {
-		t.Fatalf("InitRepo: %v", err)
-	}
-
-	// Create a stale worktree (simulate crashed job)
-	_, err = repo.CreateWorktree("stale-job-123")
-	if err != nil {
-		t.Fatalf("CreateWorktree: %v", err)
-	}
-
-	// Verify worktree exists
-	wtBase := filepath.Join(ws, ".llmwiki", "worktrees")
-	entries, _ := os.ReadDir(wtBase)
-	if len(entries) == 0 {
-		t.Fatal("expected at least one stale worktree")
-	}
-
-	// Start processor - should clean up stale worktrees
-	processor := NewJobProcessor(db, ws)
-	processor.SetGitRepo(repo)
-	processor.recoverStaleJobs()
-
-	// Verify worktree was cleaned up
-	entries, _ = os.ReadDir(wtBase)
-	for _, e := range entries {
-		if e.Name() == "stale-job-123" {
-			t.Error("expected stale worktree to be cleaned up")
-		}
-	}
-}
-
-func TestProcessAllSerialFallback(t *testing.T) {
-	if !vcs.IsGitAvailable().Available {
-		t.Skip("git not available")
-	}
-
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	// Do NOT enable parallel mode
-	ws := t.TempDir()
-	processor := NewJobProcessor(db, ws)
-
-	// ProcessAll should work in serial mode
-	if err := processor.ProcessAll(context.Background()); err != nil {
-		t.Fatalf("ProcessAll: %v", err)
 	}
 }
 
@@ -872,9 +567,9 @@ func clearLLMEnv(t *testing.T) {
 	}
 }
 
-func seedProcessorOpenAIProvider(t *testing.T, db *sqlite.DB) *sqlite.ProviderInstance {
+func seedProcessorOpenAIProvider(t *testing.T, db store.Store) *store.ProviderInstance {
 	t.Helper()
-	if err := db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	if err := db.UpsertProviderInfo([]store.ProviderInfo{
 		{
 			ID:        "openai",
 			Name:      "OpenAI",
@@ -884,7 +579,7 @@ func seedProcessorOpenAIProvider(t *testing.T, db *sqlite.DB) *sqlite.ProviderIn
 	}); err != nil {
 		t.Fatalf("UpsertProviderInfo: %v", err)
 	}
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name:      "OpenAI Work",
 		CatalogID: "openai",
 		APIKey:    "sk-test-key",
@@ -896,14 +591,10 @@ func seedProcessorOpenAIProvider(t *testing.T, db *sqlite.DB) *sqlite.ProviderIn
 }
 
 func TestResolveLLMClientForSessionArchiveUsesSessionConfig(t *testing.T) {
-	db, err := sqlite.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	inst := seedProcessorOpenAIProvider(t, db)
-	session := &sqlite.IngestSession{
+	session := &store.IngestSession{
 		Title:         "Archive Session",
 		StoragePath:   "raw/sources/web-ingest/sessions/sess123",
 		LLMInstanceID: inst.ID,
@@ -914,7 +605,7 @@ func TestResolveLLMClientForSessionArchiveUsesSessionConfig(t *testing.T) {
 	}
 
 	processor := NewJobProcessor(db, t.TempDir())
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  string(InputKindSessionArchive),
 		SourceRef:  "session:" + session.ID,
 		SourcePath: "raw/sources/web-ingest/sessions/sess123/archive.md",
@@ -930,11 +621,7 @@ func TestResolveLLMClientForSessionArchiveUsesSessionConfig(t *testing.T) {
 }
 
 func TestResolveLLMClientForJobUsesJobSettings(t *testing.T) {
-	db, err := sqlite.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	inst := seedProcessorOpenAIProvider(t, db)
 	if err := db.SetConfig("job_instance_id", inst.ID); err != nil {
@@ -951,7 +638,7 @@ func TestResolveLLMClientForJobUsesJobSettings(t *testing.T) {
 	}
 
 	processor := NewJobProcessor(db, t.TempDir())
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  "text",
 		SourceRef:  "text",
 		SourcePath: "raw/sources/web-ingest/test.md",
@@ -967,14 +654,10 @@ func TestResolveLLMClientForJobUsesJobSettings(t *testing.T) {
 }
 
 func TestResolveLLMClientForSessionArchiveIgnoresJobSettings(t *testing.T) {
-	db, err := sqlite.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	inst := seedProcessorOpenAIProvider(t, db)
-	session := &sqlite.IngestSession{
+	session := &store.IngestSession{
 		Title:         "Archive Session",
 		StoragePath:   "raw/sources/web-ingest/sessions/sess123",
 		LLMInstanceID: inst.ID,
@@ -991,7 +674,7 @@ func TestResolveLLMClientForSessionArchiveIgnoresJobSettings(t *testing.T) {
 	}
 
 	processor := NewJobProcessor(db, t.TempDir())
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  string(InputKindSessionArchive),
 		SourceRef:  "session:" + session.ID,
 		SourcePath: "raw/sources/web-ingest/sessions/sess123/archive.md",
@@ -1007,11 +690,7 @@ func TestResolveLLMClientForSessionArchiveIgnoresJobSettings(t *testing.T) {
 }
 
 func TestResolveLLMClientForJobUsesGlobalDefaults(t *testing.T) {
-	db, err := sqlite.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	inst := seedProcessorOpenAIProvider(t, db)
 	if err := db.SetConfig("last_instance_id", inst.ID); err != nil {
@@ -1022,7 +701,7 @@ func TestResolveLLMClientForJobUsesGlobalDefaults(t *testing.T) {
 	}
 
 	processor := NewJobProcessor(db, t.TempDir())
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  "text",
 		SourceRef:  "text",
 		SourcePath: "raw/sources/web-ingest/test.md",
@@ -1040,140 +719,21 @@ func TestResolveLLMClientForJobUsesGlobalDefaults(t *testing.T) {
 func TestResolveLLMClientForJobMissingConfig(t *testing.T) {
 	clearLLMEnv(t)
 
-	db, err := sqlite.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	processor := NewJobProcessor(db, t.TempDir())
-	job := &sqlite.IngestJob{
+	job := &store.IngestJob{
 		InputType:  "text",
 		SourceRef:  "text",
 		SourcePath: "raw/sources/web-ingest/test.md",
 	}
 
-	_, err = processor.resolveLLMClientForJob(job)
+	_, err := processor.resolveLLMClientForJob(job)
 	if err == nil {
 		t.Fatal("expected error without LLM configuration")
 	}
 	if !strings.Contains(err.Error(), "base URL is not configured") &&
 		!strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("error = %q, want configuration hint", err.Error())
-	}
-}
-
-func TestMergeWorktreeJobBranchIntegration(t *testing.T) {
-	if !vcs.IsGitAvailable().Available {
-		t.Skip("git not available")
-	}
-
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	ws := t.TempDir()
-	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
-	os.WriteFile(filepath.Join(ws, "wiki", "index.md"), []byte("# Index\n"), 0o644)
-	repo, err := vcs.InitRepo(ws)
-	if err != nil {
-		t.Fatalf("InitRepo: %v", err)
-	}
-
-	jobID := "review-apply-job"
-	worktreeDir, err := repo.CreateWorktree(jobID)
-	if err != nil {
-		t.Fatalf("CreateWorktree: %v", err)
-	}
-	wikiPath := filepath.Join(worktreeDir, "wiki", "applied.md")
-	if err := os.WriteFile(wikiPath, []byte("---\ntitle: Applied\n---\n\nbody\n"), 0o644); err != nil {
-		t.Fatalf("write wiki file: %v", err)
-	}
-	if _, err := repo.CommitInWorktree(worktreeDir, "review apply test"); err != nil {
-		t.Fatalf("CommitInWorktree: %v", err)
-	}
-
-	processor := NewJobProcessor(db, ws)
-	processor.SetGitRepo(repo)
-	sha, err := processor.mergeWorktreeJobBranch(context.Background(), repo, jobID, []string{"wiki/applied.md"}, nil, nil)
-	if err != nil {
-		t.Fatalf("mergeWorktreeJobBranch: %v", err)
-	}
-	if sha == "" {
-		t.Fatal("expected merge commit sha")
-	}
-	if _, err := os.Stat(filepath.Join(ws, "wiki", "applied.md")); err != nil {
-		t.Fatalf("merged file missing on main: %v", err)
-	}
-	if err := repo.RemoveWorktree(jobID); err != nil {
-		t.Fatalf("RemoveWorktree: %v", err)
-	}
-}
-
-func TestMergeWorktreeJobBranchWithDirtyWikiIndex(t *testing.T) {
-	if !vcs.IsGitAvailable().Available {
-		t.Skip("git not available")
-	}
-
-	ws := t.TempDir()
-	os.MkdirAll(filepath.Join(ws, "wiki"), 0o755)
-	os.WriteFile(filepath.Join(ws, "wiki", "index.md"), []byte("# Index\n"), 0o644)
-	repo, err := vcs.InitRepo(ws)
-	if err != nil {
-		t.Fatalf("InitRepo: %v", err)
-	}
-
-	jobID := "dirty-index-job"
-	worktreeDir, err := repo.CreateWorktree(jobID)
-	if err != nil {
-		t.Fatalf("CreateWorktree: %v", err)
-	}
-	wikiPath := filepath.Join(worktreeDir, "wiki", "applied.md")
-	if err := os.WriteFile(wikiPath, []byte("---\ntitle: Applied\n---\n\nbody\n"), 0o644); err != nil {
-		t.Fatalf("write wiki file: %v", err)
-	}
-	if _, err := repo.CommitInWorktree(worktreeDir, "review apply test"); err != nil {
-		t.Fatalf("CommitInWorktree: %v", err)
-	}
-
-	if err := os.WriteFile(filepath.Join(ws, "wiki", "index.md"), []byte("# Dirty Index\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	dirty, err := repo.HasUncommittedWikiMaintenance()
-	if err != nil {
-		t.Fatalf("HasUncommittedWikiMaintenance: %v", err)
-	}
-	if !dirty {
-		t.Fatal("expected dirty wiki/index.md before merge")
-	}
-
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	processor := NewJobProcessor(db, ws)
-	processor.SetGitRepo(repo)
-	sha, err := processor.mergeWorktreeJobBranch(context.Background(), repo, jobID, []string{"wiki/applied.md"}, nil, nil)
-	if err != nil {
-		t.Fatalf("mergeWorktreeJobBranch with dirty index: %v", err)
-	}
-	if sha == "" {
-		t.Fatal("expected merge commit sha")
-	}
-	dirty, err = repo.HasUncommittedWikiMaintenance()
-	if err != nil {
-		t.Fatalf("HasUncommittedWikiMaintenance after merge: %v", err)
-	}
-	if dirty {
-		t.Fatal("expected clean maintenance files after merge")
-	}
-	if err := repo.RemoveWorktree(jobID); err != nil {
-		t.Fatalf("RemoveWorktree: %v", err)
 	}
 }

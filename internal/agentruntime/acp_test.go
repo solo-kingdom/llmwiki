@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/solo-kingdom/llmwiki/internal/acp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type acpTestSink struct {
@@ -186,7 +186,7 @@ func TestACPRuntimeHistoryReplayAfterRestart(t *testing.T) {
 	mgr := acp.NewManager(2)
 	t.Cleanup(mgr.CloseAll)
 	runtime := newACPRuntime(mgr, t.TempDir(), cfg, agent)
-	history := []sqlite.IngestSessionMessage{{Role: "user", Content: "old context", StreamStatus: "complete"}}
+	history := []store.IngestSessionMessage{{Role: "user", Content: "old context", StreamStatus: "complete"}}
 	firstSink := &acpTestSink{}
 	if _, err := runtime.Prompt(context.Background(), PromptRequest{SessionID: "s1", UserContent: "first", History: history}, firstSink); err != nil {
 		t.Fatalf("first Prompt: %v", err)

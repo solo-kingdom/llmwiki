@@ -35,8 +35,9 @@ func TestIsLoopback(t *testing.T) {
 
 func setupWorkspace(t *testing.T) string {
 	t.Helper()
+	initTestDB(t)
 	ws := t.TempDir()
-	if err := runInit(ws); err != nil {
+	if err := runInit(ws, ""); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 	return ws

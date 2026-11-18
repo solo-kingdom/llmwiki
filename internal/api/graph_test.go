@@ -7,24 +7,19 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
 func TestKnowledgeGraphAPI(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := dir + "/test.db"
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := pgtest.Open(t)
 
-	pageA := &sqlite.Document{
+	pageA := &store.Document{
 		UserID: "u1", Filename: "a.md", Title: "Page A",
 		Path: "/wiki/", RelativePath: "wiki/entities/a.md",
 		SourceKind: "wiki", FileType: "md", Status: "ready",
 	}
-	pageB := &sqlite.Document{
+	pageB := &store.Document{
 		UserID: "u1", Filename: "b.md", Title: "Page B",
 		Path: "/wiki/", RelativePath: "wiki/concepts/b.md",
 		SourceKind: "wiki", FileType: "md", Status: "ready",
@@ -51,7 +46,7 @@ func TestKnowledgeGraphAPI(t *testing.T) {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
 	}
 
-	var resp sqlite.GraphData
+	var resp store.GraphData
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
@@ -92,12 +87,7 @@ func TestKnowledgeGraphAPI(t *testing.T) {
 }
 
 func TestKnowledgeGraphAPIEmpty(t *testing.T) {
-	dir := t.TempDir()
-	db, err := sqlite.Open(dir + "/test.db")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := pgtest.Open(t)
 
 	api := New(db)
 	r := chi.NewRouter()
@@ -111,7 +101,7 @@ func TestKnowledgeGraphAPIEmpty(t *testing.T) {
 		t.Fatalf("status %d", w.Code)
 	}
 
-	var resp sqlite.GraphData
+	var resp store.GraphData
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
@@ -124,23 +114,17 @@ func TestKnowledgeGraphAPIEmpty(t *testing.T) {
 }
 
 func TestKnowledgeGraphAPILimit(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := dir + "/test.db"
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := pgtest.Open(t)
 
 	// Create 5 documents with varying link counts.
-	docs := make([]*sqlite.Document, 5)
+	docs := make([]*store.Document, 5)
 	for i := range 5 {
-		docs[i] = &sqlite.Document{
+		docs[i] = &store.Document{
 			UserID: "u1", Filename: string(rune('a'+i)) + ".md",
-			Title:      string(rune('A' + i)),
-			Path:       "/wiki/",
+			Title:        string(rune('A' + i)),
+			Path:         "/wiki/",
 			RelativePath: "wiki/entities/" + string(rune('a'+i)) + ".md",
-			SourceKind: "wiki", FileType: "md", Status: "ready",
+			SourceKind:   "wiki", FileType: "md", Status: "ready",
 		}
 		if err := db.CreateDocument(docs[i]); err != nil {
 			t.Fatal(err)
@@ -162,7 +146,7 @@ func TestKnowledgeGraphAPILimit(t *testing.T) {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
-		var resp sqlite.GraphData
+		var resp store.GraphData
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}
@@ -182,7 +166,7 @@ func TestKnowledgeGraphAPILimit(t *testing.T) {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
-		var resp sqlite.GraphData
+		var resp store.GraphData
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}
@@ -206,7 +190,7 @@ func TestKnowledgeGraphAPILimit(t *testing.T) {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
-		var resp sqlite.GraphData
+		var resp store.GraphData
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}
@@ -223,7 +207,7 @@ func TestKnowledgeGraphAPILimit(t *testing.T) {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
-		var resp sqlite.GraphData
+		var resp store.GraphData
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatal(err)
 		}

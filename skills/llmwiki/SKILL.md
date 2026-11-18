@@ -1,6 +1,6 @@
 ---
 name: llmwiki
-description: Operate an LLM Wiki server over its HTTP API — read and write wiki pages, run ingest pipelines, lint and repair the vault, back up with git. Use when the user mentions llmwiki, the wiki server, or asks to add, query, ingest, reorganize, lint, or back up wiki knowledge. Entry skill: it routes to the stage skills.
+description: Operate an LLM Wiki server over its HTTP API — read and write wiki pages, run ingest pipelines, lint and repair the vault, and inspect or roll back history. Use when the user mentions llmwiki, the wiki server, or asks to add, query, ingest, reorganize, lint, or roll back wiki knowledge. Entry skill: it routes to the stage skills.
 license: MIT
 metadata:
   author: llmwiki
@@ -22,7 +22,7 @@ curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/health"      # {"status":"ok"} means
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/workspace"   # server address + vault state
 ```
 
-`GET /api/v1/workspace` is the first call of every task. It returns `root`, `layout` (which parts of the vault exist), `counts`, `page_types`, `wiki_dirs`. Empty counts + `layout.index_db: false` means a fresh or unindexed vault: run `POST /api/v1/reindex` before anything else.
+`GET /api/v1/workspace` is the first call of every task. It returns `root`, `layout` (which parts of the vault exist), `counts`, `page_types`, `wiki_dirs`. Empty counts + `layout.index_db: false` means PostgreSQL is not initialized: check `--database-url` and run `llmwiki init` before anything else.
 
 When a token is configured, every `/api/v1/*` call needs the `Authorization` header. Only `/api/v1/health` and `/api/public/wiki/status` are unauthenticated. The token comes from Settings (`api_token`) or the server `--token` flag; the flag wins. `GET /api/v1/settings` reports `api_token_source` (`flag` / `settings` / `none`) — never print the token itself.
 
@@ -52,7 +52,7 @@ wiki/overview.md      top-level orientation page
 wiki/index.md         generated table of contents — never hand-edit
 wiki/log.md           append-only journal: `## [YYYY-MM-DD] action | description`
 wiki/entities/ concepts/ synthesis/ comparisons/ queries/ sources/
-.llmwiki/index.db     derived index (search, graph, lint) — rebuildable, never edited
+PostgreSQL             pages, revisions, search, graph, lint — the only source of truth
 ```
 
 - **Files are the truth, the index is derived.** Write through the API, then let it reindex. Changes made behind the server's back need `POST /api/v1/reindex` before search, graph or lint can see them.
@@ -65,7 +65,7 @@ wiki/entities/ concepts/ synthesis/ comparisons/ queries/ sources/
 
 | Task | Stage skill | Endpoint |
 |---|---|---|
-| Install, first run, configure models, git backup | `llmwiki-guide` | `GET /skills/llmwiki-guide.md` |
+| Install, first run, configure models and embeddings, history and rollback | `llmwiki-guide` | `GET /skills/llmwiki-guide.md` |
 | Answer a question, find pages, inspect references | `llmwiki-query` | `GET /skills/llmwiki-query.md` |
 | Create, edit, merge, move or delete pages | `llmwiki-organize` | `GET /skills/llmwiki-organize.md` |
 | Turn files/URLs/paste into wiki knowledge | `llmwiki-ingest` | `GET /skills/llmwiki-ingest.md` |
@@ -81,7 +81,7 @@ Read the stage skill before starting its task; each one lists the exact payloads
 4. **No silent inventing.** If the vault lacks the evidence, say so and ingest a source instead of guessing.
 5. **Verify with lint after every batch** of page changes; do not report success while `GET /api/v1/lint` returns `severity: error` issues you caused.
 6. **Never edit `wiki/index.md`, `.llmwiki/` or `raw/`.**
-7. **Report evidence, not activity**: list the paths you changed, the lint result, and the git commit sha when you committed.
+7. **Report evidence, not activity**: list the paths you changed, the lint result, and the change set id when you rolled back.
 
 ## Response conventions
 

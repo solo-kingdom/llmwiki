@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/spf13/cobra"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/spf13/cobra"
 )
 
 func newIngestCmd() *cobra.Command {
@@ -36,9 +35,9 @@ func runIngest(workspaceDir, sourceFile string, forceOverwrite bool) error {
 		return fmt.Errorf("resolve source path: %w", err)
 	}
 
-	db, err := sqlite.Open(workspaceIndexPath(ws))
+	db, err := openDatabase()
 	if err != nil {
-		return fmt.Errorf("open database: %w", err)
+		return err
 	}
 	defer db.Close()
 
@@ -53,8 +52,9 @@ func runIngest(workspaceDir, sourceFile string, forceOverwrite bool) error {
 		Model:    wsCfg.Model,
 	})
 
-	pipeline := ingest.NewPipeline(ws, client)
+	pipeline := ingest.NewPipelineWithDB(ws, db, client)
 	pipeline.SetForceOverwrite(forceOverwrite)
+	pipeline.SetChangeSetMeta("ingest", "", "", filepath.Base(absSource), "")
 	files, err := pipeline.Ingest(context.Background(), absSource)
 	if err != nil {
 		return fmt.Errorf("ingest: %w", err)

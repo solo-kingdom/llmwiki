@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type providerCheckResponse struct {
@@ -45,7 +45,7 @@ func (a *API) CheckAllProviderInstances(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if instances == nil {
-		instances = []sqlite.ProviderInstance{}
+		instances = []store.ProviderInstance{}
 	}
 
 	type item struct {
@@ -65,7 +65,7 @@ func (a *API) CheckAllProviderInstances(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"instances": results})
 }
 
-func (a *API) checkProviderInstance(ctx context.Context, inst *sqlite.ProviderInstance) providerCheckResponse {
+func (a *API) checkProviderInstance(ctx context.Context, inst *store.ProviderInstance) providerCheckResponse {
 	resp := providerCheckResponse{
 		Status:  "ok",
 		Message: "连接正常",

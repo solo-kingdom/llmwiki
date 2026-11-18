@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func (a *API) Search(w http.ResponseWriter, r *http.Request) {
@@ -20,17 +20,22 @@ func (a *API) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	pageTypes := r.URL.Query()["types"]
 
-	results, err := a.db.SearchChunks(query, limit, filter, pageTypes...)
+	mode := normalizeSearchMode(r.URL.Query().Get("mode"))
+	if mode == "auto" {
+		mode = "hybrid"
+	}
+	results, err := a.hybridSearch(query, limit, filter, pageTypes, mode)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if results == nil {
-		results = []sqlite.SearchChunk{}
+		results = []store.SearchChunk{}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"query":   query,
+		"mode":    mode,
 		"results": results,
 	})
 }

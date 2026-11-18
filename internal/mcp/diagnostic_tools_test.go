@@ -6,20 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
 func TestExecuteLocalStructureHeaderAndTypedDirs(t *testing.T) {
 	ws := t.TempDir()
-	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := pgtest.Open(t)
 
 	if err := os.MkdirAll(filepath.Join(ws, "wiki", "templates"), 0o755); err != nil {
 		t.Fatal(err)
@@ -33,7 +26,7 @@ func TestExecuteLocalStructureHeaderAndTypedDirs(t *testing.T) {
 		{"wiki/index.md", "index.md", "/wiki/", "Index"},
 		{"wiki/log.md", "log.md", "/wiki/", "Log"},
 	} {
-		if err := db.CreateDocument(&sqlite.Document{
+		if err := db.CreateDocument(&store.Document{
 			Filename:     spec.filename,
 			Title:        spec.title,
 			Path:         spec.path,

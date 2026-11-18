@@ -7,21 +7,17 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
 
 	_ "github.com/solo-kingdom/llmwiki" // embed web assets
 	"github.com/solo-kingdom/llmwiki/internal/acp"
-	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
 	"github.com/solo-kingdom/llmwiki/internal/server"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
-	"github.com/solo-kingdom/llmwiki/internal/watcher"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
 	"github.com/solo-kingdom/llmwiki/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -33,7 +29,6 @@ func newServeCmd() *cobra.Command {
 		token         string
 		publicWiki    bool
 		noMCP         bool
-		noWatch       bool
 		mcpAllowWrite bool
 	)
 
@@ -52,7 +47,6 @@ func newServeCmd() *cobra.Command {
 				token:         token,
 				publicWiki:    publicWiki,
 				noMCP:         noMCP,
-				noWatch:       noWatch,
 				mcpAllowWrite: mcpAllowWrite,
 			})
 		},
@@ -63,7 +57,6 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&token, "token", "", "API token for authentication (optional)")
 	cmd.Flags().BoolVar(&publicWiki, "public-wiki", false, "Enable public read-only Wiki at /wiki and /api/public/wiki/*")
 	cmd.Flags().BoolVar(&noMCP, "no-mcp", false, "Disable MCP server")
-	cmd.Flags().BoolVar(&noWatch, "no-watch", false, "Disable file watcher")
 	cmd.Flags().BoolVar(&mcpAllowWrite, "mcp-allow-write", false, "Allow MCP write/delete tools for remote agents (default: readonly)")
 
 	return cmd
@@ -85,14 +78,9 @@ func runServe(dir string, opts serveOptions) error {
 		return err
 	}
 
-	dbPath, _, err := storesvc.DiscoverWorkspace(ws)
+	db, err := openDatabase()
 	if err != nil {
 		return err
-	}
-
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("open database: %w", err)
 	}
 	defer db.Close()
 
@@ -121,7 +109,6 @@ func runServe(dir string, opts serveOptions) error {
 		Token:         opts.token,
 		PublicWiki:    opts.publicWiki,
 		NoMCP:         opts.noMCP,
-		NoWatch:       opts.noWatch,
 		Workspace:     ws,
 		DB:            db,
 		LockMgr:       lockMgr,
@@ -143,34 +130,7 @@ func runServe(dir string, opts serveOptions) error {
 		srv.SetMCPHandler(mcp.NewHTTPHandler(mcpServer))
 	}
 
-	if !opts.noWatch {
-		w, err := watcher.New(ws, func(changes []watcher.Change) {
-			for _, ch := range changes {
-				rel, err := filepath.Rel(ws, ch.Path)
-				if err != nil {
-					continue
-				}
-				rel = filepath.ToSlash(rel)
-				switch ch.Type {
-				case watcher.ChangeCreated:
-					activity.RecordWatcherEvent(db, "file_created", rel)
-				case watcher.ChangeModified:
-					activity.RecordWatcherModify(db, rel)
-				case watcher.ChangeDeleted:
-					activity.RecordWatcherEvent(db, "file_deleted", rel)
-				}
-			}
-		})
-		if err != nil {
-			log.Printf("Warning: file watcher unavailable: %v", err)
-		} else {
-			w.SetIndexer(&activity.Indexer{Inner: fileIndexer, DB: db})
-			srv.SetWatcher(w)
-		}
-	}
-
 	processor := ingest.NewJobProcessor(db, ws)
-	processor.SetFileIndexer(fileIndexer)
 	processor.Start(2 * time.Second)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -28,6 +28,8 @@ func newRootCmd() *cobra.Command {
 		Long:  "Incrementally build and maintain a structured wiki from source documents.",
 	}
 
+	root.PersistentFlags().StringVar(&databaseURL, "database-url", "", "PostgreSQL DSN (default: $"+databaseURLEnv+")")
+
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newServeCmd())
 	root.AddCommand(newLintCmd())
@@ -35,6 +37,9 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newIngestCmd())
 	root.AddCommand(newMCPCmd())
 	root.AddCommand(newMCPConfigCmd())
+	root.AddCommand(newExportCmd())
+	root.AddCommand(newEmbedCmd())
+	root.AddCommand(newMigrateCmd())
 	root.AddCommand(newVersionCmd())
 
 	return root

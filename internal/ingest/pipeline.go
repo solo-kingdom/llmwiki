@@ -9,21 +9,28 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 type Pipeline struct {
-	workspace       string
-	targetDir       string     // optional: when set, wiki/ reads and writes go to this directory instead of workspace
-	db              *sqlite.DB // database for local tool execution
-	llmClient       *llm.Client
-	lockMgr         *PageLockManager
-	recorder        JobRecorder
-	mcpExecutor     *pipelineMCPExecutor
-	toolLoopCfg     llm.ToolLoopConfig
-	docLang         string // "zh" or "en", controls generation language
-	rulesSupplement string
-	forceOverwrite  bool
+	workspace         string
+	targetDir         string      // optional: when set, wiki/ reads and writes go to this directory instead of workspace
+	db                store.Store // database for local tool execution
+	llmClient         *llm.Client
+	lockMgr           *PageLockManager
+	recorder          JobRecorder
+	mcpExecutor       *pipelineMCPExecutor
+	toolLoopCfg       llm.ToolLoopConfig
+	docLang           string // "zh" or "en", controls generation language
+	rulesSupplement   string
+	forceOverwrite    bool
+	applyToDB         bool
+	changeSetKind     string
+	changeSetJobID    string
+	changeSetReviewID string
+	sourceFilename    string
+	normalizedContent string
+	lastChangeSetID   string
 }
 
 type CacheEntry struct {
@@ -46,18 +53,35 @@ func NewPipeline(workspace string, llmClient *llm.Client) *Pipeline {
 }
 
 // NewPipelineWithDB creates a pipeline with database access for local tool execution.
-func NewPipelineWithDB(workspace string, db *sqlite.DB, llmClient *llm.Client) *Pipeline {
+func NewPipelineWithDB(workspace string, db store.Store, llmClient *llm.Client) *Pipeline {
 	return &Pipeline{
 		workspace: workspace,
 		db:        db,
 		llmClient: llmClient,
 		lockMgr:   NewPageLockManager(),
+		applyToDB: db != nil,
 	}
 }
 
 // SetDB sets or updates the database reference for local tool execution.
-func (p *Pipeline) SetDB(db *sqlite.DB) {
+func (p *Pipeline) SetDB(db store.Store) {
 	p.db = db
+	p.applyToDB = db != nil
+}
+
+// SetApplyToDB toggles the DB-first apply path (enabled by NewPipelineWithDB).
+func (p *Pipeline) SetApplyToDB(v bool) { p.applyToDB = v }
+
+// LastChangeSetID returns the change set created by the most recent DB apply.
+func (p *Pipeline) LastChangeSetID() string { return p.lastChangeSetID }
+
+// SetChangeSetMeta records which ingest job/review produced the next change set.
+func (p *Pipeline) SetChangeSetMeta(kind, jobID, reviewID, sourceFilename, normalizedContent string) {
+	p.changeSetKind = kind
+	p.changeSetJobID = jobID
+	p.changeSetReviewID = reviewID
+	p.sourceFilename = sourceFilename
+	p.normalizedContent = normalizedContent
 }
 
 // SetLLMClient updates the LLM client used for subsequent pipeline runs.
@@ -281,7 +305,7 @@ func (p *Pipeline) generate(ctx context.Context, name, content, analysis string)
 		p.lockMgr.Unlock(path)
 	}
 
-	applyResult, err := ApplyWikiBlocks(ctx, p.effectiveWorkspace(), blocks, p.applyWikiBlocksOpts())
+	applyResult, err := p.applyBlocks(ctx, blocks)
 	if err != nil {
 		return nil, err
 	}

@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func TestAssembleIngestChatMessagesSkipsFailedAssistant(t *testing.T) {
-	history := []sqlite.IngestSessionMessage{
+	history := []store.IngestSessionMessage{
 		{Role: "user", Content: "first", StreamStatus: "complete"},
 		{Role: "assistant", Content: "error text", StreamStatus: "failed"},
 		{Role: "user", Content: "second", StreamStatus: "complete"},
@@ -33,7 +33,7 @@ func TestAssembleIngestChatMessagesSkipsFailedAssistant(t *testing.T) {
 }
 
 func TestAssembleIngestChatMessagesLanguageInstruction(t *testing.T) {
-	history := []sqlite.IngestSessionMessage{}
+	history := []store.IngestSessionMessage{}
 	msgs := AssembleIngestChatMessages(history, "", "zh", "", "", "", StepSessionChat)
 	if len(msgs) < 1 || msgs[0].Role != "system" {
 		t.Fatal("expected system message")

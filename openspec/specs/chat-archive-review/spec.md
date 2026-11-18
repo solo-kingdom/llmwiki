@@ -53,7 +53,7 @@ ArchiveReviewCard SHALL 提供确认计划操作，并在执行期间展示进�
 - **WHEN** review 状态变为 `succeeded`
 - **AND** apply 实际写入了至少一个 wiki 页面
 - **THEN** 卡片 SHALL 显示成功摘要（写入页面数大于 0）
-- **AND** 若 `merge_commit_sha` 存在 SHALL 显示「查看变更 diff」入口
+- **AND** 若 `change_set_id` 存在 SHALL 显示「查看变更 diff」入口
 
 #### Scenario: 执行成功但零页面写入
 - **WHEN** review 状态为 `failed` 且错误为无 wiki 文件写入

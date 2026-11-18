@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func setupSessionRoutes(api *API, r chi.Router) {
@@ -77,7 +77,7 @@ func TestPatchIngestSessionAgent(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 	seedACPTestAgent(t, api, "x", "echo", true)
-	session := &sqlite.IngestSession{Title: "native"}
+	session := &store.IngestSession{Title: "native"}
 	if err := api.db.CreateIngestSession(session); err != nil {
 		t.Fatalf("CreateIngestSession: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestPatchIngestSessionAgentValidationAndConflicts(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 	seedACPTestAgent(t, api, "x", "echo", true)
-	session := &sqlite.IngestSession{Title: "native"}
+	session := &store.IngestSession{Title: "native"}
 	if err := api.db.CreateIngestSession(session); err != nil {
 		t.Fatalf("CreateIngestSession: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestPatchIngestSessionAgentValidationAndConflicts(t *testing.T) {
 			t.Fatalf("body=%s status=%d response=%s", body, w.Code, w.Body.String())
 		}
 	}
-	streaming := &sqlite.IngestSessionMessage{SessionID: session.ID, Role: "assistant", Content: "partial", StreamStatus: "streaming"}
+	streaming := &store.IngestSessionMessage{SessionID: session.ID, Role: "assistant", Content: "partial", StreamStatus: "streaming"}
 	if err := api.db.CreateIngestSessionMessage(streaming); err != nil {
 		t.Fatalf("CreateIngestSessionMessage: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestACPSessionWithoutProviderDoesNotMentionProvider(t *testing.T) {
 	api, r := setupTestAPI(t)
 	setupSessionRoutes(api, r)
 	seedACPTestAgent(t, api, "x", "definitely-missing-acp-cli", true)
-	session := &sqlite.IngestSession{Title: "acp", AgentKind: "acp", ACPAgentID: "x"}
+	session := &store.IngestSession{Title: "acp", AgentKind: "acp", ACPAgentID: "x"}
 	if err := api.db.CreateIngestSession(session); err != nil {
 		t.Fatalf("CreateIngestSession: %v", err)
 	}
@@ -800,7 +800,7 @@ func TestStreamSessionReplyNoAPIKey(t *testing.T) {
 
 func seedOpenAIProviderForStream(t *testing.T, api *API) {
 	t.Helper()
-	if err := api.db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	if err := api.db.UpsertProviderInfo([]store.ProviderInfo{
 		{
 			ID:        "openai",
 			Name:      "OpenAI",
@@ -878,7 +878,7 @@ func TestStreamSessionReplyIncrementalPersist(t *testing.T) {
 	}, true))
 	t.Cleanup(llmSrv.Close)
 
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name:      "Mock OpenAI",
 		CatalogID: "openai",
 		APIKey:    "sk-test",
@@ -954,7 +954,7 @@ func TestStreamSessionReplyIncrementalPersist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListIngestSessionMessages: %v", err)
 	}
-	var assistant *sqlite.IngestSessionMessage
+	var assistant *store.IngestSessionMessage
 	for i := range msgs {
 		if msgs[i].Role == "assistant" {
 			assistant = &msgs[i]
@@ -991,7 +991,7 @@ func TestStreamSessionReplyClientDisconnectMarksIncomplete(t *testing.T) {
 	}, true))
 	t.Cleanup(llmSrv.Close)
 
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name:      "Mock OpenAI",
 		CatalogID: "openai",
 		APIKey:    "sk-test",
@@ -1045,7 +1045,7 @@ func TestStreamSessionReplyClientDisconnectMarksIncomplete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListIngestSessionMessages: %v", err)
 	}
-	var assistant *sqlite.IngestSessionMessage
+	var assistant *store.IngestSessionMessage
 	for i := range msgs {
 		if msgs[i].Role == "assistant" {
 			assistant = &msgs[i]
@@ -1064,7 +1064,7 @@ func TestStreamSessionReplyClientDisconnectMarksIncomplete(t *testing.T) {
 }
 
 func TestRetryIngestSessionMessageReusesSameRows(t *testing.T) {
-	api, r := setupTestAPI(t)
+	api, r, db := setupTestAPIWithDB(t)
 	setupSessionRoutes(api, r)
 	seedOpenAIProviderForStream(t, api)
 
@@ -1077,7 +1077,7 @@ func TestRetryIngestSessionMessageReusesSameRows(t *testing.T) {
 	}, true))
 	t.Cleanup(llmSrv.Close)
 
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name:      "Mock OpenAI",
 		CatalogID: "openai",
 		APIKey:    "sk-test",
@@ -1100,7 +1100,7 @@ func TestRetryIngestSessionMessageReusesSameRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	userMsg := &sqlite.IngestSessionMessage{
+	userMsg := &store.IngestSessionMessage{
 		SessionID:    createResp.Session.ID,
 		Role:         "user",
 		Content:      "hello retry",
@@ -1110,8 +1110,16 @@ func TestRetryIngestSessionMessageReusesSameRows(t *testing.T) {
 	if err := api.db.CreateIngestSessionMessage(userMsg); err != nil {
 		t.Fatalf("CreateIngestSessionMessage user: %v", err)
 	}
+	// created_at has second precision, so user and assistant created in the same
+	// second tie-break by id (random UUID). Backdate the user message to keep the
+	// chronological order deterministic.
+	if _, err := db.Pool().Exec(context.Background(),
+		`UPDATE ingest_session_messages SET created_at = '2000-01-01 00:00:00' WHERE id = $1`,
+		userMsg.ID); err != nil {
+		t.Fatalf("backdate user message: %v", err)
+	}
 
-	assistant := &sqlite.IngestSessionMessage{
+	assistant := &store.IngestSessionMessage{
 		SessionID:    createResp.Session.ID,
 		Role:         "assistant",
 		Content:      "LLM stream failed",
@@ -1140,7 +1148,7 @@ func TestRetryIngestSessionMessageReusesSameRows(t *testing.T) {
 		t.Fatalf("ListIngestSessionMessages: %v", err)
 	}
 	userCount := 0
-	var retried *sqlite.IngestSessionMessage
+	var retried *store.IngestSessionMessage
 	for i := range msgs {
 		if msgs[i].Role == "user" {
 			userCount++
@@ -1176,7 +1184,7 @@ func TestRetryIngestSessionMessageNotRetriable(t *testing.T) {
 	var createResp sessionResponse
 	_ = json.NewDecoder(w.Body).Decode(&createResp)
 
-	assistant := &sqlite.IngestSessionMessage{
+	assistant := &store.IngestSessionMessage{
 		SessionID:    createResp.Session.ID,
 		Role:         "assistant",
 		Content:      "done",
@@ -1241,7 +1249,7 @@ func TestListSessionReferencesEmpty(t *testing.T) {
 		t.Fatalf("list references: %d %s", w.Code, w.Body.String())
 	}
 	var resp struct {
-		References []sqlite.IngestSessionReference `json:"references"`
+		References []store.IngestSessionReference `json:"references"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
@@ -1256,7 +1264,7 @@ func TestArchiveSessionIncludesReferencedWikiPages(t *testing.T) {
 	setupSessionRoutes(api, r)
 	dir := api.workspace
 
-	mentionDoc := &sqlite.Document{
+	mentionDoc := &store.Document{
 		Filename:     "alpha.md",
 		Title:        "Alpha Page",
 		Path:         "/wiki/",
@@ -1269,7 +1277,7 @@ func TestArchiveSessionIncludesReferencedWikiPages(t *testing.T) {
 	if err := api.db.CreateDocument(mentionDoc); err != nil {
 		t.Fatalf("CreateDocument mention: %v", err)
 	}
-	readDoc := &sqlite.Document{
+	readDoc := &store.Document{
 		Filename:     "beta.md",
 		Title:        "Beta Page",
 		Path:         "/wiki/",
@@ -1317,7 +1325,7 @@ func TestArchiveSessionIncludesReferencedWikiPages(t *testing.T) {
 		readDoc.ID,
 		readDoc.RelativePath,
 		readDoc.Title,
-		sqlite.SessionRefSourceToolRead,
+		store.SessionRefSourceToolRead,
 	); err != nil {
 		t.Fatalf("UpsertSessionReference tool_read: %v", err)
 	}
@@ -1329,7 +1337,7 @@ func TestArchiveSessionIncludesReferencedWikiPages(t *testing.T) {
 		t.Fatalf("list references: %d %s", w.Code, w.Body.String())
 	}
 	var refsResp struct {
-		References []sqlite.IngestSessionReference `json:"references"`
+		References []store.IngestSessionReference `json:"references"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&refsResp); err != nil {
 		t.Fatal(err)
@@ -1550,7 +1558,7 @@ func TestStreamSessionToolLoopFailureEmitsWarningAndDone(t *testing.T) {
 	llmSrv := httptest.NewServer(mockToolLoopAndStreamFailHandler())
 	t.Cleanup(llmSrv.Close)
 
-	inst := &sqlite.ProviderInstance{
+	inst := &store.ProviderInstance{
 		Name:      "Mock OpenAI",
 		CatalogID: "openai",
 		APIKey:    "sk-test",
@@ -1615,7 +1623,7 @@ func TestStreamSessionToolLoopFailureEmitsWarningAndDone(t *testing.T) {
 		t.Fatalf("warning message = %q, want tool loop error", warningData["message"])
 	}
 
-	var doneMsg sqlite.IngestSessionMessage
+	var doneMsg store.IngestSessionMessage
 	for _, ev := range events {
 		if ev.Type == "done" {
 			if err := json.Unmarshal([]byte(ev.Data), &doneMsg); err != nil {
@@ -1635,7 +1643,7 @@ func TestStreamSessionToolLoopFailureEmitsWarningAndDone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListIngestSessionMessages: %v", err)
 	}
-	var assistant *sqlite.IngestSessionMessage
+	var assistant *store.IngestSessionMessage
 	for i := range msgs {
 		if msgs[i].Role == "assistant" {
 			assistant = &msgs[i]

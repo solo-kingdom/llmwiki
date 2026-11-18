@@ -26,7 +26,8 @@
 │   ├── queries/            # 归档问答
 │   └── templates/          # 页面模板（系统目录，非业务内容）
 └── .llmwiki/
-    ├── index.db            # SQLite 索引（可 reindex 重建）
+    ├── workspace-settings.json # 非密设置快照（可选）
+    └── prompts.yaml        # 追加式提示词补充
     └── ...
 ```
 
@@ -57,7 +58,7 @@
 Organize 模式应调用 Local `structure()` 工具。真实输出特征：
 
 - 标题：`# Wiki 目录结构`
-- 含工作区路径与数据来源说明（SQLite index）
+- 含工作区路径说明（页面正文与历史在 PostgreSQL）
 - 统计行：`总计 N 个 wiki 文档（M 个业务内容页）`
 - typed 子目录：`├── entities/ (N 页)` 等，空目录显示 `(空目录)`
 - 路径前缀为 `wiki/…`（相对工作区根）
@@ -68,7 +69,7 @@ Organize 模式应调用 Local `structure()` 工具。真实输出特征：
 # Wiki 目录结构
 
 工作区：`/path/to/research`
-数据来源：SQLite index（与文件系统不一致时请运行 `llmwiki reindex`）
+数据来源：PostgreSQL（需要文件副本时运行 `llmwiki export --out <dir>`）
 
 总计 41 个 wiki 文档（32 个业务内容页）
 

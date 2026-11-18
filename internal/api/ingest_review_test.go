@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 
 func setupReviewRoutes(api *API, r chi.Router) {
@@ -68,39 +67,6 @@ func TestGetSessionIncludesActiveReview(t *testing.T) {
 	}
 	if detail.ActiveReview.ReviewID != arch.ReviewID {
 		t.Fatalf("review_id = %q, want %q", detail.ActiveReview.ReviewID, arch.ReviewID)
-	}
-}
-
-func TestGetReviewReturnsMergeCommitSHA(t *testing.T) {
-	api, r := setupTestAPI(t)
-	setupReviewRoutes(api, r)
-
-	review := &sqlite.IngestReview{
-		SessionID:         "sess-1",
-		ArchiveSourcePath: "raw/test.md",
-		Status:            "succeeded",
-	}
-	if err := api.db.CreateIngestReview(review); err != nil {
-		t.Fatal(err)
-	}
-	if err := api.db.SetIngestReviewMergeCommitSHA(review.ID, "deadbeef"); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/reviews/"+review.ID, nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("get review: %d %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Review struct {
-			MergeCommitSHA string `json:"merge_commit_sha"`
-		} `json:"review"`
-	}
-	_ = json.NewDecoder(w.Body).Decode(&resp)
-	if resp.Review.MergeCommitSHA != "deadbeef" {
-		t.Fatalf("merge_commit_sha = %q", resp.Review.MergeCommitSHA)
 	}
 }
 

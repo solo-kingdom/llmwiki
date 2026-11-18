@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/google/uuid"
 
 	"github.com/solo-kingdom/llmwiki/internal/store"
 )
@@ -18,7 +19,7 @@ func (d *DB) CreateSourceBlob(blob *store.SourceBlob, data []byte) error {
 		return fmt.Errorf("nil source blob")
 	}
 	if blob.ID == "" {
-		return fmt.Errorf("source blob id is required")
+		blob.ID = uuid.New().String()
 	}
 	if data == nil {
 		data = []byte{}

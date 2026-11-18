@@ -6,16 +6,16 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/agentruntime"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func TestSSEEventSinkTokenPersistsFullContent(t *testing.T) {
 	api, _ := setupTestAPI(t)
-	session := &sqlite.IngestSession{Title: "sink"}
+	session := &store.IngestSession{Title: "sink"}
 	if err := api.db.CreateIngestSession(session); err != nil {
 		t.Fatalf("CreateIngestSession: %v", err)
 	}
-	message := &sqlite.IngestSessionMessage{SessionID: session.ID, Role: "assistant", Content: "", StreamStatus: "streaming"}
+	message := &store.IngestSessionMessage{SessionID: session.ID, Role: "assistant", Content: "", StreamStatus: "streaming"}
 	if err := api.db.CreateIngestSessionMessage(message); err != nil {
 		t.Fatalf("CreateIngestSessionMessage: %v", err)
 	}
@@ -30,11 +30,11 @@ func TestSSEEventSinkTokenPersistsFullContent(t *testing.T) {
 
 func TestSSEEventSinkThoughtAndPermission(t *testing.T) {
 	api, _ := setupTestAPI(t)
-	session := &sqlite.IngestSession{Title: "sink"}
+	session := &store.IngestSession{Title: "sink"}
 	if err := api.db.CreateIngestSession(session); err != nil {
 		t.Fatalf("CreateIngestSession: %v", err)
 	}
-	message := &sqlite.IngestSessionMessage{SessionID: session.ID, Role: "assistant", Content: "body", StreamStatus: "streaming"}
+	message := &store.IngestSessionMessage{SessionID: session.ID, Role: "assistant", Content: "body", StreamStatus: "streaming"}
 	if err := api.db.CreateIngestSessionMessage(message); err != nil {
 		t.Fatalf("CreateIngestSessionMessage: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestSSEEventSinkThoughtAndPermission(t *testing.T) {
 	if strings.Join(events, ",") != "thought,permission" {
 		t.Fatalf("SSE events = %v", events)
 	}
-	logs, err := api.db.ListActivityLogs(sqlite.ActivityLogListFilter{Category: "agent", Limit: 10})
+	logs, err := api.db.ListActivityLogs(store.ActivityLogListFilter{Category: "agent", Limit: 10})
 	if err != nil {
 		t.Fatalf("ListActivityLogs: %v", err)
 	}

@@ -7,7 +7,7 @@ import (
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
 func TestReindexRecoversWebIngestedSources(t *testing.T) {
@@ -28,12 +28,7 @@ func TestReindexRecoversWebIngestedSources(t *testing.T) {
 		t.Fatalf("WriteFile wiki: %v", err)
 	}
 
-	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	defer db.Close()
+	db := pgtest.Open(t)
 
 	adapter := storesvc.NewStoreAdapter(db)
 	reindexer := engine.NewReindexer(adapter, ws)
@@ -82,12 +77,7 @@ func TestReindexRecoversMultipleWebIngestFormats(t *testing.T) {
 		t.Fatalf("WriteFile wiki: %v", err)
 	}
 
-	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	defer db.Close()
+	db := pgtest.Open(t)
 
 	adapter := storesvc.NewStoreAdapter(db)
 	reindexer := engine.NewReindexer(adapter, ws)
@@ -132,12 +122,7 @@ func TestReindexPreservesWebIngestAfterDoubleReindex(t *testing.T) {
 		t.Fatalf("WriteFile wiki: %v", err)
 	}
 
-	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	defer db.Close()
+	db := pgtest.Open(t)
 
 	adapter := storesvc.NewStoreAdapter(db)
 	reindexer := engine.NewReindexer(adapter, ws)
@@ -172,12 +157,7 @@ func TestReindexPrunesMissingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dbPath := filepath.Join(ws, ".llmwiki", "index.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := pgtest.Open(t)
 
 	adapter := storesvc.NewStoreAdapter(db)
 	if err := adapter.CreateDocument(&engine.DocData{

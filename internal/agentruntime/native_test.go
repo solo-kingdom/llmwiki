@@ -10,7 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
 type testSink struct {
@@ -27,19 +28,14 @@ func (s *testSink) Permission(PermissionDecision)                {}
 func (s *testSink) Warning(code, message string)                 { s.warnings = append(s.warnings, code+":"+message) }
 func (s *testSink) Debug(string, string, string, map[string]any) {}
 
-func openRuntimeTestDB(t *testing.T) *sqlite.DB {
+func openRuntimeTestDB(t *testing.T) store.Store {
 	t.Helper()
-	db, err := sqlite.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
+	return pgtest.Open(t)
 }
 
-func createRuntimeProvider(t *testing.T, db *sqlite.DB, baseURL string) *sqlite.ProviderInstance {
+func createRuntimeProvider(t *testing.T, db store.Store, baseURL string) *store.ProviderInstance {
 	t.Helper()
-	instance := &sqlite.ProviderInstance{Name: "Mock", CatalogID: "openai", APIKey: "sk-test", BaseURL: baseURL + "/v1"}
+	instance := &store.ProviderInstance{Name: "Mock", CatalogID: "openai", APIKey: "sk-test", BaseURL: baseURL + "/v1"}
 	if err := db.CreateProviderInstance(instance); err != nil {
 		t.Fatalf("CreateProviderInstance: %v", err)
 	}
@@ -55,7 +51,7 @@ func TestNativeRuntimeToolLoop(t *testing.T) {
 	defer server.Close()
 	db := openRuntimeTestDB(t)
 	instance := createRuntimeProvider(t, db, server.URL)
-	session := &sqlite.IngestSession{AgentKind: KindNative, LLMInstanceID: instance.ID, LLMModel: "gpt-4o"}
+	session := &store.IngestSession{AgentKind: KindNative, LLMInstanceID: instance.ID, LLMModel: "gpt-4o"}
 	runtime, err := Resolve(db, t.TempDir(), nil, session)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -93,7 +89,7 @@ func TestNativeRuntimeToolLoopFallback(t *testing.T) {
 	defer server.Close()
 	db := openRuntimeTestDB(t)
 	instance := createRuntimeProvider(t, db, server.URL)
-	session := &sqlite.IngestSession{AgentKind: KindNative, LLMInstanceID: instance.ID, LLMModel: "gpt-4o"}
+	session := &store.IngestSession{AgentKind: KindNative, LLMInstanceID: instance.ID, LLMModel: "gpt-4o"}
 	runtime, err := Resolve(db, t.TempDir(), nil, session)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -113,7 +109,7 @@ func TestNativeRuntimeToolLoopFallback(t *testing.T) {
 
 func TestResolveNativeMissingProvider(t *testing.T) {
 	db := openRuntimeTestDB(t)
-	_, err := Resolve(db, t.TempDir(), nil, &sqlite.IngestSession{AgentKind: KindNative})
+	_, err := Resolve(db, t.TempDir(), nil, &store.IngestSession{AgentKind: KindNative})
 	if !errors.Is(err, ErrNoProviderInstance) {
 		t.Fatalf("Resolve error = %v, want ErrNoProviderInstance", err)
 	}

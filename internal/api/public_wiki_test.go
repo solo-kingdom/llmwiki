@@ -5,11 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
 func mountPublicWikiRoutes(r *chi.Mux, api *API) {
@@ -23,13 +22,7 @@ func mountPublicWikiRoutes(r *chi.Mux, api *API) {
 
 func setupPublicWikiRouter(t *testing.T, publicEnabled bool, withToken bool) (*chi.Mux, string) {
 	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := pgtest.Open(t)
 
 	api := New(db)
 	api.SetPublicWikiEnabled(publicEnabled)

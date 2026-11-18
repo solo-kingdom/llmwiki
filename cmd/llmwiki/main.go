@@ -38,6 +38,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newMCPCmd())
 	root.AddCommand(newMCPConfigCmd())
 	root.AddCommand(newExportCmd())
+	root.AddCommand(newEmbedCmd())
+	root.AddCommand(newMigrateCmd())
 	root.AddCommand(newVersionCmd())
 
 	return root

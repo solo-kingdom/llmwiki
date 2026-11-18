@@ -1,6 +1,6 @@
 ---
 name: llmwiki-guide
-description: 通过 HTTP 安装与运维 llmwiki 服务——检查知识库状态、配置摄取与会话用的模型实例、重建索引、管理 git 快照。wiki 连不上、刚部署、缺模型配置、搜索结果过期，或用户要求备份、推送、恢复时使用。
+description: 通过 HTTP 安装与运维 llmwiki 服务——检查知识库状态、配置摄取与会话用的模型实例、配置 embedding、重建索引、查看与回滚修订历史。wiki 连不上、刚部署、缺模型配置、搜索结果过期，或用户要求查看历史、回滚、恢复时使用。
 license: MIT
 metadata:
   author: llmwiki
@@ -26,7 +26,7 @@ curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/workspace"
 | `root` | 服务端的知识库路径 | 如实报告，不要当作本机路径 |
 | `layout.purpose` / `layout.rules` | `purpose.md` / `rules.md` 是否存在 | 缺失说明库未初始化，请用户在服务端跑 `llmwiki init`（没有 HTTP 初始化接口） |
 | `layout.wiki` / `layout.raw_sources` | 内容目录是否存在 | 同上 |
-| `layout.index_db` | `.llmwiki/index.db` 是否存在 | `false` 时跑 `POST /api/v1/reindex` |
+| `layout.index_db` | PostgreSQL 是否可连通并已初始化 | `false` 时检查 `--database-url` 并跑 `llmwiki init` |
 | `counts` | 文档 / wiki 页面 / 来源数量 | 文件明明存在却全 0，跑 reindex |
 | `page_types` | 各类型页面数 | 与 `wiki_dirs` 不一致提示页面放错目录，见 `llmwiki-lint` |
 | `wiki_dirs` | `wiki/` 各子目录的 md 数，`""` 为顶层 | 子目录全空说明还没有内容 |
@@ -58,7 +58,7 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
   -d '{"job_instance_id":"<instance_id>","job_model":"<model id>"}'
 ```
 
-`PUT /api/v1/settings` 是部分更新，只发要改的键。可用键包括 `job_instance_id`、`job_model`、`temperature`、`max_tokens`、`chunk_size`、`chunk_overlap`、`auto_reindex`、`watch_sources`、`doc_language`（`zh`/`en`）、`ui_language`、`rules_supplement`、`backup_include_raw`、`vc_auto_push`、`default_agent_kind`、`default_acp_agent_id`。未知键会被忽略，改完重新读 settings 确认。
+`PUT /api/v1/settings` 是部分更新，只发要改的键。可用键包括 `job_instance_id`、`job_model`、`temperature`、`max_tokens`、`chunk_size`、`chunk_overlap`、`auto_reindex`、`watch_sources`、`doc_language`（`zh`/`en`）、`ui_language`、`rules_supplement`、`embedding_instance_id`、`embedding_model`、`embedding_dim`、`default_agent_kind`、`default_acp_agent_id`。未知键会被忽略，改完重新读 settings 确认。
 
 查 provider 实例时只返回 `api_key_masked`，不会回传密钥；`PUT /api/v1/provider-instances/{id}` 可换字段，包括 key。
 
@@ -74,7 +74,7 @@ curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/capabilities"
 
 返回 `file_types[]`（含 `tier`、`can_extract`、`can_chunk`、`missing_deps`、`remediation`）和 `runtime_dependencies[]`。目标格式带 `missing_deps` 时，直接告诉用户缺哪个依赖，不要丢一个注定失败的摄取作业过去。
 
-`GET /api/v1/vcs/status` 也会报 git 是否可用；没有 git 时快照和摄取落地都无法提交。
+知识库写入现在是 PostgreSQL 单一真源；每次写入都会生成 change set 与页面修订。
 
 ## 5. 库内约定（`rules.md`）
 
@@ -92,20 +92,19 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/workspace/rule-files" \
 
 `PUT` 接受 `purpose` 和/或 `rules`（markdown，非空），写文件并重建索引。只有用户要求修改约定时才动它——它会影响之后每一次 LLM 步骤。一次性的补充指示写 `rules_supplement`（`PUT /api/v1/settings`）。不要把长篇规范塞进页面。
 
-## 6. Git 快照
+## 6. 历史与回滚
 
 ```bash
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/vcs/status"    # 是否初始化、远程、脏文件、ahead/behind
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/vcs/log?limit=20"
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/vcs/diff/{sha}"
-curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/vcs/init"                      # 仅首次
-curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/vcs/remote" -H 'Content-Type: application/json' -d '{"url":"<remote>"}'
-curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/vcs/backup"                    # 提交快照 → {"status":"ok","commit_sha":"…"}
-curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/vcs/push"
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/history?limit=20"          # change set 列表
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/history/{id}"              # 影响页面与修订
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/history/{id}/diff"         # unified diff
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/pages/history?path=wiki/concepts/x.md"
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/history/{id}/rollback"   # 撤销该 change set
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/revisions/{id}/restore"  # 恢复单个页面修订
 ```
 
-`backup` 会导出设置、暂存知识库并提交；没有变化时 `commit_sha` 为空。`push` 需要已配 remote。回退到历史状态用 `POST /api/v1/ingest/rollback {"commit_sha": "…"}`，它会排一个回滚作业，像其他作业一样轮询。
+回滚是确定性的：把 change set 内每个页面恢复到父修订，或软删由该 change set 新建的页面；不会再调用 LLM。`POST /api/v1/ingest/rollback {"change_set_id":"…"}` 会排队一个回滚作业，像其他作业一样轮询。旧 `commit_sha` 不再接受。
 
 ## 7. 收尾
 
-汇报：知识库 `root`、reindex 后的计数、当前 `job_instance_id`/`job_model`、提交了就给出快照 sha。没动过的字段不用提。
+汇报：知识库 `root`、reindex 后的计数、当前 `job_instance_id`/`job_model`、embedding 是否配置、执行过的回滚 change set id。没动过的字段不用提。

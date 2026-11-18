@@ -82,7 +82,7 @@ func (d *DB) ChunksMissingEmbedding(model string, limit int) ([]store.Chunk, err
 		return nil, nil
 	}
 	rows, err := d.pool.Query(context.Background(), `
-		SELECT dc.document_id, dc.chunk_index, dc.content, dc.page, dc.start_char,
+		SELECT dc.id, dc.document_id, dc.chunk_index, dc.content, dc.page, dc.start_char,
 			dc.token_count, dc.header_breadcrumb
 		FROM document_chunks dc
 		JOIN documents d ON dc.document_id = d.id
@@ -100,7 +100,7 @@ func (d *DB) ChunksMissingEmbedding(model string, limit int) ([]store.Chunk, err
 		var c store.Chunk
 		var page, startChar sql.NullInt64
 		var headerBreadcrumb sql.NullString
-		if err := rows.Scan(&c.DocumentID, &c.ChunkIndex, &c.Content, &page, &startChar,
+		if err := rows.Scan(&c.ID, &c.DocumentID, &c.ChunkIndex, &c.Content, &page, &startChar,
 			&c.TokenCount, &headerBreadcrumb); err != nil {
 			return nil, fmt.Errorf("chunks missing embedding: %w", err)
 		}

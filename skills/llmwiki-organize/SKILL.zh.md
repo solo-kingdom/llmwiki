@@ -115,10 +115,10 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/documents/{log_id}/content" \
 ```bash
 curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"     # 重建 wiki/index.md 与图谱
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/lint"                # 不能留下你造成的 error
-curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/vcs/backup"  # 用户要快照时才做
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/history?limit=1"  # 取本次写入的 change set id
 ```
 
-汇报改动路径、lint 摘要、提交了就给出 commit sha。
+汇报改动路径、lint 摘要、执行过回滚就给出 change set id。
 
 ## 禁止
 

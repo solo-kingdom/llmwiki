@@ -1,22 +1,17 @@
 package ingest
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func TestContextResolverSeedsFromWikiRefs(t *testing.T) {
 	dir := t.TempDir()
-	db, err := sqlite.Open(filepath.Join(dir, ".llmwiki", "index.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
-	doc := &sqlite.Document{
+	doc := &store.Document{
 		Filename:     "seed.md",
 		Title:        "Seed Page",
 		Path:         "/wiki/",

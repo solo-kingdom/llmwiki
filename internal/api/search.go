@@ -20,7 +20,11 @@ func (a *API) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	pageTypes := r.URL.Query()["types"]
 
-	results, err := a.db.SearchChunks(query, limit, filter, pageTypes...)
+	mode := normalizeSearchMode(r.URL.Query().Get("mode"))
+	if mode == "auto" {
+		mode = "hybrid"
+	}
+	results, err := a.hybridSearch(query, limit, filter, pageTypes, mode)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -31,6 +35,7 @@ func (a *API) Search(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"query":   query,
+		"mode":    mode,
 		"results": results,
 	})
 }

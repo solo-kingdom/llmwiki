@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/solo-kingdom/llmwiki/internal/activity"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func setupActivityLogsRoutes(api *API, r chi.Router) {
@@ -27,7 +27,7 @@ func TestActivityLogsAPI(t *testing.T) {
 	setupActivityLogsRoutes(api, r)
 
 	for i := 0; i < 3; i++ {
-		_ = api.db.CreateActivityLog(&sqlite.ActivityLog{
+		_ = api.db.CreateActivityLog(&store.ActivityLog{
 			Category: "ingest",
 			Action:   "queued",
 			Message:  "test",
@@ -42,8 +42,8 @@ func TestActivityLogsAPI(t *testing.T) {
 		t.Fatalf("list: %d %s", w.Code, w.Body.String())
 	}
 	var list struct {
-		Logs  []sqlite.ActivityLog `json:"logs"`
-		Total int                  `json:"total"`
+		Logs  []store.ActivityLog `json:"logs"`
+		Total int                 `json:"total"`
 	}
 	json.NewDecoder(w.Body).Decode(&list)
 	if len(list.Logs) != 3 || list.Total != 3 {
@@ -57,7 +57,7 @@ func TestActivityLogsAPI(t *testing.T) {
 		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
 	}
 
-	logs, _ := api.db.ListActivityLogs(sqlite.ActivityLogListFilter{Limit: 10})
+	logs, _ := api.db.ListActivityLogs(store.ActivityLogListFilter{Limit: 10})
 	if len(logs) != 1 || logs[0].Action != "logs_cleared" {
 		t.Fatalf("after clear expected logs_cleared, got %+v", logs)
 	}
@@ -68,7 +68,7 @@ func TestActivityLogsMaxCountSettings(t *testing.T) {
 	setupActivityLogsRoutes(api, r)
 
 	for i := 0; i < 105; i++ {
-		_ = api.db.CreateActivityLog(&sqlite.ActivityLog{
+		_ = api.db.CreateActivityLog(&store.ActivityLog{
 			Category: "system",
 			Action:   "test",
 			Message:  "x",

@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func workspaceTestRouter(api *API) *chi.Mux {
@@ -43,13 +43,13 @@ func TestGetWorkspaceOverview(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := api.db.CreateDocument(&sqlite.Document{
+	if err := api.db.CreateDocument(&store.Document{
 		Filename: "alpha.md", Path: "/wiki/entities/", RelativePath: "wiki/entities/alpha.md",
 		SourceKind: "wiki", Status: "ready", Content: "x",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := api.db.CreateDocument(&sqlite.Document{
+	if err := api.db.CreateDocument(&store.Document{
 		Filename: "a.md", Path: "/raw/sources/", RelativePath: "raw/sources/a.md",
 		SourceKind: "source", Status: "ready", Content: "x",
 	}); err != nil {
@@ -69,8 +69,8 @@ func TestGetWorkspaceOverview(t *testing.T) {
 	if !got.Layout.Purpose || !got.Layout.Rules || !got.Layout.Wiki || !got.Layout.RawSources {
 		t.Errorf("layout flags not detected: %+v", got.Layout)
 	}
-	if got.Layout.IndexDB {
-		t.Errorf("index_db should be false in a bare workspace")
+	if !got.Layout.IndexDB {
+		t.Errorf("index_db should be true when PostgreSQL is configured")
 	}
 	if got.Counts.Documents != 2 || got.Counts.WikiPages != 1 || got.Counts.Sources != 1 {
 		t.Errorf("counts = %+v", got.Counts)
@@ -83,8 +83,8 @@ func TestGetWorkspaceOverview(t *testing.T) {
 	for _, d := range got.WikiDirs {
 		dirs[d.Dir] = d.Count
 	}
-	if dirs["entities"] != 2 || dirs["concepts"] != 1 || dirs[""] != 1 {
-		t.Errorf("wiki_dirs = %+v", got.WikiDirs)
+	if dirs["entities"] != 1 || len(dirs) != 1 {
+		t.Errorf("wiki_dirs = %+v, want entities=1 from PostgreSQL", got.WikiDirs)
 	}
 }
 
@@ -126,7 +126,7 @@ func TestCreateDocumentDerivesWikiKindFromPath(t *testing.T) {
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("path %q: status = %d, body %s", tc.path, rec.Code, rec.Body.String())
 		}
-		var doc sqlite.Document
+		var doc store.Document
 		if err := json.NewDecoder(rec.Body).Decode(&doc); err != nil {
 			t.Fatal(err)
 		}

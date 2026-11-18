@@ -1,6 +1,6 @@
 ---
 name: llmwiki-ingest
-description: Feed files, URLs or pasted text into an llmwiki vault over HTTP — queue ingest jobs, drive the review/plan/approve pipeline for sessions, and roll back a commit. Use when the user wants to add source material, ingest a document, summarize a conversation into the wiki, or undo a previous ingest.
+description: Feed files, URLs or pasted text into an llmwiki vault over HTTP — queue ingest jobs, drive the review/plan/approve pipeline for sessions, and roll back a change set. Use when the user wants to add source material, ingest a document, summarize a conversation into the wiki, or undo a previous ingest.
 license: MIT
 metadata:
   author: llmwiki
@@ -52,7 +52,7 @@ POST /ingest/sessions/{id}/archive → review(id) in status "planning" + plan jo
 GET  /ingest/reviews/{review_id}/plans        → plan versions (plan_markdown + plan_json)
 POST /ingest/reviews/{id}/feedback            → request changes, then /replan
 POST /ingest/reviews/{id}/approve             → apply job, merges into the vault
-GET  /ingest/jobs/{apply_job_id}              → succeeded → review.merge_commit_sha
+GET  /ingest/jobs/{apply_job_id}              → succeeded → review.change_set_id
 ```
 
 ### Session
@@ -105,7 +105,7 @@ Show the user `plan_markdown` before approving — this is the last checkpoint b
 ### Verify
 
 ```bash
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/ingest/reviews/{id}"     # succeeded + merge_commit_sha
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/ingest/reviews/{id}"     # succeeded + change_set_id
 curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/lint"
 ```
@@ -116,10 +116,10 @@ Then answer the user's question from the new pages and cite their paths.
 
 ```bash
 curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/rollback" \
-  -H 'Content-Type: application/json' -d '{"commit_sha":"<sha from review or /vcs/log>"}'
+  -H 'Content-Type: application/json' -d '{"change_set_id":"<from review>"}'
 ```
 
-Queues a rollback job: it reverts the commit, un-indexes the pages it added and re-indexes the rest. Poll it like any job, then reindex and lint. Never roll back a commit you did not identify from `GET /api/v1/vcs/log`.
+Queues a deterministic rollback job: each page in the change set returns to its parent revision, pages created by it are soft-deleted. Poll it like any job. Never roll back a change set you did not identify from `GET /api/v1/history`.
 
 ## Rules
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -12,7 +13,9 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres"
+	"github.com/solo-kingdom/llmwiki/internal/store/postgres/pgtest"
 )
 
 type testCreateRequest struct {
@@ -26,13 +29,16 @@ type testCreateRequest struct {
 
 func setupTestAPI(t *testing.T) (*API, *chi.Mux) {
 	t.Helper()
+	api, r, _ := setupTestAPIWithDB(t)
+	return api, r
+}
+
+// setupTestAPIWithDB is setupTestAPI plus the concrete PostgreSQL store for
+// tests that need raw SQL against the isolated schema.
+func setupTestAPIWithDB(t *testing.T) (*API, *chi.Mux, *postgres.DB) {
+	t.Helper()
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := pgtest.Open(t)
 
 	api := New(db)
 	api.SetWorkspace(dir)
@@ -67,7 +73,7 @@ func setupTestAPI(t *testing.T) (*API, *chi.Mux) {
 		r.Post("/upload", api.CreateUploadIngestJobs)
 	})
 
-	return api, r
+	return api, r, db
 }
 
 func (a *API) Health(w http.ResponseWriter, r *http.Request) {
@@ -125,7 +131,7 @@ func TestCreateAndGetDocument(t *testing.T) {
 		t.Fatalf("expected status 201, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	var created sqlite.Document
+	var created store.Document
 	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
 		t.Fatalf("decode created: %v", err)
 	}
@@ -141,7 +147,7 @@ func TestCreateAndGetDocument(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", getW.Code)
 	}
 
-	var fetched sqlite.Document
+	var fetched store.Document
 	if err := json.NewDecoder(getW.Body).Decode(&fetched); err != nil {
 		t.Fatalf("decode fetched: %v", err)
 	}
@@ -180,7 +186,7 @@ func TestUpdateDocumentContent(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	var created sqlite.Document
+	var created store.Document
 	json.NewDecoder(w.Body).Decode(&created)
 
 	updateBody, _ := json.Marshal(updateContentRequest{Content: "updated content"})
@@ -195,7 +201,7 @@ func TestUpdateDocumentContent(t *testing.T) {
 }
 
 func TestDeleteDocument(t *testing.T) {
-	_, r := setupTestAPI(t)
+	api, r := setupTestAPI(t)
 
 	body, _ := json.Marshal(testCreateRequest{
 		Filename: "delete-me.md",
@@ -207,7 +213,7 @@ func TestDeleteDocument(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	var created sqlite.Document
+	var created store.Document
 	json.NewDecoder(w.Body).Decode(&created)
 
 	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/documents/"+created.ID, nil)
@@ -218,12 +224,27 @@ func TestDeleteDocument(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", delW.Code)
 	}
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/documents/"+created.ID, nil)
-	getW := httptest.NewRecorder()
-	r.ServeHTTP(getW, getReq)
+	// Deletion soft-archives the row: it must disappear from listings while
+	// remaining readable by ID for revision history.
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/documents", nil)
+	listW := httptest.NewRecorder()
+	r.ServeHTTP(listW, listReq)
+	var docs []store.Document
+	if err := json.NewDecoder(listW.Body).Decode(&docs); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	for _, d := range docs {
+		if d.ID == created.ID {
+			t.Fatalf("deleted document %s still listed", created.ID)
+		}
+	}
 
-	if getW.Code != http.StatusNotFound {
-		t.Errorf("expected status 404 after delete, got %d", getW.Code)
+	archived, err := api.db.GetDocument(created.ID)
+	if err != nil {
+		t.Fatalf("get archived document: %v", err)
+	}
+	if archived == nil || archived.DeletedAt == "" {
+		t.Fatalf("expected archived row with deleted_at set, got %+v", archived)
 	}
 }
 
@@ -286,7 +307,7 @@ func TestGraphEndpoints(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	var created sqlite.Document
+	var created store.Document
 	json.NewDecoder(w.Body).Decode(&created)
 
 	blReq := httptest.NewRequest(http.MethodGet, "/api/v1/graph/"+created.ID+"/backlinks", nil)
@@ -496,13 +517,7 @@ func TestUploadIngestJobsAcceptedRejected(t *testing.T) {
 
 func TestIngestRequiresWorkspace(t *testing.T) {
 	// Setup API without workspace to validate persistence precondition.
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := pgtest.Open(t)
 
 	api := New(db)
 	r := chi.NewRouter()
@@ -741,7 +756,7 @@ func TestE2EConversationIngestLifecycle(t *testing.T) {
 		t.Fatalf("list jobs: expected 200, got %d", listW.Code)
 	}
 
-	var jobs []sqlite.IngestJob
+	var jobs []store.IngestJob
 	json.NewDecoder(listW.Body).Decode(&jobs)
 	if len(jobs) == 0 {
 		t.Fatal("expected at least 1 job in list")
@@ -784,10 +799,10 @@ func TestE2ETextIngestFullFlow(t *testing.T) {
 
 	// 2. Mark as failed (simulating pipeline error)
 	failBody, _ := json.Marshal(map[string]interface{}{
-		"error_code":   "llm_auth_failed",
-		"message":      "Invalid API key",
+		"error_code":         "llm_auth_failed",
+		"message":            "Invalid API key",
 		"missing_dependency": "OpenAI API key",
-		"remediation":  "check your API key in Settings",
+		"remediation":        "check your API key in Settings",
 	})
 	failReq := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/jobs/"+createResp.Job.ID+"/fail", bytes.NewReader(failBody))
 	failReq.Header.Set("Content-Type", "application/json")
@@ -875,7 +890,7 @@ func TestE2EUploadIngestPartialSuccess(t *testing.T) {
 }
 
 func TestGetJobSourceTextFile(t *testing.T) {
-	api, r := setupTestAPI(t)
+	api, r, db := setupTestAPIWithDB(t)
 
 	// Create a text ingest job first
 	body, _ := json.Marshal(map[string]interface{}{
@@ -905,7 +920,9 @@ func TestGetJobSourceTextFile(t *testing.T) {
 	}
 
 	// Manually set source_path to point to our test file
-	api.db.DB().Exec(`UPDATE ingest_jobs SET source_path = ? WHERE id = ?`, "raw/sources/preview/test.md", jobID)
+	if _, err := db.Pool().Exec(context.Background(), `UPDATE ingest_jobs SET source_path = $1 WHERE id = $2`, "raw/sources/preview/test.md", jobID); err != nil {
+		t.Fatalf("update source_path: %v", err)
+	}
 
 	// Get source content
 	srcReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/"+jobID+"/source", nil)
@@ -927,7 +944,7 @@ func TestGetJobSourceTextFile(t *testing.T) {
 }
 
 func TestGetJobSourceImageFile(t *testing.T) {
-	api, r := setupTestAPI(t)
+	api, r, db := setupTestAPIWithDB(t)
 
 	// Create workspace source directory and a fake image file
 	sourceDir := filepath.Join(api.workspace, "raw", "sources")
@@ -954,7 +971,9 @@ func TestGetJobSourceImageFile(t *testing.T) {
 	jobID := createResp.Job.ID
 
 	// Set source_path to the image
-	api.db.DB().Exec(`UPDATE ingest_jobs SET source_path = ? WHERE id = ?`, "raw/sources/test.png", jobID)
+	if _, err := db.Pool().Exec(context.Background(), `UPDATE ingest_jobs SET source_path = $1 WHERE id = $2`, "raw/sources/test.png", jobID); err != nil {
+		t.Fatalf("update source_path: %v", err)
+	}
 
 	srcReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/"+jobID+"/source", nil)
 	srcW := httptest.NewRecorder()
@@ -983,7 +1002,7 @@ func TestGetJobSourceNotFound(t *testing.T) {
 }
 
 func TestGetJobSourceFileNotFoundOnDisk(t *testing.T) {
-	api, r := setupTestAPI(t)
+	_, r, db := setupTestAPIWithDB(t)
 
 	// Create a text ingest job
 	body, _ := json.Marshal(map[string]interface{}{
@@ -1000,7 +1019,9 @@ func TestGetJobSourceFileNotFoundOnDisk(t *testing.T) {
 	jobID := createResp.Job.ID
 
 	// Set source_path to a file that doesn't exist
-	api.db.DB().Exec(`UPDATE ingest_jobs SET source_path = ? WHERE id = ?`, "raw/sources/nonexistent.md", jobID)
+	if _, err := db.Pool().Exec(context.Background(), `UPDATE ingest_jobs SET source_path = $1 WHERE id = $2`, "raw/sources/nonexistent.md", jobID); err != nil {
+		t.Fatalf("update source_path: %v", err)
+	}
 
 	srcReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/"+jobID+"/source", nil)
 	srcW := httptest.NewRecorder()
@@ -1012,7 +1033,7 @@ func TestGetJobSourceFileNotFoundOnDisk(t *testing.T) {
 }
 
 func TestGetJobSourcePathTraversal(t *testing.T) {
-	api, r := setupTestAPI(t)
+	_, r, db := setupTestAPIWithDB(t)
 
 	// Create a text ingest job
 	body, _ := json.Marshal(map[string]interface{}{
@@ -1029,7 +1050,9 @@ func TestGetJobSourcePathTraversal(t *testing.T) {
 	jobID := createResp.Job.ID
 
 	// Set source_path with path traversal
-	api.db.DB().Exec(`UPDATE ingest_jobs SET source_path = ? WHERE id = ?`, "../../../etc/passwd", jobID)
+	if _, err := db.Pool().Exec(context.Background(), `UPDATE ingest_jobs SET source_path = $1 WHERE id = $2`, "../../../etc/passwd", jobID); err != nil {
+		t.Fatalf("update source_path: %v", err)
+	}
 
 	srcReq := httptest.NewRequest(http.MethodGet, "/api/v1/ingest/jobs/"+jobID+"/source", nil)
 	srcW := httptest.NewRecorder()
@@ -1077,14 +1100,14 @@ func TestIngestUploadAllUnsupported(t *testing.T) {
 func TestListDocumentsSourceKindFilter(t *testing.T) {
 	api, r := setupTestAPI(t)
 
-	if err := api.db.CreateDocument(&sqlite.Document{
+	if err := api.db.CreateDocument(&store.Document{
 		Filename: "wiki.md", Title: "Wiki Page", Path: "/wiki/entities",
 		RelativePath: "wiki/entities/wiki.md", SourceKind: "wiki",
 		FileType: "md", Status: "ready",
 	}); err != nil {
 		t.Fatalf("create wiki doc: %v", err)
 	}
-	if err := api.db.CreateDocument(&sqlite.Document{
+	if err := api.db.CreateDocument(&store.Document{
 		Filename: "raw.md", Title: "Raw", Path: "/raw",
 		RelativePath: "raw/sources/x.md", SourceKind: "source",
 		FileType: "md", Status: "ready",
@@ -1098,7 +1121,7 @@ func TestListDocumentsSourceKindFilter(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("list status %d", w.Code)
 	}
-	var docs []sqlite.Document
+	var docs []store.Document
 	if err := json.NewDecoder(w.Body).Decode(&docs); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -1112,12 +1135,12 @@ func TestListDocumentsSourceKindFilter(t *testing.T) {
 func TestSearchDefaultWikiScope(t *testing.T) {
 	api, r := setupTestAPI(t)
 
-	wiki := &sqlite.Document{
+	wiki := &store.Document{
 		Filename: "w.md", Title: "Wiki Hit", Path: "/wiki/entities",
 		RelativePath: "wiki/entities/w.md", SourceKind: "wiki",
 		FileType: "md", Status: "ready", Content: "UniqueWikiSearchTokenXYZ",
 	}
-	raw := &sqlite.Document{
+	raw := &store.Document{
 		Filename: "r.md", Title: "Raw Hit", Path: "/raw",
 		RelativePath: "raw/sources/r.md", SourceKind: "source",
 		FileType: "md", Status: "ready", Content: "UniqueWikiSearchTokenXYZ",
@@ -1128,12 +1151,12 @@ func TestSearchDefaultWikiScope(t *testing.T) {
 	if err := api.db.CreateDocument(raw); err != nil {
 		t.Fatalf("raw doc: %v", err)
 	}
-	if err := api.db.StoreChunks(wiki.ID, []sqlite.Chunk{{
+	if err := api.db.StoreChunks(wiki.ID, []store.Chunk{{
 		DocumentID: wiki.ID, ChunkIndex: 0, Content: "UniqueWikiSearchTokenXYZ",
 	}}); err != nil {
 		t.Fatalf("wiki chunks: %v", err)
 	}
-	if err := api.db.StoreChunks(raw.ID, []sqlite.Chunk{{
+	if err := api.db.StoreChunks(raw.ID, []store.Chunk{{
 		DocumentID: raw.ID, ChunkIndex: 0, Content: "UniqueWikiSearchTokenXYZ",
 	}}); err != nil {
 		t.Fatalf("raw chunks: %v", err)
@@ -1146,7 +1169,7 @@ func TestSearchDefaultWikiScope(t *testing.T) {
 		t.Fatalf("search status %d: %s", w.Code, w.Body.String())
 	}
 	var resp struct {
-		Results []sqlite.SearchChunk `json:"results"`
+		Results []store.SearchChunk `json:"results"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)

@@ -169,27 +169,20 @@ const en: Record<MessageKey, string> = {
   "settings.processing.watch_sources_desc":
     "Automatically watch data source directory for file changes",
 
-  "settings.vc.title": "Version Control",
-  "settings.vc.not_ready": "Not ready",
-  "settings.vc.repair_hint":
-    "Run llmwiki init in the workspace directory to bootstrap git version control.",
-  "settings.vc.active": "Active",
-  "settings.vc.commits": "{count} commit(s)",
-  "settings.vc.tracked": "Tracked",
-  "settings.vc.excluded": "Excluded",
-  "settings.vc.backup": "Backup track",
-  "settings.vc.view_history": "View history",
-  "settings.vc.desc":
-    "View wiki version history, change diffs, and rollbacks; configure remote backup",
-  "settings.vc.remote_url": "Remote repository URL",
-  "settings.vc.remote_save": "Save remote",
-  "settings.vc.remote_status": "Branch {branch} · ahead {ahead} · behind {behind}",
-  "settings.vc.backup_raw": "Backup raw/ source files (on by default)",
-  "settings.vc.auto_push": "Auto push after commit",
-  "settings.vc.backup_now": "Backup now",
-  "settings.vc.push_now": "Push now",
-  "settings.vc.api_key_hint":
-    "Settings export to .llmwiki/workspace-settings.json. API keys are not stored in git; re-enter them on a new machine.",
+  "settings.embedding.title": "Semantic Search",
+  "settings.embedding.desc":
+    "Configure the embedding model used for semantic search; leave empty to use keyword search only",
+  "settings.embedding.configured": "Configured",
+  "settings.embedding.not_configured": "Not configured",
+  "settings.embedding.instance": "Provider instance",
+  "settings.embedding.instance_desc": "Instance that provides the embedding service",
+  "settings.embedding.instance_none": "Semantic search disabled",
+  "settings.embedding.model": "Embedding model",
+  "settings.embedding.model_placeholder": "e.g. text-embedding-3-small",
+  "settings.embedding.dim": "Vector dimension",
+  "settings.embedding.dim_desc": "Leave empty to use the model default",
+  "settings.embedding.hint":
+    "Rebuild the index after changing this so existing documents get new vectors.",
 
   "settings.groups.basic.title": "Basic Settings",
   "settings.groups.basic.desc": "UI language and document generation preferences",
@@ -197,8 +190,6 @@ const en: Record<MessageKey, string> = {
   "settings.groups.models.desc": "Manage Providers, Agent Runtimes, and models used by background jobs",
   "settings.groups.rules.title": "Workspace Rules",
   "settings.groups.rules.desc": "Preview workspace rule files and append temporary supplements",
-  "settings.groups.vc.title": "Version Control",
-  "settings.groups.vc.desc": "View wiki version control status and history entry",
   "settings.groups.advanced.title": "Advanced Settings",
   "settings.groups.advanced.desc":
     "Low-frequency options such as MCP, tool loops, log retention, and processing parameters",
@@ -280,7 +271,7 @@ const en: Record<MessageKey, string> = {
   "chat.review.confirm_apply": "Confirm and apply",
   "chat.review.view_diff": "View changes",
   "chat.review.no_diff":
-    "Git repository is not initialized — diff unavailable. Run llmwiki init to repair.",
+    "No change set recorded for this apply — diff unavailable.",
   "chat.review.apply_success": "Wiki pages updated successfully.",
   "chat.review.apply_success_count": "Successfully wrote {count} wiki page(s).",
   "chat.review.apply_failed_zero_pages":
@@ -462,29 +453,44 @@ const en: Record<MessageKey, string> = {
   "document.outline": "Outline",
   "document.no_headings": "No headings in this document",
 
-  // Timeline
-  "timeline.loading": "Loading timeline...",
-  "timeline.no_git": "Git repository is not initialized.",
-  "timeline.repair_hint":
-    "Run llmwiki init in the workspace directory to bootstrap version control.",
-  "timeline.title": "Timeline",
-  "timeline.commits": "{count} commit(s)",
-  "timeline.no_history": "No history yet",
+  // History timeline
+  "timeline.loading": "Loading change history...",
+  "timeline.title": "Change History",
+  "timeline.changes": "{count} change(s)",
+  "timeline.no_history": "No changes yet",
   "timeline.rollback_badge": "rollback",
   "timeline.diff": "Diff",
+  "timeline.details": "Details",
   "timeline.rollback": "Rollback",
   "timeline.load_more": "Load More",
-  "timeline.files_changed": "{count} file(s)",
+  "timeline.pages_changed": "{count} page(s)",
   "timeline.confirm_rollback": "Confirm Rollback",
-  "timeline.rollback_intro": "This will roll back the changes from:",
+  "timeline.rollback_intro": "This will roll back the change set:",
   "timeline.rollback_note_1":
-    "The wiki changes from this ingest will be reversed via LLM",
+    "Affected pages will be restored to their content before this change",
   "timeline.rollback_note_2":
-    "Original source file will be moved to revert/ directory (if it still exists)",
+    "Pages are restored one by one from the revision history",
   "timeline.rollback_note_3":
-    "This action creates a new rollback commit in the timeline",
+    "This action creates a new rollback change set",
   "timeline.rolling_back": "Rolling back...",
   "timeline.diff_load_failed": "Failed to load diff",
+  "timeline.kind.ingest": "Ingest",
+  "timeline.kind.review_apply": "Review apply",
+  "timeline.kind.rollback": "Rollback",
+  "timeline.kind.manual": "Manual",
+  "timeline.kind.delete": "Delete",
+  "timeline.kind.import": "Import",
+  "timeline.operation.create": "Create",
+  "timeline.operation.update": "Update",
+  "timeline.operation.delete": "Delete",
+  "timeline.operation.restore": "Restore",
+  "timeline.detail.title": "Change Details",
+  "timeline.detail.loading": "Loading details...",
+  "timeline.detail.failed": "Failed to load details",
+  "timeline.detail.kind": "Kind",
+  "timeline.detail.source": "Source",
+  "timeline.detail.time": "Time",
+  "timeline.detail.no_pages": "This change set has no page records",
 
   // Commit diff
   "diff.loading": "Loading diff...",
@@ -494,7 +500,7 @@ const en: Record<MessageKey, string> = {
   "diff.no_hunks": "No hunks in this file",
   "diff.select_file": "Select a file",
   "diff.file_count": "{count} file(s)",
-  "diff.title": "Diff: {sha}",
+  "diff.title": "Diff: {change}",
   "diff.unified": "Unified",
   "diff.split": "Split",
   "diff.close": "Close",

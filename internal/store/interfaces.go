@@ -77,6 +77,7 @@ type RevisionStore interface {
 	GetRevision(id string) (*PageRevision, error)
 	UndoChangeSet(changeSetID, actor string) (*ChangeSet, error)
 	RestoreRevision(revisionID, actor string) (*ChangeSet, error)
+	SeedInitialRevisions(actor string) (int, error)
 }
 
 // SourceStore stores immutable raw source bytes.

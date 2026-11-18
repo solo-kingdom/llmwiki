@@ -1,6 +1,6 @@
 ## Quick Start
 
-1. **Initialize a workspace** (requires git CLI):
+1. **Initialize a workspace**:
 
 ```bash
 llmwiki init ~/research
@@ -100,7 +100,7 @@ Workbench navigation:
 |------|---------|
 | **Ingest** | Multi-turn chat; **Add context** for plain text (no AI reply); attachments; **Archive** with review |
 | **Jobs** | Ingest job lifecycle (queued / running / succeeded / failed), retry and cancel |
-| **Timeline** | Git history and diffs for `wiki/` (when VC enabled at init) |
+| **Timeline** | Change history, diffs and rollbacks for `wiki/` (PostgreSQL revisions) |
 | **Logs** | System activity logs |
 | **Settings** | Providers, UI/doc language, wiki rules supplement, MCP config |
 | **Wiki** | Read-only reader: tree, search (⌘K / Ctrl+K), knowledge graph |
@@ -184,7 +184,7 @@ Common commands (from workspace dir or with path argument):
 
 | Command | Description |
 |---------|-------------|
-| `llmwiki init <dir>` | Scaffold workspace, git (wiki/), SQLite index |
+| `llmwiki init <dir>` | Scaffold workspace and PostgreSQL revision history |
 | `llmwiki serve [dir]` | HTTP API + embedded Web UI (default `127.0.0.1:8868`) |
 | `llmwiki ingest <file>` | Ingest a source file (merge protection) |
 | `llmwiki reindex [dir]` | Force full index rebuild from disk |

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 // workspaceLayout reports which workspace scaffold entries exist on disk.
@@ -114,6 +115,39 @@ func businessPageTypes() map[string]int {
 	return out
 }
 
+// wikiDirsFromDocuments counts wiki pages per top-level directory in the database.
+func wikiDirsFromDocuments(docs []store.Document) []workspaceDir {
+	counts := map[string]int{}
+	for _, d := range docs {
+		if d.SourceKind != "wiki" {
+			continue
+		}
+		parts := strings.Split(strings.TrimPrefix(d.RelativePath, "wiki/"), "/")
+		if len(parts) <= 1 {
+			counts[""]++
+			continue
+		}
+		if _, ok := engine.WikiSystemSubdirs[parts[0]]; ok {
+			continue
+		}
+		counts[parts[0]]++
+	}
+	out := make([]workspaceDir, 0, len(counts))
+	for name, n := range counts {
+		out = append(out, workspaceDir{Dir: name, Count: n})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Dir == "" {
+			return true
+		}
+		if out[j].Dir == "" {
+			return false
+		}
+		return out[i].Dir < out[j].Dir
+	})
+	return out
+}
+
 func isMarkdownFile(name string) bool {
 	return strings.EqualFold(filepath.Ext(name), ".md")
 }
@@ -133,7 +167,7 @@ func (a *API) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 			Rules:      fileExists(filepath.Join(root, "rules.md")),
 			Wiki:       dirExists(filepath.Join(root, "wiki")),
 			RawSources: dirExists(filepath.Join(root, "raw", "sources")),
-			IndexDB:    fileExists(filepath.Join(root, ".llmwiki", "index.db")),
+			IndexDB:    a.db != nil,
 		},
 		PageTypes: businessPageTypes(),
 		WikiDirs:  countMarkdownByDir(filepath.Join(root, "wiki")),
@@ -160,6 +194,7 @@ func (a *API) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 				overview.LastUpdated = d.UpdatedAt
 			}
 		}
+		overview.WikiDirs = wikiDirsFromDocuments(docs)
 	}
 	if overview.WikiDirs == nil {
 		overview.WikiDirs = []workspaceDir{}

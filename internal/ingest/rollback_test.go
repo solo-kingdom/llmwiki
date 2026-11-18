@@ -1,68 +1,12 @@
 package ingest
 
 import (
+	"context"
+	"strings"
 	"testing"
+
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
-
-func TestBuildRollbackPrompt(t *testing.T) {
-	ctx := &RollbackContext{
-		Diff:              "diff --git a/wiki/page.md b/wiki/page.md\n+new content",
-		NormalizedContent: "original source content",
-		AffectedFiles:     []string{"wiki/page.md"},
-		SourceFilename:    "doc.pdf",
-		CommitSHA:         "abc1234",
-	}
-
-	currentFiles := map[string]string{
-		"wiki/page.md": "# Page\nnew content",
-	}
-
-	prompt := buildRollbackPrompt(ctx, currentFiles)
-
-	if prompt == "" {
-		t.Fatal("expected non-empty prompt")
-	}
-	if !contains(prompt, "original source content") {
-		t.Error("prompt should contain normalized content")
-	}
-	if !contains(prompt, "wiki/page.md") {
-		t.Error("prompt should contain affected file path")
-	}
-	if !contains(prompt, "# Page\nnew content") {
-		t.Error("prompt should contain current file content")
-	}
-}
-
-func TestParseDiffFiles(t *testing.T) {
-	diff := `diff --git a/wiki/intro.md b/wiki/intro.md
-new file mode 100644
---- /dev/null
-+++ b/wiki/intro.md
-@@ -0,0 +1,5 @@
-+# Introduction
-+Hello world
-diff --git a/wiki/conclusion.md b/wiki/conclusion.md
---- a/wiki/conclusion.md
-+++ b/wiki/conclusion.md`
-
-	files := parseDiffFiles(diff)
-	if len(files) != 2 {
-		t.Fatalf("expected 2 files, got %d: %v", len(files), files)
-	}
-	if files[0] != "wiki/intro.md" {
-		t.Errorf("file[0] = %q, want wiki/intro.md", files[0])
-	}
-	if files[1] != "wiki/conclusion.md" {
-		t.Errorf("file[1] = %q, want wiki/conclusion.md", files[1])
-	}
-}
-
-func TestParseDiffFilesEmpty(t *testing.T) {
-	files := parseDiffFiles("")
-	if len(files) != 0 {
-		t.Errorf("expected 0 files, got %d", len(files))
-	}
-}
 
 func TestParseFileBlocksWithContent(t *testing.T) {
 	output := `Here are the rollback files:
@@ -95,6 +39,142 @@ Original content
 	}
 	if content2 != "---DELETE---\n" {
 		t.Errorf("page2 content: %q", content2)
+	}
+}
+
+func TestProcessRollbackJobRestoresPageAndAppendsHistory(t *testing.T) {
+	db := openTestDB(t)
+	rel := "wiki/entities/rollback-page.md"
+
+	baseline := &store.ChangeSet{Kind: "ingest", Summary: "baseline create"}
+	if err := db.ApplyChangeSet(baseline, []store.PageWrite{{
+		Document: &store.Document{
+			Filename:     "rollback-page.md",
+			Title:        "Rollback Page",
+			Path:         "/wiki/entities/",
+			RelativePath: rel,
+			SourceKind:   "wiki",
+			FileType:     "md",
+			Status:       "ready",
+			Content:      "# V1\n\nfirst revision",
+			ContentHash:  "hash-v1",
+		},
+		Operation: store.RevisionCreate,
+		Chunks:    []store.Chunk{{ChunkIndex: 0, Content: "first revision", TokenCount: 2}},
+	}}); err != nil {
+		t.Fatalf("baseline ApplyChangeSet: %v", err)
+	}
+
+	ctx := context.Background()
+	var createdID string
+	if err := db.Pool().QueryRow(ctx,
+		`SELECT id FROM documents WHERE relative_path = $1`, rel).Scan(&createdID); err != nil {
+		t.Fatalf("load created document: %v", err)
+	}
+
+	update := &store.ChangeSet{Kind: "ingest", Summary: "update content"}
+	if err := db.ApplyChangeSet(update, []store.PageWrite{{
+		Document: &store.Document{
+			ID:           createdID,
+			Filename:     "rollback-page.md",
+			Title:        "Rollback Page",
+			Path:         "/wiki/entities/",
+			RelativePath: rel,
+			SourceKind:   "wiki",
+			FileType:     "md",
+			Status:       "ready",
+			Content:      "# V2\n\nsecond revision",
+			ContentHash:  "hash-v2",
+		},
+		Operation: store.RevisionUpdate,
+		Chunks:    []store.Chunk{{ChunkIndex: 0, Content: "second revision", TokenCount: 2}},
+	}}); err != nil {
+		t.Fatalf("update ApplyChangeSet: %v", err)
+	}
+
+	var updatedContent string
+	if err := db.Pool().QueryRow(ctx,
+		`SELECT COALESCE(content, '') FROM documents WHERE id = $1`, createdID).Scan(&updatedContent); err != nil {
+		t.Fatalf("load updated document: %v", err)
+	}
+	if !strings.Contains(updatedContent, "second revision") {
+		t.Fatalf("updated content = %q, want second revision", updatedContent)
+	}
+
+	job := &store.IngestJob{
+		InputType:  "rollback",
+		SourcePath: "raw/rollback.md",
+		SourceRef:  update.ID,
+		Status:     "running",
+		MaxRetries: 3,
+	}
+	if err := db.CreateIngestJob(job); err != nil {
+		t.Fatalf("CreateIngestJob: %v", err)
+	}
+
+	processor := NewJobProcessor(db, t.TempDir())
+	if err := processor.processRollbackJob(context.Background(), job); err != nil {
+		t.Fatalf("processRollbackJob: %v", err)
+	}
+
+	var restoredID, restoredContent string
+	if err := db.Pool().QueryRow(ctx,
+		`SELECT id, COALESCE(content, '') FROM documents WHERE relative_path = $1`, rel).
+		Scan(&restoredID, &restoredContent); err != nil {
+		t.Fatalf("load restored document row: %v", err)
+	}
+	if !strings.Contains(restoredContent, "first revision") {
+		t.Fatalf("restored content = %q, want first revision", restoredContent)
+	}
+	if restoredID != createdID {
+		t.Fatalf("restored document id = %q, want %q", restoredID, createdID)
+	}
+
+	finished, err := db.GetIngestJob(job.ID)
+	if err != nil || finished == nil {
+		t.Fatalf("load finished job: job=%v err=%v", finished, err)
+	}
+	if finished.Status != "succeeded" {
+		t.Fatalf("job status = %q, want succeeded", finished.Status)
+	}
+	if !strings.Contains(finished.ResultSummary, "rolled back") {
+		t.Fatalf("result summary = %q, want rollback summary", finished.ResultSummary)
+	}
+
+	changeSets, err := db.ListChangeSets(10, "")
+	if err != nil {
+		t.Fatalf("ListChangeSets: %v", err)
+	}
+	var rollbackSet *store.ChangeSet
+	for i := range changeSets {
+		if changeSets[i].Kind == "rollback" && changeSets[i].RollbackOf == update.ID {
+			rollbackSet = &changeSets[i]
+			break
+		}
+	}
+	if rollbackSet == nil {
+		t.Fatalf("expected rollback change set for %s, got %+v", update.ID, changeSets)
+	}
+	if rollbackSet.PageCount != 1 {
+		t.Fatalf("rollback page count = %d, want 1", rollbackSet.PageCount)
+	}
+
+	revisions, err := db.ListPageRevisions(rel, 10)
+	if err != nil {
+		t.Fatalf("ListPageRevisions: %v", err)
+	}
+	if len(revisions) != 3 {
+		t.Fatalf("revision count = %d, want 3 (create, update, rollback)", len(revisions))
+	}
+	latest := revisions[0]
+	if latest.Operation != store.RevisionRestore {
+		t.Fatalf("latest operation = %q, want restore", latest.Operation)
+	}
+	if latest.ChangeSetID != rollbackSet.ID {
+		t.Fatalf("latest revision change set = %q, want %q", latest.ChangeSetID, rollbackSet.ID)
+	}
+	if !strings.Contains(latest.Content, "first revision") {
+		t.Fatalf("latest revision content = %q, want first revision", latest.Content)
 	}
 }
 

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
 func setupProviderRoutes(api *API, r chi.Router) {
@@ -41,7 +41,7 @@ func TestListProvidersWithData(t *testing.T) {
 	setupProviderRoutes(api, r)
 
 	// Seed provider cache
-	err := api.db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	err := api.db.UpsertProviderInfo([]store.ProviderInfo{
 		{ID: "openai", Name: "OpenAI", APIBase: "https://api.openai.com/v1", APIFormat: "openai", EnvKey: "OPENAI_API_KEY", DocURL: "https://platform.openai.com"},
 		{ID: "anthropic", Name: "Anthropic", APIBase: "https://api.anthropic.com", APIFormat: "anthropic", EnvKey: "ANTHROPIC_API_KEY", DocURL: "https://docs.anthropic.com"},
 	})
@@ -118,14 +118,14 @@ func TestListProviderModels(t *testing.T) {
 	setupProviderRoutes(api, r)
 
 	// Seed data
-	err := api.db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	err := api.db.UpsertProviderInfo([]store.ProviderInfo{
 		{ID: "openai", Name: "OpenAI", APIBase: "https://api.openai.com/v1", APIFormat: "openai"},
 	})
 	if err != nil {
 		t.Fatalf("seed provider: %v", err)
 	}
 
-	err = api.db.UpsertModels([]sqlite.ModelInfo{
+	err = api.db.UpsertModels([]store.ModelInfo{
 		{ProviderID: "openai", ModelID: "gpt-4o", Name: "GPT-4o", Family: "GPT-4", ContextLimit: 128000, OutputLimit: 16384, CostInput: 2.5, CostOutput: 10.0, Reasoning: true, ToolCall: true, Attachment: true},
 		{ProviderID: "openai", ModelID: "gpt-4o-mini", Name: "GPT-4o Mini", Family: "GPT-4", ContextLimit: 128000, OutputLimit: 16384, CostInput: 0.15, CostOutput: 0.6},
 	})
@@ -172,7 +172,7 @@ func TestListProviderModelsFilterByProvider(t *testing.T) {
 	setupProviderRoutes(api, r)
 
 	// Seed two providers
-	err := api.db.UpsertProviderInfo([]sqlite.ProviderInfo{
+	err := api.db.UpsertProviderInfo([]store.ProviderInfo{
 		{ID: "openai", Name: "OpenAI", APIFormat: "openai"},
 		{ID: "anthropic", Name: "Anthropic", APIFormat: "anthropic"},
 	})
@@ -180,7 +180,7 @@ func TestListProviderModelsFilterByProvider(t *testing.T) {
 		t.Fatalf("seed providers: %v", err)
 	}
 
-	err = api.db.UpsertModels([]sqlite.ModelInfo{
+	err = api.db.UpsertModels([]store.ModelInfo{
 		{ProviderID: "openai", ModelID: "gpt-4o", Name: "GPT-4o"},
 		{ProviderID: "anthropic", ModelID: "claude-3", Name: "Claude 3"},
 	})

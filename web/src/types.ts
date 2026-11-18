@@ -62,10 +62,14 @@ export interface SearchChunk {
   path: string
   file_type: string
   score: number
+  match_type?: "keyword" | "semantic"
 }
+
+export type SearchMode = "keyword" | "semantic" | "hybrid"
 
 export interface SearchResponse {
   query: string
+  mode?: SearchMode
   results: SearchChunk[]
 }
 
@@ -177,8 +181,10 @@ export interface Settings {
   session_tool_loop_max_rounds_qa?: number
   session_tool_loop_max_rounds_organize?: number
   session_tool_loop_max_calls_per_round?: number
-  backup_include_raw?: string | boolean
-  vc_auto_push?: string | boolean
+  embedding_instance_id?: string
+  embedding_model?: string
+  embedding_dim?: string | number
+  embedding_configured?: boolean
   acp_agents_json?: string
   default_agent_kind?: AgentKind
   default_acp_agent_id?: string
@@ -337,7 +343,7 @@ export interface ActiveReviewSummary {
   review_id: string
   status: IngestReview["status"]
   current_plan_version: number
-  merge_commit_sha?: string
+  change_set_id?: string
 }
 
 export interface IngestSession {
@@ -424,7 +430,7 @@ export interface IngestReview {
   current_plan_version: number
   approved_plan_version: number
   final_job_id?: string
-  merge_commit_sha?: string
+  change_set_id?: string
   created_at: string
   updated_at: string
 }
@@ -444,22 +450,58 @@ export interface OutlineItem {
   slug: string
 }
 
-export interface VCStatus {
-  enabled: boolean
-  commit_count: number
-  git_available: boolean
-  git_version: string
-  tracked_dirs: string[]
-  excluded_dirs: string[]
-  backup_dirs?: string[]
-  remote_configured?: boolean
-  remote_url?: string
-  branch?: string
-  ahead?: number
-  behind?: number
-  auto_push?: boolean
-  backup_include_raw?: boolean
-  last_push_error?: string
+/** One atomic write operation recorded in PostgreSQL revision history. */
+export interface ChangeSet {
+  id: string
+  kind: string
+  job_id?: string
+  review_id?: string
+  source_blob_id?: string
+  source_filename?: string
+  summary?: string
+  rollback_of?: string
+  page_count: number
+  created_at: string
+}
+
+export type RevisionOperation = "create" | "update" | "delete" | "restore"
+
+/** Immutable snapshot of one page within a change set. */
+export interface PageRevision {
+  id: string
+  document_id?: string
+  relative_path: string
+  revision_no: number
+  parent_revision_id?: string
+  change_set_id: string
+  operation: RevisionOperation
+  title: string
+  content: string
+  metadata: string
+  content_hash: string
+  source_kind: string
+  file_type: string
+  actor: string
+  created_at: string
+}
+
+export interface HistoryListResponse {
+  changes: ChangeSet[]
+}
+
+export interface HistoryDetailResponse {
+  change_set: ChangeSet
+  pages: PageRevision[]
+}
+
+export interface PageHistoryResponse {
+  path: string
+  revisions: PageRevision[]
+}
+
+export interface RollbackResponse {
+  status: string
+  job_id: string
 }
 
 export interface ProviderCheckResult {
@@ -480,14 +522,6 @@ export interface MCPServerCheckResult {
   status: "ok" | "error" | "disabled"
   message?: string
   tool_count?: number
-}
-
-export interface VCLogEntry {
-  sha: string
-  subject: string
-  timestamp: string
-  files_changed: number
-  is_rollback: boolean
 }
 
 export interface SessionMessageEvent {

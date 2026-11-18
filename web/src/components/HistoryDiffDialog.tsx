@@ -24,9 +24,9 @@ import { useT } from "@/i18n"
 
 export const DIFF_LOAD_FAILED_MARKER = "__DIFF_LOAD_FAILED__"
 
-export interface CommitDiffDialogProps {
+export interface HistoryDiffDialogProps {
   open: boolean
-  sha: string
+  changeId: string
   diff: string
   loading: boolean
   onClose: () => void
@@ -200,13 +200,13 @@ function DiffContentBody({
   )
 }
 
-export function CommitDiffDialog({
+export function HistoryDiffDialog({
   open,
-  sha,
+  changeId,
   diff,
   loading,
   onClose,
-}: CommitDiffDialogProps) {
+}: HistoryDiffDialogProps) {
   const t = useT()
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [viewType, setViewType] = useState<ViewType>("unified")
@@ -221,7 +221,7 @@ export function CommitDiffDialog({
 
   useEffect(() => {
     setSelectedIndex(0)
-  }, [diff, sha])
+  }, [diff, changeId])
 
   useEffect(() => {
     if (!open) return
@@ -273,7 +273,7 @@ export function CommitDiffDialog({
       >
         <div className="flex items-center justify-between gap-2 p-4 border-b shrink-0">
           <h2 className="font-semibold text-sm truncate">
-            {t("diff.title", { sha })}
+            {t("diff.title", { change: changeId })}
           </h2>
           <div className="flex items-center gap-1 shrink-0">
             <Button

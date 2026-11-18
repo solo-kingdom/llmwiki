@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Settings 导出文件
-系统 SHALL 将非敏感应用配置导出到 workspace 文件 `.llmwiki/workspace-settings.json`，供轨道 B git 备份。
+系统 SHALL 将非敏感应用配置导出到 workspace 文件 `.llmwiki/workspace-settings.json`，用于恢复到新部署。
 
 #### Scenario: 导出内容
 - **WHEN** 系统执行 settings 导出
@@ -16,7 +16,7 @@
 系统 SHALL 在适当时机从 `.llmwiki/workspace-settings.json` 导入配置到 `app_config`。
 
 #### Scenario: 新数据库首次 init 后导入
-- **WHEN** `llmwiki init` 创建新 `index.db` 且 workspace 存在有效的 `workspace-settings.json`
+- **WHEN** `llmwiki init` 或 `migrate` 发现有效的 `workspace-settings.json`
 - **THEN** SHALL 将文件中的允许键导入 `app_config`
 - **AND** SHALL NOT 导入 API Key
 
@@ -29,7 +29,7 @@
 - **THEN** SHALL 跳过导入并记录 warning，不阻塞 init/serve
 
 ### Requirement: API Key 新环境重填
-系统 SHALL NOT 通过 git 备份恢复 provider API Key；导入后用户 MUST 在 Settings 重新配置凭证。
+系统 SHALL NOT 通过 settings 文件恢复 provider API Key；新环境用户 MUST 在 Settings 重新配置凭证。
 
 #### Scenario: 导入后 provider 为空
 - **WHEN** settings 从文件导入完成

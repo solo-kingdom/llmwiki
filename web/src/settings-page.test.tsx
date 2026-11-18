@@ -12,12 +12,26 @@ vi.mock("@/context/AppContext", () => ({
       doc_language: "zh",
       rules_supplement: "",
       mcp_servers_json: "",
+      embedding_instance_id: "inst-1",
+      embedding_model: "text-embedding-3-small",
+      embedding_dim: "1536",
+      embedding_configured: true,
     },
     loadSettings: mockLoadSettings,
     saveSettings: mockSaveSettings,
     providers: [],
     loadProviders: vi.fn(),
-    instances: [],
+    instances: [
+      {
+        id: "inst-1",
+        name: "OpenAI",
+        catalog_id: "openai",
+        api_key_masked: "sk-…",
+        base_url: "",
+        created_at: "",
+        updated_at: "",
+      },
+    ],
     loadInstances: vi.fn(),
     createInstance: vi.fn(),
     updateInstance: vi.fn(),
@@ -30,12 +44,7 @@ vi.mock("@/context/AppContext", () => ({
   }),
 }))
 
-const mockGetVCStatus = vi.fn().mockResolvedValue({ enabled: false, git_available: true })
-const mockSetVCSRemote = vi.fn()
-
 vi.mock("@/lib/api", () => ({
-  getVCStatus: (...args: unknown[]) => mockGetVCStatus(...args),
-  setVCSRemote: (...args: unknown[]) => mockSetVCSRemote(...args),
   checkAllProviderInstances: vi.fn().mockResolvedValue({ instances: [] }),
   checkProviderInstance: vi.fn(),
   checkMCPStatus: vi.fn().mockResolvedValue({ servers: [] }),
@@ -50,8 +59,6 @@ describe("SettingsPage layout and save UX", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockSaveSettings.mockResolvedValue({ ui_language: "zh" })
-    mockGetVCStatus.mockResolvedValue({ enabled: false, git_available: true })
-    mockSetVCSRemote.mockResolvedValue({ enabled: true, git_available: true })
   })
 
   it("renders grouped settings sections", () => {
@@ -60,7 +67,6 @@ describe("SettingsPage layout and save UX", () => {
     expect(screen.getByTestId("settings-group-basic")).toBeInTheDocument()
     expect(screen.getByTestId("settings-group-models")).toBeInTheDocument()
     expect(screen.getByTestId("settings-group-rules")).toBeInTheDocument()
-    expect(screen.getByTestId("settings-group-vc")).toBeInTheDocument()
     expect(screen.getByTestId("settings-group-advanced")).toBeInTheDocument()
     expect(screen.getByText("基础设置")).toBeInTheDocument()
     expect(screen.getByText("模型与连接")).toBeInTheDocument()
@@ -112,28 +118,25 @@ describe("SettingsPage layout and save UX", () => {
     })
   })
 
-  it("accepts SSH git remote URLs without HTML5 url validation", async () => {
-    mockGetVCStatus.mockResolvedValue({
-      enabled: true,
-      git_available: true,
-      commit_count: 1,
-      tracked_dirs: [".wiki"],
-      excluded_dirs: [],
-    })
-
+  it("shows embedding configuration and saves embedding changes", async () => {
     render(<SettingsPage />)
 
-    const input = await screen.findByTestId("vc-remote-url")
-    expect(input).toHaveAttribute("type", "text")
+    expect(await screen.findByTestId("embedding-status")).toHaveTextContent("已配置")
+    expect(screen.getByTestId("embedding-instance")).toHaveValue("inst-1")
+    expect(screen.getByTestId("embedding-model")).toHaveValue(
+      "text-embedding-3-small",
+    )
+    expect(screen.getByTestId("embedding-dim")).toHaveValue(1536)
 
-    const sshURL = "git@codeup.aliyun.com:wii/llmwiki-data.git"
-    fireEvent.change(input, { target: { value: sshURL } })
-    expect((input as HTMLInputElement).checkValidity()).toBe(true)
-
-    fireEvent.click(screen.getByText("保存远程"))
+    fireEvent.change(screen.getByTestId("embedding-model"), {
+      target: { value: "text-embedding-3-large" },
+    })
+    fireEvent.click(screen.getByTestId("settings-save-button"))
 
     await waitFor(() => {
-      expect(mockSetVCSRemote).toHaveBeenCalledWith(sshURL)
+      expect(mockSaveSettings).toHaveBeenCalledWith({
+        embedding_model: "text-embedding-3-large",
+      })
     })
   })
 
@@ -153,7 +156,6 @@ describe("API token setting", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockSaveSettings.mockResolvedValue({ ui_language: "zh" })
-    mockGetVCStatus.mockResolvedValue({ enabled: false, git_available: true })
   })
 
   it("saves the token typed by the user and explains the active source", async () => {

@@ -5,17 +5,12 @@ import (
 	"testing"
 
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
-	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
+	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
-func openPipelineTestDB(t *testing.T) *sqlite.DB {
+func openPipelineTestDB(t *testing.T) store.Store {
 	t.Helper()
-	db, err := sqlite.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("open test db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
+	return openTestDB(t)
 }
 
 func TestPipelineToolExecutor_ListTools_LocalOnly(t *testing.T) {

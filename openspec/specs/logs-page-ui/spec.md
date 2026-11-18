@@ -72,9 +72,9 @@ Logs 页面 SHALL 提供清空全部系统日志的操作。
 - **THEN** 列表 SHALL 刷新；若仅剩 `logs_cleared` 记录则显示该条或空状态
 
 ### Requirement: Logs 与 Timeline 区分
-Logs 页面 SHALL 明确为系统运行时日志，而非 Git 版本历史。
+Logs 页面 SHALL 明确为系统运行时日志，而非页面修订历史。
 
 #### Scenario: 导航标签
 - **WHEN** 用户查看全局导航
 - **THEN** Logs Tab 与 Timeline Tab SHALL 并列显示且标签分别为「Logs」与「Timeline」
-- **AND** Logs 页面 SHALL NOT 展示 git commit 或 diff 内容
+- **AND** Logs 页面 SHALL NOT 展示页面修订或 diff 内容

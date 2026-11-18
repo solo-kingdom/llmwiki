@@ -10,6 +10,7 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/acp"
 	"github.com/solo-kingdom/llmwiki/internal/activity"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
+	"github.com/solo-kingdom/llmwiki/internal/llm"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
 	"github.com/solo-kingdom/llmwiki/internal/store"
 	"github.com/solo-kingdom/llmwiki/internal/workspace"
@@ -52,6 +53,10 @@ type settingsResponse struct {
 	DefaultAgentKind                 string `json:"default_agent_kind"`
 	DefaultACPAgentID                string `json:"default_acp_agent_id"`
 	ACPMaxConcurrentAgents           string `json:"acp_max_concurrent_agents"`
+	EmbeddingInstanceID              string `json:"embedding_instance_id"`
+	EmbeddingModel                   string `json:"embedding_model"`
+	EmbeddingDim                     string `json:"embedding_dim"`
+	EmbeddingConfigured              bool   `json:"embedding_configured"`
 	// APIToken is never returned; callers see whether one is set and where it comes from.
 	APITokenSet    bool   `json:"api_token_set"`
 	APITokenMasked string `json:"api_token_masked"`
@@ -91,6 +96,10 @@ func (a *API) GetSettings(w http.ResponseWriter, r *http.Request) {
 		DefaultAgentKind:                 defaultAgentKindForResponse(all["default_agent_kind"]),
 		DefaultACPAgentID:                all["default_acp_agent_id"],
 		ACPMaxConcurrentAgents:           acpMaxConcurrentAgentsForResponse(all["acp_max_concurrent_agents"]),
+		EmbeddingInstanceID:              all[llm.ConfigEmbeddingInstanceID],
+		EmbeddingModel:                   all[llm.ConfigEmbeddingModel],
+		EmbeddingDim:                     all[llm.ConfigEmbeddingDim],
+		EmbeddingConfigured:              all[llm.ConfigEmbeddingInstanceID] != "" && all[llm.ConfigEmbeddingModel] != "",
 		APITokenSet:                      all[store.ConfigAPIToken] != "",
 		APITokenMasked:                   maskKey(all[store.ConfigAPIToken]),
 		APITokenSource:                   apiTokenSource(a, all[store.ConfigAPIToken]),
@@ -215,6 +224,9 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		"default_agent_kind":                       true,
 		"default_acp_agent_id":                     true,
 		"acp_max_concurrent_agents":                true,
+		llm.ConfigEmbeddingInstanceID:              true,
+		llm.ConfigEmbeddingModel:                   true,
+		llm.ConfigEmbeddingDim:                     true,
 		store.ConfigAPIToken:                       true,
 	}
 
@@ -339,6 +351,15 @@ func (a *API) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			if _, err := mcp.ParseToolLoopMaxCallsPerRound(value); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
+			}
+		}
+		if key == llm.ConfigEmbeddingDim {
+			if value != "" {
+				var n int
+				if _, err := fmt.Sscanf(value, "%d", &n); err != nil || n < 1 || n > 8192 {
+					writeError(w, http.StatusBadRequest, "embedding_dim must be an integer between 1 and 8192")
+					return
+				}
 			}
 		}
 		if key == store.ConfigAPIToken {

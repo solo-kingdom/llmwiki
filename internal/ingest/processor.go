@@ -233,17 +233,17 @@ func (p *JobProcessor) failJob(id, errorCode, message, missingDep, remediation s
 			sha := failed.SourceRef
 			activity.Record(p.db, activity.Entry{
 				Level:        "error",
-				Category:     "vcs",
+				Category:     "history",
 				Action:       "rollback_failed",
 				Message:      fmt.Sprintf("回滚失败：%s", sha),
-				ResourceType: "commit",
+				ResourceType: "change_set",
 				ResourceID:   sha,
 				Status:       "failure",
 				Source:       "processor",
 				Details: map[string]interface{}{
-					"commit_sha": sha,
-					"job_id":     failed.ID,
-					"error":      failed.ErrorMessage,
+					"change_set_id": sha,
+					"job_id":        failed.ID,
+					"error":         failed.ErrorMessage,
 				},
 			})
 		}

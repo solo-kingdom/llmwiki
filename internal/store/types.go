@@ -58,6 +58,7 @@ type ListDocumentsFilter struct {
 
 // Chunk is a text chunk for full-text/vector indexing.
 type Chunk struct {
+	ID               string
 	DocumentID       string
 	ChunkIndex       int
 	Content          string

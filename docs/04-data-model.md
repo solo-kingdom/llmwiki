@@ -93,30 +93,29 @@ CREATE INDEX idx_refs_source ON document_references(source_document_id);
 CREATE INDEX idx_refs_target ON document_references(target_document_id);
 ```
 
-### chunks_fts — FTS5 全文搜索
+### 搜索与修订（PostgreSQL）
 
 ```sql
-CREATE VIRTUAL TABLE chunks_fts USING fts5(
-    content,
-    content='document_chunks',
-    content_rowid='rowid',
-    tokenize='porter unicode61'
+-- 关键词：tsvector + trigram（中文子串）
+CREATE INDEX idx_chunks_fts ON document_chunks
+  USING gin (to_tsvector('simple', content));
+CREATE INDEX idx_chunks_content_trgm ON document_chunks
+  USING gin (content gin_trgm_ops);
+
+-- 语义：每个 chunk 每个模型一行
+CREATE TABLE chunk_embeddings (
+    chunk_id TEXT REFERENCES document_chunks(id) ON DELETE CASCADE,
+    model TEXT NOT NULL, dim INTEGER NOT NULL,
+    embedding vector NOT NULL,
+    PRIMARY KEY (chunk_id, model)
 );
 
--- 触发器自动同步
-CREATE TRIGGER chunks_fts_insert AFTER INSERT ON document_chunks BEGIN
-    INSERT INTO chunks_fts(rowid, content) VALUES (new.rowid, new.content);
-END;
-CREATE TRIGGER chunks_fts_delete AFTER DELETE ON document_chunks BEGIN
-    INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES('delete', old.rowid, old.content);
-END;
-CREATE TRIGGER chunks_fts_update AFTER UPDATE ON document_chunks BEGIN
-    INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES('delete', old.rowid, old.content);
-    INSERT INTO chunks_fts(rowid, content) VALUES (new.rowid, new.content);
-END;
+-- 历史：一次写入一个 change set，每页一条修订
+CREATE TABLE change_sets (...);
+CREATE TABLE page_revisions (...);
 ```
 
----
+回滚恢复父修订内容，确定性执行，不调用 LLM。
 
 ## 分块策略
 
@@ -205,7 +204,7 @@ reindex 时必须从文件重新解析 frontmatter → 回填 tags, date, descri
 ### 初始化 (llmwiki init)
 ```go
 1. 创建 wiki/ 目录
-2. 创建 .llmwiki/index.db
+2. 创建 PostgreSQL schema 与 workspace 行
 3. 执行 schema → 建表
 4. 写入 workspace 行
 5. 脚手架: overview.md + log.md (写文件 + 写 DB)
@@ -222,7 +221,7 @@ reindex 时必须从文件重新解析 frontmatter → 回填 tags, date, descri
    - 文本文件: 读内容 → INSERT documents + frontmatter 解析回填
    - 非文本: 仅 INSERT documents 元数据
 6. 对 wiki/*.md 重新解析引用图
-7. 对所有文本文件重新分块 → 触发器自动填充 FTS5
+7. 对所有文本文件重新分块 → 写入 PostgreSQL chunks 与全文索引
 ```
 
 ### 文件监视器
@@ -273,6 +272,6 @@ reindex 时必须从文件重新解析 frontmatter → 回填 tags, date, descri
 │   ├── synthesis/             # 综合分析              → DB: source_kind='wiki'
 │   └── comparisons/           # 对比分析              → DB: source_kind='wiki'
 └── .llmwiki/
-    ├── index.db               # SQLite: documents, pages, chunks, references, fts
+    └── workspace-settings.json # 非密设置快照（可选，页面正文与历史在 PostgreSQL）
     └── cache/                 # 衍生缓存: PDF 提取结果, LibreOffice 转换
 ```

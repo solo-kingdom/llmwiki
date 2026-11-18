@@ -1,6 +1,6 @@
 ---
 name: llmwiki
-description: 通过 HTTP API 操作 llmwiki 服务——读写 wiki 页面、跑摄取流水线、检查并修复知识库、用 git 做快照。用户提到 llmwiki、wiki 服务，或要求新增、查询、摄取、整理、检查、备份 wiki 知识时使用。本文件是入口，负责把任务路由到各阶段 skill。
+description: 通过 HTTP API 操作 llmwiki 服务——读写 wiki 页面、跑摄取流水线、检查并修复知识库、查看与回滚修订历史。用户提到 llmwiki、wiki 服务，或要求新增、查询、摄取、整理、检查、回滚 wiki 知识时使用。本文件是入口，负责把任务路由到各阶段 skill。
 license: MIT
 metadata:
   author: llmwiki
@@ -23,7 +23,7 @@ curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/health"      # {"status":"ok"} 表�
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/workspace"   # 服务地址 + 知识库状态
 ```
 
-每次都先调 `GET /api/v1/workspace`。它返回 `root`、`layout`（知识库各部分是否存在）、`counts`、`page_types`、`wiki_dirs`。计数全 0 且 `layout.index_db: false` 表示知识库是新库或没建索引，先跑 `POST /api/v1/reindex`。
+每次都先调 `GET /api/v1/workspace`。它返回 `root`、`layout`（知识库各部分是否存在）、`counts`、`page_types`、`wiki_dirs`。计数全 0 且 `layout.index_db: false` 表示 PostgreSQL 未初始化：检查 `--database-url` 并先跑 `llmwiki init`。
 
 服务端配了 token 时，所有 `/api/v1/*` 都要带 `Authorization`；只有 `/api/v1/health` 和 `/api/public/wiki/status` 免鉴权。令牌来自设置项 `api_token` 或启动参数 `--token`，带参数时以参数为准；`GET /api/v1/settings` 的 `api_token_source`（`flag` / `settings` / `none`）说明当前来源，令牌本身不要回显。
 
@@ -66,7 +66,7 @@ wiki/entities/ concepts/ synthesis/ comparisons/ queries/ sources/
 
 | 任务 | 阶段 skill | 端点 |
 |---|---|---|
-| 初次安装、配置模型、git 备份 | `llmwiki-guide` | `GET /skills/llmwiki-guide.md` |
+| 初次安装、配置模型与 embedding、历史与回滚 | `llmwiki-guide` | `GET /skills/llmwiki-guide.md` |
 | 回答问题、找页面、看引用关系 | `llmwiki-query` | `GET /skills/llmwiki-query.md` |
 | 新建、改写、合并、移动、删除页面 | `llmwiki-organize` | `GET /skills/llmwiki-organize.md` |
 | 把文件/文本变成 wiki 知识 | `llmwiki-ingest` | `GET /skills/llmwiki-ingest.md` |
@@ -82,7 +82,7 @@ wiki/entities/ concepts/ synthesis/ comparisons/ queries/ sources/
 4. **不编造。** 知识库没有依据就明说，改为摄取来源，不要靠猜填空。
 5. **每批改动后跑 lint**；`GET /api/v1/lint` 还有你造成的 `severity: error` 时不许报成功。
 6. **不编辑 `wiki/index.md`、`.llmwiki/`、`raw/`。**
-7. **报证据不报动作**：列出改动的路径、lint 结果、提交了就给出 commit sha。
+7. **报证据不报动作**：列出改动的路径、lint 结果、执行过回滚就给出 change set id。
 
 ## 响应约定
 

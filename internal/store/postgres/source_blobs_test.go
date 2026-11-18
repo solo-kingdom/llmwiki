@@ -103,8 +103,12 @@ func TestSourceBlobDedupAndRead(t *testing.T) {
 	if err := db.CreateSourceBlob(nil, data); err == nil {
 		t.Fatal("expected error for nil blob")
 	}
-	if err := db.CreateSourceBlob(&store.SourceBlob{Filename: "x"}, data); err == nil {
-		t.Fatal("expected error for empty id")
+	created := &store.SourceBlob{Filename: "x"}
+	if err := db.CreateSourceBlob(created, data); err != nil {
+		t.Fatalf("CreateSourceBlob with generated id: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatal("expected generated blob id")
 	}
 }
 

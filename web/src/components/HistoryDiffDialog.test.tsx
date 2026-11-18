@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { screen } from "@testing-library/react"
-import { CommitDiffDialog } from "@/components/CommitDiffDialog"
+import { HistoryDiffDialog } from "@/components/HistoryDiffDialog"
 import { renderWithI18n } from "@/test/i18n"
 
 const sampleDiff = `diff --git a/wiki/intro.md b/wiki/intro.md
@@ -11,12 +11,12 @@ const sampleDiff = `diff --git a/wiki/intro.md b/wiki/intro.md
 +line
 `
 
-describe("CommitDiffDialog", () => {
+describe("HistoryDiffDialog", () => {
   it("renders file list and diff table when parsed", () => {
     const { container } = renderWithI18n(
-      <CommitDiffDialog
+      <HistoryDiffDialog
         open
-        sha="abc1234"
+        changeId="abc1234"
         diff={sampleDiff}
         loading={false}
         onClose={() => {}}
@@ -31,9 +31,9 @@ describe("CommitDiffDialog", () => {
 
   it("shows raw diff fallback when parse has no hunks", () => {
     renderWithI18n(
-      <CommitDiffDialog
+      <HistoryDiffDialog
         open
-        sha="abc1234"
+        changeId="abc1234"
         diff="not a valid unified diff"
         loading={false}
         onClose={() => {}}
@@ -49,9 +49,9 @@ describe("CommitDiffDialog", () => {
 
   it("shows empty diff message when diff text is blank", () => {
     renderWithI18n(
-      <CommitDiffDialog
+      <HistoryDiffDialog
         open
-        sha="empty01"
+        changeId="empty01"
         diff=""
         loading={false}
         onClose={() => {}}
@@ -65,9 +65,9 @@ describe("CommitDiffDialog", () => {
 
   it("shows loading state", () => {
     renderWithI18n(
-      <CommitDiffDialog
+      <HistoryDiffDialog
         open
-        sha="abc1234"
+        changeId="abc1234"
         diff=""
         loading
         onClose={() => {}}

@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 

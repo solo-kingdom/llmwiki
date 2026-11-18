@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/vcs"
 	"github.com/solo-kingdom/llmwiki/internal/workspace"

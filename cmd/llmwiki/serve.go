@@ -19,7 +19,7 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/mcp"
 	"github.com/solo-kingdom/llmwiki/internal/server"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/watcher"
 	"github.com/solo-kingdom/llmwiki/internal/workspace"

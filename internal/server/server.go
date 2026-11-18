@@ -21,7 +21,7 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 	"github.com/solo-kingdom/llmwiki/internal/watcher"
 )

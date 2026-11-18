@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/solo-kingdom/llmwiki/internal/engine"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
 	"github.com/solo-kingdom/llmwiki/internal/store/sqlite"
 )
 

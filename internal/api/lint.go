@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/solo-kingdom/llmwiki/internal/engine"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
 )
 
 // Lint runs wiki health checks and returns a LintReport JSON payload.

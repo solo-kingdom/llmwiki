@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	storesvc "github.com/solo-kingdom/llmwiki/internal/store"
+	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
 )
 
 func resolveWorkspaceDir(arg string) (string, error) {

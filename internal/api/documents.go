@@ -220,9 +220,18 @@ func (a *API) UpdateDocumentMetadata(w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = existing.Title
 	}
-	tags := req.Tags
+	tags := existing.Tags
+	if req.Tags != nil {
+		tags = req.Tags
+	}
 	date := req.Date
+	if date == "" {
+		date = existing.Date
+	}
 	metadata := req.Metadata
+	if metadata == "" {
+		metadata = existing.Metadata
+	}
 
 	existing.Title = title
 	existing.Tags = tags

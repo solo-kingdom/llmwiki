@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/pmezard/go-difflib/difflib"
 
 	"github.com/solo-kingdom/llmwiki/internal/activity"
+	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
@@ -74,6 +76,12 @@ func (a *API) HistoryDiff(w http.ResponseWriter, r *http.Request) {
 				from = "a/" + parent.RelativePath
 			}
 		}
+		fromName := "a/" + rev.RelativePath
+		if rev.ParentRevisionID != "" {
+			if parent, perr := a.db.GetRevision(rev.ParentRevisionID); perr == nil && parent != nil {
+				fromName = "a/" + parent.RelativePath
+			}
+		}
 		diff, derr := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
 			A:        difflib.SplitLines(before),
 			B:        difflib.SplitLines(rev.Content),
@@ -85,6 +93,7 @@ func (a *API) HistoryDiff(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, derr.Error())
 			return
 		}
+		fmt.Fprintf(&b, "diff --git %s b/%s\n", fromName, rev.RelativePath)
 		b.WriteString(diff)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"diff": b.String()})
@@ -177,6 +186,10 @@ func (a *API) GetRevision(w http.ResponseWriter, r *http.Request) {
 func (a *API) RestoreRevision(w http.ResponseWriter, r *http.Request) {
 	cs, err := a.db.RestoreRevision(chi.URLParam(r, "id"), "api")
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, err := ingest.RebuildDerived(a.db); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

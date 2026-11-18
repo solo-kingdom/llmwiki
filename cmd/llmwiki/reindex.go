@@ -3,54 +3,31 @@ package main
 import (
 	"fmt"
 
-	"github.com/solo-kingdom/llmwiki/internal/engine"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
-	"github.com/solo-kingdom/llmwiki/internal/store"
 	"github.com/spf13/cobra"
+
+	"github.com/solo-kingdom/llmwiki/internal/ingest"
 )
 
 func newReindexCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "reindex [dir]",
-		Short: "Rebuild the SQLite index from workspace files",
-		Args:  cobra.MaximumNArgs(1),
+		Use:   "reindex",
+		Short: "Rebuild chunks and references from PostgreSQL content",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dir := ""
-			if len(args) > 0 {
-				dir = args[0]
-			}
-			return runReindex(dir)
+			return runReindex()
 		},
 	}
 }
 
-func runReindex(dir string) error {
-	ws, err := resolveWorkspaceDir(dir)
-	if err != nil {
-		return err
-	}
-
+func runReindex() error {
 	db, err := openDatabase()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-
-	if err := clearDerivedIndex(db); err != nil {
-		return fmt.Errorf("clear index: %w", err)
-	}
-
-	adapter := storesvc.NewStoreAdapter(db)
-	reindexer := engine.NewReindexer(adapter, ws)
-	count, err := reindexer.Rebuild("default")
+	count, err := ingest.RebuildDerived(db)
 	if err != nil {
 		return fmt.Errorf("reindex: %w", err)
 	}
-
-	fmt.Printf("Reindexed %d files in %s\n", count, ws)
+	fmt.Printf("Rebuilt derived index for %d document(s)\n", count)
 	return nil
-}
-
-func clearDerivedIndex(db store.Store) error {
-	return db.ClearDerivedIndex()
 }

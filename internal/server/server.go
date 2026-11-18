@@ -21,7 +21,6 @@ import (
 	"github.com/solo-kingdom/llmwiki/internal/engine"
 	"github.com/solo-kingdom/llmwiki/internal/ingest"
 	"github.com/solo-kingdom/llmwiki/internal/llm"
-	storesvc "github.com/solo-kingdom/llmwiki/internal/service"
 	"github.com/solo-kingdom/llmwiki/internal/store"
 )
 
@@ -461,8 +460,8 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
-	if s.db == nil || s.config.Workspace == "" {
-		http.Error(w, `{"error":"workspace not configured"}`, http.StatusInternalServerError)
+	if s.db == nil {
+		http.Error(w, `{"error":"database not configured"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -476,9 +475,7 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		Source:   "api",
 	})
 
-	adapter := storesvc.NewStoreAdapter(s.db)
-	reindexer := engine.NewReindexer(adapter, s.config.Workspace)
-	count, err := reindexer.Rebuild("default")
+	count, err := ingest.RebuildDerived(s.db)
 	if err != nil {
 		activity.Record(s.db, activity.Entry{
 			Level:    "error",
@@ -500,7 +497,7 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		Level:    "info",
 		Category: "system",
 		Action:   "reindex_completed",
-		Message:  fmt.Sprintf("索引重建完成，共索引 %d 个文件", count),
+		Message:  fmt.Sprintf("索引重建完成，共处理 %d 个文档", count),
 		Status:   "success",
 		Source:   "api",
 		Details: map[string]interface{}{

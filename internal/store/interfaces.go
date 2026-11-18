@@ -28,7 +28,6 @@ type DocumentStore interface {
 	GetWikiDocumentByID(id string) (*Document, error)
 	UpdateDocument(id, content, title string, tags []string, date, metadata string) error
 	ArchiveDocuments(ids []string) (int64, error)
-	ClearDerivedIndex() error
 	ListDocuments() ([]Document, error)
 	ListDocumentsFiltered(f ListDocumentsFilter) ([]Document, error)
 	ListDocumentsWithContent() ([]Document, error)

@@ -30,6 +30,10 @@ func (p *JobProcessor) processRollbackJob(ctx context.Context, job *store.Ingest
 		return p.failJob(job.ID, "rollback_failed",
 			fmt.Sprintf("rollback failed: %v", err), "", "")
 	}
+	if _, err := RebuildDerived(p.db); err != nil {
+		return p.failJob(job.ID, "rollback_failed",
+			fmt.Sprintf("rebuild index after rollback: %v", err), "", "")
+	}
 
 	summary := fmt.Sprintf("rolled back change set %s (%d page(s))", changeSetID, rb.PageCount)
 	if err := p.db.MarkIngestJobSucceeded(job.ID, summary); err != nil {

@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -41,23 +40,6 @@ func (d *DB) UpdateIngestSessionStatusAndTitle(id, status, title string) error {
 		if title != "" {
 			if _, err := tx.Exec(context.Background(), `UPDATE ingest_sessions SET title=$2, updated_at=(`+nowText+`) WHERE id=$1`, id, title); err != nil {
 				return err
-			}
-		}
-		return nil
-	})
-}
-
-// ClearDerivedIndex removes all derived index rows (full rebuild entry point).
-func (d *DB) ClearDerivedIndex() error {
-	return d.withTx(context.Background(), func(tx pgx.Tx) error {
-		for _, stmt := range []string{
-			`DELETE FROM document_references`,
-			`DELETE FROM document_chunks`,
-			`DELETE FROM document_pages`,
-			`DELETE FROM documents`,
-		} {
-			if _, err := tx.Exec(context.Background(), stmt); err != nil {
-				return fmt.Errorf("clear index: %w", err)
 			}
 		}
 		return nil

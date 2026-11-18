@@ -54,6 +54,7 @@ func runIngest(workspaceDir, sourceFile string, forceOverwrite bool) error {
 
 	pipeline := ingest.NewPipelineWithDB(ws, db, client)
 	pipeline.SetForceOverwrite(forceOverwrite)
+	pipeline.SetChangeSetMeta("ingest", "", "", filepath.Base(absSource), "")
 	files, err := pipeline.Ingest(context.Background(), absSource)
 	if err != nil {
 		return fmt.Errorf("ingest: %w", err)

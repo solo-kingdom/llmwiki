@@ -14,13 +14,19 @@ func (d *DB) CreateProviderInstance(inst *store.ProviderInstance) error {
 	if inst == nil {
 		return fmt.Errorf("nil provider instance")
 	}
-	inst.ID = "inst_" + uuid.New().String()[:8]
+	if inst.ID == "" {
+		inst.ID = "inst_" + uuid.New().String()[:8]
+	}
 	if inst.CatalogID == "" {
 		return fmt.Errorf("catalog_id is required")
 	}
 	err := d.pool.QueryRow(context.Background(), `
 		INSERT INTO provider_instances (id, name, catalog_id, api_key, base_url, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, `+nowText+`, `+nowText+`)
+		ON CONFLICT (id) DO UPDATE SET
+			name = EXCLUDED.name, catalog_id = EXCLUDED.catalog_id,
+			api_key = EXCLUDED.api_key, base_url = EXCLUDED.base_url,
+			updated_at = EXCLUDED.updated_at
 		RETURNING created_at, updated_at`,
 		inst.ID,
 		strings.TrimSpace(inst.Name),

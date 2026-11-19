@@ -1,0 +1,16 @@
+package: quiet-inset
+decisions: {}
+pages:
+  /: conversation
+  /chat/:id: conversation
+  /jobs: collection
+  /timeline: collection
+  /logs: log-viewer
+  /settings: settings
+  /help: page
+  /wiki: detail
+  /wiki/:id: detail
+  /wiki/graph: detail
+local_edits:
+  src/lib/vocab.ts: "补充 llmwiki 领域状态词（job/review/revision/page type），统一由 StatusBadge 使用。"
+feedback: []

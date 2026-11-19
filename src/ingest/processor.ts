@@ -1,0 +1,750 @@
+import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
+import path from "node:path";
+import { logIngestJob, logSession, record } from "../activity/index.js";
+import { clientFromInstance, clientFromWorkspace } from "../llm/instance_client.js";
+import type { Client } from "../llm/client.js";
+import { logger } from "../logger.js";
+import { McpRegistry } from "../mcp/registry.js";
+import { McpRouter } from "../mcp/router.js";
+import type { Store } from "../store/interfaces.js";
+import {
+  DEFAULT_JOB_EVENTS_MAX_COUNT,
+  type IngestJob,
+  type IngestReview,
+} from "../store/types.js";
+import { NoWikiFilesWrittenError } from "./fileblocks.js";
+import { computeRulesHash, resolveRulesSupplement } from "./prompts.js";
+import { normalizeJobSource } from "./normalize.js";
+import { Pipeline } from "./pipeline.js";
+import { formatFeedbackForPlan, parseReviewIdFromRef, reviewSourceRef } from "./review.js";
+import { createJobRecorder, StoreJobRecorder } from "./job_events.js";
+import { rebuildDerived } from "./rebuild.js";
+import type { ApplyWikiResult } from "./types.js";
+
+const STALE_HEARTBEAT_SECONDS = 120;
+
+export class JobProcessor {
+  private readonly pipeline: Pipeline;
+  private readonly runnerId: string;
+  private running = false;
+  private timer: NodeJS.Timeout | null = null;
+  private active = false;
+
+  constructor(
+    private readonly db: Store,
+    private readonly workspace: string,
+  ) {
+    this.pipeline = new Pipeline(workspace, db, null);
+    this.runnerId = `${hostname() || "local"}-${process.pid}-${randomUUID().slice(0, 8)}`;
+  }
+
+  start(pollIntervalMs = 3000): void {
+    if (this.running) return;
+    this.running = true;
+    void this.recoverStaleJobs();
+    this.timer = setInterval(() => {
+      if (this.active) return;
+      this.active = true;
+      void this.processNext()
+        .catch((error) => {
+          if (!errorMessage(error).includes("no queued jobs")) {
+            logger.error({ error }, "ingest processor");
+          }
+        })
+        .finally(() => {
+          this.active = false;
+        });
+    }, pollIntervalMs > 0 ? pollIntervalMs : 3000);
+  }
+
+  stop(): void {
+    this.running = false;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  async processAll(): Promise<void> {
+    for (;;) {
+      try {
+        await this.processNext();
+      } catch (error) {
+        if (errorMessage(error).includes("no queued jobs")) return;
+        throw error;
+      }
+    }
+  }
+
+  async processNext(): Promise<void> {
+    const job = await this.db.claimNextIngestJob(this.runnerId);
+    if (!job) throw new Error("no queued jobs");
+    logIngestJob(this.db, job, "running", "processor");
+
+    const recorder = await createJobRecorder(this.db, job.id);
+    this.pipeline.setJobRecorder(recorder);
+    const stopHeartbeat = this.startHeartbeat(job.id);
+    try {
+      if (job.input_type === "rollback") {
+        await this.processRollbackJob(job);
+        return;
+      }
+      if (job.input_type === "review_plan") {
+        await this.processReviewPlanJob(job);
+        return;
+      }
+      if (job.input_type === "review_apply") {
+        await this.processReviewApplyJob(job);
+        return;
+      }
+
+      let normalized;
+      try {
+        normalized = await normalizeJobSource(this.workspace, job.input_type, job.source_path, job.source_ref);
+      } catch (error) {
+        await this.failJob(job.id, "normalize_failed", `normalization failed: ${errorMessage(error)}`, "", "");
+        return;
+      }
+
+      if (!(await this.preparePipelineForJob(job))) return;
+      this.pipeline.setChangeSetMeta(
+        "ingest",
+        job.id,
+        "",
+        path.basename(normalized.canonicalPath),
+        new TextDecoder().decode(normalized.content),
+      );
+      this.pipeline.setMcpRouter(null);
+      await this.checkRulesDrift(job.id);
+
+      try {
+        const files = await this.pipeline.ingestNormalized(normalized);
+        this.finalizeWikiApply(job.id, job.source_path, "", { written: files, deleted: [] });
+        await this.markJobSucceeded(job.id, files);
+      } catch (error) {
+        const code = classifyPipelineError(error);
+        await this.failJob(job.id, code, errorMessage(error), "", remediationForCode(code));
+      }
+    } finally {
+      stopHeartbeat();
+      await this.db.clearIngestJobLease(job.id).catch(() => undefined);
+      this.pipeline.setJobRecorder(null);
+    }
+  }
+
+  private async markJobSucceeded(jobId: string, files: string[]): Promise<void> {
+    const summary = `generated ${files.length} wiki page(s)`;
+    try {
+      await this.db.markIngestJobSucceeded(jobId, summary);
+    } catch (error) {
+      logger.error({ error, jobId }, "processor: failed to mark job succeeded");
+    }
+    const updated = await this.db.getIngestJob(jobId);
+    if (updated) {
+      logIngestJob(this.db, updated, "succeeded", "processor");
+      this.logSessionArchiveOutcome(updated, "archive_succeeded", "success");
+    }
+  }
+
+  private async recoverStaleJobs(): Promise<void> {
+    let ids: string[] = [];
+    try {
+      ids = await this.db.recoverStaleRunningJobs();
+    } catch (error) {
+      logger.error({ error }, "ingest processor: recover stale");
+      return;
+    }
+    for (const id of ids) {
+      const recorder = await createJobRecorder(this.db, id);
+      recorder.record("system", "stale_recovered", "job requeued after heartbeat timeout", {
+        threshold_seconds: STALE_HEARTBEAT_SECONDS,
+      });
+    }
+  }
+
+  private startHeartbeat(jobId: string): () => void {
+    const timer = setInterval(() => {
+      void this.db
+        .touchIngestJobHeartbeat(jobId, this.runnerId)
+        .catch((error) => logger.error({ error, jobId }, "ingest processor: heartbeat"));
+    }, 30_000);
+    return () => clearInterval(timer);
+  }
+
+  private async failJob(
+    id: string,
+    errorCode: string,
+    message: string,
+    missingDep: string,
+    remediation: string,
+  ): Promise<void> {
+    await this.db.clearIngestJobLease(id).catch(() => undefined);
+    await this.db.updateIngestJobFailure(id, errorCode, message, missingDep, remediation);
+    const failed = await this.db.getIngestJob(id);
+    if (!failed) return;
+    logIngestJob(this.db, failed, "failed", "processor");
+    this.logSessionArchiveOutcome(failed, "archive_failed", "failure");
+    if (failed.input_type === "rollback") {
+      const changeSetId = failed.source_ref;
+      record(this.db, {
+        level: "error",
+        category: "history",
+        action: "rollback_failed",
+        message: `回滚失败：${changeSetId}`,
+        resourceType: "change_set",
+        resourceId: changeSetId,
+        status: "failure",
+        source: "processor",
+        details: {
+          change_set_id: changeSetId,
+          job_id: failed.id,
+          error: failed.error_message,
+        },
+      });
+    }
+  }
+
+  private logSessionArchiveOutcome(job: IngestJob, action: string, status: string): void {
+    if (job.input_type !== "session_archive" || !job.source_ref.startsWith("session:")) return;
+    const sessionId = job.source_ref.slice("session:".length);
+    const message =
+      action === "archive_succeeded"
+        ? `会话 ${sessionId} 归档成功`
+        : `会话 ${sessionId} 归档失败`;
+    logSession(this.db, action, sessionId, message, status, "processor", {
+      job_id: job.id,
+      error: job.error_message,
+    });
+  }
+
+  private async preparePipelineForJob(job: IngestJob): Promise<boolean> {
+    try {
+      const client = await this.resolveLLMClientForJob(job);
+      this.pipeline.setLLMClient(client);
+    } catch (error) {
+      await this.failJob(job.id, "llm_config_invalid", errorMessage(error), "", remediationForCode("llm_config_invalid"));
+      return false;
+    }
+    await this.attachMCPRouter();
+    this.pipeline.setDocLanguage(await resolveDocLang(this.db));
+    this.pipeline.setRulesSupplement(await resolveRulesSupplement(this.db));
+    return true;
+  }
+
+  private async preparePipelineForReviewJob(job: IngestJob, review: IngestReview): Promise<boolean> {
+    try {
+      const client = await this.resolveLLMClientForReview(review);
+      this.pipeline.setLLMClient(client);
+    } catch (error) {
+      await this.failJob(job.id, "llm_config_invalid", errorMessage(error), "", remediationForCode("llm_config_invalid"));
+      return false;
+    }
+    await this.attachMCPRouter();
+    this.pipeline.setDocLanguage(await resolveDocLang(this.db));
+    this.pipeline.setRulesSupplement(await resolveRulesSupplement(this.db));
+    return true;
+  }
+
+  async checkRulesDrift(jobId: string): Promise<void> {
+    const recorder = this.pipeline.currentRecorder();
+    if (!recorder) return;
+    const current = computeRulesHash(this.workspace, await resolveRulesSupplement(this.db));
+    const snapshot = await queuedRulesHash(this.db, jobId);
+    if (snapshot && snapshot !== current) {
+      recorder.record("system", "info", "rules_drift: workspace rules changed since job was queued", {
+        rules_hash_snapshot: snapshot,
+        rules_hash_current: current,
+      });
+    }
+  }
+
+  private async attachMCPRouter(): Promise<void> {
+    try {
+      const raw = await this.db.getConfig("mcp_servers_json");
+      const registry = new McpRegistry(raw);
+      const router = new McpRouter(registry, {
+        recordMCP: (step, phase, message, payload) => {
+          this.pipeline.currentRecorder()?.record(step, phase, message, payload);
+        },
+      });
+      this.pipeline.setMcpRouter(router);
+    } catch {
+      this.pipeline.setMcpRouter(null);
+    }
+  }
+
+  private async resolveLLMClientForJob(job: IngestJob): Promise<Client> {
+    let instanceId = "";
+    let model = "";
+    if (job.input_type === "session_archive" && job.source_ref.startsWith("session:")) {
+      const session = await this.db.getIngestSession(job.source_ref.slice("session:".length));
+      if (session) {
+        instanceId = session.llm_instance_id;
+        model = session.llm_model;
+      }
+    }
+    if (!instanceId) instanceId = await this.db.getConfig("job_instance_id");
+    if (!model) model = await this.db.getConfig("job_model");
+    if (!instanceId) instanceId = await this.db.getConfig("last_instance_id");
+    if (!model) model = await this.db.getConfig("last_model");
+    if (instanceId && model) return clientFromInstance(this.db, instanceId, model);
+    return clientFromWorkspace(this.workspace);
+  }
+
+  private async resolveLLMClientForReview(review: IngestReview): Promise<Client> {
+    if (review.session_id) {
+      const session = await this.db.getIngestSession(review.session_id);
+      if (session?.llm_instance_id && session.llm_model) {
+        return clientFromInstance(this.db, session.llm_instance_id, session.llm_model);
+      }
+    }
+    let instanceId = await this.db.getConfig("job_instance_id");
+    let model = await this.db.getConfig("job_model");
+    if (!instanceId) instanceId = await this.db.getConfig("last_instance_id");
+    if (!model) model = await this.db.getConfig("last_model");
+    if (instanceId && model) return clientFromInstance(this.db, instanceId, model);
+    return clientFromWorkspace(this.workspace);
+  }
+
+  private finalizeWikiApply(
+    jobId: string,
+    archivePath: string,
+    planJson: string,
+    result: ApplyWikiResult,
+  ): void {
+    void archivePath;
+    void planJson;
+    const recorder = new StoreJobRecorder(this.db, jobId, DEFAULT_JOB_EVENTS_MAX_COUNT);
+    recorder.record(
+      "post_apply",
+      "complete",
+      `applied ${result.written.length} page(s), deleted ${result.deleted.length}`,
+      null,
+    );
+  }
+
+  private async processRollbackJob(job: IngestJob): Promise<void> {
+    const changeSetId = job.source_ref;
+    if (!changeSetId) {
+      await this.failJob(job.id, "rollback_context_missing", "no change set specified for rollback", "", "");
+      return;
+    }
+    const target = await this.db.getChangeSet(changeSetId);
+    if (!target) {
+      await this.failJob(job.id, "rollback_context_missing", `change set ${changeSetId} not found`, "", "");
+      return;
+    }
+    let rollback;
+    try {
+      rollback = await this.db.undoChangeSet(changeSetId, "rollback");
+    } catch (error) {
+      await this.failJob(job.id, "rollback_failed", `rollback failed: ${errorMessage(error)}`, "", "");
+      return;
+    }
+    try {
+      await rebuildDerived(this.db);
+    } catch (error) {
+      await this.failJob(job.id, "rollback_failed", `rebuild index after rollback: ${errorMessage(error)}`, "", "");
+      return;
+    }
+    const summary = `rolled back change set ${changeSetId} (${rollback.page_count} page(s))`;
+    await this.db.markIngestJobSucceeded(job.id, summary);
+    const updated = await this.db.getIngestJob(job.id);
+    if (updated) logIngestJob(this.db, updated, "succeeded", "processor");
+    record(this.db, {
+      level: "info",
+      category: "history",
+      action: "rollback_succeeded",
+      message: `回滚成功：${changeSetId}`,
+      resourceType: "change_set",
+      resourceId: changeSetId,
+      status: "success",
+      source: "processor",
+      details: {
+        change_set_id: changeSetId,
+        rollback_set_id: rollback.id,
+        job_id: job.id,
+        pages: rollback.page_count,
+      },
+    });
+  }
+
+  private async processReviewPlanJob(job: IngestJob): Promise<void> {
+    const reviewId = parseReviewIdFromRef(job.source_ref);
+    if (!reviewId) {
+      await this.failJob(job.id, "pipeline_error", "invalid review source_ref", "", "");
+      return;
+    }
+    const review = await this.db.getIngestReview(reviewId);
+    if (!review) {
+      await this.failJob(job.id, "pipeline_error", "review not found", "", "");
+      return;
+    }
+    if (!(await this.preparePipelineForReviewJob(job, review))) return;
+    this.pipeline.setMcpRouter(null);
+    await this.checkRulesDrift(job.id);
+
+    let normalized;
+    try {
+      normalized = await normalizeJobSource(this.workspace, "session_archive", job.source_path, job.source_ref);
+    } catch (error) {
+      await this.failReviewPlanFailed(reviewId, job.id, "normalize_failed", error);
+      return;
+    }
+
+    let feedback = await this.collectReviewFeedback(reviewId);
+    if (review.deep_organize) {
+      const deep = await this.collectDeepOrganizeContext();
+      if (deep) feedback = `${feedback}\n\n${deep}`;
+    }
+
+    let plan;
+    try {
+      plan = await this.pipeline.planOnly(normalized, feedback);
+    } catch (error) {
+      await this.failReviewPlanFailed(reviewId, job.id, classifyPipelineError(error), error);
+      return;
+    }
+
+    try {
+      const version = await this.db.nextIngestReviewPlanVersion(reviewId);
+      await this.db.createIngestReviewPlan({
+        id: "",
+        review_id: reviewId,
+        version,
+        plan_markdown: plan.planMarkdown,
+        plan_json: plan.planJson,
+        created_at: "",
+      });
+      await this.db.setIngestReviewPlanVersion(reviewId, version);
+      await this.db.createIngestReviewMessage({
+        id: "",
+        review_id: reviewId,
+        role: "assistant",
+        message_type: "plan_summary",
+        content: `Plan v${version} ready for review.`,
+        created_at: "",
+      });
+      if (review.status === "revising" || review.status === "failed" || review.status === "planning") {
+        await this.db.updateIngestReviewStatus(reviewId, "ready_for_review");
+      }
+      this.logReviewEvent(reviewId, review.session_id, "review_ready", "plan ready for review", "success");
+      await this.db.markIngestJobSucceeded(job.id, `plan v${version} generated`);
+    } catch (error) {
+      await this.failReviewPlanFailed(reviewId, job.id, "pipeline_error", error);
+    }
+  }
+
+  private async processReviewApplyJob(job: IngestJob): Promise<void> {
+    const reviewId = parseReviewIdFromRef(job.source_ref);
+    if (!reviewId) {
+      await this.failJob(job.id, "pipeline_error", "invalid review source_ref", "", "");
+      return;
+    }
+    const review = await this.db.getIngestReview(reviewId);
+    if (!review) {
+      await this.failJob(job.id, "pipeline_error", "review not found", "", "");
+      return;
+    }
+    if (review.approved_plan_version <= 0) {
+      await this.failReviewApplyFailed(reviewId, job.id, "pipeline_error", new Error("no approved plan version"));
+      return;
+    }
+
+    await this.db.updateIngestReviewStatus(reviewId, "applying");
+    this.logReviewEvent(reviewId, review.session_id, "review_applying", "apply started", "pending");
+
+    if (!(await this.preparePipelineForReviewJob(job, review))) return;
+    this.pipeline.setMcpRouter(null);
+    await this.checkRulesDrift(job.id);
+
+    const plan = await this.db.getIngestReviewPlan(reviewId, review.approved_plan_version);
+    if (!plan) {
+      await this.failReviewApplyFailed(reviewId, job.id, "pipeline_error", new Error("approved plan not found"));
+      return;
+    }
+    let normalized;
+    try {
+      normalized = await normalizeJobSource(this.workspace, "session_archive", job.source_path, job.source_ref);
+    } catch (error) {
+      await this.failReviewApplyFailed(reviewId, job.id, "normalize_failed", error);
+      return;
+    }
+
+    this.pipeline.setChangeSetMeta(
+      "review_apply",
+      job.id,
+      reviewId,
+      path.basename(normalized.canonicalPath),
+      new TextDecoder().decode(normalized.content),
+    );
+
+    let result;
+    try {
+      result = await this.pipeline.applyFromPlan(normalized, plan.plan_json);
+    } catch (error) {
+      await this.failReviewApplyFailed(reviewId, job.id, classifyPipelineError(error), error);
+      return;
+    }
+    if (result.written.length === 0 && result.deleted.length === 0) {
+      await this.failReviewApplyFailed(reviewId, job.id, "no_wiki_files_written", new NoWikiFilesWrittenError());
+      return;
+    }
+
+    this.finalizeWikiApply(job.id, job.source_path, plan.plan_json, result);
+    await this.db.setIngestReviewFinalJob(reviewId, job.id);
+    const changeSetId = this.pipeline.lastChangeSetId();
+    if (changeSetId) await this.db.setIngestReviewChangeSet(reviewId, changeSetId);
+
+    const summary = `applied ${result.written.length} wiki page(s) from approved plan v${review.approved_plan_version}`;
+    await this.db.markIngestJobSucceeded(job.id, summary);
+    await this.db.updateIngestReviewStatus(reviewId, "succeeded");
+    this.logReviewEvent(reviewId, review.session_id, "review_succeeded", summary, "success");
+    if (review.session_id) {
+      logSession(
+        this.db,
+        "archive_succeeded",
+        review.session_id,
+        `会话 ${review.session_id} 归档审核执行成功`,
+        "success",
+        "processor",
+        { job_id: job.id, review_id: reviewId },
+      );
+    }
+  }
+
+  private async collectReviewFeedback(reviewId: string): Promise<string> {
+    const messages = await this.db.listIngestReviewMessages(reviewId);
+    const feedback: string[] = [];
+    for (const message of messages) {
+      if (message.message_type === "feedback" && message.role === "user" && message.content.trim()) {
+        feedback.push(message.content);
+      }
+    }
+    return formatFeedbackForPlan(feedback);
+  }
+
+  private async collectDeepOrganizeContext(): Promise<string> {
+    const docs = await this.db.listDocuments();
+    const wikiDocs = docs.filter((doc) => doc.source_kind === "wiki");
+    if (wikiDocs.length === 0) return "";
+    const pairs: string[] = [];
+    const seen = new Set<string>();
+    for (const doc of wikiDocs) {
+      let query = doc.content;
+      if ([...query].length > 500) query = [...query].slice(0, 500).join("");
+      if (!query.trim()) continue;
+      let results;
+      try {
+        results = await this.db.searchChunks(query, 5, "wiki");
+      } catch {
+        continue;
+      }
+      for (const result of results) {
+        if (result.path === doc.relative_path || result.score < 0.3) continue;
+        const [a, b] = [doc.relative_path, result.path].sort();
+        const key = `${a}|${b}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        pairs.push(`- ${a} ⟷ ${b} (重叠度: ${result.score.toFixed(2)})`);
+      }
+    }
+    if (pairs.length === 0) return "";
+    return `## 深度整理：检测到 ${pairs.length} 对内容相似页面\n\n${pairs.join("\n")}\n\n请在计划中考虑合并这些相似页面，使用 merge action 并填写 source_paths 和 to_path。`;
+  }
+
+  private async failReviewPlanFailed(reviewId: string, jobId: string, code: string, error: unknown): Promise<void> {
+    await this.db.updateIngestReviewStatus(reviewId, "failed");
+    const review = await this.db.getIngestReview(reviewId);
+    if (review) this.logReviewEvent(reviewId, review.session_id, "review_plan_failed", errorMessage(error), "failure");
+    await this.failJob(jobId, code, errorMessage(error), "", remediationForCode(code));
+  }
+
+  private async failReviewApplyFailed(reviewId: string, jobId: string, code: string, error: unknown): Promise<void> {
+    await this.db.updateIngestReviewStatus(reviewId, "failed");
+    const review = await this.db.getIngestReview(reviewId);
+    if (review) {
+      this.logReviewEvent(reviewId, review.session_id, "review_apply_failed", errorMessage(error), "failure");
+      if (review.session_id) {
+        logSession(
+          this.db,
+          "archive_failed",
+          review.session_id,
+          `会话 ${review.session_id} 归档审核执行失败`,
+          "failure",
+          "processor",
+          { job_id: jobId, review_id: reviewId, error: errorMessage(error) },
+        );
+      }
+    }
+    await this.failJob(jobId, code, errorMessage(error), "", remediationForCode(code));
+  }
+
+  private logReviewEvent(
+    reviewId: string,
+    sessionId: string,
+    action: string,
+    message: string,
+    status: string,
+  ): void {
+    const details: Record<string, unknown> = { review_id: reviewId };
+    if (sessionId) details.session_id = sessionId;
+    record(this.db, {
+      level: "info",
+      category: "ingest",
+      action,
+      message,
+      resourceType: "review",
+      resourceId: reviewId,
+      status,
+      source: "processor",
+      details,
+    });
+  }
+}
+
+export async function enqueueReviewPlanJob(
+  db: Store,
+  workspace: string,
+  review: IngestReview,
+): Promise<IngestJob> {
+  const job: IngestJob = {
+    id: "",
+    parent_job_id: "",
+    input_type: "review_plan",
+    source_path: review.archive_source_path,
+    source_ref: reviewSourceRef(review.id),
+    status: "queued",
+    retries: 0,
+    max_retries: 3,
+    error: "",
+    error_code: "",
+    error_message: "",
+    missing_dependency: "",
+    remediation: "",
+    result_summary: "",
+    created_at: "",
+    updated_at: "",
+  };
+  await db.createIngestJob(job);
+  await recordRulesSnapshot(db, job.id, workspace);
+  logIngestJob(db, job, "queued", "api");
+  return job;
+}
+
+export async function enqueueReviewApplyJob(
+  db: Store,
+  workspace: string,
+  review: IngestReview,
+): Promise<IngestJob> {
+  const job: IngestJob = {
+    id: "",
+    parent_job_id: "",
+    input_type: "review_apply",
+    source_path: review.archive_source_path,
+    source_ref: reviewSourceRef(review.id),
+    status: "queued",
+    retries: 0,
+    max_retries: 3,
+    error: "",
+    error_code: "",
+    error_message: "",
+    missing_dependency: "",
+    remediation: "",
+    result_summary: "",
+    created_at: "",
+    updated_at: "",
+  };
+  await db.createIngestJob(job);
+  await recordRulesSnapshot(db, job.id, workspace);
+  logIngestJob(db, job, "queued", "api");
+  return job;
+}
+
+export async function recordRulesSnapshot(db: Store, jobId: string, workspace: string): Promise<void> {
+  if (!jobId) return;
+  const hash = computeRulesHash(workspace, await resolveRulesSupplement(db));
+  let maxCount = DEFAULT_JOB_EVENTS_MAX_COUNT;
+  try {
+    const raw = await db.getConfig("ingest_job_events_max_count");
+    if (raw) {
+      const parsed = Number.parseInt(raw, 10);
+      if (Number.isFinite(parsed)) maxCount = parsed;
+    }
+  } catch {
+    maxCount = DEFAULT_JOB_EVENTS_MAX_COUNT;
+  }
+  await db.insertIngestJobEvent(jobId, "system", "queued", "rules snapshot", { rules_hash: hash }, maxCount);
+}
+
+async function queuedRulesHash(db: Store, jobId: string): Promise<string> {
+  const events = await db.listIngestJobEvents(jobId, 50);
+  for (const event of events) {
+    if (event.step !== "system" || event.phase !== "queued" || !event.payload) continue;
+    try {
+      const payload = JSON.parse(event.payload) as { rules_hash?: string };
+      if (payload.rules_hash) return payload.rules_hash;
+    } catch {
+      // ignore malformed payloads
+    }
+  }
+  return "";
+}
+
+export async function resolveDocLang(db: Store): Promise<string> {
+  const value = await db.getConfig("doc_language");
+  return value === "zh" || value === "en" ? value : "zh";
+}
+
+export function classifyPipelineError(error: unknown): string {
+  if (!error) return "";
+  const message = errorMessage(error);
+  if (
+    message.includes("unsupported protocol scheme") ||
+    message.includes("base URL is not configured") ||
+    message.includes("provider base URL")
+  ) {
+    return "llm_config_invalid";
+  }
+  if (message.includes("API key") || message.includes("unauthorized") || message.includes("401")) {
+    return "llm_auth_failed";
+  }
+  if (message.includes("quota") || message.includes("429") || message.includes("rate limit")) {
+    return "llm_rate_limited";
+  }
+  if (message.includes("timeout") || message.includes("deadline exceeded")) return "llm_timeout";
+  if (message.includes("unsupported format") || message.includes("unsupported file")) return "unsupported_format";
+  if (message.includes("analysis:") || message.includes("analyze")) return "analysis_failed";
+  if (message.includes("generation:") || message.includes("generate")) return "generation_failed";
+  if (error instanceof NoWikiFilesWrittenError || message.includes("no wiki files written")) {
+    return "no_wiki_files_written";
+  }
+  return "pipeline_error";
+}
+
+export function remediationForCode(code: string): string {
+  switch (code) {
+    case "llm_config_invalid":
+      return "configure Provider and base URL in Settings (Provider instances)";
+    case "llm_auth_failed":
+      return "check your API key in Settings";
+    case "llm_rate_limited":
+      return "wait a moment and retry, or reduce batch size";
+    case "llm_timeout":
+      return "the LLM request timed out; try again or use a smaller input";
+    case "unsupported_format":
+      return "convert the file to a supported format before uploading";
+    case "analysis_failed":
+    case "generation_failed":
+      return "the LLM pipeline encountered an error; check the job error message and server logs";
+    case "no_wiki_files_written":
+      return "the model produced FILE blocks but none were written; replan or check job logs for invalid paths";
+    default:
+      return "";
+  }
+}
+
+export { formatFeedbackForPlan };
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

@@ -1,0 +1,10 @@
+@media (max-width: 720px) {
+  .llmwiki-logs .whitespace-pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .llmwiki-logs .tabular-nums {
+    white-space: nowrap;
+  }
+}

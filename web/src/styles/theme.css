@@ -153,6 +153,8 @@
    * --sidebar-accent-foreground via data-active. */
   --sidebar-row-height: 28px;
   --sidebar-item-foreground: oklch(0.378 0.013 284);
+  /* Normal items are 500 too (only selected-state weight lives in --sidebar-active-weight). */
+  --sidebar-item-weight: 500;
   /* Measured panel shadow: 1px ring (the reference's hairline separation) + soft drop. */
   --surface-shadow: rgb(0 0 0 / 0.029) 0px 0px 0px 1px, rgb(0 0 0 / 0.02) 0px 3px 6px -2px,
     rgb(0 0 0 / 0.04) 0px 1px 1px 0px;

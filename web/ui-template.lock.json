@@ -1,6 +1,6 @@
 {
   "package": "quiet-inset",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "items": [
     "app/index-css",
     "blocks/app-errors",
@@ -128,7 +128,7 @@
     "src/components/ui/select.tsx": "d0ea3b62332be501636ac37920eb457afa5201e57a9f090eb1fc8effe14d7fc3",
     "src/components/ui/separator.tsx": "b5b5460e5337c2d5f361c1512001615b2e5eacb38c7449a4418bb9ddb47c4bba",
     "src/components/ui/sheet.tsx": "549678370096804f5acd0895fcbd58084b45ac80f28197887377038d8266ddd3",
-    "src/components/ui/sidebar.tsx": "8cf7d274cfa81309dd59a08e13d69434c3af72e8670b54ebe4b3200bf9f2ee0b",
+    "src/components/ui/sidebar.tsx": "77b557c82d48385f1628b335b0da291105f25a88e7ad438901e28d23982e2132",
     "src/components/ui/skeleton.tsx": "4c2af7fa9c645358a0fb188779deab6f0b981733b62befc25e18aaebea1350dc",
     "src/components/ui/sonner.tsx": "f08d1dff4c101bc4a10c287fb8fa2e565b326839009524d7455aea1c73d54a69",
     "src/components/ui/spinner.tsx": "6916679a40ad1c7624520de5eaa7b337635e81f9a76413201267f8619844646f",
@@ -144,7 +144,7 @@
     "src/stories/ui-kit/primitives.stories.tsx": "25af30acf025f41bbee18fb77c6b8355ca645ca22daecd3f5c7514069efd353e",
     "src/stories/ui-kit/settings-page.stories.tsx": "9d778dd31f9942069e31a8a3558a180a908bd96d8d02e70b6432f51be4fe12c6",
     "src/styles/fonts.css": "c292bd5fba7a025ec16776495f443d8fdfb728744b0e041b557a8e7188b9e0ab",
-    "src/styles/theme.css": "5504c82a019faa1843ca1da2ed0352472956e620e835ebe9de26e4ffb321eb23",
+    "src/styles/theme.css": "a6f7e64e0034c23e065a508af508c26426059490ef38e4e67483b9cf41b72a3f",
     "tests/ui-kit/fidelity.spec.ts": "167f9f778516bffe1cf7a63e61e02d6037cfea6bfa40d4d8f701686748e6f4f5"
   },
   "theme_base": {
@@ -228,6 +228,7 @@
     ":root --sidebar-foreground": "oklch(0.222 0 285.4)",
     ":root --sidebar-group-weight": "500",
     ":root --sidebar-item-foreground": "oklch(0.378 0.013 284)",
+    ":root --sidebar-item-weight": "500",
     ":root --sidebar-primary": "oklch(0.563 0.159 275.2)",
     ":root --sidebar-primary-foreground": "oklch(1 0 0)",
     ":root --sidebar-ring": "oklch(0.608 0.14 276.3)",

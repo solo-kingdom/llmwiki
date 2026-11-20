@@ -175,7 +175,7 @@ function ProviderInstances({ onSaved }: { onSaved: () => Promise<void> }) {
           <Stack gap="md">
             <Input placeholder="实例名称" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
             <Select value={draft.catalog_id} onValueChange={(value) => setDraft({ ...draft, catalog_id: value })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger aria-label="Provider 类型"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {providers.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>)}
               </SelectContent>
@@ -312,6 +312,11 @@ export function SettingsRoute() {
   if (error) return <ErrorState error={error} onRetry={() => void refresh()} />
   if (!settings) return <RowsSkeleton rows={10} />
 
+  const selectedInstanceId = instances.some((instance) => instance.id === (modelInstanceId || settings.last_instance_id))
+    ? (modelInstanceId || settings.last_instance_id)
+    : ""
+  const selectedModel = (models.data ?? []).some((model) => model.model_id === settings.last_model) ? settings.last_model : ""
+
   return (
     <Page title="设置">
       <Section title="Provider 实例" description="对话与摄入使用的模型来源。">
@@ -326,13 +331,13 @@ export function SettingsRoute() {
               description="新建会话默认使用的实例"
               control={
                 <Select
-                  value={modelInstanceId || settings.last_instance_id}
+                  value={selectedInstanceId}
                   onValueChange={(value) => {
                     setModelInstanceId(value)
                     save.mutate({ last_instance_id: value })
                   }}
                 >
-                  <SelectTrigger className="w-52 max-sm:w-full"><SelectValue placeholder="选择实例" /></SelectTrigger>
+                  <SelectTrigger aria-label="默认 Provider 实例" className="w-52 max-sm:w-full"><SelectValue placeholder="选择实例" /></SelectTrigger>
                   <SelectContent>
                     {instances.map((instance) => <SelectItem key={instance.id} value={instance.id}>{instance.name}</SelectItem>)}
                   </SelectContent>
@@ -344,10 +349,10 @@ export function SettingsRoute() {
               description="可在对话中临时切换"
               control={
                 <Select
-                  value={settings.last_model}
+                  value={selectedModel}
                   onValueChange={(value) => setLastModel.mutate({ instanceId: settings.last_instance_id, model: value })}
                 >
-                  <SelectTrigger className="w-52 max-sm:w-full"><SelectValue placeholder="选择模型" /></SelectTrigger>
+                  <SelectTrigger aria-label="默认模型" className="w-52 max-sm:w-full"><SelectValue placeholder="选择模型" /></SelectTrigger>
                   <SelectContent>
                     {(models.data ?? []).map((model) => <SelectItem key={model.model_id} value={model.model_id}>{model.name}</SelectItem>)}
                   </SelectContent>
@@ -357,7 +362,7 @@ export function SettingsRoute() {
             <SettingRow
               label="摄入任务模型"
               description="后台整理任务使用的模型；留空沿用默认"
-              control={<Input className="w-52 max-sm:w-full" defaultValue={settings.job_model} onBlur={(event) => save.mutate({ job_model: event.target.value })} />}
+              control={<Input aria-label="摄入任务模型" className="w-52 max-sm:w-full" defaultValue={settings.job_model} onBlur={(event) => save.mutate({ job_model: event.target.value })} />}
             />
           </Rows>
         </Panel>
@@ -373,21 +378,21 @@ export function SettingsRoute() {
             <SettingRow
               label="自动重建索引"
               description="内容变化后刷新派生索引"
-              control={<Switch checked={settings.auto_reindex} onCheckedChange={(value) => save.mutate({ auto_reindex: value })} />}
+              control={<Switch aria-label="自动重建索引" checked={settings.auto_reindex} onCheckedChange={(value) => save.mutate({ auto_reindex: value })} />}
             />
             <SettingRow
               label="监控来源目录"
               description="发现新文件时自动创建摄入任务"
-              control={<Switch checked={settings.watch_sources} onCheckedChange={(value) => save.mutate({ watch_sources: value })} />}
+              control={<Switch aria-label="监控来源目录" checked={settings.watch_sources} onCheckedChange={(value) => save.mutate({ watch_sources: value })} />}
             />
             <SettingRow
               label="Embedding 实例"
               description="用于 chunk 向量化"
-              control={<Input className="w-52 max-sm:w-full" defaultValue={settings.embedding_instance_id ?? ""} onBlur={(event) => save.mutate({ embedding_instance_id: event.target.value })} />}
+              control={<Input aria-label="Embedding 实例" className="w-52 max-sm:w-full" defaultValue={settings.embedding_instance_id ?? ""} onBlur={(event) => save.mutate({ embedding_instance_id: event.target.value })} />}
             />
             <SettingRow
               label="Embedding 模型"
-              control={<Input className="w-52 max-sm:w-full" defaultValue={settings.embedding_model ?? ""} onBlur={(event) => save.mutate({ embedding_model: event.target.value })} />}
+              control={<Input aria-label="Embedding 模型" className="w-52 max-sm:w-full" defaultValue={settings.embedding_model ?? ""} onBlur={(event) => save.mutate({ embedding_model: event.target.value })} />}
             />
           </Rows>
         </Panel>
@@ -400,7 +405,7 @@ export function SettingsRoute() {
               label="界面语言"
               control={
                 <Select value={settings.ui_language} onValueChange={(value) => save.mutate({ ui_language: value })}>
-                  <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="界面语言" className="w-40"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="zh">简体中文</SelectItem>
                     <SelectItem value="en">English</SelectItem>
@@ -413,7 +418,7 @@ export function SettingsRoute() {
               description="生成 wiki 页面使用的主语言"
               control={
                 <Select value={settings.doc_language} onValueChange={(value) => save.mutate({ doc_language: value })}>
-                  <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="文档语言" className="w-40"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="zh">简体中文</SelectItem>
                     <SelectItem value="en">English</SelectItem>
@@ -426,7 +431,7 @@ export function SettingsRoute() {
               description={settings.api_token_set ? `当前：${settings.api_token_masked}（${settings.api_token_source}）` : "当前未设置"}
               control={
                 <Inline>
-                  <Input className="w-44 max-sm:w-full" type="password" placeholder="留空不修改" value={token} onChange={(event) => setToken(event.target.value)} />
+                  <Input aria-label="API Token" className="w-44 max-sm:w-full" type="password" placeholder="留空不修改" value={token} onChange={(event) => setToken(event.target.value)} />
                   <Button size="sm" variant="outline" onClick={() => { save.mutate({ api_token: token }); setToken("") }}>保存</Button>
                 </Inline>
               }
@@ -435,7 +440,7 @@ export function SettingsRoute() {
               label="默认 Agent"
               control={
                 <Select value={settings.default_agent_kind ?? "native"} onValueChange={(value) => save.mutate({ default_agent_kind: value as "native" | "acp" })}>
-                  <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="默认 Agent 类型" className="w-40"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="native">Native</SelectItem>
                     <SelectItem value="acp">ACP</SelectItem>
@@ -448,7 +453,7 @@ export function SettingsRoute() {
               description={`${acpAgents.filter((agent) => agent.enabled).length} 个已启用`}
               control={
                 <Select value={settings.default_acp_agent_id ?? ""} onValueChange={(value) => save.mutate({ default_acp_agent_id: value })}>
-                  <SelectTrigger className="w-44 max-sm:w-full"><SelectValue placeholder="未选择" /></SelectTrigger>
+                  <SelectTrigger aria-label="默认 ACP Agent" className="w-44 max-sm:w-full"><SelectValue placeholder="未选择" /></SelectTrigger>
                   <SelectContent>
                     {acpAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>)}
                   </SelectContent>

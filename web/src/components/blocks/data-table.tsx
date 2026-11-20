@@ -151,9 +151,9 @@ function LoadMoreSentinel({ onLoadMore, disabled }: { onLoadMore: () => void; di
 /** Page-number controls for `{ mode: "pages" }`: 上一页 / 第 n / 共 P 页 / 下一页 (+ optional page-size select). */
 function PageControls({ paging, pageCount }: { paging: PagesPaging; pageCount: number }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
       {paging.pageSizeOptions !== undefined && paging.onPageSize !== undefined ? (
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
           <span>{vocab.copy.pageSize}</span>
           <Select value={String(paging.pageSize)} onValueChange={(value) => paging.onPageSize?.(Number(value))}>
             <SelectTrigger size="sm" aria-label={vocab.copy.pageSize} className="w-16"><SelectValue /></SelectTrigger>
@@ -334,7 +334,7 @@ export function DataTable<T>({
         data-paging={pages === null ? undefined : "pages"}
         data-has-more={pages !== null ? (pages.page < pageCount ? "true" : undefined) : more?.hasMore === true ? "true" : undefined}
         data-capped={more?.capped === true ? "true" : undefined}
-        className={cn("flex items-center justify-between gap-3 px-3 py-2 text-xs text-muted-foreground", bordered && "border-t")}>
+        className={cn("flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-xs text-muted-foreground", bordered && "border-t")}>
         <span role="status">{pages !== null ? vocab.copy.totalItems(pages.total) : vocab.copy.count(rows.length, { total, more: more?.hasMore === true, capped: more?.capped === true })}</span>
         {pages !== null ? <PageControls paging={pages} pageCount={pageCount} /> : null}
         {more !== null && more.hasMore ? (

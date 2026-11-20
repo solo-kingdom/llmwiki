@@ -134,6 +134,22 @@ function outlineOf(content: string): { level: number; text: string }[] {
     .map((match) => ({ level: (match[1] ?? "").length, text: match[2] ?? "" }))
 }
 
+/** The page header owns the only h1; demote body headings outside fenced code blocks. */
+function demoteHeadings(content: string): string {
+  let fence = ""
+  return content.split("\n").map((line) => {
+    const marker = /^\s*(```+|~~~+)/.exec(line)
+    if (marker !== null) {
+      const token = marker[1] ?? ""
+      if (fence === "") fence = token[0] ?? "`"
+      else if (token[0] === fence) fence = ""
+      return line
+    }
+    if (fence !== "") return line
+    return line.replace(/^(#{1,5})(\s+)/, (_, hashes: string, space: string) => `${hashes}#${space}`)
+  }).join("\n")
+}
+
 function Reader({ docId, documents }: { docId: string; documents: DocumentListItem[] }) {
   const queryClient = useQueryClient()
   const navigate = useAppNavigate()
@@ -176,6 +192,7 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
 
   const body = React.useMemo(() => stripFrontmatter(doc?.content ?? ""), [doc?.content])
   const outline = React.useMemo(() => outlineOf(body), [body])
+  const rendered = React.useMemo(() => demoteHeadings(body), [body])
 
   const onContentClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const anchor = (event.target as HTMLElement).closest("a")
@@ -228,7 +245,7 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
   const article = (
     <Panel>
       <div onClick={onContentClick}>
-        <Markdown>{body || "_（空页面）_"}</Markdown>
+        <Markdown>{rendered || "_（空页面）_"}</Markdown>
       </div>
     </Panel>
   )

@@ -6,21 +6,53 @@ import { StatusBadge } from "@/components/blocks/status-badge"
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
 import { Num } from "@/components/blocks/format"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useContainerWidth } from "@/components/blocks/use-container-width"
 import { getKnowledgeGraph } from "@/lib/api"
 
-const WIDTH = 800
-const HEIGHT = 520
+const WIDE = { width: 800, height: 520 }
+const NARROW = { width: 360, height: 620 }
 
-function usePositions(nodes: { id: string }[]) {
+function labelWidth(text: string): number {
+  const glyphs = Array.from(text).reduce((sum, char) => sum + (/[　-鿿]/.test(char) ? 10 : 6), 0)
+  return Math.max(28, glyphs + 8)
+}
+
+function nodeRadius(canvas: { width: number }, linkCount: number): number {
+  return canvas.width < 560
+    ? 12 + Math.min(4, Math.max(0, linkCount))
+    : 16 + Math.min(10, Math.max(0, linkCount))
+}
+
+function usePositions(nodes: { id: string }[], canvas: { width: number; height: number }) {
   return React.useMemo(() => {
     const positions = new Map<string, { x: number; y: number }>()
-    const centerX = WIDTH / 2
-    const centerY = HEIGHT / 2
-    const middle = Math.ceil(nodes.length / 2)
-    const rings = [
-      { nodes: nodes.slice(0, middle), radius: Math.min(WIDTH, HEIGHT) * 0.26 },
-      { nodes: nodes.slice(middle), radius: Math.min(WIDTH, HEIGHT) * 0.42 },
-    ]
+    const centerX = canvas.width / 2
+    const centerY = canvas.height / 2
+    if (canvas.width < 560) {
+      const cols = 5
+      const rows = Math.max(1, Math.ceil(nodes.length / cols))
+      const cellWidth = canvas.width / cols
+      const cellHeight = canvas.height / rows
+      nodes.forEach((node, index) => {
+        const col = index % cols
+        const row = Math.floor(index / cols)
+        positions.set(node.id, {
+          x: cellWidth * (col + 0.5),
+          y: cellHeight * (row + 0.5),
+        })
+      })
+      return positions
+    }
+    const minSide = Math.min(canvas.width, canvas.height)
+    const rings = nodes.length > 8
+      ? [0, 1, 2].map((index) => ({
+          nodes: nodes.slice(Math.floor((nodes.length * index) / 3), Math.floor((nodes.length * (index + 1)) / 3)),
+          radius: minSide * (0.22 + index * 0.1),
+        }))
+      : [
+          { nodes: nodes.slice(0, Math.ceil(nodes.length / 2)), radius: minSide * 0.26 },
+          { nodes: nodes.slice(Math.ceil(nodes.length / 2)), radius: minSide * 0.42 },
+        ]
     for (const ring of rings) {
       ring.nodes.forEach((node, index) => {
         const angle = (index / Math.max(1, ring.nodes.length)) * Math.PI * 2 - Math.PI / 2
@@ -31,20 +63,22 @@ function usePositions(nodes: { id: string }[]) {
       })
     }
     return positions
-  }, [nodes])
+  }, [nodes, canvas])
 }
 
 export function GraphPage() {
   const [limit, setLimit] = React.useState("200")
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
   const [hoveredId, setHoveredId] = React.useState<string | null>(null)
+  const [hostRef, hostWidth] = useContainerWidth<HTMLDivElement>()
+  const canvas = hostWidth > 0 && hostWidth < 560 ? NARROW : WIDE
   const graph = useQuery({
     queryKey: ["knowledge-graph", limit],
     queryFn: () => getKnowledgeGraph({ limit: Number.parseInt(limit, 10) }),
   })
   const nodes = React.useMemo(() => graph.data?.nodes ?? [], [graph.data?.nodes])
   const edges = graph.data?.edges ?? []
-  const positions = usePositions(nodes)
+  const positions = usePositions(nodes, canvas)
   const selected = nodes.find((node) => node.id === selectedId) ?? nodes[0]
   const labelLayout = React.useMemo(() => {
     const placed: { x1: number; y1: number; x2: number; y2: number }[] = []
@@ -52,17 +86,18 @@ export function GraphPage() {
     for (const node of nodes) {
       const point = positions.get(node.id)
       if (point === undefined) continue
-      const radius = 16 + Math.min(10, Math.max(0, node.link_count))
+      const radius = nodeRadius(canvas, node.link_count)
       placed.push({ x1: point.x - radius, y1: point.y - radius, x2: point.x + radius, y2: point.y + radius })
     }
-    const candidates = [...nodes].sort((a, b) => b.link_count - a.link_count).slice(0, 10)
+    const budget = canvas.width < 560 ? 4 : 10
+    const candidates = [...nodes].sort((a, b) => b.link_count - a.link_count).slice(0, budget)
     for (const node of candidates) {
       const point = positions.get(node.id)
       if (point === undefined) continue
-      const radius = 16 + Math.min(10, Math.max(0, node.link_count))
+      const radius = nodeRadius(canvas, node.link_count)
       const raw = node.title || node.id
       const text = raw.length > 12 ? `${raw.slice(0, 12)}…` : raw
-      const width = Math.max(28, text.length * 8 + 8)
+      const width = labelWidth(text)
       const options = [
         { x: point.x, y: point.y + radius + 14 },
         { x: point.x, y: point.y - radius - 8 },
@@ -76,7 +111,7 @@ export function GraphPage() {
           x2: option.x + width / 2 + 2,
           y2: option.y + 4,
         }
-        if (box.x1 < 0 || box.x2 > WIDTH || box.y1 < 0 || box.y2 > HEIGHT) continue
+        if (box.x1 < 0 || box.x2 > canvas.width || box.y1 < 0 || box.y2 > canvas.height) continue
         if (placed.some((p) => !(box.x2 < p.x1 || box.x1 > p.x2 || box.y2 < p.y1 || box.y1 > p.y2))) continue
         placed.push(box)
         layout.set(node.id, { ...option, text, width })
@@ -84,7 +119,7 @@ export function GraphPage() {
       }
     }
     return layout
-  }, [nodes, positions])
+  }, [nodes, positions, canvas])
 
   return (
     <Page
@@ -118,7 +153,7 @@ export function GraphPage() {
                   <Row key={node.id}>
                     <button
                       type="button"
-                      className="min-w-0 flex-1 truncate text-left hover:underline"
+                      className="min-h-6 min-w-0 flex-1 truncate text-left hover:underline"
                       onClick={() => setSelectedId(node.id)}
                     >
                       {node.title || node.id}
@@ -133,12 +168,13 @@ export function GraphPage() {
         }
       >
         <Stack grow>
+          <div ref={hostRef} className="min-w-0">
           <Panel
             title="知识图谱"
             description={graph.data?.truncated ? `共 ${graph.data.total_nodes} 个节点，已按引用数截取前 ${nodes.length} 个` : `共 ${graph.data?.total_nodes ?? 0} 个节点`}
           >
             {nodes.length === 0 ? <EmptyState title="暂无可视化节点" /> : (
-              <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%" height="100%" role="img" aria-label="知识图谱">
+              <svg viewBox={`0 0 ${canvas.width} ${canvas.height}`} width="100%" height="100%" role="img" aria-label="知识图谱">
                 {edges.map((edge) => {
                   const from = positions.get(edge.source)
                   const to = positions.get(edge.target)
@@ -160,14 +196,7 @@ export function GraphPage() {
                   const point = positions.get(node.id)
                   if (point === undefined) return null
                   const active = selected?.id === node.id
-                  const radius = 16 + Math.min(10, Math.max(0, node.link_count))
-                  const label = node.title || node.id
-                  const placed = labelLayout.get(node.id)
-                  const showLabel = placed !== undefined || hoveredId === node.id || active
-                  const labelText = placed?.text ?? (label.length > 12 ? `${label.slice(0, 12)}…` : label)
-                  const labelWidth = placed?.width ?? Math.max(28, labelText.length * 8 + 8)
-                  const labelX = placed?.x ?? point.x
-                  const labelY = placed?.y ?? Math.min(HEIGHT - 6, point.y + radius + 14)
+                  const radius = nodeRadius(canvas, node.link_count)
                   return (
                     <g
                       key={node.id}
@@ -190,34 +219,48 @@ export function GraphPage() {
                         strokeOpacity={active ? 0.95 : 0.5}
                         strokeWidth={active ? 2 : 1}
                       />
-                      {showLabel ? (
-                        <g style={{ pointerEvents: "none" }}>
-                          <rect
-                            x={labelX - labelWidth / 2}
-                            y={labelY - 10}
-                            width={labelWidth}
-                            height={13}
-                            rx={3}
-                            fill="var(--card)"
-                            fillOpacity={0.94}
-                          />
-                          <text
-                            x={labelX}
-                            y={labelY}
-                            textAnchor="middle"
-                            fontSize="10"
-                            fill="currentColor"
-                          >
-                            {labelText}
-                          </text>
-                        </g>
-                      ) : null}
+                    </g>
+                  )
+                })}
+                {nodes.map((node) => {
+                  const point = positions.get(node.id)
+                  if (point === undefined) return null
+                  const active = selected?.id === node.id
+                  const placed = labelLayout.get(node.id)
+                  if (placed === undefined && hoveredId !== node.id && !active) return null
+                  const radius = nodeRadius(canvas, node.link_count)
+                  const label = node.title || node.id
+                  const labelText = placed?.text ?? (label.length > 12 ? `${label.slice(0, 12)}…` : label)
+                  const labelWidthValue = placed?.width ?? labelWidth(labelText)
+                  const labelX = placed?.x ?? point.x
+                  const labelY = placed?.y ?? Math.min(canvas.height - 6, point.y + radius + 14)
+                  return (
+                    <g key={`label-${node.id}`} style={{ pointerEvents: "none" }}>
+                      <rect
+                        x={labelX - labelWidthValue / 2}
+                        y={labelY - 10}
+                        width={labelWidthValue}
+                        height={13}
+                        rx={3}
+                        fill="var(--card)"
+                        fillOpacity={0.94}
+                      />
+                      <text
+                        x={labelX}
+                        y={labelY}
+                        textAnchor="middle"
+                        fontSize="10"
+                        fill="currentColor"
+                      >
+                        {labelText}
+                      </text>
                     </g>
                   )
                 })}
               </svg>
             )}
           </Panel>
+          </div>
 
           {selected ? (
             <Panel title={selected.title || selected.id} description="选中节点">
@@ -230,7 +273,7 @@ export function GraphPage() {
                     { label: "路径", value: selected.id, mono: true, wide: true },
                   ]}
                 />
-                <AppLink to={`/wiki/${encodeURIComponent(selected.document_id)}`} className="text-sm text-primary underline underline-offset-2">
+                <AppLink to={`/wiki/${encodeURIComponent(selected.document_id)}`} className="inline-flex min-h-6 items-center text-sm text-brand underline underline-offset-2">
                   打开页面
                 </AppLink>
               </Stack>

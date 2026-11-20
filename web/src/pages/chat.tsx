@@ -183,6 +183,8 @@ function ModelPicker({ session }: { session: IngestSession }) {
     enabled: catalogId !== "",
   })
   const models = modelsQuery.data ?? []
+  const selectedInstanceId = instance === undefined ? "" : instanceId
+  const selectedModel = models.some((model) => model.model_id === session.llm_model) ? session.llm_model : ""
   const update = useMutation({
     mutationFn: ({ nextInstanceId, model }: { nextInstanceId: string; model: string }) =>
       updateIngestSession(session.id, { instance_id: nextInstanceId, model }),
@@ -197,7 +199,7 @@ function ModelPicker({ session }: { session: IngestSession }) {
     <Inline gap="sm" wrap>
       <span className="text-xs text-muted-foreground">模型</span>
       <Select
-        value={instanceId}
+        value={selectedInstanceId}
         onValueChange={(value) => {
           setInstanceId(value)
           if (value === session.llm_instance_id && session.llm_model !== "") {
@@ -205,17 +207,17 @@ function ModelPicker({ session }: { session: IngestSession }) {
           }
         }}
       >
-        <SelectTrigger size="sm" className="w-40"><SelectValue placeholder="选择实例" /></SelectTrigger>
+        <SelectTrigger aria-label="对话 Provider 实例" size="sm" className="w-40"><SelectValue placeholder="选择实例" /></SelectTrigger>
         <SelectContent>
           {instances.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
         </SelectContent>
       </Select>
       <Select
-        value={session.llm_model}
+        value={selectedModel}
         disabled={models.length === 0}
         onValueChange={(model) => update.mutate({ nextInstanceId: instanceId, model })}
       >
-        <SelectTrigger size="sm" className="w-44"><SelectValue placeholder="选择模型" /></SelectTrigger>
+        <SelectTrigger aria-label="对话模型" size="sm" className="w-44"><SelectValue placeholder="选择模型" /></SelectTrigger>
         <SelectContent>
           {models.map((model) => <SelectItem key={model.model_id} value={model.model_id}>{model.name || model.model_id}</SelectItem>)}
         </SelectContent>

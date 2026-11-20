@@ -273,8 +273,9 @@ export function TimelinePage() {
   return (
     <Page title="时间线">
       {history.isError ? <ErrorState error={history.error} onRetry={() => void history.refetch()} /> : null}
-      {!history.isError && changes.length === 0 && !history.isLoading ? <EmptyState title="暂无变更" /> : null}
-      {!history.isError ? (
+      {!history.isError && history.isLoading ? <RowsSkeleton rows={5} /> : null}
+      {!history.isError && !history.isLoading && changes.length === 0 ? <EmptyState title="暂无变更" /> : null}
+      {!history.isError && changes.length > 0 ? (
         <DataTable
           label="变更时间线"
           columns={columns}

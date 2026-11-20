@@ -17,17 +17,29 @@ export function useAppNavigate(): (to: string, options?: { replace?: boolean }) 
   return React.useCallback((to, options) => { void navigate(to, options) }, [navigate])
 }
 
+// "Clear filters" sets six params in one handler. React Router applies every functional setSearchParams
+// against the same location snapshot, so concurrent calls overwrite each other and only the last one lands.
+// Updates accumulate here and flush once per microtask instead.
+let pendingSearch: URLSearchParams | null = null
+let flushScheduled = false
+
 /** One URL search param as state (filters, sort, tab, cursor). Empty/default values are removed from the URL. */
 export function useUrlState(key: string, fallback = ""): [string, (value: string) => void] {
   const [params, setParams] = useSearchParams()
   const value = params.get(key) ?? fallback
   const set = React.useCallback((next: string) => {
-    setParams((current) => {
-      const copy = new URLSearchParams(current)
-      if (next === "" || next === fallback) copy.delete(key)
-      else copy.set(key, next)
-      return copy
-    }, { replace: true })
+    const copy = new URLSearchParams(pendingSearch ?? window.location.search)
+    if (next === "" || next === fallback) copy.delete(key)
+    else copy.set(key, next)
+    pendingSearch = copy
+    if (flushScheduled) return
+    flushScheduled = true
+    queueMicrotask(() => {
+      const search = pendingSearch
+      pendingSearch = null
+      flushScheduled = false
+      if (search !== null) setParams(search, { replace: true })
+    })
   }, [key, fallback, setParams])
   return [value, set]
 }

@@ -18,7 +18,6 @@ import { TimelinePage } from "./pages/timeline"
 import { WikiReaderPage } from "./pages/wiki"
 import { Root } from "./root"
 import "./index.css"
-import "./styles/overrides.css"
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } })
 

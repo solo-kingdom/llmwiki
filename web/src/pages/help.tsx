@@ -1,7 +1,7 @@
 import * as React from "react"
 import { Markdown } from "@/components/blocks/markdown"
 import { useUrlState } from "@/components/blocks/router"
-import { Body, Page, Panel, Row, Rows, Split } from "@/components/blocks/surfaces"
+import { Body, Page, Panel, Row, Rows, ScrollRegion, Split } from "@/components/blocks/surfaces"
 import { useContainerWidth } from "@/components/blocks/use-container-width"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -50,8 +50,8 @@ function HelpBody({ content, activeLang, setLang }: {
     <Body width="reading">
       <Tabs value={activeLang} onValueChange={setLang}>
         <TabsList variant="line">
-          <TabsTrigger value="zh">简体中文</TabsTrigger>
-          <TabsTrigger value="en">English</TabsTrigger>
+          <TabsTrigger value="zh" style={{ color: "color-mix(in oklab, var(--foreground) 70%, transparent)" }}>简体中文</TabsTrigger>
+          <TabsTrigger value="en" style={{ color: "color-mix(in oklab, var(--foreground) 70%, transparent)" }}>English</TabsTrigger>
         </TabsList>
       </Tabs>
       <Panel>
@@ -79,7 +79,7 @@ export function HelpPage() {
     <Page title="帮助" actions={[]} layout="fill">
       <div ref={ref} className="flex min-h-0 min-w-0 flex-1 flex-col">
         {compact ? (
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <ScrollRegion>
             <Body width="reading">
               <Select value={sectionId} onValueChange={jumpTo}>
                 <SelectTrigger aria-label="选择章节"><SelectValue placeholder="选择章节" /></SelectTrigger>
@@ -89,7 +89,7 @@ export function HelpPage() {
               </Select>
             </Body>
             <HelpBody content={content} activeLang={activeLang} setLang={setLang} />
-          </div>
+          </ScrollRegion>
         ) : (
           <Split
             sideLabel="文档目录"
@@ -101,7 +101,7 @@ export function HelpPage() {
                     <Row key={section.id}>
                       <button
                         type="button"
-                        className="min-w-0 flex-1 truncate text-left text-sm hover:underline"
+                        className="min-h-6 min-w-0 flex-1 truncate text-left text-sm hover:underline"
                         onClick={() => jumpTo(section.id)}
                       >
                         {section.text}
@@ -112,9 +112,7 @@ export function HelpPage() {
               </Panel>
             }
           >
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <HelpBody content={content} activeLang={activeLang} setLang={setLang} />
-            </div>
+            <HelpBody content={content} activeLang={activeLang} setLang={setLang} />
           </Split>
         )}
       </div>

@@ -1,5 +1,5 @@
 /*
- * ui-template package theme: quiet-inset 0.4.0
+ * ui-template package theme: quiet-inset 0.5.0
  * Near-neutral three-surface workbench: sidebar sits on the shell, content is an inset panel, cards and inputs are white.
  * One indigo accent for primary actions, switches, focus and links. Compact density.
  * Light values measured from the reference product via computed-style export (2026-11-20, browser console dump:
@@ -78,7 +78,7 @@
   --shadow-lg: var(--floating-shadow);
 }
 
-/* Density: compact. Body and navigation 13px; descriptions 12px; group titles 15px; page titles 24px.
+/* Density: compact. Body and navigation 13px; descriptions 12px; group titles 12px; page titles 24px.
  * Measured ladder (reference): 11 micro / 12 mini / 13 small / 15 regular / 18 large / 20 title3 / 24 title2 / 36 title1.
  * 15px is the reference "regular"; --text-base takes it (the 0.1.0 draft's 14px is not in the measured ladder). */
 @theme {
@@ -141,10 +141,18 @@
   --sidebar-accent-foreground: oklch(0.222 0 285.4);
   --sidebar-border: oklch(0.902 0 285.4);
   --sidebar-ring: oklch(0.608 0.14 276.3);
-  /* F-2: measured sidebar weight 400 (normal, active and group labels; lighter than the
-   * 450 body normal). ui/sidebar reads these vars; its built-in default is 500. */
-  --sidebar-active-weight: 400;
-  --sidebar-group-weight: 400;
+  /* F-2 (revised 2026-11-20): sidebar item text measures 13px/500 for BOTH normal and active
+   * states, group labels 12px/500 (inner text spans, direct read). The 0.4.0 "measured 400" came
+   * from container-level picks (<a>/<button> inheriting the 16px/400 body value) and is revoked.
+   * ui/sidebar reads these vars; its built-in default is 500. */
+  --sidebar-active-weight: 500;
+  --sidebar-group-weight: 500;
+  /* Sidebar row height: reference sidebar rows measure 28px (meta.yaml "sidebar rows 28px");
+   * the library default (--sidebar-row-height, 2rem = 32px) follows the workbench-shell reference.
+   * Sidebar items read as secondary gray (lch(37.776 1.25 282)); selected items flip to
+   * --sidebar-accent-foreground via data-active. */
+  --sidebar-row-height: 28px;
+  --sidebar-item-foreground: oklch(0.378 0.013 284);
   /* Measured panel shadow: 1px ring (the reference's hairline separation) + soft drop. */
   --surface-shadow: rgb(0 0 0 / 0.029) 0px 0px 0px 1px, rgb(0 0 0 / 0.02) 0px 3px 6px -2px,
     rgb(0 0 0 / 0.04) 0px 1px 1px 0px;
@@ -193,6 +201,8 @@
   --sidebar-accent-foreground: oklch(0.95 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.65 0.13 277);
+  /* Dark has no reference capture yet; secondary item gray follows the dark muted tier. */
+  --sidebar-item-foreground: oklch(0.7 0.004 284);
   --surface-shadow: 0 1px 1px rgb(0 0 0 / 0.2);
   --floating-shadow: 0 12px 32px rgb(0 0 0 / 0.45), 0 2px 8px rgb(0 0 0 / 0.3);
 }

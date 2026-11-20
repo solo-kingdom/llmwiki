@@ -115,7 +115,7 @@ export function LogsPage() {
       <Panel padding="none">
         {logs.isError ? <ErrorState error={logs.error} onRetry={() => void logs.refetch()} /> : null}
         {!logs.isError && lines.length === 0 && !logs.isLoading ? <EmptyState title="暂无活动日志" description="系统操作与摄入任务会记录在这里。" /> : null}
-        <LogView lines={lines} height="calc(100vh - 13rem)" follow={false} filterPlaceholder="过滤日志" className="llmwiki-logs" />
+        <LogView lines={lines} height="calc(100vh - 13rem)" follow={false} filterPlaceholder="过滤日志" className="llmwiki-logs [&_input]:max-sm:max-w-40" />
       </Panel>
     </Page>
   )

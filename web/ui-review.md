@@ -52,7 +52,7 @@ status: reviewed
 archetype: detail
 shots: .ui-review/logs-*.png
 status: reviewed
-- [x] state narrow: 390 下长行自动换行，计数只出现在 LogView 工具栏（窄屏「6 / 6」被挤成两行，信息不丢）
+- [x] state narrow: 390 下长行自动换行，计数只出现在 LogView 工具栏并保持一行
 - U12 结论：info 行为中性前景色（截图采样 #1b1b1b），error/failed 才为红色；未复现「info 显示红色」。级别色在模板锁内，不再改动
 - 清空日志确认、导出与刷新操作保持可达
 

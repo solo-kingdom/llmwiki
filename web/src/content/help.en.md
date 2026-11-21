@@ -21,9 +21,9 @@ llmwiki serve ~/research
 
 ## Core Concepts
 
-How LLM Wiki differs from traditional RAG:
+How ZhiLin (知林) differs from traditional RAG:
 
-| Traditional RAG | LLM Wiki |
+| Traditional RAG | ZhiLin |
 |-----------------|----------|
 | Retrieve fragments at query time | Compile knowledge at ingest time into persistent Markdown |
 | Each question starts fresh | Knowledge accumulates with every source and archive |

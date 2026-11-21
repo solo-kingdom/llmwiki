@@ -1,5 +1,5 @@
 /*
- * ui-template package theme: quiet-inset 0.5.0
+ * ui-template package theme: quiet-inset 0.6.0
  * Near-neutral three-surface workbench: sidebar sits on the shell, content is an inset panel, cards and inputs are white.
  * One indigo accent for primary actions, switches, focus and links. Compact density.
  * Light values measured from the reference product via computed-style export (2026-11-20, browser console dump:
@@ -15,7 +15,10 @@
  *   Token keeps oklch(0.648 0.003 283) (#8e8e90, 3.10).
  * - primary: reference brand indigo #5e6ad2 measures 4.47 vs panel; token darkens to oklch(0.563 0.159 275.2)
  *   (#5d69d1, 4.55 vs panel, 4.79 white-on-primary). The lighter interactive indigo #6d78d5 is kept as --ring.
- * - floating-shadow: menus/popovers were not captured; estimated by amplifying the measured drop-shadow family.
+ * - floating-shadow: captured 2026-11-21 from the command palette panel (0.08 / 48px + 0.1 / 6px layer;
+ *   the second blur carried a truncated read, 24px taken from the same family). The 0.4.0 estimate was lighter.
+ * - controls measure 28px tall, 8px radius, pill buttons, 30x20 switches, 46px/15px command items (2026-11-21
+ *   component calibration); these live in library component tokens with workbench-shell defaults.
  * - destructive/success/info/warning: no reference measurements; 0.1.0 draft values kept (all pass contract pairs).
  * - dark theme: provisional (no dark reference captured yet).
  */
@@ -67,7 +70,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  /* Measured corner radii: 4px small controls, 8px controls/rows, 10px inputs/tabs, 12px panels. */
+  /* Measured corner radii: 4px small controls, 8px controls/rows/inputs, 10px input cards/tabs, 12px panels. */
   --radius-sm: calc(var(--radius) * 0.5);
   --radius-md: calc(var(--radius) * 1);
   --radius-lg: calc(var(--radius) * 1.25);
@@ -158,8 +161,18 @@
   /* Measured panel shadow: 1px ring (the reference's hairline separation) + soft drop. */
   --surface-shadow: rgb(0 0 0 / 0.029) 0px 0px 0px 1px, rgb(0 0 0 / 0.02) 0px 3px 6px -2px,
     rgb(0 0 0 / 0.04) 0px 1px 1px 0px;
-  --floating-shadow: rgb(0 0 0 / 0.02) 0px 3px 6px -2px, rgb(0 0 0 / 0.04) 0px 1px 1px 0px,
-    rgb(0 0 0 / 0.06) 0px 8px 24px 0px;
+  /* Floating shadow (command palette panel, measured 2026-11-21): the 0.4.0 estimate was far too
+   * light. Second layer's blur carried a truncated read (0 6px …); 24px taken from the same family. */
+  --floating-shadow: rgb(0 0 0 / 0.08) 0px 9px 48px 0px, rgb(0 0 0 / 0.1) 0px 6px 24px 0px;
+  /* Component calibration (2026-11-21): reference controls are 28px tall (search input 28,
+   * combobox 30, primary pill 28), 8px radius, pill-shaped buttons, 30x20 switches and 46px
+   * command items at 15px. Library defaults keep the workbench-shell values. */
+  --control-height: 28px;
+  --button-radius: 9999px;
+  --switch-width: 30px;
+  --switch-height: 20px;
+  --command-item-height: 46px;
+  --command-item-font-size: 15px;
 }
 
 .dark {

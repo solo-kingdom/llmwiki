@@ -1,6 +1,6 @@
 {
   "package": "quiet-inset",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "items": [
     "app/index-css",
     "blocks/app-errors",
@@ -95,7 +95,7 @@
     "src/components/blocks/section-nav.tsx": "89068547f63524d3fec46668db3e0802774331f4ddc58f043a663f7b9d30ee3e",
     "src/components/blocks/state-boundary.tsx": "1925acf46a56d42ccc938a8b5fadd7cd6f5f03e0714a8319567088e82f64ba9d",
     "src/components/blocks/status-badge.tsx": "7ae4cc8b052aaa18ebe7c71cfd066e22ec13b354acf805ae94561ae0ec338621",
-    "src/components/blocks/surfaces.tsx": "9e2c1953a84efb14a0077bd6f0d6cbb7c1bf01aa7d5ff5fc7318846ecfa48320",
+    "src/components/blocks/surfaces.tsx": "1b7faf01e07ee252aced6cabd5acdb55014b497895437e835b949a5e24058ef5",
     "src/components/blocks/theme-menu.tsx": "bb3a75f2331904fc9adfc3abc02be22d37ff75aa9a903480f7a5d5b977c33fe4",
     "src/components/blocks/theme.tsx": "68e5c67c2c6999cd36ccaf413f211135ba299abf3697bf0c20db419c8ba4b877",
     "src/components/blocks/use-container-width.ts": "3b57b6be28fe9c36a1bba0d509222c74a851fc215dea7f13433261d993926820",

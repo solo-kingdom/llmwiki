@@ -1,11 +1,11 @@
 import * as React from "react"
 import { useParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { HistoryIcon, RotateCcwIcon, SearchIcon } from "lucide-react"
+import { HashIcon, HistoryIcon, RotateCcwIcon, SearchIcon } from "lucide-react"
 import { Markdown } from "@/components/blocks/markdown"
 import { AppLink, useAppNavigate } from "@/components/blocks/router"
 import { ListDetailLayout, ListPaneTrigger, PaneHeader, PaneSection } from "@/components/blocks/list-detail"
-import { Body, NavItem, NavList, Page, Panel, Row, Rows, ScrollRegion, Section, Split } from "@/components/blocks/surfaces"
+import { Body, NavItem, NavList, Page, Panel, Row, Rows, ScrollRegion, Section, Split, Stack } from "@/components/blocks/surfaces"
 import { StatusBadge } from "@/components/blocks/status-badge"
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
 import { Time } from "@/components/blocks/format"
@@ -231,15 +231,16 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
   )
 
   const outlinePanel = outline.length > 0 ? (
-    <Panel title="目录" padding="none">
+    <Stack gap="xs">
+      <span className="text-xs font-medium text-muted-foreground">目录</span>
       <NavList label="目录">
         {outline.map((item, index) => (
-          <NavItem key={`${item.text}-${index}`}>
+          <NavItem key={`${item.text}-${index}`} icon={<HashIcon />} indent={item.level > 2}>
             {item.text}
           </NavItem>
         ))}
       </NavList>
-    </Panel>
+    </Stack>
   ) : null
 
   const article = (

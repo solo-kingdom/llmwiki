@@ -210,29 +210,35 @@ export function Row({ children }: { children: React.ReactNode }) {
 }
 
 /** NavList — a compact in-page navigation list (help contents, document outline, section menus).
- *  Rows read as table rows (dividers, 40px); navigation reads as menu items: no dividers, 32px rows,
- *  hover/active surfaces — the same rhythm as sidebar items. */
+ *  Rows read as table rows (dividers, 40px); navigation reads as menu items: no dividers, 28px rows,
+ *  a leading 16px icon and hover/active surfaces — the same rhythm as the app sidebar (one level
+ *  of navigation, one look). */
 export function NavList({ label, children }: { label?: string | undefined; children: React.ReactNode }) {
-  return <ul aria-label={label} className="flex min-w-0 flex-col gap-0.5 p-1">{children}</ul>
+  return <ul aria-label={label} className="flex min-w-0 flex-col gap-0.5">{children}</ul>
 }
-export function NavItem({ active = false, onSelect, children }: {
+export function NavItem({ active = false, onSelect, icon, indent = false, children }: {
   active?: boolean | undefined
   /** Omit for a display-only entry (e.g. a document outline that cannot scroll yet). */
   onSelect?: (() => void) | undefined
+  /** Leading 16px icon, same as sidebar items. */
+  icon?: React.ReactNode | undefined
+  /** Indent one level (document outlines: h3 entries under h2). */
+  indent?: boolean | undefined
   children: React.ReactNode
 }) {
   const classes = cn(
-    "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground transition-colors [&_svg]:size-4 [&_svg]:shrink-0",
+    "flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground transition-colors [&_svg]:size-4 [&_svg]:shrink-0",
+    indent && "pl-7",
     active && "bg-accent font-medium text-accent-foreground",
     onSelect !== undefined && "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
   )
   return (
     <li className="min-w-0">
       {onSelect === undefined ? (
-        <div className={classes}><span className="truncate">{children}</span></div>
+        <div className={classes}>{icon}<span className="truncate">{children}</span></div>
       ) : (
         <button type="button" onClick={onSelect} aria-current={active ? "page" : undefined} className={classes}>
-          <span className="truncate">{children}</span>
+          {icon}<span className="truncate">{children}</span>
         </button>
       )}
     </li>

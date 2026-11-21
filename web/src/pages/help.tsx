@@ -1,4 +1,5 @@
 import * as React from "react"
+import { BookOpenIcon, CircleHelpIcon, FolderTreeIcon, HashIcon, HeartPulseIcon, LightbulbIcon, MessageSquareIcon, MonitorIcon, PlugIcon, TerminalIcon, WorkflowIcon, ZapIcon } from "lucide-react"
 import { Markdown } from "@/components/blocks/markdown"
 import { useUrlState } from "@/components/blocks/router"
 import { Body, NavItem, NavList, Page, Panel, ScrollRegion, Split } from "@/components/blocks/surfaces"
@@ -9,6 +10,9 @@ import zhContent from "@/content/help.zh.md?raw"
 import enContent from "@/content/help.en.md?raw"
 
 type Section = { id: string; text: string }
+
+/** Section icons pair by order with help.zh.md / help.en.md (both keep the same chapter order). */
+const SECTION_ICONS = [ZapIcon, LightbulbIcon, FolderTreeIcon, BookOpenIcon, MonitorIcon, MessageSquareIcon, HeartPulseIcon, WorkflowIcon, TerminalIcon, PlugIcon, CircleHelpIcon]
 
 function slugify(text: string): string {
   return text.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "")
@@ -95,15 +99,21 @@ export function HelpPage() {
             sideLabel="文档目录"
             sideWidth="sm"
             side={
-              <Panel padding="none">
-                <NavList label="文档目录">
-                  {sections.map((section) => (
-                    <NavItem key={section.id} active={sectionId === section.id} onSelect={() => jumpTo(section.id)}>
+              <NavList label="文档目录">
+                {sections.map((section, index) => {
+                  const Icon = SECTION_ICONS[index]
+                  return (
+                    <NavItem
+                      key={section.id}
+                      icon={Icon === undefined ? <HashIcon /> : <Icon />}
+                      active={sectionId === section.id}
+                      onSelect={() => jumpTo(section.id)}
+                    >
                       {section.text}
                     </NavItem>
-                  ))}
-                </NavList>
-              </Panel>
+                  )
+                })}
+              </NavList>
             }
           >
             <HelpBody content={content} activeLang={activeLang} setLang={setLang} />

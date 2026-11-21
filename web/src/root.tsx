@@ -39,6 +39,9 @@ const nav: NavGroup[] = [
 ]
 
 function Brand() {
+  // Brand is an identity asset, not a layout surface: the logo needs its own radius and the
+  // collapsible-icon state needs raw group-data classes, so the layout-class rule is waived here.
+  /* eslint-disable ui-template/no-layout-classes */
   return (
     <div className="flex min-w-0 items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
       <img src="/icon.png" alt="" width={20} height={20} className="size-5 shrink-0 rounded-[5px] object-contain" draggable={false} />
@@ -48,6 +51,7 @@ function Brand() {
       </div>
     </div>
   )
+  /* eslint-enable ui-template/no-layout-classes */
 }
 
 export function Root() {

@@ -21,7 +21,9 @@ export default defineConfig({
     deviceScaleFactor: 1,
   },
   webServer: {
-    command: "npx vite preview --outDir storybook-static --port 6007 --strictPort",
+    // --host 127.0.0.1: vite preview defaults to localhost, which binds ::1 only on macOS while
+    // Playwright probes 127.0.0.1 below — without this the webServer probe times out after 60s.
+    command: "npx vite preview --host 127.0.0.1 --outDir storybook-static --port 6007 --strictPort",
     url: "http://127.0.0.1:6007/iframe.html",
     reuseExistingServer: false,
   },

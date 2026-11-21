@@ -77,7 +77,7 @@
     ".storybook/main.ts": "d3f35b859bb2a587b929c75a5dd71f3dfcc03b054897c345953393d43c8ae282",
     ".storybook/preview.tsx": "2c1eca7caeff78450c18de2fd9750952b8e89068774ea38063bf54de29e58ba1",
     "eslint/ui-template.mjs": "63db50c1f84f86857599aeeb0c6b3af9279f455f870a1dba7d6490fba9cb7997",
-    "playwright.fidelity.config.ts": "54285547293e4330590943ac41b458d24767b2b9abb391693e7b17273c406512",
+    "playwright.fidelity.config.ts": "d0c1f97d781d74acded3afc5720c46fc4e7e202a0099daf343f5059d9721d711",
     "src/components/blocks/app-errors.tsx": "f358545efb509d97c4c95323e09f3567cc70245b0764be5b7bde97c293cd8f3a",
     "src/components/blocks/app-shell.tsx": "efb1a007d697bb87c9bfa53e64762c68bc80e89198143e237d60a375339d51b4",
     "src/components/blocks/code-block.tsx": "fe1389718a04e9dda2db839dd5269f372fcdf03b99df92532f16d6f1c357f1ec",

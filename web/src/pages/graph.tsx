@@ -156,7 +156,7 @@ export function GraphPage() {
                   <Row key={node.id}>
                     <button
                       type="button"
-                      className="min-h-6 min-w-0 flex-1 truncate text-left hover:underline"
+                      className="min-h-6 min-w-0 flex-1 truncate text-left hover:text-brand"
                       onClick={() => setSelectedId(node.id)}
                     >
                       {node.title || node.id}

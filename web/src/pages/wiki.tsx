@@ -106,7 +106,7 @@ function WikiPane({ documents }: { documents: DocumentListItem[] }) {
             {visible.map((doc) => (
               <Row key={doc.id}>
                 <div className="min-w-0 flex-1">
-                  <AppLink to={`/wiki/${encodeURIComponent(doc.id)}`} className="block truncate text-sm hover:underline">
+                  <AppLink to={`/wiki/${encodeURIComponent(doc.id)}`} className="block truncate text-sm hover:text-brand">
                     {doc.title || doc.filename}
                   </AppLink>
                   <div className="truncate text-xs text-muted-foreground">{doc.relative_path}</div>

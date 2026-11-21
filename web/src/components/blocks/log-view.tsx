@@ -56,7 +56,7 @@ export function LogView({ lines, height = "28rem", follow: followDefault = true,
                 <div className={cn("flex gap-3", wrapping ? "whitespace-pre-wrap break-all" : "whitespace-pre")}>
                   {line.time !== undefined ? <span className="shrink-0 text-muted-foreground tabular-nums">{formatDateTime(line.time, { timeStyle: "medium" })}</span> : null}
                   <span className={cn("min-w-0", levelClass[line.level ?? "info"])}>{line.text}</span>
-                  {line.detail !== undefined ? <button type="button" onClick={() => toggle(line.id)} className="shrink-0 text-muted-foreground underline-offset-2 hover:underline">{expanded ? "−" : "{…}"}</button> : null}
+                  {line.detail !== undefined ? <button type="button" onClick={() => toggle(line.id)} className="shrink-0 text-muted-foreground hover:text-foreground">{expanded ? "−" : "{…}"}</button> : null}
                 </div>
                 {expanded ? <pre className="mt-1 mb-1 overflow-x-auto rounded bg-muted/50 p-2 whitespace-pre">{JSON.stringify(line.detail, null, 2)}</pre> : null}
               </div>

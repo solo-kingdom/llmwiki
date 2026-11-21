@@ -14,7 +14,7 @@ function withoutNode<P extends { node?: unknown }>(props: P): Omit<P, "node"> {
 }
 
 const components: Components = {
-  a: (props) => <a {...withoutNode(props)} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2" />,
+  a: (props) => <a {...withoutNode(props)} target="_blank" rel="noreferrer" className="text-primary transition-colors hover:text-primary/75" />,
   code: (raw) => {
     const { className, children, ...props } = withoutNode(raw)
     const language = /language-(\S+)/.exec(className ?? "")?.[1]

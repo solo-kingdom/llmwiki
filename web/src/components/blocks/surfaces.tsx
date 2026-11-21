@@ -213,7 +213,7 @@ export function Row({ children }: { children: React.ReactNode }) {
  *  Rows read as table rows (dividers, 40px); navigation reads as menu items: no dividers, 32px rows,
  *  hover/active surfaces — the same rhythm as sidebar items. */
 export function NavList({ label, children }: { label?: string | undefined; children: React.ReactNode }) {
-  return <ul aria-label={label} className="flex min-w-0 flex-col gap-px p-1">{children}</ul>
+  return <ul aria-label={label} className="flex min-w-0 flex-col gap-0.5 p-1">{children}</ul>
 }
 export function NavItem({ active = false, onSelect, children }: {
   active?: boolean | undefined

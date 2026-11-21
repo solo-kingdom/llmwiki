@@ -108,7 +108,7 @@ function ChatPane({ sessionId, onCreate, creating }: { sessionId: string | undef
                   <AppLink
                     to={`/chat/${session.id}`}
                     aria-current={sessionId === session.id ? "page" : undefined}
-                    className="block truncate text-sm hover:underline"
+                    className="block truncate text-sm hover:text-brand"
                   >
                     {session.title || "未命名对话"}
                   </AppLink>

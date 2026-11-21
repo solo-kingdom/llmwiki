@@ -201,7 +201,7 @@ function ReviewsSection() {
             <Row key={review.id}>
               <button
                 type="button"
-                className="min-w-0 flex-1 truncate text-left text-sm hover:underline"
+                className="min-w-0 flex-1 truncate text-left text-sm hover:text-brand"
                 onClick={() => setSelectedId(review.id)}
               >
                 {review.archive_source_path || review.id}

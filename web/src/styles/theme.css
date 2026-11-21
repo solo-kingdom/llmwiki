@@ -158,6 +158,9 @@
   --sidebar-item-foreground: oklch(0.378 0.013 284);
   /* Normal items are 500 too (only selected-state weight lives in --sidebar-active-weight). */
   --sidebar-item-weight: 500;
+  /* Hover reads one step lighter than the selected fill (--sidebar-accent 0.91): reference measures
+   * hover #e4e4e5 vs selected #e1e1e2 over the 0.944 sidebar, so keep a visible step between them. */
+  --sidebar-hover: oklch(0.935 0.001 284.2);
   /* Measured panel shadow: 1px ring (the reference's hairline separation) + soft drop. */
   --surface-shadow: rgb(0 0 0 / 0.029) 0px 0px 0px 1px, rgb(0 0 0 / 0.02) 0px 3px 6px -2px,
     rgb(0 0 0 / 0.04) 0px 1px 1px 0px;
@@ -218,6 +221,8 @@
   --sidebar-ring: oklch(0.65 0.13 277);
   /* Dark has no reference capture yet; secondary item gray follows the dark muted tier. */
   --sidebar-item-foreground: oklch(0.7 0.004 284);
+  /* Hover sits between the 0.155 sidebar and the 0.25 selected fill. */
+  --sidebar-hover: oklch(0.21 0 0);
   --surface-shadow: 0 1px 1px rgb(0 0 0 / 0.2);
   --floating-shadow: 0 12px 32px rgb(0 0 0 / 0.45), 0 2px 8px rgb(0 0 0 / 0.3);
 }

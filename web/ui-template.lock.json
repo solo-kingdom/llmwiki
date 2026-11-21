@@ -1,6 +1,6 @@
 {
   "package": "quiet-inset",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "items": [
     "app/index-css",
     "blocks/app-errors",
@@ -127,7 +127,7 @@
     "src/components/ui/scroll-area.tsx": "436777583f300e9fb0ca9df97ce9d1ca45443b7513273f39d27c6183b99db396",
     "src/components/ui/select.tsx": "8153c588d583ec3fdd735322ad56c51d498c3476f189d4ef887e8b07628b588b",
     "src/components/ui/separator.tsx": "b5b5460e5337c2d5f361c1512001615b2e5eacb38c7449a4418bb9ddb47c4bba",
-    "src/components/ui/sheet.tsx": "549678370096804f5acd0895fcbd58084b45ac80f28197887377038d8266ddd3",
+    "src/components/ui/sheet.tsx": "8c6a4637cabc17a8f67605cae21cd4ab8fe50d622d6ab994e78a42cd3530792b",
     "src/components/ui/sidebar.tsx": "b61af7390cf93d25fcc20fb0709ef164337c3b9eba2b0c997110069c4952a1eb",
     "src/components/ui/skeleton.tsx": "4c2af7fa9c645358a0fb188779deab6f0b981733b62befc25e18aaebea1350dc",
     "src/components/ui/sonner.tsx": "f08d1dff4c101bc4a10c287fb8fa2e565b326839009524d7455aea1c73d54a69",

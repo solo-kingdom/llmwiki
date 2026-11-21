@@ -137,10 +137,29 @@ const rules = {
       return { JSXAttribute(node) { if (node.name.name === "className" && classStrings(node).some((s) => bad.test(s))) context.report({ node, messageId: "m" }) } }
     },
   },
+  "no-raw-scroll-containers": {
+    meta: { type: "suggestion", messages: { m: "`{{token}}` on a raw <{{tag}}>: scroll regions belong to surfaces (ScrollRegion, Body, Split, Sheet/Dialog content) so padding and seams stay owned by the container. Compose them instead of a custom scroll div." }, schema: [] },
+    create(context) {
+      const SCROLL = /^(?:overflow-y-auto|overflow-auto|overflow-x-auto|overflow-scroll)$/
+      const RAW = /^(?:div|section|main|aside|article|nav|ul|ol)$/
+      return {
+        JSXOpeningElement(node) {
+          const tag = node.name.name
+          if (typeof tag !== "string" || !RAW.test(tag)) return
+          const attr = node.attributes.find((a) => a.type === "JSXAttribute" && a.name?.name === "className")
+          if (attr === undefined) return
+          const token = classStrings(attr)
+            .flatMap((s) => s.split(/\s+/).map((t) => t.split(":").pop().replace(/^!?-?/, "")))
+            .find((t) => SCROLL.test(t))
+          if (token !== undefined) context.report({ node: attr, messageId: "m", data: { token, tag } })
+        },
+      }
+    },
+  },
 }
 
 const plugin = {
-  meta: { name: "ui-template", version: "5.3.2" },
+  meta: { name: "ui-template", version: "5.3.3" },
   rules,
   configs: { recommended: { rules: Object.fromEntries(Object.keys(rules).map((name) => [`ui-template/${name}`, "error"])) } },
 }

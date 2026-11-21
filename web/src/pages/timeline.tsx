@@ -10,7 +10,7 @@ import { Markdown } from "@/components/blocks/markdown"
 import { useConfirm } from "@/components/blocks/confirm"
 import { notify } from "@/components/blocks/notify"
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
-import { Inline, Page, Panel, Properties, Row, Rows, Section, Stack } from "@/components/blocks/surfaces"
+import { Inline, Page, Panel, Properties, Row, Rows, ScrollRegion, Section, Stack } from "@/components/blocks/surfaces"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
@@ -74,7 +74,7 @@ function ChangeSetSheet({ id, open, onOpenChange }: { id: string | null; open: b
             {detail.data?.change_set.kind} · {detail.data?.change_set.created_at}
           </SheetDescription>
         </SheetHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <ScrollRegion name="sheet" label="变更详情">
           {detail.isLoading ? <RowsSkeleton rows={6} /> : null}
           {detail.isError ? <ErrorState error={detail.error} onRetry={() => void detail.refetch()} /> : null}
           {detail.data ? (
@@ -129,7 +129,7 @@ function ChangeSetSheet({ id, open, onOpenChange }: { id: string | null; open: b
               </Inline>
             </Stack>
           ) : null}
-        </div>
+        </ScrollRegion>
       </SheetContent>
     </Sheet>
   )

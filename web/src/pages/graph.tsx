@@ -1,5 +1,6 @@
 import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
+import { RotateCcwIcon } from "lucide-react"
 import { AppLink } from "@/components/blocks/router"
 import { Page, Panel, Properties, Row, Rows, Split, Stack } from "@/components/blocks/surfaces"
 import { StatusBadge } from "@/components/blocks/status-badge"
@@ -127,6 +128,8 @@ export function GraphPage() {
       layout="fill"
       actions={[{
         label: "刷新",
+        icon: <RotateCcwIcon />,
+        iconOnly: true,
         onSelect: () => void graph.refetch(),
       }]}
     >

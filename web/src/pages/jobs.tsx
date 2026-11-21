@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import type { ColumnDef } from "@tanstack/react-table"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { SearchIcon } from "lucide-react"
+import { RotateCcwIcon, SearchIcon } from "lucide-react"
 import { notify } from "@/components/blocks/notify"
 import { DataTable } from "@/components/blocks/data-table"
 import { Id, Num, Time } from "@/components/blocks/format"
@@ -141,7 +141,7 @@ export function JobsPage() {
   return (
     <Page
       title="摄入任务"
-      actions={[{ label: "刷新", onSelect: () => { void jobsQuery.refetch() } }]}
+      actions={[{ label: "刷新", icon: <RotateCcwIcon />, iconOnly: true, onSelect: () => { void jobsQuery.refetch() } }]}
     >
       <Toolbar>
         <InputGroup>

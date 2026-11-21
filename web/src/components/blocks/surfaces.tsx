@@ -209,6 +209,36 @@ export function Row({ children }: { children: React.ReactNode }) {
   return <li className="flex min-w-0 items-center gap-3 px-4 py-2 text-sm">{children}</li>
 }
 
+/** NavList — a compact in-page navigation list (help contents, document outline, section menus).
+ *  Rows read as table rows (dividers, 40px); navigation reads as menu items: no dividers, 32px rows,
+ *  hover/active surfaces — the same rhythm as sidebar items. */
+export function NavList({ label, children }: { label?: string | undefined; children: React.ReactNode }) {
+  return <ul aria-label={label} className="flex min-w-0 flex-col gap-px p-1">{children}</ul>
+}
+export function NavItem({ active = false, onSelect, children }: {
+  active?: boolean | undefined
+  /** Omit for a display-only entry (e.g. a document outline that cannot scroll yet). */
+  onSelect?: (() => void) | undefined
+  children: React.ReactNode
+}) {
+  const classes = cn(
+    "flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground transition-colors [&_svg]:size-4 [&_svg]:shrink-0",
+    active && "bg-accent font-medium text-accent-foreground",
+    onSelect !== undefined && "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+  )
+  return (
+    <li className="min-w-0">
+      {onSelect === undefined ? (
+        <div className={classes}><span className="truncate">{children}</span></div>
+      ) : (
+        <button type="button" onClick={onSelect} aria-current={active ? "page" : undefined} className={classes}>
+          <span className="truncate">{children}</span>
+        </button>
+      )}
+    </li>
+  )
+}
+
 /** DisclosureRow — a Row that expands in place (assets, previews); content is separated by a rule. */
 export function DisclosureRow({ summary, children }: { summary: React.ReactNode; children?: React.ReactNode | undefined }) {
   const [open, setOpen] = React.useState(false)

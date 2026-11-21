@@ -1,7 +1,7 @@
 import * as React from "react"
 import { Markdown } from "@/components/blocks/markdown"
 import { useUrlState } from "@/components/blocks/router"
-import { Body, Page, Panel, Row, Rows, ScrollRegion, Split } from "@/components/blocks/surfaces"
+import { Body, NavItem, NavList, Page, Panel, ScrollRegion, Split } from "@/components/blocks/surfaces"
 import { useContainerWidth } from "@/components/blocks/use-container-width"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -96,19 +96,13 @@ export function HelpPage() {
             sideWidth="sm"
             side={
               <Panel padding="none">
-                <Rows label="文档目录">
+                <NavList label="文档目录">
                   {sections.map((section) => (
-                    <Row key={section.id}>
-                      <button
-                        type="button"
-                        className="min-h-6 min-w-0 flex-1 truncate text-left text-sm hover:underline"
-                        onClick={() => jumpTo(section.id)}
-                      >
-                        {section.text}
-                      </button>
-                    </Row>
+                    <NavItem key={section.id} active={sectionId === section.id} onSelect={() => jumpTo(section.id)}>
+                      {section.text}
+                    </NavItem>
                   ))}
-                </Rows>
+                </NavList>
               </Panel>
             }
           >

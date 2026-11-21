@@ -76,8 +76,8 @@ export function LogsPage() {
     <Page
       title="活动日志"
       actions={[
-        { label: "刷新", icon: <RefreshCwIcon />, onSelect: () => void logs.refetch() },
-        { label: "导出", icon: <DownloadIcon />, onSelect: exportLogs },
+        { label: "刷新", icon: <RefreshCwIcon />, iconOnly: true, onSelect: () => void logs.refetch() },
+        { label: "导出", icon: <DownloadIcon />, iconOnly: true, onSelect: exportLogs },
         {
           label: "清空日志",
           icon: <Trash2Icon />,

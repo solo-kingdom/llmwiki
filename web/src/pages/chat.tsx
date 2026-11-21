@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "react-router"
-import { PaperclipIcon, PencilIcon, PlusIcon, RotateCcwIcon, SendIcon, SquareIcon, Trash2Icon } from "lucide-react"
+import { ArchiveIcon, CpuIcon, PaperclipIcon, PencilIcon, PlusIcon, RotateCcwIcon, SendIcon, SquareIcon, Trash2Icon } from "lucide-react"
 import { useConfirm } from "@/components/blocks/confirm"
 import { notify } from "@/components/blocks/notify"
 import {
@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupTextarea } from "@/components/ui/input-group"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useApp } from "@/context/app-context"
 import {
@@ -196,33 +197,42 @@ function ModelPicker({ session }: { session: IngestSession }) {
   })
 
   return (
-    <Inline gap="sm" wrap>
-      <span className="text-xs text-muted-foreground">模型</span>
-      <Select
-        value={selectedInstanceId}
-        onValueChange={(value) => {
-          setInstanceId(value)
-          if (value === session.llm_instance_id && session.llm_model !== "") {
-            update.mutate({ nextInstanceId: value, model: session.llm_model })
-          }
-        }}
-      >
-        <SelectTrigger aria-label="对话 Provider 实例" size="sm" className="w-40"><SelectValue placeholder="选择实例" /></SelectTrigger>
-        <SelectContent>
-          {instances.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
-      <Select
-        value={selectedModel}
-        disabled={models.length === 0}
-        onValueChange={(model) => update.mutate({ nextInstanceId: instanceId, model })}
-      >
-        <SelectTrigger aria-label="对话模型" size="sm" className="w-44"><SelectValue placeholder="选择模型" /></SelectTrigger>
-        <SelectContent>
-          {models.map((model) => <SelectItem key={model.model_id} value={model.model_id}>{model.name || model.model_id}</SelectItem>)}
-        </SelectContent>
-      </Select>
-    </Inline>
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button size="icon-sm" variant="ghost" aria-label="模型设置" title="模型设置">
+          <CpuIcon />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" side="top" className="w-64">
+        <Stack gap="sm">
+          <span className="text-xs text-muted-foreground">模型</span>
+          <Select
+            value={selectedInstanceId}
+            onValueChange={(value) => {
+              setInstanceId(value)
+              if (value === session.llm_instance_id && session.llm_model !== "") {
+                update.mutate({ nextInstanceId: value, model: session.llm_model })
+              }
+            }}
+          >
+            <SelectTrigger aria-label="对话 Provider 实例" size="sm" className="w-full"><SelectValue placeholder="选择实例" /></SelectTrigger>
+            <SelectContent>
+              {instances.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select
+            value={selectedModel}
+            disabled={models.length === 0}
+            onValueChange={(model) => update.mutate({ nextInstanceId: instanceId, model })}
+          >
+            <SelectTrigger aria-label="对话模型" size="sm" className="w-full"><SelectValue placeholder="选择模型" /></SelectTrigger>
+            <SelectContent>
+              {models.map((model) => <SelectItem key={model.model_id} value={model.model_id}>{model.name || model.model_id}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Stack>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -411,8 +421,8 @@ function Conversation({ session }: { session: IngestSession }) {
       layout="fill"
       leading={<ListPaneTrigger />}
       actions={[
-        { label: "归档", onSelect: () => archive.mutate() },
-        { label: "刷新", onSelect: () => { void messagesQuery.refetch() } },
+        { label: "归档", icon: <ArchiveIcon />, iconOnly: true, onSelect: () => archive.mutate() },
+        { label: "刷新", icon: <RotateCcwIcon />, iconOnly: true, onSelect: () => { void messagesQuery.refetch() } },
       ]}
     >
       <ScrollRegion name="conversation" follow>
@@ -430,21 +440,6 @@ function Conversation({ session }: { session: IngestSession }) {
       </ScrollRegion>
       <ComposerDock>
         <InputGroup>
-          <InputGroupAddon>
-            <Button size="icon-sm" variant="ghost" aria-label="上传附件" disabled={upload.isPending} onClick={() => fileRef.current?.click()}>
-              <PaperclipIcon />
-            </Button>
-            <input
-              ref={fileRef}
-              type="file"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file !== undefined) upload.mutate(file)
-                event.target.value = ""
-              }}
-            />
-          </InputGroupAddon>
           <InputGroupTextarea
             aria-label="输入消息"
             placeholder="输入消息，Enter 发送，Shift+Enter 换行"
@@ -457,10 +452,26 @@ function Conversation({ session }: { session: IngestSession }) {
               }
             }}
           />
-          <InputGroupAddon align="inline-end">
-            <Button size="icon-sm" aria-label="发送" disabled={sending || input.trim() === ""} onClick={() => { void send() }}>
-              {sending ? <SquareIcon /> : <SendIcon />}
-            </Button>
+          <InputGroupAddon align="block-end">
+            <ModelPicker session={session} />
+            <Stack direction="row" gap="xs" grow justify="end">
+              <Button size="icon-sm" variant="ghost" aria-label="上传附件" title="上传附件" disabled={upload.isPending} onClick={() => fileRef.current?.click()}>
+                <PaperclipIcon />
+              </Button>
+              <Button size="icon-sm" aria-label="发送" title="发送" disabled={sending || input.trim() === ""} onClick={() => { void send() }}>
+                {sending ? <SquareIcon /> : <SendIcon />}
+              </Button>
+            </Stack>
+            <input
+              ref={fileRef}
+              type="file"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file !== undefined) upload.mutate(file)
+                event.target.value = ""
+              }}
+            />
           </InputGroupAddon>
         </InputGroup>
         {attachmentName !== "" ? (
@@ -468,7 +479,6 @@ function Conversation({ session }: { session: IngestSession }) {
             <AttachmentChip icon={<PaperclipIcon />} name={attachmentName} meta="附件" />
           </Stack>
         ) : null}
-        <Stack gap="sm"><ModelPicker session={session} /></Stack>
       </ComposerDock>
     </Page>
   )

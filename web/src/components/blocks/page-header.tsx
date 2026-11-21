@@ -13,7 +13,16 @@ import { AppLink } from "@/components/blocks/router"
 import { useContainerWidth } from "@/components/blocks/use-container-width"
 import { vocab } from "@/lib/vocab"
 
-export type HeaderAction = { label: string; icon?: React.ReactNode | undefined; onSelect: () => void; destructive?: boolean | undefined; disabled?: boolean | undefined }
+export type HeaderAction = {
+  label: string
+  icon?: React.ReactNode | undefined
+  /** Icon-only rendering (label becomes aria-label + title). Use only when the icon is unambiguous
+   *  (refresh, archive, export, more…); ambiguous custom actions keep icon + label. Requires `icon`. */
+  iconOnly?: boolean | undefined
+  onSelect: () => void
+  destructive?: boolean | undefined
+  disabled?: boolean | undefined
+}
 
 export function PageHeader({
   title, breadcrumbs = [], primary, actions = [], sidebarTrigger = true, leading, className,
@@ -54,10 +63,18 @@ export function PageHeader({
         </BreadcrumbList>
       </Breadcrumb>
       {inline.map((action) => (
-        <Button key={action.label} variant="ghost" size="sm" onClick={action.onSelect} disabled={action.disabled}
-          className={cn(action.destructive && "text-destructive hover:text-destructive")}>
-          {action.icon}{action.label}
-        </Button>
+        action.iconOnly === true && action.icon !== undefined ? (
+          <Button key={action.label} variant="ghost" size="icon-sm" onClick={action.onSelect} disabled={action.disabled}
+            aria-label={action.label} title={action.label}
+            className={cn(action.destructive && "text-destructive hover:text-destructive")}>
+            {action.icon}
+          </Button>
+        ) : (
+          <Button key={action.label} variant="ghost" size="sm" onClick={action.onSelect} disabled={action.disabled}
+            className={cn(action.destructive && "text-destructive hover:text-destructive")}>
+            {action.icon}{action.label}
+          </Button>
+        )
       ))}
       {overflow.length > 0 ? (
         <DropdownMenu>

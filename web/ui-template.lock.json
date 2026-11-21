@@ -1,6 +1,6 @@
 {
   "package": "quiet-inset",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "items": [
     "app/index-css",
     "blocks/app-errors",
@@ -95,7 +95,7 @@
     "src/components/blocks/section-nav.tsx": "89068547f63524d3fec46668db3e0802774331f4ddc58f043a663f7b9d30ee3e",
     "src/components/blocks/state-boundary.tsx": "1925acf46a56d42ccc938a8b5fadd7cd6f5f03e0714a8319567088e82f64ba9d",
     "src/components/blocks/status-badge.tsx": "7ae4cc8b052aaa18ebe7c71cfd066e22ec13b354acf805ae94561ae0ec338621",
-    "src/components/blocks/surfaces.tsx": "1b7faf01e07ee252aced6cabd5acdb55014b497895437e835b949a5e24058ef5",
+    "src/components/blocks/surfaces.tsx": "4fa017ef377fbedae87e8964be3e7e6b449d7e8a7f5f6d6344e3b634ff9f8189",
     "src/components/blocks/theme-menu.tsx": "bb3a75f2331904fc9adfc3abc02be22d37ff75aa9a903480f7a5d5b977c33fe4",
     "src/components/blocks/theme.tsx": "68e5c67c2c6999cd36ccaf413f211135ba299abf3697bf0c20db419c8ba4b877",
     "src/components/blocks/use-container-width.ts": "3b57b6be28fe9c36a1bba0d509222c74a851fc215dea7f13433261d993926820",
@@ -125,7 +125,7 @@
     "src/components/ui/progress.tsx": "11470bfbc6c80a4b198a1c00b6ea6300f5b29990fdd2ac36921d1f30eb2d4aa4",
     "src/components/ui/radio-group.tsx": "e97775aa292979393ebd4ffd53385b60e71511daa80a11fcfad0ec16d017e0e0",
     "src/components/ui/scroll-area.tsx": "436777583f300e9fb0ca9df97ce9d1ca45443b7513273f39d27c6183b99db396",
-    "src/components/ui/select.tsx": "839a4672b385c992532cae545ecf3e394da7374b2679e9eafd23840b184a9381",
+    "src/components/ui/select.tsx": "8153c588d583ec3fdd735322ad56c51d498c3476f189d4ef887e8b07628b588b",
     "src/components/ui/separator.tsx": "b5b5460e5337c2d5f361c1512001615b2e5eacb38c7449a4418bb9ddb47c4bba",
     "src/components/ui/sheet.tsx": "549678370096804f5acd0895fcbd58084b45ac80f28197887377038d8266ddd3",
     "src/components/ui/sidebar.tsx": "b61af7390cf93d25fcc20fb0709ef164337c3b9eba2b0c997110069c4952a1eb",

@@ -86,6 +86,10 @@ export function ScrollRegion({ name = "main", label, follow = false, children }:
 /**
  * Split — side column + main column, each its own scroll region, divider drawn by the container (full height,
  * meets the header rule above and the frame edge below). Below `collapseBelow` px it stacks: side on top, main scrolls.
+ *
+ * Padding contract: the side column carries `p-3`; the main column carries none. Content placed in `main`
+ * must own its padding (a `Body`, or a full-bleed surface such as a canvas) — a bordered `Panel` dropped
+ * straight into `main` puts its border against the divider and the header rule, reading as a double line.
  */
 export function Split({ side, sideLabel, sideWidth = "md", collapseBelow = 720, children }: {
   side: React.ReactNode; sideLabel: string; sideWidth?: "sm" | "md" | "lg" | undefined

@@ -2,7 +2,7 @@ import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
 import { RotateCcwIcon } from "lucide-react"
 import { AppLink } from "@/components/blocks/router"
-import { Page, Panel, Properties, Row, Rows, Split, Stack } from "@/components/blocks/surfaces"
+import { Body, Page, Panel, Properties, Row, Rows, Split, Stack } from "@/components/blocks/surfaces"
 import { StatusBadge } from "@/components/blocks/status-badge"
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
 import { Num } from "@/components/blocks/format"
@@ -170,7 +170,7 @@ export function GraphPage() {
           </Stack>
         }
       >
-        <Stack grow>
+        <Body width="full" gap="md">
           <div ref={hostRef} className="min-w-0">
           <Panel
             title="知识图谱"
@@ -282,7 +282,7 @@ export function GraphPage() {
               </Stack>
             </Panel>
           ) : null}
-        </Stack>
+        </Body>
       </Split>
     </Page>
   )

@@ -9,7 +9,7 @@ import {
   ScrollTextIcon,
   SettingsIcon,
 } from "lucide-react"
-import { AppShell, ShellBrand, type NavGroup } from "@/components/blocks/app-shell"
+import { AppShell, type NavGroup } from "@/components/blocks/app-shell"
 import { ThemeMenu } from "@/components/blocks/theme-menu"
 
 const nav: NavGroup[] = [
@@ -38,6 +38,18 @@ const nav: NavGroup[] = [
   },
 ]
 
+function Brand() {
+  return (
+    <div className="flex min-w-0 items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+      <img src="/icon.png" alt="" width={20} height={20} className="size-5 shrink-0 rounded-[5px] object-contain" draggable={false} />
+      <div className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
+        <span className="truncate text-sm font-semibold">知林</span>
+        <span className="truncate text-xs text-muted-foreground">知识库工作台</span>
+      </div>
+    </div>
+  )
+}
+
 export function Root() {
-  return <AppShell brand={<ShellBrand title="LLM Wiki" subtitle="知识库工作台" />} nav={nav} footer={<ThemeMenu />}><Outlet /></AppShell>
+  return <AppShell brand={<Brand />} nav={nav} footer={<ThemeMenu />}><Outlet /></AppShell>
 }

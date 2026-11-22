@@ -66,28 +66,8 @@ function patchMessage(
 }
 
 function ChatPane({ sessionId, onCreate, creating }: { sessionId: string | undefined; onCreate: () => void; creating: boolean }) {
-  const queryClient = useQueryClient()
-  const confirm = useConfirm()
   const sessionsQuery = useQuery({ queryKey: ["ingest-sessions"], queryFn: listIngestSessions })
   const sessions = sessionsQuery.data?.sessions ?? []
-  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
-  const rename = useMutation({
-    mutationFn: (value: { id: string; title: string }) => updateIngestSession(value.id, { title: value.title }),
-    onSuccess: async () => {
-      notify.success("会话已重命名")
-      setRenaming(null)
-      await queryClient.invalidateQueries({ queryKey: ["ingest-sessions"] })
-    },
-    onError: (error: Error) => notify.error(error),
-  })
-  const remove = useMutation({
-    mutationFn: (id: string) => deleteIngestSession(id),
-    onSuccess: async () => {
-      notify.success("会话已删除")
-      await queryClient.invalidateQueries({ queryKey: ["ingest-sessions"] })
-    },
-    onError: (error: Error) => notify.error(error),
-  })
 
   return (
     <>
@@ -116,58 +96,11 @@ function ChatPane({ sessionId, onCreate, creating }: { sessionId: string | undef
                     <Time value={session.updated_at} mode="datetime" />
                   </div>
                 </div>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={`重命名 ${session.title || "未命名对话"}`}
-                  onClick={() => setRenaming({ id: session.id, title: session.title || "" })}
-                >
-                  <PencilIcon />
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={`删除 ${session.title || "未命名对话"}`}
-                  onClick={async () => {
-                    const ok = await confirm({
-                      title: `删除会话「${session.title || "未命名对话"}」？`,
-                      description: "会话消息会一并删除，已归档的评审不受影响。",
-                      confirmLabel: "删除",
-                      destructive: true,
-                    })
-                    if (ok) remove.mutate(session.id)
-                  }}
-                >
-                  <Trash2Icon />
-                </Button>
               </Row>
             ))}
           </Rows>
         )}
       </PaneSection>
-
-      <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) setRenaming(null) }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>重命名会话</DialogTitle>
-            <DialogDescription>标题只影响列表展示。</DialogDescription>
-          </DialogHeader>
-          <Input
-            aria-label="会话标题"
-            value={renaming?.title ?? ""}
-            onChange={(event) => setRenaming((current) => current === null ? current : { ...current, title: event.target.value })}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenaming(null)}>取消</Button>
-            <Button
-              disabled={renaming === null || renaming.title.trim() === "" || rename.isPending}
-              onClick={() => { if (renaming !== null) rename.mutate({ id: renaming.id, title: renaming.title.trim() }) }}
-            >
-              保存
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   )
 }
@@ -274,6 +207,8 @@ function MessageView({ message, onRetry }: { message: IngestSessionMessage; onRe
 
 function Conversation({ session }: { session: IngestSession }) {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const confirm = useConfirm()
   const messagesQuery = useQuery({
     queryKey: ["session-messages", session.id],
     queryFn: () => listIngestSessionMessages(session.id),
@@ -404,6 +339,26 @@ function Conversation({ session }: { session: IngestSession }) {
     },
     onError: (error: Error) => notify.error(error),
   })
+  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
+  const rename = useMutation({
+    mutationFn: (value: { id: string; title: string }) => updateIngestSession(value.id, { title: value.title }),
+    onSuccess: async () => {
+      notify.success("会话已重命名")
+      setRenaming(null)
+      await queryClient.invalidateQueries({ queryKey: ["ingest-sessions"] })
+      await queryClient.invalidateQueries({ queryKey: ["ingest-session", session.id] })
+    },
+    onError: (error: Error) => notify.error(error),
+  })
+  const remove = useMutation({
+    mutationFn: () => deleteIngestSession(session.id),
+    onSuccess: async () => {
+      notify.success("会话已删除")
+      await queryClient.invalidateQueries({ queryKey: ["ingest-sessions"] })
+      navigate("/chat")
+    },
+    onError: (error: Error) => notify.error(error),
+  })
 
   const upload = useMutation({
     mutationFn: (file: File) => uploadIngestSessionAttachment(session.id, file),
@@ -421,8 +376,25 @@ function Conversation({ session }: { session: IngestSession }) {
       layout="fill"
       leading={<ListPaneTrigger />}
       actions={[
+        { label: "编辑", icon: <PencilIcon />, iconOnly: true, onSelect: () => setRenaming({ id: session.id, title: session.title || "" }) },
         { label: "归档", icon: <ArchiveIcon />, iconOnly: true, onSelect: () => archive.mutate() },
         { label: "刷新", icon: <RotateCcwIcon />, iconOnly: true, onSelect: () => { void messagesQuery.refetch() } },
+        {
+          label: "删除",
+          icon: <Trash2Icon />,
+          iconOnly: true,
+          destructive: true,
+          disabled: remove.isPending,
+          onSelect: async () => {
+            const ok = await confirm({
+              title: `删除会话「${session.title || "未命名对话"}」？`,
+              description: "会话消息会一并删除，已归档的评审不受影响。",
+              confirmLabel: "删除",
+              destructive: true,
+            })
+            if (ok) remove.mutate()
+          },
+        },
       ]}
     >
       <ScrollRegion name="conversation" follow>
@@ -480,6 +452,28 @@ function Conversation({ session }: { session: IngestSession }) {
           </Stack>
         ) : null}
       </ComposerDock>
+      <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) setRenaming(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>重命名会话</DialogTitle>
+            <DialogDescription>标题只影响列表展示。</DialogDescription>
+          </DialogHeader>
+          <Input
+            aria-label="会话标题"
+            value={renaming?.title ?? ""}
+            onChange={(event) => setRenaming((current) => current === null ? current : { ...current, title: event.target.value })}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenaming(null)}>取消</Button>
+            <Button
+              disabled={renaming === null || renaming.title.trim() === "" || rename.isPending}
+              onClick={() => { if (renaming !== null) rename.mutate({ id: renaming.id, title: renaming.title.trim() }) }}
+            >
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Page>
   )
 }

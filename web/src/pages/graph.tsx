@@ -2,7 +2,7 @@ import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
 import { RotateCcwIcon } from "lucide-react"
 import { AppLink } from "@/components/blocks/router"
-import { Body, Page, Panel, Properties, Row, Rows, Split, Stack } from "@/components/blocks/surfaces"
+import { Body, NavItem, NavList, Page, Panel, Properties, Split, Stack, Toolbar } from "@/components/blocks/surfaces"
 import { StatusBadge } from "@/components/blocks/status-badge"
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
 import { Num } from "@/components/blocks/format"
@@ -138,44 +138,37 @@ export function GraphPage() {
         sideWidth="md"
         side={
           <Stack gap="sm">
-            <Select value={limit} onValueChange={setLimit}>
-              <SelectTrigger size="sm" aria-label="节点上限"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="50">最多 50 个节点</SelectItem>
-                <SelectItem value="100">最多 100 个节点</SelectItem>
-                <SelectItem value="200">最多 200 个节点</SelectItem>
-                <SelectItem value="500">最多 500 个节点</SelectItem>
-              </SelectContent>
-            </Select>
-            <Panel padding="none">
-              {graph.isLoading ? <RowsSkeleton rows={6} /> : null}
-              {graph.isError ? <ErrorState error={graph.error} onRetry={() => void graph.refetch()} /> : null}
-              {!graph.isLoading && !graph.isError && nodes.length === 0 ? <EmptyState title="暂无图谱数据" /> : null}
-              <Rows label="图谱节点">
-                {nodes.map((node) => (
-                  <Row key={node.id}>
-                    <button
-                      type="button"
-                      className="min-h-6 min-w-0 flex-1 truncate text-left hover:text-brand"
-                      onClick={() => setSelectedId(node.id)}
-                    >
-                      {node.title || node.id}
-                    </button>
-                    <StatusBadge status={node.type} />
-                    <Num value={node.link_count} />
-                  </Row>
-                ))}
-              </Rows>
-            </Panel>
+            <Toolbar end={<span className="text-xs text-muted-foreground">{nodes.length}</span>}>
+              <Select value={limit} onValueChange={setLimit}>
+                <SelectTrigger size="sm" aria-label="节点上限"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="50">最多 50 个节点</SelectItem>
+                  <SelectItem value="100">最多 100 个节点</SelectItem>
+                  <SelectItem value="200">最多 200 个节点</SelectItem>
+                  <SelectItem value="500">最多 500 个节点</SelectItem>
+                </SelectContent>
+              </Select>
+            </Toolbar>
+            {graph.isLoading ? <RowsSkeleton rows={6} /> : null}
+            {graph.isError ? <ErrorState error={graph.error} onRetry={() => void graph.refetch()} /> : null}
+            {!graph.isLoading && !graph.isError && nodes.length === 0 ? <EmptyState title="暂无图谱数据" /> : null}
+            <NavList label="图谱节点">
+              {nodes.map((node) => (
+                <NavItem
+                  key={node.id}
+                  active={selected?.id === node.id}
+                  onSelect={() => setSelectedId(node.id)}
+                  trailing={<Num value={node.link_count} />}
+                >
+                  {node.title || node.id}
+                </NavItem>
+              ))}
+            </NavList>
           </Stack>
         }
       >
         <Body width="full" gap="md">
           <div ref={hostRef} className="min-w-0">
-          <Panel
-            title="知识图谱"
-            description={graph.data?.truncated ? `共 ${graph.data.total_nodes} 个节点，已按引用数截取前 ${nodes.length} 个` : `共 ${graph.data?.total_nodes ?? 0} 个节点`}
-          >
             {nodes.length === 0 ? <EmptyState title="暂无可视化节点" /> : (
               <svg viewBox={`0 0 ${canvas.width} ${canvas.height}`} width="100%" height="100%" role="img" aria-label="知识图谱">
                 {edges.map((edge) => {
@@ -262,7 +255,6 @@ export function GraphPage() {
                 })}
               </svg>
             )}
-          </Panel>
           </div>
 
           {selected ? (

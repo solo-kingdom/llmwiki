@@ -17,6 +17,7 @@ import * as React from "react"
 import { ChevronRightIcon } from "lucide-react"
 import { cn } from "cn"
 import { PageHeader, type HeaderAction } from "@/components/blocks/page-header"
+import { AppLink } from "@/components/blocks/router"
 import { useContainerWidth } from "@/components/blocks/use-container-width"
 
 type Width = "narrow" | "reading" | "form" | "full"
@@ -227,7 +228,9 @@ export function Row({ children }: { children: React.ReactNode }) {
 export function NavList({ label, children }: { label?: string | undefined; children: React.ReactNode }) {
   return <ul aria-label={label} className="flex min-w-0 flex-col gap-0.5">{children}</ul>
 }
-export function NavItem({ active = false, onSelect, icon, indent = false, children }: {
+export function NavItem({ to, active = false, onSelect, icon, indent = false, trailing, children }: {
+  /** Renders a link (middle click / open in new tab work); takes precedence over `onSelect`. */
+  to?: string | undefined
   active?: boolean | undefined
   /** Omit for a display-only entry (e.g. a document outline that cannot scroll yet). */
   onSelect?: (() => void) | undefined
@@ -235,22 +238,32 @@ export function NavItem({ active = false, onSelect, icon, indent = false, childr
   icon?: React.ReactNode | undefined
   /** Indent one level (document outlines: h3 entries under h2). */
   indent?: boolean | undefined
+  /** Trailing element (type badge, count) pinned to the right edge. */
+  trailing?: React.ReactNode | undefined
   children: React.ReactNode
 }) {
+  const interactive = to !== undefined || onSelect !== undefined
   const classes = cn(
     "flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground transition-colors [&_svg]:size-4 [&_svg]:shrink-0",
     indent && "pl-7",
     active && "bg-accent font-medium text-accent-foreground",
-    onSelect !== undefined && "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+    interactive && "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+  )
+  const body = (
+    <>
+      {icon}
+      <span className="truncate">{children}</span>
+      {trailing !== undefined ? <span className="ml-auto shrink-0">{trailing}</span> : null}
+    </>
   )
   return (
     <li className="min-w-0">
-      {onSelect === undefined ? (
-        <div className={classes}>{icon}<span className="truncate">{children}</span></div>
+      {to !== undefined ? (
+        <AppLink to={to} aria-current={active ? "page" : undefined} className={classes}>{body}</AppLink>
+      ) : onSelect === undefined ? (
+        <div className={classes}>{body}</div>
       ) : (
-        <button type="button" onClick={onSelect} aria-current={active ? "page" : undefined} className={classes}>
-          {icon}<span className="truncate">{children}</span>
-        </button>
+        <button type="button" onClick={onSelect} aria-current={active ? "page" : undefined} className={classes}>{body}</button>
       )}
     </li>
   )

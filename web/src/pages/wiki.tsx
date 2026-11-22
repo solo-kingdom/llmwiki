@@ -3,9 +3,8 @@ import { useParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ExternalLinkIcon, HistoryIcon, InfoIcon, Link2Icon, ListTreeIcon, RotateCcwIcon, SearchIcon } from "lucide-react"
 import { Markdown } from "@/components/blocks/markdown"
-import { AppLink, useAppNavigate } from "@/components/blocks/router"
-import { ListDetailLayout, ListPaneTrigger, PaneHeader, PaneSection } from "@/components/blocks/list-detail"
-import { Body, NavItem, NavList, Page, Panel, Row, Rows, ScrollRegion, Split, Stack } from "@/components/blocks/surfaces"
+import { useAppNavigate } from "@/components/blocks/router"
+import { Body, NavItem, NavList, Page, Panel, Row, Rows, Split, Stack, Toolbar } from "@/components/blocks/surfaces"
 import { StatusBadge } from "@/components/blocks/status-badge"
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
 import { Time } from "@/components/blocks/format"
@@ -52,7 +51,7 @@ function pageTypeOf(doc: { relative_path?: string | undefined; path?: string | u
   return ({ entities: "entity", concepts: "concept", sources: "source", synthesis: "synthesis", comparisons: "comparison", queries: "query" } as Record<string, string>)[subdir] ?? "page"
 }
 
-function WikiPane({ documents }: { documents: DocumentListItem[] }) {
+function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; currentId?: string | undefined }) {
   const [query, setQuery] = React.useState("")
   const [type, setType] = React.useState("all")
   const debounced = useDebounced(query)
@@ -73,13 +72,9 @@ function WikiPane({ documents }: { documents: DocumentListItem[] }) {
   }, [debounced, documents, search.data, type])
 
   return (
-    <>
-      <PaneHeader>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">Wiki 页面</span>
-        <span className="text-xs text-muted-foreground">{documents.length}</span>
-      </PaneHeader>
-      <PaneSection>
-        <InputGroup>
+    <Stack gap="sm">
+      <Toolbar end={<span className="text-xs text-muted-foreground">{visible.length}</span>}>
+        <InputGroup className="min-w-0 flex-1">
           <InputGroupAddon><SearchIcon /></InputGroupAddon>
           <InputGroupInput
             aria-label="搜索页面"
@@ -91,35 +86,30 @@ function WikiPane({ documents }: { documents: DocumentListItem[] }) {
         <Select value={type} onValueChange={setType}>
           <SelectTrigger size="sm" aria-label="按页面类型筛选"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部类型</SelectItem>
+            <SelectItem value="all">全部</SelectItem>
             {Object.entries(PAGE_TYPE_LABELS).map(([value, label]) => (
               <SelectItem key={value} value={value}>{label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-      </PaneSection>
-      <PaneSection grow>
-        <Panel padding="none">
-          {search.isError ? <ErrorState error={search.error} onRetry={() => void search.refetch()} /> : null}
-          {!search.isError && visible.length === 0 ? (
-            <EmptyState title="没有匹配的页面" description={debounced ? `没有匹配“${debounced}”的结果` : "工作区还没有 wiki 页面"} />
-          ) : null}
-          <Rows label="Wiki 页面">
-            {visible.map((doc) => (
-              <Row key={doc.id}>
-                <div className="min-w-0 flex-1">
-                  <AppLink to={`/wiki/${encodeURIComponent(doc.id)}`} className="block truncate text-sm hover:text-brand">
-                    {doc.title || doc.filename}
-                  </AppLink>
-                  <div className="truncate text-xs text-muted-foreground">{doc.relative_path}</div>
-                </div>
-                <StatusBadge status={pageTypeOf(doc)} />
-              </Row>
-            ))}
-          </Rows>
-        </Panel>
-      </PaneSection>
-    </>
+      </Toolbar>
+      {search.isError ? <ErrorState error={search.error} onRetry={() => void search.refetch()} /> : null}
+      {!search.isError && visible.length === 0 ? (
+        <EmptyState title="没有匹配的页面" description={debounced ? `没有匹配“${debounced}”的结果` : "工作区还没有 wiki 页面"} />
+      ) : null}
+      <NavList label="Wiki 页面">
+        {visible.map((doc) => (
+          <NavItem
+            key={doc.id}
+            to={`/wiki/${encodeURIComponent(doc.id)}`}
+            active={doc.id === currentId}
+            trailing={<StatusBadge status={pageTypeOf(doc)} />}
+          >
+            {doc.title || doc.filename}
+          </NavItem>
+        ))}
+      </NavList>
+    </Stack>
   )
 }
 
@@ -226,7 +216,8 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
   const [dialog, setDialog] = React.useState<ReaderDialog>(null)
   const articleRef = React.useRef<HTMLDivElement>(null)
   const [measureRef, containerWidth] = useContainerWidth<HTMLDivElement>()
-  const narrow = containerWidth > 0 && containerWidth < 900
+  // Rail needs the page width minus the list pane (18rem) to still leave a ≥900px article column.
+  const narrow = containerWidth > 0 && containerWidth < 1180
 
   // Heading ids + outline come from the rendered DOM: code fences never produce headings, and the ids are
   // exactly what jumpTo() can find. h3/h4 are this page's section levels (h1 demoted, title h1 stripped).
@@ -294,15 +285,11 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
   ))
 
   const content = (
-    <ScrollRegion name="document">
-      <Body width="reading">
-        <Panel>
-          <div ref={articleRef} onClick={onContentClick}>
-            <Markdown>{rendered || "_（空页面）_"}</Markdown>
-          </div>
-        </Panel>
-      </Body>
-    </ScrollRegion>
+    <Body width="full" align="start">
+      <div ref={articleRef} onClick={onContentClick}>
+        <Markdown>{rendered || "_（空页面）_"}</Markdown>
+      </div>
+    </Body>
   )
 
   const infoDialog = (
@@ -439,7 +426,6 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
     <Page
       title={doc.title || doc.filename}
       layout="fill"
-      leading={<ListPaneTrigger />}
       breadcrumbs={[{ label: "Wiki", to: "/wiki" }]}
       inlineMax={5}
       actions={[
@@ -451,22 +437,29 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
       ]}
     >
       <div ref={measureRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {!narrow && outline.length > 0 ? (
-          <Split
-            sideLabel="目录"
-            sideWidth="md"
-            sidePosition="end"
-            collapseBelow={900}
-            side={
-              <Stack gap="xs">
-                <span className="text-xs font-medium text-muted-foreground">目录</span>
-                <NavList label="目录">{tocEntries}</NavList>
-              </Stack>
-            }
-          >
-            {content}
-          </Split>
-        ) : content}
+        <Split
+          sideLabel="Wiki 页面"
+          sideWidth="lg"
+          collapseBelow={900}
+          side={<WikiPane documents={documents} currentId={docId} />}
+        >
+          {!narrow && outline.length > 0 ? (
+            <Split
+              sideLabel="目录"
+              sideWidth="md"
+              sidePosition="end"
+              collapseBelow={720}
+              side={
+                <Stack gap="xs">
+                  <span className="text-xs font-medium text-muted-foreground">目录</span>
+                  <NavList label="目录">{tocEntries}</NavList>
+                </Stack>
+              }
+            >
+              {content}
+            </Split>
+          ) : content}
+        </Split>
       </div>
       {infoDialog}
       {backlinksDialog}
@@ -495,9 +488,14 @@ export function WikiReaderPage() {
   if (documentsQuery.isLoading) return <RowsSkeleton rows={8} />
   if (documentsQuery.isError) return <ErrorState error={documentsQuery.error} onRetry={() => void documentsQuery.refetch()} />
 
-  return (
-    <ListDetailLayout label="Wiki 页面" pane={<WikiPane documents={documents} />}>
-      {id === undefined ? <EmptyState title="选择一个页面" description="从左侧列表选择，或搜索标题与内容。" /> : <Reader docId={id} documents={documents} />}
-    </ListDetailLayout>
-  )
+  if (id === undefined) {
+    return (
+      <Page title="Wiki" layout="fill">
+        <Body width="full" align="start">
+          <EmptyState title="选择一个页面" description="从左侧列表选择，或搜索标题与内容。" />
+        </Body>
+      </Page>
+    )
+  }
+  return <Reader docId={id} documents={documents} />
 }

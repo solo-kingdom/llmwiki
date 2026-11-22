@@ -15,6 +15,7 @@ import {
 } from "../agentruntime/runtime.js";
 import { buildPageChunks, rebuildReferences, storeReferenceEntries } from "../ingest/dbapply.js";
 import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
+import { ReferenceParser, WIKI_DOUBLE_BRACKET_RE } from "../engine/references.js";
 import type { PageLockManager } from "../ingest/lock.js";
 import type { WorkspaceFileIndexer } from "../engine/file_indexer.js";
 import { engineStoreFromStore } from "../engine/adapter.js";
@@ -272,4 +273,54 @@ export function docRelativePath(doc: Document): string {
   if (doc.relative_path) return doc.relative_path;
   if (doc.filename) return `${doc.path.replace(/\/+$/, "")}/${doc.filename}`.replace(/^\/+/, "");
   return "";
+}
+
+export interface ReferenceEntryPayload {
+  kind: "related" | "source";
+  raw_text: string;
+  target_document_id: string;
+  annotation: string;
+  target_title: string;
+}
+
+export interface WikilinkPayload {
+  text: string;
+  doc_id: string;
+  title: string;
+}
+
+/** Reference payload appended to document responses: structured entries plus a
+ * resolution map for inline [[..]] links so the web can render them clickable. */
+export async function buildReferencesPayload(
+  db: Store,
+  doc: Document,
+): Promise<{ reference_entries: ReferenceEntryPayload[]; wikilinks: WikilinkPayload[] }> {
+  const entries = await db.listReferenceEntries(doc.id);
+  const docs = await db.listDocuments();
+  const parser = new ReferenceParser(
+    docs.map((d) => ({ id: d.id, filename: d.filename, title: d.title, path: d.path })),
+  );
+  const docPath = `${doc.path}${doc.filename}`;
+  const byText = new Map<string, WikilinkPayload>();
+  for (const match of doc.content?.matchAll(WIKI_DOUBLE_BRACKET_RE) ?? []) {
+    const text = (match[1] ?? "").trim();
+    if (!text || byText.has(text)) continue;
+    const docId = parser.resolveLink(text, docPath);
+    const target = docId ? docs.find((d) => d.id === docId) : undefined;
+    byText.set(text, {
+      text,
+      doc_id: docId,
+      title: target?.title ?? target?.filename ?? "",
+    });
+  }
+  return {
+    reference_entries: entries.map((entry) => ({
+      kind: entry.kind,
+      raw_text: entry.rawText,
+      target_document_id: entry.targetDocumentId,
+      annotation: entry.annotation,
+      target_title: entry.targetTitle || entry.targetFilename,
+    })),
+    wikilinks: [...byText.values()],
+  };
 }

@@ -6,6 +6,7 @@ import {
   applyPageDelete,
   applyPageDeletes,
   applyPageWrite,
+  buildReferencesPayload,
   contentHash,
   docRelativePath,
   getID,
@@ -70,7 +71,8 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const doc = await ctx.db.getDocument(id);
         if (!doc) return writeError(c, 404, "document not found");
-        return writeJson(c, 200, doc);
+        const refs = await buildReferencesPayload(ctx.db, doc);
+        return writeJson(c, 200, { ...doc, ...refs });
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }

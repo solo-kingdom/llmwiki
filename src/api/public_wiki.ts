@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import type { Document, SearchChunk } from "../store/types.js";
 import {
+  buildReferencesPayload,
   getID,
   parseQueryInt,
   requirePublicWiki,
@@ -81,7 +82,8 @@ export function publicWikiApi(ctx: ApiContext) {
       try {
         const doc = await ctx.db.getDocument(id);
         if (!doc) return writeError(c, 404, "document not found");
-        return writeJson(c, 200, toPublicDocument(doc));
+        const refs = await buildReferencesPayload(ctx.db, doc);
+        return writeJson(c, 200, { ...toPublicDocument(doc), ...refs });
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }

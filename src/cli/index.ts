@@ -9,6 +9,7 @@ import { runLint } from "./lint.js";
 import { runMcp } from "./mcp.js";
 import { runMcpConfig } from "./mcp-config.js";
 import { runMigrate } from "./migrate.js";
+import { runMigrateReferences } from "./migrate_references.js";
 import { runReindex } from "./reindex.js";
 import { runServe } from "./serve.js";
 import { runVersion } from "./version.js";
@@ -129,6 +130,14 @@ program
   .option("--name <name>", "Workspace name (default: directory name)")
   .action(async (opts: { workspace?: string; name?: string }) => {
     await runMigrate(opts.workspace, opts.name, databaseUrl());
+  });
+
+program
+  .command("migrate-references")
+  .description("Extract trailing reference sections from stored wiki pages into document_reference_entries and strip them from content")
+  .option("--dry-run", "Report what would change without writing")
+  .action(async (opts: { dryRun?: boolean }) => {
+    await runMigrateReferences(opts, databaseUrl());
   });
 
 program

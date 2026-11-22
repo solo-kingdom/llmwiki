@@ -305,7 +305,9 @@ function linkifyWikilinks(content: string): string {
     if (fence !== "") return line
     return line.replace(/\[\[([^\]|#]+)(?:\|([^\]]*))?\]\]/g, (_match, target: string, label?: string) => {
       const clean = target.trim()
-      return `[${(label ?? "").trim() || clean}](${clean})`
+      const label2 = (label ?? "").trim() || clean
+      // Spaces break markdown link URLs; encode for href, keep the label readable.
+      return `[${label2}](${clean.replace(/ /g, "%20")})`
     })
   }).join("\n")
 }
@@ -374,8 +376,18 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
     const href = anchor.getAttribute("href") ?? ""
     if (!href || /^(https?:|#|mailto:)/.test(href)) return
     event.preventDefault()
-    const clean = href.replace(/^\/+/, "").replace(/^wiki\//, "").replace(/\.md$/i, "").toLowerCase()
-    const target = linkIndex.get(clean) ?? linkIndex.get(clean.split("/").pop() ?? clean)
+    let raw = href
+    try {
+      raw = decodeURIComponent(href)
+    } catch {
+      // keep the original when it is not valid percent-encoding
+    }
+    const clean = raw.replace(/^\/+/, "").replace(/^wiki\//, "").replace(/\.md$/i, "").toLowerCase()
+    // [[Adam Foroughi]] vs filename Adam_Foroughi.md — retry with underscores.
+    const target =
+      linkIndex.get(clean) ??
+      linkIndex.get(clean.replace(/ /g, "_")) ??
+      linkIndex.get(clean.split("/").pop() ?? clean)
     if (target) navigate(`/wiki/${encodeURIComponent(target)}`)
     else notify.info(`没有找到页面：${href}`)
   }, [linkIndex, navigate])

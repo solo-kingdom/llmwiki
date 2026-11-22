@@ -101,6 +101,14 @@ function findSections(headings: Heading[], lineCount: number): Section[] {
   return sections;
 }
 
+/** Lines allowed after the trailing group at EOF: blank lines, blockquote
+ * merge notes and HTML comments. Blockquote/comment lines are kept in content
+ * when the sections are stripped; they never become entries. */
+function isTailChrome(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed === "" || trimmed.startsWith(">") || trimmed.startsWith("<!--");
+}
+
 /** The trailing group is the maximal suffix of sections that all sit at the end
  * of the document and all match reference-section names. Sections appearing
  * mid-document (e.g. a lone 来源 before later prose sections) are never touched. */
@@ -111,11 +119,14 @@ function trailingGroup(sections: Section[], lines: string[]): Section[] {
     const section = sections[i];
     if (!section) break;
     if (expectedStart >= 0 && section.endLine !== expectedStart) break;
-    // The section must be followed (up to the next group member or EOF) only by blank lines.
+    // Between group members only blank lines are allowed; past the last section
+    // (to EOF) blockquote notes and comments are tolerated as tail chrome.
     const bridgeEnd = expectedStart >= 0 ? expectedStart : lines.length;
+    const allowChrome = expectedStart < 0;
     let bridge = true;
     for (let l = section.endLine; l < bridgeEnd; l++) {
-      if ((lines[l] ?? "").trim() !== "") {
+      const line = lines[l] ?? "";
+      if (allowChrome ? !isTailChrome(line) : line.trim() !== "") {
         bridge = false;
         break;
       }
@@ -156,7 +167,7 @@ function sectionIsStrippable(lines: string[], section: Section): boolean {
   for (let i = section.heading.line + 1; i < section.endLine; i++) {
     const line = lines[i];
     if (line === undefined || line.trim() === "") continue;
-    if (line.trimStart().startsWith("<!--")) continue;
+    if (line.trimStart().startsWith("<!--") || line.trimStart().startsWith(">")) continue;
     if (BULLET_RE.test(line)) continue;
     return false;
   }
@@ -197,7 +208,17 @@ export function extractTrailingReferences(content: string): ExtractResult {
   }
 
   const first = stripped[0];
+  const last = stripped[stripped.length - 1] ?? first;
   const kept = first ? lines.slice(0, first.heading.line) : lines.slice();
+  // Tail chrome (blockquote merge notes, comments) inside or after the last
+  // section stays in content — stripping removes the sections themselves only.
+  if (last) {
+    for (let l = last.heading.line + 1; l < lines.length; l++) {
+      const line = lines[l] ?? "";
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith(">") || trimmed.startsWith("<!--")) kept.push(line);
+    }
+  }
   while (kept.length > 0 && (kept[kept.length - 1] ?? "").trim() === "") kept.pop();
   const strippedContent = kept.join("\n");
 

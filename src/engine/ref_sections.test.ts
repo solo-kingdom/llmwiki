@@ -155,3 +155,42 @@ describe("normalizeWikiContent", () => {
     expect(result.entries.length).toBe(11);
   });
 });
+
+describe("extractTrailingReferences: tail chrome", () => {
+  it("strips sections followed by a blockquote merge note and keeps the note", () => {
+    const content = `# 概述
+
+正文。
+
+## 相关实体/概念
+
+- [[AppLovin]]
+- [[小团队_AI杠杆模型]]
+
+## 来源
+
+- 20VC 播客访谈
+
+> 本页面整合了两版源文件，保留旧正文所有要点。
+`;
+    const result = extractTrailingReferences(content);
+    expect(result.entries.map((e) => e.rawText)).toEqual(["AppLovin", "小团队_AI杠杆模型", "20VC 播客访谈"]);
+    expect(result.content).not.toContain("## 来源");
+    expect(result.content).toContain("> 本页面整合了两版源文件");
+    expect(result.content.trimEnd().endsWith("要点。")).toBe(true);
+  });
+
+  it("keeps footnote-style source sections in place (body cites them)", () => {
+    const content = `# 概述
+
+正文引用[^1]。
+
+## 参考来源
+
+[^1]: 花叔 (2026). 文章。[[sources/some-page]]
+`;
+    const result = extractTrailingReferences(content);
+    expect(result.entries).toEqual([]);
+    expect(result.content).toBe(content);
+  });
+});

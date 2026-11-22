@@ -1,6 +1,6 @@
 {
   "package": "quiet-inset",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "items": [
     "app/index-css",
     "blocks/app-errors",
@@ -92,7 +92,7 @@
     "src/components/blocks/page-header.tsx": "5e10ad2657d05bfecb249930a7da13e4a741a716b38f35cb2373bef887cf69e2",
     "src/components/blocks/router.tsx": "704bc62dca220b7e7692a670e03041f087df088f078dd66a51546d08b92a2fd3",
     "src/components/blocks/row-link.tsx": "a7b8dcedea5addc95c944ab3534b3954030a1e303ba1547dcdcea635ff862ea1",
-    "src/components/blocks/section-nav.tsx": "89068547f63524d3fec46668db3e0802774331f4ddc58f043a663f7b9d30ee3e",
+    "src/components/blocks/section-nav.tsx": "a9a3d0243f21ef2f9817eefc8cf24b6f50d04fcce3e22dae050d3433bf873091",
     "src/components/blocks/state-boundary.tsx": "1925acf46a56d42ccc938a8b5fadd7cd6f5f03e0714a8319567088e82f64ba9d",
     "src/components/blocks/status-badge.tsx": "7ae4cc8b052aaa18ebe7c71cfd066e22ec13b354acf805ae94561ae0ec338621",
     "src/components/blocks/surfaces.tsx": "4fa017ef377fbedae87e8964be3e7e6b449d7e8a7f5f6d6344e3b634ff9f8189",

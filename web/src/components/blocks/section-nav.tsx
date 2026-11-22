@@ -9,14 +9,21 @@ import { AppLink, useIsActive } from "@/components/blocks/router"
 import { useContainerWidth } from "@/components/blocks/use-container-width"
 import { Body, Split } from "@/components/blocks/surfaces"
 
-export type SectionNavItem = { label: string; to: string; description?: string | undefined }
+export type SectionNavItem = {
+  label: string
+  to: string
+  description?: string | undefined
+  /** Leading 16px icon, same as sidebar NavItem. Optional: text-only entries stay valid. */
+  icon?: React.ReactNode | undefined
+}
 
 function Entry({ item, vertical }: { item: SectionNavItem; vertical: boolean }) {
   const active = useIsActive(item.to)
   return (
     <AppLink to={item.to} aria-current={active ? "page" : undefined}
-      className={cn("shrink-0 rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+      className={cn("flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none [&_svg]:size-4 [&_svg]:shrink-0",
         active ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground", vertical && "w-full")}>
+      {item.icon}
       {item.label}
     </AppLink>
   )

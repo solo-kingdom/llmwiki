@@ -23,6 +23,8 @@ export interface Document {
   highlights: string
   created_at: string
   updated_at: string
+  reference_entries?: ReferenceEntry[]
+  wikilinks?: Wikilink[]
 }
 
 export interface DocumentListItem {
@@ -38,6 +40,23 @@ export interface DocumentListItem {
   updated_at: string
 }
 
+/** Structured reference entry from document_reference_entries (trailing
+ * 相关/来源 sections extracted server-side). */
+export interface ReferenceEntry {
+  kind: "related" | "source"
+  raw_text: string
+  target_document_id: string
+  annotation: string
+  target_title: string
+}
+
+/** Server-resolved inline [[..]] map returned with document payloads. */
+export interface Wikilink {
+  text: string
+  doc_id: string
+  title: string
+}
+
 /** Public read-only document payload from /api/public/wiki/documents/{id} */
 export interface PublicWikiDocument {
   id: string
@@ -49,6 +68,8 @@ export interface PublicWikiDocument {
   updated_at: string
   content: string
   tags: string[]
+  reference_entries?: ReferenceEntry[]
+  wikilinks?: Wikilink[]
 }
 
 export interface SearchChunk {

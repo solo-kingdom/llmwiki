@@ -3,6 +3,7 @@ import { useParams } from "react-router"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon, FoldVerticalIcon, HistoryIcon, InfoIcon, Link2Icon, ListTreeIcon, LocateFixedIcon, RotateCcwIcon, SearchIcon, UnfoldVerticalIcon } from "lucide-react"
 import { Markdown } from "@/components/blocks/markdown"
+import { ReferencesBlock } from "@/components/blocks/references-block"
 import { useAppNavigate } from "@/components/blocks/router"
 import { Body, NavItem, NavList, Page, Panel, Row, Rows, Split, Stack, Toolbar } from "@/components/blocks/surfaces"
 import { StatusBadge } from "@/components/blocks/status-badge"
@@ -288,6 +289,27 @@ function demoteHeadings(content: string): string {
   }).join("\n")
 }
 
+/** Turn inline [[target]] / [[target|label]] wiki links into markdown links;
+ * onContentClick resolves them through linkIndex exactly like relative page
+ * links. Fenced code blocks are left untouched. */
+function linkifyWikilinks(content: string): string {
+  let fence = ""
+  return content.split("\n").map((line) => {
+    const marker = /^\s*(```+|~~~+)/.exec(line)
+    if (marker !== null) {
+      const token = marker[1] ?? ""
+      if (fence === "") fence = token[0] ?? "`"
+      else if (token[0] === fence) fence = ""
+      return line
+    }
+    if (fence !== "") return line
+    return line.replace(/\[\[([^\]|#]+)(?:\|([^\]]*))?\]\]/g, (_match, target: string, label?: string) => {
+      const clean = target.trim()
+      return `[${(label ?? "").trim() || clean}](${clean})`
+    })
+  }).join("\n")
+}
+
 function slugify(text: string): string {
   return text.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "")
 }
@@ -299,6 +321,8 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
   const queryClient = useQueryClient()
   const navigate = useAppNavigate()
   const confirm = useConfirm()
+  const { settings } = useApp()
+  const lang: "zh" | "en" = settings?.ui_language === "en" ? "en" : "zh"
   // Keep the previous page on screen while the next one loads: the tree and header must not unmount (no flash).
   const documentQuery = useQuery({ queryKey: ["document", docId], queryFn: () => getDocument(docId), enabled: docId !== "", placeholderData: keepPreviousData })
   const doc = documentQuery.data
@@ -342,7 +366,7 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
     () => stripDuplicateTitle(rawBody, doc?.title || doc?.filename || ""),
     [rawBody, doc?.title, doc?.filename],
   )
-  const rendered = React.useMemo(() => demoteHeadings(body), [body])
+  const rendered = React.useMemo(() => linkifyWikilinks(demoteHeadings(body)), [body])
 
   const onContentClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const anchor = (event.target as HTMLElement).closest("a")
@@ -442,6 +466,11 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
     <Body width="full" align="start">
       <div ref={articleRef} onClick={onContentClick}>
         <Markdown>{rendered || "_（空页面）_"}</Markdown>
+        <ReferencesBlock
+          entries={doc.reference_entries ?? []}
+          lang={lang}
+          onOpen={(id) => navigate(`/wiki/${encodeURIComponent(id)}`)}
+        />
       </div>
     </Body>
   )

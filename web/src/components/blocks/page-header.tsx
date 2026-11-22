@@ -25,14 +25,17 @@ export type HeaderAction = {
 }
 
 export function PageHeader({
-  title, breadcrumbs = [], primary, actions = [], sidebarTrigger = true, leading, className,
+  title, breadcrumbs = [], primary, actions = [], inlineMax = 2, sidebarTrigger = true, leading, className,
 }: {
   title: string
   breadcrumbs?: { label: string; to: string }[] | undefined
   /** The single most important action (a <Button> or a link styled as one). */
   primary?: React.ReactNode | undefined
-  /** At most two are shown inline on wide containers; the rest live in the overflow menu. */
+  /** At most `inlineMax` are shown inline on wide containers; the rest live in the overflow menu. */
   actions?: HeaderAction[] | undefined
+  /** Inline budget for non-destructive actions (default 2). Raise only when the extra actions are iconOnly and
+   *  unambiguous (a document reader's info/backlinks/history icons) — text actions stay at the default. */
+  inlineMax?: number | undefined
   /** Render the shell's sidebar toggle (requires the shell's SidebarProvider). */
   sidebarTrigger?: boolean | undefined
   /** Rendered after the sidebar toggle, e.g. `<ListPaneTrigger />` of a ListDetailLayout. */
@@ -43,7 +46,7 @@ export function PageHeader({
   const wide = width === 0 || width >= 560
   // destructive actions never sit inline: they always end the overflow menu
   const safe = actions.filter((action) => !action.destructive)
-  const inline = wide ? safe.slice(0, 2) : []
+  const inline = wide ? safe.slice(0, inlineMax) : []
   const overflow = [...safe.slice(inline.length), ...actions.filter((action) => action.destructive)]
   return (
     <header ref={ref} className={cn("@container/header flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3", className)}>

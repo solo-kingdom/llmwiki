@@ -1,17 +1,19 @@
 import * as React from "react"
 import { useParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { HashIcon, HistoryIcon, RotateCcwIcon, SearchIcon } from "lucide-react"
+import { ExternalLinkIcon, HistoryIcon, InfoIcon, Link2Icon, ListTreeIcon, RotateCcwIcon, SearchIcon } from "lucide-react"
 import { Markdown } from "@/components/blocks/markdown"
 import { AppLink, useAppNavigate } from "@/components/blocks/router"
 import { ListDetailLayout, ListPaneTrigger, PaneHeader, PaneSection } from "@/components/blocks/list-detail"
-import { Body, NavItem, NavList, Page, Panel, Row, Rows, ScrollRegion, Section, Split, Stack } from "@/components/blocks/surfaces"
+import { Body, NavItem, NavList, Page, Panel, Row, Rows, ScrollRegion, Split, Stack } from "@/components/blocks/surfaces"
 import { StatusBadge } from "@/components/blocks/status-badge"
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
 import { Time } from "@/components/blocks/format"
 import { useConfirm } from "@/components/blocks/confirm"
 import { notify } from "@/components/blocks/notify"
+import { useContainerWidth } from "@/components/blocks/use-container-width"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
@@ -126,12 +128,15 @@ function stripFrontmatter(content: string): string {
   return match ? content.slice(match[0].length) : content
 }
 
-function outlineOf(content: string): { level: number; text: string }[] {
-  return content
-    .split("\n")
-    .map((line) => /^(#{1,4})\s+(.+?)\s*$/.exec(line))
-    .filter((match): match is RegExpExecArray => match !== null)
-    .map((match) => ({ level: (match[1] ?? "").length, text: match[2] ?? "" }))
+/** Drop a leading h1 that only repeats the page title already shown in the page header. */
+function stripDuplicateTitle(body: string, title: string): string {
+  const lines = body.split("\n")
+  const index = lines.findIndex((line) => line.trim() !== "")
+  const match = index < 0 ? null : /^#\s+(.+?)\s*$/.exec(lines[index] ?? "")
+  if (match === null) return body
+  const normalize = (value: string) => value.trim().toLowerCase().replace(/\.md$/i, "").replace(/\s+/g, " ")
+  if (normalize(match[1] ?? "") !== normalize(title)) return body
+  return [...lines.slice(0, index), ...lines.slice(index + 1)].join("\n")
 }
 
 /** The page header owns the only h1; demote body headings outside fenced code blocks. */
@@ -149,6 +154,13 @@ function demoteHeadings(content: string): string {
     return line.replace(/^(#{1,5})(\s+)/, (_, hashes: string, space: string) => `${hashes}#${space}`)
   }).join("\n")
 }
+
+function slugify(text: string): string {
+  return text.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "")
+}
+
+type OutlineEntry = { id: string; text: string; level: number }
+type ReaderDialog = "info" | "backlinks" | "forward" | "history" | "toc" | null
 
 function Reader({ docId, documents }: { docId: string; documents: DocumentListItem[] }) {
   const queryClient = useQueryClient()
@@ -190,8 +202,11 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
     return index
   }, [documents])
 
-  const body = React.useMemo(() => stripFrontmatter(doc?.content ?? ""), [doc?.content])
-  const outline = React.useMemo(() => outlineOf(body), [body])
+  const rawBody = React.useMemo(() => stripFrontmatter(doc?.content ?? ""), [doc?.content])
+  const body = React.useMemo(
+    () => stripDuplicateTitle(rawBody, doc?.title || doc?.filename || ""),
+    [rawBody, doc?.title, doc?.filename],
+  )
   const rendered = React.useMemo(() => demoteHeadings(body), [body])
 
   const onContentClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -206,56 +221,127 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
     else notify.info(`没有找到页面：${href}`)
   }, [linkIndex, navigate])
 
+  const [outline, setOutline] = React.useState<OutlineEntry[]>([])
+  const [activeId, setActiveId] = React.useState("")
+  const [dialog, setDialog] = React.useState<ReaderDialog>(null)
+  const articleRef = React.useRef<HTMLDivElement>(null)
+  const [measureRef, containerWidth] = useContainerWidth<HTMLDivElement>()
+  const narrow = containerWidth > 0 && containerWidth < 900
+
+  // Heading ids + outline come from the rendered DOM: code fences never produce headings, and the ids are
+  // exactly what jumpTo() can find. h3/h4 are this page's section levels (h1 demoted, title h1 stripped).
+  React.useEffect(() => {
+    const root = articleRef.current
+    if (root === null) return
+    const seen = new Map<string, number>()
+    const items: OutlineEntry[] = []
+    for (const heading of Array.from(root.querySelectorAll("h3, h4"))) {
+      const text = (heading.textContent ?? "").trim()
+      if (text === "") continue
+      const base = slugify(text)
+      const count = (seen.get(base) ?? 0) + 1
+      seen.set(base, count)
+      const id = count === 1 ? base : `${base}-${count}`
+      heading.id = id
+      items.push({ id, text, level: heading.tagName === "H3" ? 2 : 3 })
+    }
+    setOutline(items)
+  }, [rendered, docId, narrow])
+
+  // Scroll spy: the current section is the last heading above the scroller's top edge; at the bottom of the
+  // document the final section wins. The article lives in the only declared scroll region of the reader.
+  React.useEffect(() => {
+    if (outline.length === 0) return
+    const scroller = articleRef.current?.closest("[data-scroll-region]")
+    const root: HTMLElement | Window = scroller instanceof HTMLElement ? scroller : window
+    let frame = 0
+    const update = () => {
+      frame = 0
+      const top = (scroller instanceof HTMLElement ? scroller.getBoundingClientRect().top : 0) + 48
+      let current = outline[0]?.id ?? ""
+      for (const item of outline) {
+        const element = document.getElementById(item.id)
+        if (element !== null && element.getBoundingClientRect().top <= top) current = item.id
+      }
+      if (scroller instanceof HTMLElement && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 8) {
+        current = outline[outline.length - 1]?.id ?? current
+      }
+      setActiveId(current)
+    }
+    const onScroll = () => { if (frame === 0) frame = window.requestAnimationFrame(update) }
+    update()
+    root.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      root.removeEventListener("scroll", onScroll)
+      if (frame !== 0) window.cancelAnimationFrame(frame)
+    }
+  }, [outline])
+
+  const jumpTo = (id: string) => {
+    setActiveId(id)
+    setDialog(null)
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
   if (documentQuery.isLoading) return <RowsSkeleton rows={8} />
   if (documentQuery.isError) return <ErrorState error={documentQuery.error} onRetry={() => void documentQuery.refetch()} />
   if (!doc) return <EmptyState title="页面不存在" description="链接可能已失效，或该内容已被删除。" />
 
-  const infoPanel = (
-    <Panel title="页面信息" padding="none">
-      <Rows label="页面信息">
-        {[
-          { label: "类型", value: <StatusBadge status={pageTypeOf(doc)} /> },
-          { label: "路径", value: doc.relative_path },
-          { label: "更新", value: <Time value={doc.updated_at} mode="datetime" /> },
-          { label: "版本", value: `${doc.version}` },
-          { label: "反链", value: `${backlinks.data?.length ?? 0} 条` },
-          { label: "引用", value: `${forward.data?.length ?? 0} 条` },
-        ].map((item) => (
-          <Row key={item.label}>
-            <span className="shrink-0 text-xs text-muted-foreground">{item.label}</span>
-            <span className="min-w-0 flex-1 break-words text-sm">{item.value}</span>
-          </Row>
-        ))}
-      </Rows>
-    </Panel>
+  const tocEntries = outline.map((item) => (
+    <NavItem key={item.id} indent={item.level === 3} active={activeId === item.id} onSelect={() => jumpTo(item.id)}>
+      {item.text}
+    </NavItem>
+  ))
+
+  const content = (
+    <ScrollRegion name="document">
+      <Body width="reading">
+        <Panel>
+          <div ref={articleRef} onClick={onContentClick}>
+            <Markdown>{rendered || "_（空页面）_"}</Markdown>
+          </div>
+        </Panel>
+      </Body>
+    </ScrollRegion>
   )
 
-  const outlinePanel = outline.length > 0 ? (
-    <Stack gap="xs">
-      <span className="text-xs font-medium text-muted-foreground">目录</span>
-      <NavList label="目录">
-        {outline.map((item, index) => (
-          <NavItem key={`${item.text}-${index}`} icon={<HashIcon />} indent={item.level > 2}>
-            {item.text}
-          </NavItem>
-        ))}
-      </NavList>
-    </Stack>
-  ) : null
-
-  const article = (
-    <Panel>
-      <div onClick={onContentClick}>
-        <Markdown>{rendered || "_（空页面）_"}</Markdown>
-      </div>
-    </Panel>
-  )
-
-  const references = (
-    <>
-      <Section title="反向引用" description="引用当前页面的其他页面。">
+  const infoDialog = (
+    <Dialog open={dialog === "info"} onOpenChange={(open) => { if (!open) setDialog(null) }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>页面信息</DialogTitle>
+          <DialogDescription>{doc.title || doc.filename}</DialogDescription>
+        </DialogHeader>
         <Panel padding="none">
-          {(backlinks.data?.length ?? 0) === 0 ? <EmptyState title="暂无反向引用" /> : (
+          <Rows label="页面信息">
+            {[
+              { label: "类型", value: <StatusBadge status={pageTypeOf(doc)} /> },
+              { label: "路径", value: doc.relative_path },
+              { label: "更新", value: <Time value={doc.updated_at} mode="datetime" /> },
+              { label: "版本", value: `${doc.version}` },
+              { label: "反链", value: `${backlinks.data?.length ?? 0} 条` },
+              { label: "引用", value: `${forward.data?.length ?? 0} 条` },
+            ].map((item) => (
+              <Row key={item.label}>
+                <span className="shrink-0 text-xs text-muted-foreground">{item.label}</span>
+                <span className="min-w-0 flex-1 break-words text-sm">{item.value}</span>
+              </Row>
+            ))}
+          </Rows>
+        </Panel>
+      </DialogContent>
+    </Dialog>
+  )
+
+  const backlinksDialog = (
+    <Dialog open={dialog === "backlinks"} onOpenChange={(open) => { if (!open) setDialog(null) }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>反向引用</DialogTitle>
+          <DialogDescription>引用当前页面的其他页面。</DialogDescription>
+        </DialogHeader>
+        {(backlinks.data?.length ?? 0) === 0 ? <EmptyState title="暂无反向引用" /> : (
+          <Panel padding="none">
             <Rows label="反向引用">
               {backlinks.data?.map((ref) => (
                 <Row key={`${ref.path}-${ref.filename}-${ref.reference_type}`}>
@@ -264,13 +350,21 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
                 </Row>
               ))}
             </Rows>
-          )}
-        </Panel>
-      </Section>
+          </Panel>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
 
-      <Section title="前向引用" description="当前页面引用到的其他页面。">
-        <Panel padding="none">
-          {(forward.data?.length ?? 0) === 0 ? <EmptyState title="暂无引用" /> : (
+  const forwardDialog = (
+    <Dialog open={dialog === "forward"} onOpenChange={(open) => { if (!open) setDialog(null) }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>前向引用</DialogTitle>
+          <DialogDescription>当前页面引用到的其他页面。</DialogDescription>
+        </DialogHeader>
+        {(forward.data?.length ?? 0) === 0 ? <EmptyState title="暂无引用" /> : (
+          <Panel padding="none">
             <Rows label="前向引用">
               {forward.data?.map((ref) => (
                 <Row key={`${ref.path}-${ref.filename}-${ref.reference_type}`}>
@@ -280,47 +374,66 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
                 </Row>
               ))}
             </Rows>
-          )}
-        </Panel>
-      </Section>
-
-      <Section
-        title="页面历史"
-        description="每次写入生成一个不可变版本。"
-        actions={<HistoryIcon aria-hidden className="text-muted-foreground" />}
-      >
-        <Panel padding="none">
-          {history.isLoading ? <RowsSkeleton rows={3} /> : null}
-          {history.isError ? <ErrorState error={history.error} onRetry={() => void history.refetch()} /> : null}
-          {(history.data?.revisions.length ?? 0) === 0 && !history.isLoading ? <EmptyState title="暂无历史版本" /> : null}
-          <Rows label="页面历史">
-            {history.data?.revisions.map((revision) => (
-              <Row key={revision.id}>
-                <span className="text-xs text-muted-foreground">#{revision.revision_no}</span>
-                <StatusBadge status={revision.operation} />
-                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{revision.actor}</span>
-                <Time value={revision.created_at} mode="datetime" />
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={async () => {
-                    const ok = await confirm({
-                      title: `恢复版本 #${revision.revision_no}？`,
-                      description: "将以该版本内容创建一个新的变更集，不会删除现有历史。",
-                      confirmLabel: "恢复",
-                    })
-                    if (ok) restore.mutate(revision.id)
-                  }}
-                >
-                  <RotateCcwIcon />恢复
-                </Button>
-              </Row>
-            ))}
-          </Rows>
-        </Panel>
-      </Section>
-    </>
+          </Panel>
+        )}
+      </DialogContent>
+    </Dialog>
   )
+
+  const historyDialog = (
+    <Dialog open={dialog === "history"} onOpenChange={(open) => { if (!open) setDialog(null) }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>页面历史</DialogTitle>
+          <DialogDescription>每次写入生成一个不可变版本。</DialogDescription>
+        </DialogHeader>
+        {history.isLoading ? <RowsSkeleton rows={3} /> : null}
+        {history.isError ? <ErrorState error={history.error} onRetry={() => void history.refetch()} /> : null}
+        {!history.isLoading && !history.isError && (history.data?.revisions?.length ?? 0) === 0 ? <EmptyState title="暂无历史版本" /> : null}
+        {(history.data?.revisions?.length ?? 0) > 0 ? (
+          <Panel padding="none">
+            <Rows label="页面历史">
+              {history.data?.revisions?.map((revision) => (
+                <Row key={revision.id}>
+                  <span className="text-xs text-muted-foreground">#{revision.revision_no}</span>
+                  <StatusBadge status={revision.operation} />
+                  <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{revision.actor}</span>
+                  <Time value={revision.created_at} mode="datetime" />
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: `恢复版本 #${revision.revision_no}？`,
+                        description: "将以该版本内容创建一个新的变更集，不会删除现有历史。",
+                        confirmLabel: "恢复",
+                      })
+                      if (ok) restore.mutate(revision.id)
+                    }}
+                  >
+                    <RotateCcwIcon />恢复
+                  </Button>
+                </Row>
+              ))}
+            </Rows>
+          </Panel>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  )
+
+  const tocDialog = (
+    <Dialog open={dialog === "toc"} onOpenChange={(open) => { if (!open) setDialog(null) }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>目录</DialogTitle></DialogHeader>
+        <NavList label="目录">{tocEntries}</NavList>
+      </DialogContent>
+    </Dialog>
+  )
+
+  const tocAction = narrow && outline.length > 0
+    ? [{ label: "目录", icon: <ListTreeIcon />, iconOnly: true, onSelect: () => setDialog("toc") }]
+    : []
 
   return (
     <Page
@@ -328,20 +441,38 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
       layout="fill"
       leading={<ListPaneTrigger />}
       breadcrumbs={[{ label: "Wiki", to: "/wiki" }]}
+      inlineMax={5}
+      actions={[
+        ...tocAction,
+        { label: "反向引用", icon: <Link2Icon />, iconOnly: true, onSelect: () => setDialog("backlinks") },
+        { label: "前向引用", icon: <ExternalLinkIcon />, iconOnly: true, onSelect: () => setDialog("forward") },
+        { label: "页面历史", icon: <HistoryIcon />, iconOnly: true, onSelect: () => setDialog("history") },
+        { label: "页面信息", icon: <InfoIcon />, iconOnly: true, onSelect: () => setDialog("info") },
+      ]}
     >
-      <Split
-        sideLabel="页面信息"
-        sideWidth="lg"
-        side={infoPanel}
-      >
-        <ScrollRegion>
-          <Body width="reading">
-            {article}
-            {outlinePanel}
-            {references}
-          </Body>
-        </ScrollRegion>
-      </Split>
+      <div ref={measureRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {!narrow && outline.length > 0 ? (
+          <Split
+            sideLabel="目录"
+            sideWidth="md"
+            sidePosition="end"
+            collapseBelow={900}
+            side={
+              <Stack gap="xs">
+                <span className="text-xs font-medium text-muted-foreground">目录</span>
+                <NavList label="目录">{tocEntries}</NavList>
+              </Stack>
+            }
+          >
+            {content}
+          </Split>
+        ) : content}
+      </div>
+      {infoDialog}
+      {backlinksDialog}
+      {forwardDialog}
+      {historyDialog}
+      {tocDialog}
     </Page>
   )
 }

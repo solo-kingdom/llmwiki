@@ -112,9 +112,10 @@ export function RecencyList({ items, labels = DEFAULT_LABELS, className }: {
   )
 }
 
-/** Pane header row: same 48px height and rule as PageHeader, so the two align across the divider. */
+/** Pane header row: same 48px height and rule as PageHeader, so the two align across the divider.
+ *  The pane itself is the scroll container, so the header is sticky — a long list must not carry the title away. */
 export function PaneHeader({ children }: { children: React.ReactNode }) {
-  return <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">{children}</div>
+  return <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b bg-background px-2">{children}</div>
 }
 
 /** Pane body block (search, filters, the list). `grow` takes the remaining height. */

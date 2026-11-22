@@ -1,16 +1,20 @@
 package: quiet-inset
-decisions: {}
+decisions:
+  reader.width: full
+  reader.toc_visibility: persisted
+  tree-nav.groups: fixed_groups
 pages:
   /: { pattern: conversation, states: [sessions] }
   /chat/:id: { pattern: conversation, states: [sessions] }
   /jobs: { pattern: collection, states: [empty] }
   /timeline: { pattern: collection, states: [populated] }
   /logs: log-viewer
-  /settings: settings
+  /settings: { pattern: settings, states: [redirect] }
+  /settings/:section: { pattern: settings, states: [wide, narrow] }
   /help: page
-  /wiki: detail
-  /wiki/:id: detail
-  /wiki/graph: { pattern: canvas, states: [dense, dark] }
+  /wiki: { pattern: tree-nav, states: [collapsed, expanded, search] }
+  /wiki/:id: { pattern: reader, states: [wide, narrow, toc-hidden] }
+  /wiki/graph: { pattern: canvas, states: [dense, dark, hover, detail] }
 local_edits:
-  src/lib/vocab.ts: "补充 llmwiki 领域状态词（job/review/revision/page type），统一由 StatusBadge 使用。"
+  src/lib/vocab.ts: "补充领域状态词（job/review/revision/page type），统一由 StatusBadge 使用。"
 feedback: []

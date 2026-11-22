@@ -16,6 +16,8 @@ Checklist (per composite):
 13. count: the same number is not repeated in the header and a footer or toolbar
 14. canvas: labels do not cover nodes, dark edges stay visible, and labels are capped
 15. copy: database names, file paths, and ports match the running system
+16. continuity: switching list/tree items keeps the page shell (header, nav, outline) mounted; no full-page skeleton
+17. persistence: hidden rails / collapsed groups survive a reload
 
 ## /
 archetype: list-detail
@@ -60,32 +62,47 @@ status: reviewed
 archetype: settings
 shots: .ui-review/settings-*.png
 status: reviewed
-- [x] state saved: 数字项显示已保存值或默认 placeholder（4096 / 0.7 / 512）；失效实例与模型选择器显示 placeholder
-- 设置仍为单页分区滚动，未拆路由或侧栏导航，属本任务边界（不改信息架构）
-- 危险操作与访问配置分区顺序、行标签与控件对齐均保持
+- [x] state redirect: 访问 /settings 以 replace 跳到 /settings/models，不产生历史栈；页头只有「设置」一个
+- 5 个分区：模型 / 摄入与检索 / 访问控制 / 外部集成 / 规则文件；宽屏左侧竖排导航 + 42rem 居中窄列，窄屏横向滚动导航
+- 行内左标签与说明、右控件；开关即时保存、文本 blur 保存；分区用 Section/Panel，不额外套卡片
+
+## /settings/models
+archetype: settings
+shots: .ui-review/settings-models-*.png
+status: reviewed
+- [x] state wide: 左侧分区导航（含图标）与内容列对齐，内容 672px 居中；Provider 实例行与默认模型行控件对齐
+- [x] state narrow: 顶部分区导航单行横向滚动，内容全宽；添加实例弹窗内边距正常
+- 其余分区（ingest / access / integrations / rules）同构；页头动作 icon-only 带 aria-label
 
 ## /wiki
-archetype: detail
-shots: .ui-review/wiki-*.png
+archetype: tree-nav
+shots: .ui-review/wiki-tree-*.png
 status: reviewed
-- 列表空态、搜索无结果提示、类型筛选均正常；列表行显示路径副标题
-- 窄屏列表与详情按 Split 堆叠，无横向滚动
+- [x] state collapsed: 默认全折叠，仅当前页祖先展开；一级固定 概念 / 实体 / 其他
+- [x] state expanded: 全展按钮展开所有目录；文件夹 chevron 与层级缩进正确（深度 3 封顶）
+- [x] state search: 输入关键词退回扁平结果列表，清空恢复树
+- 目录名随界面语言（中/英映射，未知目录保留原名）；工具条 = 搜索框 + 框外定位 + 展/折单按钮
+- 树节点行尾不显示类型徽标（分组即类型）；搜索态扁平列表保留徽标
 
 ## /wiki/38a1c506-19f8-4231-b8c4-8e866f8e0f8b
-archetype: detail
-shots: .ui-review/wiki_38a1c506_19f8_4231_b8c4_8e866f8e0f8b-*.png
+archetype: reader
+shots: .ui-review/wiki-reader-*.png
 status: reviewed
-- 正文标题降一级后每页仅 PageHeader 一个 h1；代码块内标题不受影响
-- 属性、目录、反向/前向引用与页面历史分区对齐；scroll-end 下页头固定、画布四边完整
-- 1280 深色正文与侧栏对比可读，侧栏字重 400 与 0.4.1 实测一致
+- [x] state wide: 单页头 + 左树 + 正文（无卡片、不限宽）+ 右目录；目录随滚动高亮当前章节，点击平滑跳转
+- [x] state narrow: 右目录收进页头图标弹窗；正文全宽；无横向滚动
+- [x] state toc-hidden: 页头切换隐藏目录，正文占满；刷新后仍隐藏（本地存储）
+- 页头 4 个 icon（反链 / 前向引用 / 历史 / 信息）各自弹窗内容与空态正常
+- 切页连续性：连续点击树中条目，页头/树/目录不卸载、无整页骨架，新文档到达后原地替换
 
 ## /wiki/graph
 archetype: canvas
 shots: .ui-review/wiki_graph-*.png
 status: reviewed
-- [x] state dense: 标签上限 10（窄屏 4），标签带底色并绘制在节点层之上；宽屏三环、390 宽五列网格，节点不再互相挤压
+- [x] state dense: 标签上限 10（窄屏 4），标签带底色并绘制在节点层之上；宽屏三环、390 宽五列网格
 - [x] state dark: 深色连线可辨（透明度 0.28/0.6），标签与节点分离
-- 节点命中区在 390 宽下仍 ≥24px（check_rendered R04 0 命中）；侧栏节点列表按钮补足 24px 行高
+- [x] state hover: 节点 hover 出浮层摘要（标题/类型/引用数），靠近右/下边缘自动翻转，浮层不接收指针
+- [x] state detail: 选中节点后页头出现「节点详情」图标，弹窗显示类型/引用数/路径/打开页面
+- 画布无卡片、全宽；默认不选中任何节点；侧栏节点列表为菜单行（行尾引用数）
 
 ## /help
 archetype: page

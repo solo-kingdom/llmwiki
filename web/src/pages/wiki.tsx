@@ -1,6 +1,6 @@
 import * as React from "react"
 import { useParams } from "react-router"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon, FoldVerticalIcon, HistoryIcon, InfoIcon, Link2Icon, ListTreeIcon, LocateFixedIcon, RotateCcwIcon, SearchIcon, UnfoldVerticalIcon } from "lucide-react"
 import { Markdown } from "@/components/blocks/markdown"
 import { useAppNavigate } from "@/components/blocks/router"
@@ -11,6 +11,7 @@ import { Time } from "@/components/blocks/format"
 import { useConfirm } from "@/components/blocks/confirm"
 import { notify } from "@/components/blocks/notify"
 import { useContainerWidth } from "@/components/blocks/use-container-width"
+import { useApp } from "@/context/app-context"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
@@ -40,28 +41,46 @@ function pageTypeOf(doc: { relative_path?: string | undefined; path?: string | u
   return ({ entities: "entity", concepts: "concept", sources: "source", synthesis: "synthesis", comparisons: "comparison", queries: "query" } as Record<string, string>)[subdir] ?? "page"
 }
 
-type TreeNode = { key: string; name: string; doc?: DocumentListItem; children?: TreeNode[] }
+type TreeNode = { key: string; segment: string; doc?: DocumentListItem; children?: TreeNode[] }
 type TreeModel = { nodes: TreeNode[]; folderKeys: string[]; ancestors: Map<string, string[]> }
 
-function splitPath(doc: DocumentListItem): string[] {
-  const raw = (doc.relative_path ?? doc.path ?? doc.filename).replace(/\.md$/i, "")
-  return raw.split("/").filter((part) => part !== "")
+const FOLDER_LABELS: Record<string, { zh: string; en: string }> = {
+  concepts: { zh: "概念", en: "Concepts" },
+  entities: { zh: "实体", en: "Entities" },
+  other: { zh: "其他", en: "Other" },
+  sources: { zh: "来源", en: "Sources" },
+  synthesis: { zh: "综合", en: "Synthesis" },
+  comparisons: { zh: "对比", en: "Comparisons" },
+  queries: { zh: "问题", en: "Queries" },
+  sessions: { zh: "会话", en: "Sessions" },
+  "web-ingest": { zh: "网页抓取", en: "Web ingest" },
+  archive: { zh: "归档", en: "Archive" },
 }
 
-/** Directory tree over `relative_path`; a prefix shared by every page (e.g. "wiki") is stripped. */
-function buildTree(documents: DocumentListItem[]): TreeModel {
-  const entries = documents.map((doc) => ({ doc, segments: splitPath(doc) })).filter((entry) => entry.segments.length > 0)
-  const shortest = entries.length === 0 ? 0 : Math.min(...entries.map((entry) => entry.segments.length))
-  const first = entries[0]?.segments ?? []
-  let common = 0
-  while (common < shortest - 1 && entries.every((entry) => entry.segments[common] === first[common])) common += 1
+function folderLabel(segment: string, lang: "zh" | "en"): string {
+  const entry = FOLDER_LABELS[segment.toLowerCase()]
+  return entry === undefined ? segment : lang === "en" ? entry.en : entry.zh
+}
 
+/** Page path hoisted so the first tree level is always 概念 / 实体 / 其他. */
+function treeSegments(doc: DocumentListItem): string[] {
+  const segments = (doc.relative_path ?? doc.path ?? doc.filename).replace(/\.md$/i, "").split("/").filter((part) => part !== "")
+  const group = segments.find((segment) => ["concepts", "entities"].includes(segment.toLowerCase()))
+  if (group !== undefined) {
+    return [group.toLowerCase(), ...segments.slice(segments.indexOf(group) + 1)]
+  }
+  // Everything else folds into 其他; storage roots (wiki/, raw/) are not meaningful to readers.
+  const rest = segments.filter((segment) => !["wiki", "raw"].includes(segment.toLowerCase()))
+  return ["other", ...(rest.length > 0 ? rest : segments.slice(-1))]
+}
+
+function buildTree(documents: DocumentListItem[]): TreeModel {
   const nodes: TreeNode[] = []
   const folderKeys: string[] = []
   const ancestors = new Map<string, string[]>()
   const index = new Map<string, TreeNode>()
-  for (const entry of entries) {
-    const parts = entry.segments.slice(common)
+  for (const doc of documents) {
+    const parts = treeSegments(doc)
     const chain: string[] = []
     let level = nodes
     let prefix = ""
@@ -69,7 +88,7 @@ function buildTree(documents: DocumentListItem[]): TreeModel {
       prefix = prefix === "" ? part : `${prefix}/${part}`
       let folder = index.get(prefix)
       if (folder === undefined) {
-        folder = { key: `folder:${prefix}`, name: part, children: [] }
+        folder = { key: `folder:${prefix}`, segment: part, children: [] }
         index.set(prefix, folder)
         folderKeys.push(folder.key)
         level.push(folder)
@@ -77,31 +96,40 @@ function buildTree(documents: DocumentListItem[]): TreeModel {
       chain.push(folder.key)
       level = folder.children ?? (folder.children = [])
     }
-    level.push({ key: `doc:${entry.doc.id}`, name: entry.doc.title || entry.doc.filename, doc: entry.doc })
-    ancestors.set(entry.doc.id, chain)
+    level.push({ key: `doc:${doc.id}`, segment: doc.title || doc.filename, doc })
+    ancestors.set(doc.id, chain)
   }
-  const sortLevel = (list: TreeNode[]) => {
-    list.sort((a, b) => {
-      const folderA = a.children === undefined ? 1 : 0
-      const folderB = b.children === undefined ? 1 : 0
-      return folderA - folderB || a.name.localeCompare(b.name, "zh-Hans-CN")
-    })
-    for (const node of list) if (node.children !== undefined) sortLevel(node.children)
-  }
-  sortLevel(nodes)
   return { nodes, folderKeys, ancestors }
 }
 
-function TreeRows({ nodes, depth, isOpen, toggle, currentId }: {
+const TREE_RANK: Record<string, number> = { concepts: 0, entities: 1, other: 2 }
+
+/** Folders first; 概念/实体/其他 keep their fixed order; names sort by the displayed label. */
+function sortNodes(nodes: TreeNode[], lang: "zh" | "en"): TreeNode[] {
+  return [...nodes].sort((a, b) => {
+    const rankA = TREE_RANK[a.segment.toLowerCase()] ?? 9
+    const rankB = TREE_RANK[b.segment.toLowerCase()] ?? 9
+    if (rankA !== rankB) return rankA - rankB
+    const folderA = a.children === undefined ? 1 : 0
+    const folderB = b.children === undefined ? 1 : 0
+    if (folderA !== folderB) return folderA - folderB
+    const nameA = a.children === undefined ? a.segment : folderLabel(a.segment, lang)
+    const nameB = b.children === undefined ? b.segment : folderLabel(b.segment, lang)
+    return nameA.localeCompare(nameB, lang === "en" ? "en" : "zh-Hans-CN")
+  })
+}
+
+function TreeRows({ nodes, depth, lang, isOpen, toggle, currentId }: {
   nodes: TreeNode[]
   depth: number
+  lang: "zh" | "en"
   isOpen: (key: string) => boolean
   toggle: (key: string) => void
   currentId?: string | undefined
 }) {
   return (
     <>
-      {nodes.map((node) => {
+      {sortNodes(nodes, lang).map((node) => {
         if (node.children !== undefined) {
           const open = isOpen(node.key)
           return (
@@ -111,9 +139,9 @@ function TreeRows({ nodes, depth, isOpen, toggle, currentId }: {
                 icon={open ? <ChevronDownIcon /> : <ChevronRightIcon />}
                 onSelect={() => toggle(node.key)}
               >
-                {node.name}
+                {folderLabel(node.segment, lang)}
               </NavItem>
-              {open ? <TreeRows nodes={node.children} depth={depth + 1} isOpen={isOpen} toggle={toggle} currentId={currentId} /> : null}
+              {open ? <TreeRows nodes={node.children} depth={depth + 1} lang={lang} isOpen={isOpen} toggle={toggle} currentId={currentId} /> : null}
             </React.Fragment>
           )
         }
@@ -135,6 +163,8 @@ function TreeRows({ nodes, depth, isOpen, toggle, currentId }: {
 }
 
 function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; currentId?: string | undefined }) {
+  const { settings } = useApp()
+  const lang: "zh" | "en" = settings?.ui_language === "en" ? "en" : "zh"
   const [query, setQuery] = React.useState("")
   // Folders are collapsed by default; only the open page's ancestors are expanded. `overrides` records
   // explicit user choices (toggle / expand-all / collapse-all) so they win over the derived default.
@@ -214,7 +244,7 @@ function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; cur
             </NavItem>
           ))
         ) : (
-          <TreeRows nodes={tree.nodes} depth={0} isOpen={isOpen} toggle={toggle} currentId={currentId} />
+          <TreeRows nodes={tree.nodes} depth={0} lang={lang} isOpen={isOpen} toggle={toggle} currentId={currentId} />
         )}
       </NavList>
     </Stack>
@@ -264,15 +294,17 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
   const queryClient = useQueryClient()
   const navigate = useAppNavigate()
   const confirm = useConfirm()
-  const documentQuery = useQuery({ queryKey: ["document", docId], queryFn: () => getDocument(docId), enabled: docId !== "" })
+  // Keep the previous page on screen while the next one loads: the tree and header must not unmount (no flash).
+  const documentQuery = useQuery({ queryKey: ["document", docId], queryFn: () => getDocument(docId), enabled: docId !== "", placeholderData: keepPreviousData })
   const doc = documentQuery.data
 
-  const backlinks = useQuery({ queryKey: ["backlinks", docId], queryFn: () => getBacklinks(docId), enabled: docId !== "" })
-  const forward = useQuery({ queryKey: ["forward", docId], queryFn: () => getForwardReferences(docId), enabled: docId !== "" })
+  const backlinks = useQuery({ queryKey: ["backlinks", docId], queryFn: () => getBacklinks(docId), enabled: docId !== "", placeholderData: keepPreviousData })
+  const forward = useQuery({ queryKey: ["forward", docId], queryFn: () => getForwardReferences(docId), enabled: docId !== "", placeholderData: keepPreviousData })
   const history = useQuery({
     queryKey: ["page-history", doc?.relative_path],
     queryFn: () => listPageHistory(doc?.relative_path ?? ""),
     enabled: (doc?.relative_path ?? "") !== "",
+    placeholderData: keepPreviousData,
   })
 
   const restore = useMutation({

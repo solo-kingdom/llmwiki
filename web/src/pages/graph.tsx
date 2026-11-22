@@ -1,11 +1,12 @@
 import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
-import { RotateCcwIcon } from "lucide-react"
+import { InfoIcon, RotateCcwIcon } from "lucide-react"
 import { AppLink } from "@/components/blocks/router"
-import { Body, NavItem, NavList, Page, Panel, Properties, Split, Stack, Toolbar } from "@/components/blocks/surfaces"
+import { Body, Inline, NavItem, NavList, Page, Panel, Properties, Split, Stack, Toolbar } from "@/components/blocks/surfaces"
 import { StatusBadge } from "@/components/blocks/status-badge"
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
 import { Num } from "@/components/blocks/format"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useContainerWidth } from "@/components/blocks/use-container-width"
 import { getKnowledgeGraph } from "@/lib/api"
@@ -80,7 +81,10 @@ export function GraphPage() {
   const nodes = React.useMemo(() => graph.data?.nodes ?? [], [graph.data?.nodes])
   const edges = graph.data?.edges ?? []
   const positions = usePositions(nodes, canvas)
-  const selected = nodes.find((node) => node.id === selectedId) ?? nodes[0]
+  const selected = nodes.find((node) => node.id === selectedId)
+  const hovered = nodes.find((node) => node.id === hoveredId)
+  const hoveredPoint = hovered === undefined ? undefined : positions.get(hovered.id)
+  const [detailOpen, setDetailOpen] = React.useState(false)
   const labelLayout = React.useMemo(() => {
     const placed: { x1: number; y1: number; x2: number; y2: number }[] = []
     const layout = new Map<string, { x: number; y: number; text: string; width: number }>()
@@ -122,16 +126,42 @@ export function GraphPage() {
     return layout
   }, [nodes, positions, canvas])
 
+  const detailDialog = (
+    <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{selected?.title || selected?.id || "节点详情"}</DialogTitle>
+          <DialogDescription>节点详情</DialogDescription>
+        </DialogHeader>
+        {selected !== undefined ? (
+          <Stack gap="md">
+            <Properties
+              columns={1}
+              items={[
+                { label: "类型", value: <StatusBadge status={selected.type} /> },
+                { label: "引用数", value: <Num value={selected.link_count} /> },
+                { label: "路径", value: selected.id, mono: true, wide: true },
+              ]}
+            />
+            <Inline>
+              <AppLink to={`/wiki/${encodeURIComponent(selected.document_id)}`} className="inline-flex min-h-6 items-center text-sm text-brand underline underline-offset-2">
+                打开页面
+              </AppLink>
+            </Inline>
+          </Stack>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  )
+
   return (
     <Page
       title="知识图谱"
       layout="fill"
-      actions={[{
-        label: "刷新",
-        icon: <RotateCcwIcon />,
-        iconOnly: true,
-        onSelect: () => void graph.refetch(),
-      }]}
+      actions={[
+        { label: "刷新", icon: <RotateCcwIcon />, iconOnly: true, onSelect: () => void graph.refetch() },
+        ...(selected === undefined ? [] : [{ label: "节点详情", icon: <InfoIcon />, iconOnly: true, onSelect: () => setDetailOpen(true) }]),
+      ]}
     >
       <Split
         sideLabel="图谱节点"
@@ -168,7 +198,7 @@ export function GraphPage() {
         }
       >
         <Body width="full" gap="md">
-          <div ref={hostRef} className="min-w-0">
+          <div ref={hostRef} className="relative min-w-0">
             {nodes.length === 0 ? <EmptyState title="暂无可视化节点" /> : (
               <svg viewBox={`0 0 ${canvas.width} ${canvas.height}`} width="100%" height="100%" role="img" aria-label="知识图谱">
                 {edges.map((edge) => {
@@ -255,25 +285,25 @@ export function GraphPage() {
                 })}
               </svg>
             )}
+            {hovered !== undefined && hoveredPoint !== undefined ? (
+              <div className="pointer-events-none absolute z-10 max-w-xs"
+                style={{
+                  left: `${(hoveredPoint.x / canvas.width) * 100}%`,
+                  top: `${(hoveredPoint.y / canvas.height) * 100}%`,
+                  transform: `translate(${hoveredPoint.x > canvas.width * 0.62 ? "calc(-100% - 12px)" : "12px"}, ${hoveredPoint.y > canvas.height * 0.7 ? "calc(-100% - 12px)" : "12px"})`,
+                }}>
+                <Panel padding="md" title={hovered.title || hovered.id}>
+                  <Inline gap="sm">
+                    <StatusBadge status={hovered.type} />
+                    <Num value={hovered.link_count} />
+                    <span className="text-xs text-muted-foreground">引用</span>
+                  </Inline>
+                </Panel>
+              </div>
+            ) : null}
           </div>
 
-          {selected ? (
-            <Panel title={selected.title || selected.id} description="选中节点">
-              <Stack gap="md">
-                <Properties
-                  columns={2}
-                  items={[
-                    { label: "类型", value: <StatusBadge status={selected.type} /> },
-                    { label: "引用数", value: <Num value={selected.link_count} /> },
-                    { label: "路径", value: selected.id, mono: true, wide: true },
-                  ]}
-                />
-                <AppLink to={`/wiki/${encodeURIComponent(selected.document_id)}`} className="inline-flex min-h-6 items-center text-sm text-brand underline underline-offset-2">
-                  打开页面
-                </AppLink>
-              </Stack>
-            </Panel>
-          ) : null}
+          {detailDialog}
         </Body>
       </Split>
     </Page>

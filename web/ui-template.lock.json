@@ -1,6 +1,6 @@
 {
   "package": "quiet-inset",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "items": [
     "app/index-css",
     "blocks/app-errors",
@@ -79,7 +79,7 @@
     "eslint/ui-template.mjs": "4ba82af4d622f549318f5a93d23c9c82290e99cebd937038b9a41323c0a686cd",
     "playwright.fidelity.config.ts": "d0c1f97d781d74acded3afc5720c46fc4e7e202a0099daf343f5059d9721d711",
     "src/components/blocks/app-errors.tsx": "f358545efb509d97c4c95323e09f3567cc70245b0764be5b7bde97c293cd8f3a",
-    "src/components/blocks/app-shell.tsx": "efb1a007d697bb87c9bfa53e64762c68bc80e89198143e237d60a375339d51b4",
+    "src/components/blocks/app-shell.tsx": "f019302114f46ec20bc3546c5f81adfc51bd964cce6ffe04398eb4c942558408",
     "src/components/blocks/code-block.tsx": "fe1389718a04e9dda2db839dd5269f372fcdf03b99df92532f16d6f1c357f1ec",
     "src/components/blocks/confirm.tsx": "26d97f7f1560693418695532f6e55ef7a7b9b629406687c5d7005858f63bc625",
     "src/components/blocks/conversation.tsx": "ea8bac191cd84c5d4a92dea5f6b27854fdf7987de9808c87855ac63fb42cec65",
@@ -90,7 +90,7 @@
     "src/components/blocks/markdown.tsx": "d96307107ce70e8e25abdea98813516c9dbc6e4e41026834820839d1bd55e336",
     "src/components/blocks/notify.ts": "2b647b7e2a8daf40338510a6690fe28cd263140d158c343ac01e3f0892bc34af",
     "src/components/blocks/page-header.tsx": "5e10ad2657d05bfecb249930a7da13e4a741a716b38f35cb2373bef887cf69e2",
-    "src/components/blocks/router.tsx": "bbf773838b711f86ec6eed7a844f3e34b41da56959f58515febc6f55ff0da338",
+    "src/components/blocks/router.tsx": "704bc62dca220b7e7692a670e03041f087df088f078dd66a51546d08b92a2fd3",
     "src/components/blocks/row-link.tsx": "a7b8dcedea5addc95c944ab3534b3954030a1e303ba1547dcdcea635ff862ea1",
     "src/components/blocks/section-nav.tsx": "89068547f63524d3fec46668db3e0802774331f4ddc58f043a663f7b9d30ee3e",
     "src/components/blocks/state-boundary.tsx": "1925acf46a56d42ccc938a8b5fadd7cd6f5f03e0714a8319567088e82f64ba9d",

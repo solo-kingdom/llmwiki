@@ -49,8 +49,24 @@ export function useAppPathname(): string {
   return useLocation().pathname
 }
 
+/** True when `pathname` is `to` itself or one of its descendants ("/" only matches itself). */
+export function isActivePath(pathname: string, to: string): boolean {
+  return to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(to.endsWith("/") ? to : to + "/")
+}
+
 /** True when `to` is the current path or one of its ancestors ("/" only matches itself). */
 export function useIsActive(to: string): boolean {
-  const pathname = useAppPathname()
-  return to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(to.endsWith("/") ? to : to + "/")
+  return isActivePath(useAppPathname(), to)
+}
+
+/**
+ * The most specific candidate matching `pathname`, for navs that contain both a parent and a child
+ * ("/wiki" and "/wiki/graph"): prefix matching would light both, so only the longest match may be active.
+ */
+export function pickActive(pathname: string, candidates: readonly string[]): string | undefined {
+  let best: string | undefined
+  for (const to of candidates) {
+    if (isActivePath(pathname, to) && (best === undefined || to.length > best.length)) best = to
+  }
+  return best
 }

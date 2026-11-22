@@ -10,13 +10,12 @@ import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
   SidebarInset, SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail,
 } from "@/components/ui/sidebar"
-import { AppLink, useIsActive } from "@/components/blocks/router"
+import { AppLink, pickActive, useAppPathname } from "@/components/blocks/router"
 
 export type NavItem = { label: string; to: string; icon: LucideIcon; badge?: React.ReactNode | undefined }
 export type NavGroup = { label?: string | undefined; items: NavItem[] }
 
-function NavEntry({ item }: { item: NavItem }) {
-  const active = useIsActive(item.to)
+function NavEntry({ item, active }: { item: NavItem; active: boolean }) {
   const Icon = item.icon
   return (
     <SidebarMenuItem>
@@ -36,6 +35,9 @@ export function AppShell({ brand, nav, footer, children }: {
   footer?: React.ReactNode | undefined
   children: React.ReactNode
 }) {
+  // One best match across all groups: a parent item ("/wiki") and a child ("/wiki/graph") both prefix-match
+  // the pathname, and only the most specific one may render as active.
+  const activeTo = pickActive(useAppPathname(), nav.flatMap((group) => group.items.map((item) => item.to)))
   return (
     <SidebarProvider className="h-dvh overflow-hidden bg-app-shell">
       <Sidebar variant="inset" collapsible="icon">
@@ -45,7 +47,7 @@ export function AppShell({ brand, nav, footer, children }: {
             <SidebarGroup key={group.label ?? index}>
               {group.label !== undefined ? <SidebarGroupLabel>{group.label}</SidebarGroupLabel> : null}
               <SidebarGroupContent>
-                <SidebarMenu>{group.items.map((item) => <NavEntry key={item.to} item={item} />)}</SidebarMenu>
+                <SidebarMenu>{group.items.map((item) => <NavEntry key={item.to} item={item} active={item.to === activeTo} />)}</SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
           ))}

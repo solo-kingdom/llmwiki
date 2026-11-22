@@ -152,7 +152,6 @@ function TreeRows({ nodes, depth, lang, isOpen, toggle, currentId }: {
             depth={depth}
             to={`/wiki/${encodeURIComponent(doc.id)}`}
             active={doc.id === currentId}
-            trailing={<StatusBadge status={pageTypeOf(doc)} />}
           >
             {doc.title || doc.filename}
           </NavItem>
@@ -193,6 +192,7 @@ function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; cur
   }
   const expandAll = () => setOverrides(new Map(tree.folderKeys.map((key) => [key, true])))
   const collapseAll = () => setOverrides(new Map(tree.folderKeys.map((key) => [key, false])))
+  const allOpen = tree.folderKeys.every((key) => isOpen(key))
   const locateCurrent = () => {
     setOverrides((previous) => {
       const next = new Map(previous)
@@ -215,14 +215,19 @@ function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; cur
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <InputGroupAddon align="inline-end">
-            <Button size="icon-sm" variant="ghost" aria-label="定位当前页面" title="定位当前页面" onClick={locateCurrent}>
-              <LocateFixedIcon />
-            </Button>
-          </InputGroupAddon>
         </InputGroup>
-        <Button size="icon-sm" variant="ghost" aria-label="全展开" title="全展开" onClick={expandAll}><UnfoldVerticalIcon /></Button>
-        <Button size="icon-sm" variant="ghost" aria-label="全折叠" title="全折叠" onClick={collapseAll}><FoldVerticalIcon /></Button>
+        <Button size="icon-sm" variant="ghost" aria-label="定位当前页面" title="定位当前页面" onClick={locateCurrent}>
+          <LocateFixedIcon />
+        </Button>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={allOpen ? "全部折叠" : "全部展开"}
+          title={allOpen ? "全部折叠" : "全部展开"}
+          onClick={allOpen ? collapseAll : expandAll}
+        >
+          {allOpen ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
+        </Button>
       </Toolbar>
       {search.isError ? <ErrorState error={search.error} onRetry={() => void search.refetch()} /> : null}
       {!search.isError && (searching ? results.length === 0 : documents.length === 0) ? (
@@ -354,6 +359,15 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
   const [outline, setOutline] = React.useState<OutlineEntry[]>([])
   const [activeId, setActiveId] = React.useState("")
   const [dialog, setDialog] = React.useState<ReaderDialog>(null)
+  // The outline rail can be hidden; the choice persists across visits.
+  const [tocHidden, setTocHidden] = React.useState(() => window.localStorage.getItem("llmwiki:wiki:toc-hidden") === "1")
+  const toggleToc = () => {
+    setTocHidden((previous) => {
+      const next = !previous
+      window.localStorage.setItem("llmwiki:wiki:toc-hidden", next ? "1" : "0")
+      return next
+    })
+  }
   const articleRef = React.useRef<HTMLDivElement>(null)
   const [measureRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   // Rail needs the page width minus the list pane (18rem) to still leave a ≥900px article column.
@@ -558,9 +572,11 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
     </Dialog>
   )
 
-  const tocAction = narrow && outline.length > 0
-    ? [{ label: "目录", icon: <ListTreeIcon />, iconOnly: true, onSelect: () => setDialog("toc") }]
-    : []
+  const tocAction = outline.length === 0
+    ? []
+    : [narrow
+        ? { label: "目录", icon: <ListTreeIcon />, iconOnly: true, onSelect: () => setDialog("toc") }
+        : { label: tocHidden ? "显示目录" : "隐藏目录", icon: <ListTreeIcon />, iconOnly: true, onSelect: toggleToc }]
 
   return (
     <Page
@@ -583,7 +599,7 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
           collapseBelow={900}
           side={<WikiPane documents={documents} currentId={docId} />}
         >
-          {!narrow && outline.length > 0 ? (
+          {!narrow && !tocHidden && outline.length > 0 ? (
             <Split
               sideLabel="目录"
               sideWidth="md"

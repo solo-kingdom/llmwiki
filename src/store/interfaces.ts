@@ -23,6 +23,8 @@ import type {
   ProviderInstance,
   RefEdge,
   ReferenceSummary,
+  ReferenceEntryInput,
+  ReferenceEntryView,
   SearchChunk,
   SessionMessageEvent,
   SourceBlob,
@@ -65,6 +67,8 @@ export interface IndexStore {
   deleteReferences(sourceDocID: string): Promise<void>;
   upsertReference(sourceID: string, targetID: string, refType: string, page: number | null): Promise<void>;
   replaceReferencesInTx(sourceDocID: string, edges: RefEdge[]): Promise<void>;
+  replaceReferenceEntriesInTx(docID: string, entries: ReferenceEntryInput[]): Promise<void>;
+  listReferenceEntries(docID: string): Promise<ReferenceEntryView[]>;
   getBacklinks(docID: string): Promise<ReferenceSummary[]>;
   getForwardReferences(docID: string): Promise<ReferenceSummary[]>;
   findUncitedSources(): Promise<UncitedSource[]>;

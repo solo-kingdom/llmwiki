@@ -10,6 +10,7 @@ import { ingestReviewsRepo } from "./ingest_reviews.js";
 import { ingestSessionsRepo } from "./ingest_sessions.js";
 import { migrate } from "./migrations.js";
 import { providersRepo } from "./providers.js";
+import { referenceEntriesRepo } from "./reference_entries.js";
 import { revisionsRepo } from "./revisions.js";
 import { sourceBlobsRepo } from "./source_blobs.js";
 import { workspaceRepo } from "./workspace.js";
@@ -19,6 +20,7 @@ export function createStore(pool: Pool): Store {
     ...documentsRepo(pool),
     ...chunksRepo(pool),
     ...graphRepo(pool),
+    ...referenceEntriesRepo(pool),
     ...revisionsRepo(pool),
     ...sourceBlobsRepo(pool),
     ...workspaceRepo(pool),

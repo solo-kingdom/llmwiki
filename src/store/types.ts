@@ -87,6 +87,25 @@ export interface ReferenceSummary {
   page: number;
 }
 
+export interface ReferenceEntryInput {
+  kind: "related" | "source";
+  rawText: string;
+  targetDocumentId: string;
+  annotation: string;
+  position: number;
+}
+
+export interface ReferenceEntryView {
+  kind: "related" | "source";
+  rawText: string;
+  targetDocumentId: string;
+  annotation: string;
+  position: number;
+  targetTitle: string;
+  targetPath: string;
+  targetFilename: string;
+}
+
 export interface StalePage {
   filename: string;
   title: string;

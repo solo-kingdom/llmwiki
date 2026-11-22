@@ -166,8 +166,18 @@ export class Reindexer {
     for (const doc of wikiDocs) {
       await this.store.deleteReferences(doc.id);
       const references = parser.parseReferences(doc.content, doc.path + doc.filename);
+      const seen = new Set(references.map((ref) => `${ref.targetPath}\0${ref.refType}`));
       for (const reference of references) {
         await this.store.upsertReference(doc.id, reference.targetPath, reference.refType, reference.page);
+      }
+      // Structured reference entries also produce edges (see dbapply.rebuildReferences).
+      const entries = await this.store.listReferenceEntries(doc.id);
+      for (const entry of entries) {
+        if (!entry.targetDocumentId) continue;
+        const key = `${entry.targetDocumentId}\0links_to`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        await this.store.upsertReference(doc.id, entry.targetDocumentId, "links_to", null);
       }
     }
   }

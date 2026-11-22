@@ -4,6 +4,8 @@ import type {
   ChunkData,
   DocData,
   DocEntry,
+  EngineReferenceEntryInput,
+  EngineReferenceEntryView,
   EngineStore,
   RefEdge,
 } from "../engine/store_iface.js";
@@ -118,6 +120,14 @@ export function createEngineStoreAdapter(store: Store): EngineStore {
           page: edge.page,
         })),
       );
+    },
+
+    async replaceReferenceEntriesInTx(docID: string, entries: EngineReferenceEntryInput[]): Promise<void> {
+      await store.replaceReferenceEntriesInTx(docID, entries);
+    },
+
+    async listReferenceEntries(docID: string): Promise<EngineReferenceEntryView[]> {
+      return store.listReferenceEntries(docID);
     },
 
     async upsertReference(

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { chunkText, defaultChunkConfig } from "../engine/chunker.js";
 import { getMetadataJSON, parseFrontmatter, titleFromFilename } from "../engine/frontmatter.js";
+import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
 import { ReferenceParser } from "../engine/references.js";
 import type { Store } from "../store/interfaces.js";
 import type { ChangeSet, Chunk, Document, PageWrite } from "../store/types.js";
@@ -66,15 +67,23 @@ export async function applyBlocksToStore(
     };
 
     const writes: PageWrite[] = [];
+    const extracted = new Map<string, ExtractedReferenceEntry[]>();
     for (const rel of result.written) {
       const data = await readFile(path.join(scratch, rel));
-      const doc = await pageDocument(state.db, rel, data);
+      let text = new TextDecoder().decode(data);
+      const norm = normalizeWikiContent(text, "wiki", "md");
+      extracted.set(rel, norm.entries);
+      if (norm.entries.length > 0 || text !== norm.content) {
+        text = norm.content;
+        await writeFile(path.join(scratch, rel), Buffer.from(text, "utf8"));
+      }
+      const doc = await pageDocument(state.db, rel, Buffer.from(text, "utf8"));
       const existing = await state.db.getDocumentByRelativePath(rel);
       writes.push({
         relative_path: rel,
         document: doc,
         operation: existing ? "update" : "create",
-        chunks: pageChunks(doc.id, new TextDecoder().decode(data)),
+        chunks: pageChunks(doc.id, text),
         refs: [],
       });
     }
@@ -90,6 +99,7 @@ export async function applyBlocksToStore(
 
     await state.db.applyChangeSet(changeSet, writes);
     try {
+      await storeReferenceEntries(state.db, extracted);
       await rebuildReferences(state.db, result.written);
     } catch (error) {
       state.recorder?.record("apply_files", "warn", `rebuild references: ${errorMessage(error)}`, null);
@@ -172,13 +182,60 @@ export async function rebuildReferences(db: Store, relPaths: string[]): Promise<
     const doc = await db.getDocumentByRelativePath(rel);
     if (!doc) continue;
     const refs = parser.parseReferences(doc.content, `${doc.path}${doc.filename}`);
-    await db.replaceReferencesInTx(
-      doc.id,
-      refs.map((ref) => ({
+    // Structured reference entries (stripped trailing sections) also count as edges
+    // so graph/backlinks stay complete for stored content without inline links.
+    const entries = await db.listReferenceEntries(doc.id);
+    const entryEdges = entries
+      .filter((entry) => entry.targetDocumentId)
+      .map((entry) => ({
+        source_id: doc.id,
+        target_id: entry.targetDocumentId,
+        ref_type: "links_to",
+        page: null,
+      }));
+    const seen = new Set(refs.map((ref) => `${ref.targetPath}\0${ref.refType}`));
+    const merged = [
+      ...refs.map((ref) => ({
         source_id: doc.id,
         target_id: ref.targetPath,
         ref_type: ref.refType,
         page: ref.page,
+      })),
+      ...entryEdges.filter((edge) => !seen.has(`${edge.target_id}\0${edge.ref_type}`)),
+    ];
+    await db.replaceReferencesInTx(doc.id, merged);
+  }
+}
+
+/** Resolve extracted entries against the current doc index and persist them.
+ * Entries for a page are replaced wholesale, so pages whose references were
+ * removed on regeneration do not keep stale rows. */
+export async function storeReferenceEntries(
+  db: Store,
+  extracted: Map<string, ExtractedReferenceEntry[]>,
+): Promise<void> {
+  if (extracted.size === 0) return;
+  const docs = await db.listDocuments();
+  const parser = new ReferenceParser(
+    docs.map((doc) => ({
+      id: doc.id,
+      filename: doc.filename,
+      title: doc.title,
+      path: doc.path,
+    })),
+  );
+  for (const [rel, entries] of extracted) {
+    const doc = await db.getDocumentByRelativePath(rel);
+    if (!doc) continue;
+    const docPath = `${doc.path}${doc.filename}`;
+    await db.replaceReferenceEntriesInTx(
+      doc.id,
+      entries.map((entry) => ({
+        kind: entry.kind,
+        rawText: entry.rawText,
+        targetDocumentId: parser.resolveLink(entry.rawText, docPath),
+        annotation: entry.annotation,
+        position: entry.position,
       })),
     );
   }

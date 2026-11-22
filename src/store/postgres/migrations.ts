@@ -340,6 +340,25 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_session_msg_events_message ON session_message_events(message_id, id DESC)`,
     ],
   },
+  {
+    version: 3,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS document_reference_entries (
+        id TEXT PRIMARY KEY,
+        document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('related','source')),
+        raw_text TEXT NOT NULL,
+        target_document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+        annotation TEXT NOT NULL DEFAULT '',
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (${nowText}),
+        updated_at TEXT NOT NULL DEFAULT (${nowText}),
+        UNIQUE(document_id, kind, raw_text, annotation)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_ref_entries_doc ON document_reference_entries(document_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_ref_entries_target ON document_reference_entries(target_document_id)`,
+    ],
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

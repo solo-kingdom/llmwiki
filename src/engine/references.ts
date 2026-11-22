@@ -62,6 +62,17 @@ export class ReferenceParser {
     return [...this.parseCitations(content), ...this.parseWikiLinks(content, docPath)];
   }
 
+  /** Resolve a single [[..]] target against the doc index; "" when unmatched. */
+  resolveLink(target: string, docPath: string): string {
+    let wikiRel = "";
+    if (docPath.startsWith("/wiki/")) {
+      wikiRel = docPath.slice("/wiki/".length);
+      const index = wikiRel.lastIndexOf("/");
+      wikiRel = index >= 0 ? wikiRel.slice(0, index + 1) : "";
+    }
+    return this.resolveWikiPath(target.trim(), wikiRel);
+  }
+
   private parseCitations(content: string): Reference[] {
     const references: Reference[] = [];
     const citationRe = /^\[\^\d+\]:\s*(.+)$/gm;

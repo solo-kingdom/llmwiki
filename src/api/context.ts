@@ -13,7 +13,8 @@ import {
   ERR_NO_PROVIDER_INSTANCE,
   type Runtime,
 } from "../agentruntime/runtime.js";
-import { buildPageChunks, rebuildReferences } from "../ingest/dbapply.js";
+import { buildPageChunks, rebuildReferences, storeReferenceEntries } from "../ingest/dbapply.js";
+import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
 import type { PageLockManager } from "../ingest/lock.js";
 import type { WorkspaceFileIndexer } from "../engine/file_indexer.js";
 import { engineStoreFromStore } from "../engine/adapter.js";
@@ -168,7 +169,11 @@ export async function applyPageWrite(
   operation: RevisionOperation,
 ): Promise<void> {
   if (!doc) throw new Error("nil document");
-  if (!doc.content_hash) doc.content_hash = contentHash(doc.content);
+  // Trailing reference sections never persist in content; they are extracted
+  // into document_reference_entries at every write path.
+  const norm = normalizeWikiContent(doc.content ?? "", doc.source_kind, doc.file_type);
+  doc.content = norm.content;
+  doc.content_hash = contentHash(doc.content);
   if (!doc.relative_path && doc.filename) {
     doc.relative_path = trimJoin(doc.path, doc.filename);
   }
@@ -187,6 +192,8 @@ export async function applyPageWrite(
     refs: [],
   };
   await ctx.db.applyChangeSet(changeSet, [write]);
+  const extracted = new Map<string, ExtractedReferenceEntry[]>([[doc.relative_path, norm.entries]]);
+  await storeReferenceEntries(ctx.db, extracted);
   await rebuildReferences(ctx.db, [doc.relative_path]);
 }
 

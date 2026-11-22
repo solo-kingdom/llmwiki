@@ -53,7 +53,10 @@ function filterByPageType(results: SearchChunk[], pageTypes: string[]): SearchCh
 
 export function chunksRepo(
   pool: Pool,
-): Omit<IndexStore, "listWikiGraphEdges" | "buildKnowledgeGraph"> {
+): Omit<
+  IndexStore,
+  "listWikiGraphEdges" | "buildKnowledgeGraph" | "replaceReferenceEntriesInTx" | "listReferenceEntries"
+> {
   async function searchFTS(query: string, limit: number, pathFilter: string, pageTypes: string[]) {
     let sql = `
       SELECT d.id, dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,

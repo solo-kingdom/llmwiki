@@ -46,6 +46,25 @@ export interface RefEdge {
   page: number | null;
 }
 
+export interface EngineReferenceEntryInput {
+  kind: "related" | "source";
+  rawText: string;
+  targetDocumentId: string;
+  annotation: string;
+  position: number;
+}
+
+export interface EngineReferenceEntryView {
+  kind: "related" | "source";
+  rawText: string;
+  targetDocumentId: string;
+  annotation: string;
+  position: number;
+  targetTitle: string;
+  targetPath: string;
+  targetFilename: string;
+}
+
 export interface EngineStore {
   propagateStaleness(docID: string): Promise<void>;
   getBacklinks(docID: string): Promise<BacklinkInfo[]>;
@@ -62,6 +81,8 @@ export interface EngineStore {
   deleteReferences(sourceDocID: string): Promise<void>;
   upsertReference(sourceID: string, targetID: string, refType: string, page: number | null): Promise<void>;
   replaceReferencesInTx(sourceDocID: string, edges: RefEdge[]): Promise<void>;
+  replaceReferenceEntriesInTx(docID: string, entries: EngineReferenceEntryInput[]): Promise<void>;
+  listReferenceEntries(docID: string): Promise<EngineReferenceEntryView[]>;
   listAllDocuments(): Promise<DocEntry[]>;
   listWikiDocuments(): Promise<DocEntry[]>;
   storeChunks(docID: string, chunks: ChunkData[]): Promise<void>;

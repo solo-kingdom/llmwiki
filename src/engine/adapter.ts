@@ -102,6 +102,11 @@ export function engineStoreFromStore(store: Store): EngineStore {
       );
     },
 
+    replaceReferenceEntriesInTx: (docID, entries) =>
+      store.replaceReferenceEntriesInTx(docID, entries),
+
+    listReferenceEntries: (docID) => store.listReferenceEntries(docID),
+
     listAllDocuments: async () => (await store.listDocumentsWithContent()).map(toDocEntry),
 
     listWikiDocuments: async () =>

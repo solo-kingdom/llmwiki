@@ -1,7 +1,7 @@
 import * as React from "react"
 import { useParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ExternalLinkIcon, HistoryIcon, InfoIcon, Link2Icon, ListTreeIcon, RotateCcwIcon, SearchIcon } from "lucide-react"
+import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon, FoldVerticalIcon, HistoryIcon, InfoIcon, Link2Icon, ListTreeIcon, LocateFixedIcon, RotateCcwIcon, SearchIcon, UnfoldVerticalIcon } from "lucide-react"
 import { Markdown } from "@/components/blocks/markdown"
 import { useAppNavigate } from "@/components/blocks/router"
 import { Body, NavItem, NavList, Page, Panel, Row, Rows, Split, Stack, Toolbar } from "@/components/blocks/surfaces"
@@ -14,7 +14,6 @@ import { useContainerWidth } from "@/components/blocks/use-container-width"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   getBacklinks,
   getDocument,
@@ -25,16 +24,6 @@ import {
   searchDocuments,
 } from "@/lib/api"
 import type { DocumentListItem } from "@/types"
-
-const PAGE_TYPE_LABELS: Record<string, string> = {
-  entity: "实体",
-  concept: "概念",
-  source: "来源",
-  synthesis: "综合",
-  comparison: "对比",
-  query: "问题",
-  page: "页面",
-}
 
 function useDebounced<T>(value: T, delay = 280): T {
   const [debounced, setDebounced] = React.useState(value)
@@ -51,9 +40,105 @@ function pageTypeOf(doc: { relative_path?: string | undefined; path?: string | u
   return ({ entities: "entity", concepts: "concept", sources: "source", synthesis: "synthesis", comparisons: "comparison", queries: "query" } as Record<string, string>)[subdir] ?? "page"
 }
 
+type TreeNode = { key: string; name: string; doc?: DocumentListItem; children?: TreeNode[] }
+type TreeModel = { nodes: TreeNode[]; folderKeys: string[]; ancestors: Map<string, string[]> }
+
+function splitPath(doc: DocumentListItem): string[] {
+  const raw = (doc.relative_path ?? doc.path ?? doc.filename).replace(/\.md$/i, "")
+  return raw.split("/").filter((part) => part !== "")
+}
+
+/** Directory tree over `relative_path`; a prefix shared by every page (e.g. "wiki") is stripped. */
+function buildTree(documents: DocumentListItem[]): TreeModel {
+  const entries = documents.map((doc) => ({ doc, segments: splitPath(doc) })).filter((entry) => entry.segments.length > 0)
+  const shortest = entries.length === 0 ? 0 : Math.min(...entries.map((entry) => entry.segments.length))
+  const first = entries[0]?.segments ?? []
+  let common = 0
+  while (common < shortest - 1 && entries.every((entry) => entry.segments[common] === first[common])) common += 1
+
+  const nodes: TreeNode[] = []
+  const folderKeys: string[] = []
+  const ancestors = new Map<string, string[]>()
+  const index = new Map<string, TreeNode>()
+  for (const entry of entries) {
+    const parts = entry.segments.slice(common)
+    const chain: string[] = []
+    let level = nodes
+    let prefix = ""
+    for (const part of parts.slice(0, -1)) {
+      prefix = prefix === "" ? part : `${prefix}/${part}`
+      let folder = index.get(prefix)
+      if (folder === undefined) {
+        folder = { key: `folder:${prefix}`, name: part, children: [] }
+        index.set(prefix, folder)
+        folderKeys.push(folder.key)
+        level.push(folder)
+      }
+      chain.push(folder.key)
+      level = folder.children ?? (folder.children = [])
+    }
+    level.push({ key: `doc:${entry.doc.id}`, name: entry.doc.title || entry.doc.filename, doc: entry.doc })
+    ancestors.set(entry.doc.id, chain)
+  }
+  const sortLevel = (list: TreeNode[]) => {
+    list.sort((a, b) => {
+      const folderA = a.children === undefined ? 1 : 0
+      const folderB = b.children === undefined ? 1 : 0
+      return folderA - folderB || a.name.localeCompare(b.name, "zh-Hans-CN")
+    })
+    for (const node of list) if (node.children !== undefined) sortLevel(node.children)
+  }
+  sortLevel(nodes)
+  return { nodes, folderKeys, ancestors }
+}
+
+function TreeRows({ nodes, depth, isOpen, toggle, currentId }: {
+  nodes: TreeNode[]
+  depth: number
+  isOpen: (key: string) => boolean
+  toggle: (key: string) => void
+  currentId?: string | undefined
+}) {
+  return (
+    <>
+      {nodes.map((node) => {
+        if (node.children !== undefined) {
+          const open = isOpen(node.key)
+          return (
+            <React.Fragment key={node.key}>
+              <NavItem
+                depth={depth}
+                icon={open ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                onSelect={() => toggle(node.key)}
+              >
+                {node.name}
+              </NavItem>
+              {open ? <TreeRows nodes={node.children} depth={depth + 1} isOpen={isOpen} toggle={toggle} currentId={currentId} /> : null}
+            </React.Fragment>
+          )
+        }
+        const doc = node.doc as DocumentListItem
+        return (
+          <NavItem
+            key={node.key}
+            depth={depth}
+            to={`/wiki/${encodeURIComponent(doc.id)}`}
+            active={doc.id === currentId}
+            trailing={<StatusBadge status={pageTypeOf(doc)} />}
+          >
+            {doc.title || doc.filename}
+          </NavItem>
+        )
+      })}
+    </>
+  )
+}
+
 function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; currentId?: string | undefined }) {
   const [query, setQuery] = React.useState("")
-  const [type, setType] = React.useState("all")
+  // Folders are collapsed by default; only the open page's ancestors are expanded. `overrides` records
+  // explicit user choices (toggle / expand-all / collapse-all) so they win over the derived default.
+  const [overrides, setOverrides] = React.useState<ReadonlyMap<string, boolean>>(new Map())
   const debounced = useDebounced(query)
   const search = useQuery({
     queryKey: ["wiki-search", debounced],
@@ -61,19 +146,37 @@ function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; cur
     enabled: debounced.trim().length > 0,
   })
 
-  const visible = React.useMemo(() => {
-    if (debounced.trim() && search.data) {
-      const byId = new Map(documents.map((doc) => [doc.id, doc]))
-      return search.data.results
-        .map((hit) => byId.get(hit.document_id))
-        .filter((doc): doc is DocumentListItem => doc !== undefined)
-    }
-    return type === "all" ? documents : documents.filter((doc) => pageTypeOf(doc) === type)
-  }, [debounced, documents, search.data, type])
+  const tree = React.useMemo(() => buildTree(documents), [documents])
+  const searching = debounced.trim() !== ""
+  const results = React.useMemo(() => {
+    if (!searching) return []
+    const byId = new Map(documents.map((doc) => [doc.id, doc]))
+    return (search.data?.results ?? [])
+      .map((hit) => byId.get(hit.document_id))
+      .filter((doc): doc is DocumentListItem => doc !== undefined)
+  }, [documents, search.data, searching])
+
+  const currentAncestors = currentId === undefined ? [] : tree.ancestors.get(currentId) ?? []
+  const isOpen = (key: string) => overrides.get(key) ?? currentAncestors.includes(key)
+  const toggle = (key: string) => {
+    setOverrides((previous) => new Map(previous).set(key, !isOpen(key)))
+  }
+  const expandAll = () => setOverrides(new Map(tree.folderKeys.map((key) => [key, true])))
+  const collapseAll = () => setOverrides(new Map(tree.folderKeys.map((key) => [key, false])))
+  const locateCurrent = () => {
+    setOverrides((previous) => {
+      const next = new Map(previous)
+      for (const key of currentAncestors) next.set(key, true)
+      return next
+    })
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      document.querySelector('ul[aria-label="Wiki 页面"] a[aria-current="page"]')?.scrollIntoView({ block: "center", behavior: "smooth" })
+    }))
+  }
 
   return (
     <Stack gap="sm">
-      <Toolbar end={<span className="text-xs text-muted-foreground">{visible.length}</span>}>
+      <Toolbar>
         <InputGroup className="min-w-0 flex-1">
           <InputGroupAddon><SearchIcon /></InputGroupAddon>
           <InputGroupInput
@@ -82,32 +185,37 @@ function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; cur
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
+          <InputGroupAddon align="inline-end">
+            <Button size="icon-sm" variant="ghost" aria-label="定位当前页面" title="定位当前页面" onClick={locateCurrent}>
+              <LocateFixedIcon />
+            </Button>
+          </InputGroupAddon>
         </InputGroup>
-        <Select value={type} onValueChange={setType}>
-          <SelectTrigger size="sm" aria-label="按页面类型筛选"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
-            {Object.entries(PAGE_TYPE_LABELS).map(([value, label]) => (
-              <SelectItem key={value} value={value}>{label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Button size="icon-sm" variant="ghost" aria-label="全展开" title="全展开" onClick={expandAll}><UnfoldVerticalIcon /></Button>
+        <Button size="icon-sm" variant="ghost" aria-label="全折叠" title="全折叠" onClick={collapseAll}><FoldVerticalIcon /></Button>
       </Toolbar>
       {search.isError ? <ErrorState error={search.error} onRetry={() => void search.refetch()} /> : null}
-      {!search.isError && visible.length === 0 ? (
-        <EmptyState title="没有匹配的页面" description={debounced ? `没有匹配“${debounced}”的结果` : "工作区还没有 wiki 页面"} />
+      {!search.isError && (searching ? results.length === 0 : documents.length === 0) ? (
+        <EmptyState
+          title={searching ? "没有匹配的页面" : "工作区还没有 wiki 页面"}
+          description={searching ? `没有匹配“${debounced}”的结果` : undefined}
+        />
       ) : null}
       <NavList label="Wiki 页面">
-        {visible.map((doc) => (
-          <NavItem
-            key={doc.id}
-            to={`/wiki/${encodeURIComponent(doc.id)}`}
-            active={doc.id === currentId}
-            trailing={<StatusBadge status={pageTypeOf(doc)} />}
-          >
-            {doc.title || doc.filename}
-          </NavItem>
-        ))}
+        {searching ? (
+          results.map((doc) => (
+            <NavItem
+              key={doc.id}
+              to={`/wiki/${encodeURIComponent(doc.id)}`}
+              active={doc.id === currentId}
+              trailing={<StatusBadge status={pageTypeOf(doc)} />}
+            >
+              {doc.title || doc.filename}
+            </NavItem>
+          ))
+        ) : (
+          <TreeRows nodes={tree.nodes} depth={0} isOpen={isOpen} toggle={toggle} currentId={currentId} />
+        )}
       </NavList>
     </Stack>
   )

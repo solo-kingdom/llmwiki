@@ -228,7 +228,7 @@ export function Row({ children }: { children: React.ReactNode }) {
 export function NavList({ label, children }: { label?: string | undefined; children: React.ReactNode }) {
   return <ul aria-label={label} className="flex min-w-0 flex-col gap-0.5">{children}</ul>
 }
-export function NavItem({ to, active = false, onSelect, icon, indent = false, trailing, children }: {
+export function NavItem({ to, active = false, onSelect, icon, indent = false, depth, trailing, children }: {
   /** Renders a link (middle click / open in new tab work); takes precedence over `onSelect`. */
   to?: string | undefined
   active?: boolean | undefined
@@ -238,14 +238,19 @@ export function NavItem({ to, active = false, onSelect, icon, indent = false, tr
   icon?: React.ReactNode | undefined
   /** Indent one level (document outlines: h3 entries under h2). */
   indent?: boolean | undefined
+  /** Tree level (file trees: 0 root … 3). Overrides `indent`; deeper levels clamp at 3. */
+  depth?: number | undefined
   /** Trailing element (type badge, count) pinned to the right edge. */
   trailing?: React.ReactNode | undefined
   children: React.ReactNode
 }) {
   const interactive = to !== undefined || onSelect !== undefined
+  const depthClass = depth === undefined
+    ? (indent ? "pl-7" : undefined)
+    : ["", "pl-7", "pl-11", "pl-14"][Math.max(0, Math.min(3, depth))]
   const classes = cn(
     "flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground transition-colors [&_svg]:size-4 [&_svg]:shrink-0",
-    indent && "pl-7",
+    depthClass,
     active && "bg-accent font-medium text-accent-foreground",
     interactive && "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
   )

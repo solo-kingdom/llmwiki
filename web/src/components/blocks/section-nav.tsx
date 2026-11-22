@@ -32,9 +32,10 @@ function Entry({ item, vertical }: { item: SectionNavItem; vertical: boolean }) 
 /**
  * SectionLayout — Split with the section nav as side column and a padded Body as content.
  * Put it in `<Page layout="fill">`: nav and content are two scroll regions; the divider runs header rule → frame bottom.
+ * `width="narrow"` + `align="center"` is the settings shape: a centered ≤42rem column beside the nav.
  */
-export function SectionLayout({ items, label, width = "form", children, breakpoint = 720 }: {
-  items: SectionNavItem[]; label: string; width?: "reading" | "form" | "full" | undefined; children: React.ReactNode; breakpoint?: number | undefined
+export function SectionLayout({ items, label, width = "form", align = "start", children, breakpoint = 720 }: {
+  items: SectionNavItem[]; label: string; width?: "narrow" | "reading" | "form" | "full" | undefined; align?: "start" | "center" | undefined; children: React.ReactNode; breakpoint?: number | undefined
 }) {
   const [ref, measured] = useContainerWidth<HTMLDivElement>()
   const vertical = measured === 0 || measured >= breakpoint
@@ -45,7 +46,7 @@ export function SectionLayout({ items, label, width = "form", children, breakpoi
           {items.map((item) => <Entry key={item.to} item={item} vertical={vertical} />)}
         </nav>
       }>
-        <Body width={width} align="start">{children}</Body>
+        <Body width={width} align={align}>{children}</Body>
       </Split>
     </div>
   )

@@ -21,7 +21,7 @@ export function SettingsLayout() {
   if (settings === undefined) return <RowsSkeleton rows={10} />
   return (
     <Page title="设置" layout="fill">
-      <SectionLayout items={SETTINGS_SECTIONS} label="设置分区">
+      <SectionLayout items={SETTINGS_SECTIONS} label="设置分区" width="narrow" align="center">
         <Outlet />
       </SectionLayout>
     </Page>

@@ -19,8 +19,8 @@ import { cn } from "cn"
 import { PageHeader, type HeaderAction } from "@/components/blocks/page-header"
 import { useContainerWidth } from "@/components/blocks/use-container-width"
 
-type Width = "reading" | "form" | "full"
-const maxWidth: Record<Width, string> = { reading: "max-w-3xl", form: "max-w-4xl", full: "" }
+type Width = "narrow" | "reading" | "form" | "full"
+const maxWidth: Record<Width, string> = { narrow: "max-w-2xl", reading: "max-w-3xl", form: "max-w-4xl", full: "" }
 const gapClass = { xs: "gap-1", sm: "gap-2", md: "gap-4", lg: "gap-6", xl: "gap-8" } as const
 export type Gap = keyof typeof gapClass
 

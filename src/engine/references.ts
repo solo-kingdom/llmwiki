@@ -148,12 +148,16 @@ export class ReferenceParser {
     }
 
     const resolvedLower = resolved.toLowerCase();
+    // Links often write spaces where filenames/titles use underscores
+    // ([[Adam Foroughi]] vs Adam_Foroughi.md); try both variants.
+    const variants = new Set([resolvedLower, resolvedLower.replace(/ /g, "_")]);
 
-    const exact = this.docsByWikiPath.get(resolvedLower);
-    if (exact) return exact;
-
-    const withMd = this.docsByWikiPath.get(`${resolvedLower}.md`);
-    if (withMd) return withMd;
+    for (const variant of variants) {
+      const exact = this.docsByWikiPath.get(variant);
+      if (exact) return exact;
+      const withMd = this.docsByWikiPath.get(`${variant}.md`);
+      if (withMd) return withMd;
+    }
 
     let basename = resolvedLower;
     const lastSlash = basename.lastIndexOf("/");
@@ -161,10 +165,16 @@ export class ReferenceParser {
     for (const [pathKey, id] of this.docsByWikiPath) {
       const pathBase = lastSlash >= 0 ? pathKey.slice(pathKey.lastIndexOf("/") + 1) : pathKey;
       if (pathBase === basename || pathBase === `${basename}.md`) return id;
+      // filename side may hold the underscores the link wrote as spaces
+      const pathBaseSpaced = pathBase.replace(/_/g, " ");
+      if (pathBaseSpaced !== pathBase && (pathBaseSpaced === basename || pathBaseSpaced === `${basename}.md`)) {
+        return id;
+      }
     }
 
-    const slugified = slugify(resolvedLower);
-    if (slugified) {
+    for (const variant of variants) {
+      const slugified = slugify(variant);
+      if (!slugified) continue;
       const slugMatch = this.docsBySlug.get(slugified);
       if (slugMatch) return slugMatch;
       const slugMd = this.docsBySlug.get(`${slugified}.md`);
@@ -179,10 +189,12 @@ export class ReferenceParser {
       }
     }
 
-    const byFilename = this.docsByFilename.get(resolvedLower);
-    if (byFilename) return byFilename;
-    const byBase = this.docsByBase.get(resolvedLower);
-    if (byBase) return byBase;
+    for (const variant of variants) {
+      const byFilename = this.docsByFilename.get(variant);
+      if (byFilename) return byFilename;
+      const byBase = this.docsByBase.get(stripExtension(variant));
+      if (byBase) return byBase;
+    }
 
     return "";
   }

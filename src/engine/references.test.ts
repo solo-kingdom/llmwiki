@@ -56,3 +56,28 @@ describe("references", () => {
     expect(refs[0]?.targetPath).toBe("attention-id");
   });
 });
+
+describe("ReferenceParser.resolveLink space/underscore variants", () => {
+  const docs = [
+    { id: "d1", filename: "Adam_Foroughi.md", title: "Adam Foroughi", path: "/wiki/entities/" },
+    { id: "d2", filename: "小团队_AI杠杆模型.md", title: "小团队 AI 杠杆模型", path: "/wiki/concepts/" },
+  ];
+
+  function resolve(target: string, docPath: string): string {
+    const parser = new ReferenceParser(docs);
+    return parser.resolveLink(target, docPath);
+  }
+
+  it("resolves [[Adam Foroughi]] against underscore filename", () => {
+    expect(resolve("Adam Foroughi", "/wiki/entities/X.md")).toBe("d1");
+    expect(resolve("entities/Adam Foroughi", "/wiki/entities/X.md")).toBe("d1");
+  });
+
+  it("resolves underscore targets against spaced titles", () => {
+    expect(resolve("小团队_AI杠杆模型", "/wiki/entities/X.md")).toBe("d2");
+  });
+
+  it("resolves via spaced title directly", () => {
+    expect(resolve("Adam Foroughi", "/wiki/concepts/Y.md")).toBe("d1");
+  });
+});

@@ -163,6 +163,8 @@ export function templateGuidanceForGeneration(docLang: string): string {
 - comparison → wiki/comparisons/: Comparison Dimensions, Similarities and Differences, Conclusion
 - query → wiki/queries/: Question, Answer, References
 
+Trailing reference sections (Related Entities/Concepts, Sources, References) are extracted into structured reference data on ingest and stripped from stored content — still generate them per template, as bullet lists of [[wikilinks]] with optional "— annotation" notes.
+
 Business pages MUST NOT be written as top-level wiki/*.md files. Only wiki/overview.md, wiki/index.md, and wiki/log.md may live at the wiki root.
 Use the corresponding template file under wiki/templates/ as the structural reference.`;
   }
@@ -173,6 +175,8 @@ Use the corresponding template file under wiki/templates/ as the structural refe
 - synthesis → wiki/synthesis/：问题/目的、分析、引用、后续
 - comparison → wiki/comparisons/：对比维度、异同、结论
 - query → wiki/queries/：问题、回答、引用
+
+尾部引用章节（相关实体/概念、来源、引用）会在入库时提取为结构化引用数据并从正文中剥离——仍按模板生成，写成 [[wikilink]] bullet 列表，可带「— 说明」标注。
 
 业务知识页不得写入 wiki/ 顶层（仅允许 wiki/overview.md、wiki/index.md、wiki/log.md）。
 参考 wiki/templates/ 下对应模板文件结构。`;

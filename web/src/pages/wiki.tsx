@@ -681,7 +681,7 @@ function linkifyWikilinks(content: string): string {
       return line
     }
     if (fence !== "") return line
-    return line.replace(/\[\[([^\]|#]+)(?:\|([^\]]*))?\]\]/g, (_match, target: string, label?: string) => {
+    return line.replace(/\[\[([^\]|#]+?)(?:\\?\|([^\]]*))?\]\]/g, (_match, target: string, label?: string) => {
       const clean = target.trim()
       const label2 = (label ?? "").trim() || clean
       // Spaces break markdown link URLs; encode for href, keep the label readable.

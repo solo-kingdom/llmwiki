@@ -220,13 +220,18 @@ function wikiTargetExists(index: Set<string>, target: string): boolean {
   return resolveWikiTarget(index, target) !== "";
 }
 
-function resolveWikiTarget(index: Set<string>, target: string): string {
+export function resolveWikiTarget(index: Set<string>, target: string): string {
   const trimmed = target.trim().replace(/^\/+|\/+$/g, "");
   if (!trimmed) return "";
-  const lower = trimmed.toLowerCase();
-  const candidates = [`wiki/${lower}`, `wiki/${lower}.md`, lower, `${lower}.md`];
-  for (const candidate of candidates) {
-    if (index.has(candidate)) return candidate;
+  // Links often write spaces where filenames/titles use underscores
+  // ([[Adam Foroughi]] vs Adam_Foroughi.md); check both variants.
+  const variants = new Set([trimmed, trimmed.replace(/ /g, "_"), trimmed.replace(/_/g, " ")]);
+  for (const variant of variants) {
+    const lower = variant.toLowerCase();
+    const candidates = [`wiki/${lower}`, `wiki/${lower}.md`, lower, `${lower}.md`];
+    for (const candidate of candidates) {
+      if (index.has(candidate)) return candidate;
+    }
   }
   return "";
 }

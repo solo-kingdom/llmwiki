@@ -26,6 +26,55 @@ export interface IndexEntry {
   date: string;
 }
 
+const SYSTEM_WIKI_PATHS = new Set(["wiki/index.md", "wiki/log.md", "wiki/overview.md"]);
+
+export interface IndexSourceDocument {
+  relative_path?: string;
+  title?: string;
+  date?: string;
+  updated_at?: string;
+  content?: string;
+  source_kind?: string;
+}
+
+/**
+ * Build index entries from DB documents. PostgreSQL is the SSOT; the workspace
+ * directory may only hold a stale export, so reindex must not depend on files.
+ */
+export function indexEntriesFromDocuments(
+  docs: readonly IndexSourceDocument[],
+): Map<string, IndexEntry[]> {
+  const result = new Map<string, IndexEntry[]>();
+  for (const doc of docs) {
+    const rel = doc.relative_path ?? "";
+    if (!rel.startsWith("wiki/")) continue;
+    if (doc.source_kind && doc.source_kind !== "wiki") continue;
+    if (SYSTEM_WIKI_PATHS.has(rel)) continue;
+    if (rel.startsWith("wiki/templates/")) continue;
+
+    const base = rel.slice("wiki/".length);
+    const slash = base.lastIndexOf("/");
+    const subdir = slash >= 0 ? base.slice(0, slash) : "";
+    const filename = slash >= 0 ? base.slice(slash + 1) : base;
+    const ext = path.posix.extname(filename);
+    const slug = ext ? filename.slice(0, -ext.length) : filename;
+    const frontmatter = parseFrontmatter(doc.content ?? "");
+    const title = doc.title || frontmatter.title || titleFromFilename(filename);
+    const description = truncateRunes(frontmatter.description ?? "", 80);
+    let date = doc.date || frontmatter.date;
+    if (!date) date = doc.updated_at ? doc.updated_at.slice(0, 10) : formatDate(new Date());
+    else if (date.length > 10) date = date.slice(0, 10);
+
+    const list = result.get(subdir) ?? [];
+    list.push({ subdir, slug, title, description, date });
+    result.set(subdir, list);
+  }
+  for (const entries of result.values()) {
+    entries.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+  }
+  return result;
+}
+
 export class IndexBuilder {
   constructor(private readonly workspace: string) {}
 

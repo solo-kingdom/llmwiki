@@ -43,11 +43,22 @@ export class IndexBuilder {
     output += "# 内容目录\n\n";
     output += "> 本文件由 `llmwiki reindex` 自动维护，请勿手动编辑。\n\n";
 
+    const headings = new Map(WIKI_SUBDIRS.map((item) => [item.dir, item.heading]));
+    const dirKeys = entriesBySubdir ? [...entriesBySubdir.keys()] : [];
+    const orderedDirs: string[] = [];
     for (const subdir of WIKI_SUBDIRS) {
-      output += `## ${subdir.heading}\n\n`;
+      if (entriesBySubdir?.has(subdir.dir)) orderedDirs.push(subdir.dir);
+    }
+    for (const dir of dirKeys.sort()) {
+      if (!orderedDirs.includes(dir)) orderedDirs.push(dir);
+    }
+
+    for (const dir of orderedDirs) {
+      const heading = headings.get(dir) ?? dir;
+      output += `## ${heading}\n\n`;
       output += "| 页面 | 标题 | 摘要 | 更新日期 |\n";
       output += "|------|------|------|----------|\n";
-      const entries = entriesBySubdir?.get(subdir.dir) ?? [];
+      const entries = entriesBySubdir?.get(dir) ?? [];
       for (const entry of entries) {
         const link = `[[${entry.subdir}/${entry.slug}\\|${escapeGFMTableCell(entry.title)}]]`;
         output += `| ${link} | ${escapeGFMTableCell(entry.title)} | ${escapeGFMTableCell(entry.description)} | ${escapeGFMTableCell(entry.date)} |\n`;
@@ -59,33 +70,42 @@ export class IndexBuilder {
 
   private async scanWikiPages(): Promise<Map<string, IndexEntry[]>> {
     const result = new Map<string, IndexEntry[]>();
-    for (const subdir of WIKI_SUBDIRS) {
-      const entries = await this.scanSubdir(subdir.dir, path.join(this.workspace, "wiki", subdir.dir));
-      if (entries.length > 0) result.set(subdir.dir, entries);
+    const wikiRoot = path.join(this.workspace, "wiki");
+    await this.walkDir(wikiRoot, "", result);
+    for (const entries of result.values()) {
+      entries.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
     }
     return result;
   }
 
-  private async scanSubdir(subdir: string, dirPath: string): Promise<IndexEntry[]> {
-    let info;
+  private async walkDir(
+    dirPath: string,
+    relSubdir: string,
+    result: Map<string, IndexEntry[]>,
+  ): Promise<void> {
+    let entries;
     try {
-      info = await stat(dirPath);
+      entries = await readdir(dirPath, { withFileTypes: true });
     } catch (error) {
-      if (isNotFound(error)) return [];
+      if (isNotFound(error)) return;
       throw error;
     }
-    if (!info.isDirectory()) return [];
-
-    const entries: IndexEntry[] = [];
-    for (const entry of await readdir(dirPath, { withFileTypes: true })) {
-      if (entry.isDirectory()) continue;
+    for (const entry of entries) {
       const name = entry.name;
+      if (entry.isDirectory()) {
+        if (relSubdir === "" && name === "templates") continue;
+        if (name.startsWith(".")) continue;
+        const nextSubdir = relSubdir ? `${relSubdir}/${name}` : name;
+        await this.walkDir(path.join(dirPath, name), nextSubdir, result);
+        continue;
+      }
+      if (!relSubdir) continue;
       if (!name.toLowerCase().endsWith(".md")) continue;
       if (name === "index.md" || name === "log.md" || name === "overview.md") continue;
-      entries.push(await this.entryFromFile(subdir, name, path.join(dirPath, name)));
+      const list = result.get(relSubdir) ?? [];
+      list.push(await this.entryFromFile(relSubdir, name, path.join(dirPath, name)));
+      result.set(relSubdir, list);
     }
-    entries.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
-    return entries;
   }
 
   private async entryFromFile(subdir: string, filename: string, fullPath: string): Promise<IndexEntry> {

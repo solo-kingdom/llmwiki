@@ -6,6 +6,7 @@ import { chunkText, defaultChunkConfig } from "../engine/chunker.js";
 import { getMetadataJSON, parseFrontmatter, titleFromFilename } from "../engine/frontmatter.js";
 import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
 import { ReferenceParser } from "../engine/references.js";
+import { resolvePageType } from "../engine/wiki_org.js";
 import type { Store } from "../store/interfaces.js";
 import type { ChangeSet, Chunk, Document, PageWrite } from "../store/types.js";
 import {
@@ -118,6 +119,7 @@ export async function pageDocument(db: Store, rel: string, data: Uint8Array): Pr
   const frontmatter = parseFrontmatter(content);
   const title = frontmatter.title || titleFromFilename(filename);
   const hash = createHash("sha256").update(data).digest("hex");
+  const pageType = resolvePageType(frontmatter.type, "", rel);
   const doc: Document = {
     id: "",
     user_id: "default",
@@ -143,6 +145,7 @@ export async function pageDocument(db: Store, rel: string, data: Uint8Array): Pr
     highlights: "[]",
     created_at: "",
     updated_at: "",
+    page_type: pageType,
   };
   const existing = await db.getDocumentByRelativePath(rel);
   if (existing) {

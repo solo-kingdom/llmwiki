@@ -107,6 +107,7 @@ export function createApp(deps: AppDeps): Hono {
 
   // Public wiki (read-only)
   app.get("/api/public/wiki/status", api.publicWikiStatus);
+  app.get("/api/public/wiki/tree", api.getPublicWikiTree);
   app.get("/api/public/wiki/documents", api.listPublicWikiDocuments);
   app.get("/api/public/wiki/documents/:id", api.getPublicWikiDocument);
   app.get("/api/public/wiki/search", api.searchPublicWiki);
@@ -152,7 +153,13 @@ export function createApp(deps: AppDeps): Hono {
     }
   });
 
-  // Documents
+  // Documents & tree folders
+  app.get("/api/v1/tree", api.getTree);
+  app.get("/api/v1/folders", api.listFolders);
+  app.post("/api/v1/folders", api.createFolder);
+  app.patch("/api/v1/folders", api.updateFolder);
+  app.post("/api/v1/folders/move", api.moveFolder);
+  app.delete("/api/v1/folders", api.deleteFolder);
   app.get("/api/v1/documents", api.listDocuments);
   app.post("/api/v1/documents", api.createDocument);
   app.post("/api/v1/documents/bulk-delete", api.bulkDeleteDocuments);
@@ -160,6 +167,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/v1/documents/:id/content", api.getDocumentContent);
   app.put("/api/v1/documents/:id/content", api.updateDocumentContent);
   app.patch("/api/v1/documents/:id", api.updateDocumentMetadata);
+  app.post("/api/v1/documents/:id/move", api.moveDocument);
   app.delete("/api/v1/documents/:id", api.deleteDocument);
 
   // Search, lint, graph

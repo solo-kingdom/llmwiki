@@ -99,13 +99,16 @@ function wikiDirsFromDocuments(docs: Document[]): WorkspaceDir[] {
   const counts: Record<string, number> = {};
   for (const doc of docs) {
     if (doc.source_kind !== "wiki") continue;
-    const parts = doc.relative_path.replace(/^wiki\//, "").split("/");
-    if (parts.length <= 1) {
+    const rel = doc.relative_path.replace(/^wiki\//, "");
+    const lastSlash = rel.lastIndexOf("/");
+    if (lastSlash < 0) {
       counts[""] = (counts[""] ?? 0) + 1;
       continue;
     }
-    if (WIKI_SYSTEM_SUBDIRS.has(parts[0] ?? "")) continue;
-    counts[parts[0] ?? ""] = (counts[parts[0] ?? ""] ?? 0) + 1;
+    const dir = rel.slice(0, lastSlash);
+    const top = dir.split("/")[0] ?? "";
+    if (WIKI_SYSTEM_SUBDIRS.has(top)) continue;
+    counts[dir] = (counts[dir] ?? 0) + 1;
   }
   return sortDirs(Object.entries(counts).map(([name, count]) => ({ dir: name, count })));
 }
@@ -141,7 +144,7 @@ export function workspaceApi(ctx: ApiContext) {
           overview.counts.documents += 1;
           if (doc.source_kind === "wiki") {
             overview.counts.wiki_pages += 1;
-            const pageType = wikiPageType(doc.relative_path);
+            const pageType = doc.page_type || wikiPageType(doc.relative_path);
             if (PAGE_TYPE_TO_WIKI_SUBDIR[pageType]) {
               overview.page_types[pageType] = (overview.page_types[pageType] ?? 0) + 1;
             }

@@ -5,9 +5,11 @@ import { defaultToolLoopConfig, runToolLoop } from "../llm/tools.js";
 import type { Message, ToolLoopConfig } from "../llm/types.js";
 import type { McpRouter } from "../mcp/router.js";
 import type { Store } from "../store/interfaces.js";
+import { folderPathFromWikiRelPath } from "../engine/wiki_org.js";
+import { formatFolderTreeForPrompt } from "../mcp/diagnostic_tools.js";
 import { IngestCache } from "./cache.js";
 import { applyBlocksToStore } from "./dbapply.js";
-import { applyWikiBlocks, normalizeWikiFileBlocks, parseFileBlocksWithContent } from "./fileblocks.js";
+import { applyWikiBlocks, normalizeWikiFileBlocks, normalizeWikiFilePath, parseFileBlocksWithContent } from "./fileblocks.js";
 import { llmMessagesForRecord, recordLLMRequest, recordLLMResponse } from "./job_events.js";
 import { PageLockManager } from "./lock.js";
 import { normalizeUpload } from "./normalize.js";
@@ -228,9 +230,25 @@ export class Pipeline {
     return result;
   }
 
+  private async folderTreeContext(): Promise<string> {
+    if (!this.db) return "";
+    try {
+      const [folders, docs] = await Promise.all([
+        typeof this.db.listFolders === "function" ? this.db.listFolders(true) : Promise.resolve([]),
+        this.db.listDocumentsFiltered({ source_kind: "wiki", exclude_hidden: true }),
+      ]);
+      const summary = formatFolderTreeForPrompt(folders, docs);
+      return summary ? `当前目录树（请优先复用已有匹配目录）：\n${summary}` : "";
+    } catch {
+      return "";
+    }
+  }
+
   private async analyze(name: string, content: string): Promise<string> {
     const system = composeSystemPrompt("analysis", this.promptContext());
+    const treeCtx = await this.folderTreeContext();
     let userBody = `源文件：**${name}**\n\n---\n\n${content}`;
+    if (treeCtx) userBody = `${treeCtx}\n\n---\n\n${userBody}`;
     const refs = parseReferencedWikiPagesFromArchive(content);
     if (refs.length > 0) {
       const note = formatReferencedPagesForAnalysis(this.docLang, refs);
@@ -249,9 +267,10 @@ export class Pipeline {
   }
 
   private async generate(name: string, content: string, analysis: string): Promise<string[]> {
+    const treeCtx = await this.folderTreeContext();
     const prompt = `源文件：**${name}**
 
-分析（仅供参考）：
+${treeCtx ? `${treeCtx}\n\n` : ""}分析（仅供参考）：
 ${analysis}
 
 原始内容：
@@ -300,7 +319,8 @@ ${content}
       else if (mode === "qa") planStep = "plan_qa";
     }
     const system = composeSystemPrompt(planStep, this.promptContext());
-    const parts = [`源文件：**${name}**\n\n分析：\n${analysis}\n\n原始内容：\n${content}`];
+    const treeCtx = await this.folderTreeContext();
+    const parts = [`源文件：**${name}**\n\n${treeCtx ? `${treeCtx}\n\n` : ""}分析：\n${analysis}\n\n原始内容：\n${content}`];
     if (feedback.trim()) parts.push(feedback);
     return this.runLLMStep(
       "plan",
@@ -353,8 +373,33 @@ ${content}
     }
 
     const actions = parsePlanActions(planJson);
+    const movedSources = new Set<string>();
+    if (actions.length > 0 && this.applyToDB && this.db) {
+      for (const action of actions) {
+        if (action.action !== "move" || !action.from_path || !action.to_path) continue;
+        try {
+          const fromRel = normalizeWikiFilePath(action.from_path);
+          const toRel = normalizeWikiFilePath(action.to_path);
+          if (fromRel === toRel) continue;
+          const existing = await this.db.getDocumentByRelativePath(fromRel);
+          const targetFolder = folderPathFromWikiRelPath(toRel);
+          if (existing && targetFolder) {
+            await this.db.moveDocument(existing.id, targetFolder, path.posix.basename(toRel), "review");
+            movedSources.add(fromRel);
+          }
+        } catch (error) {
+          this.recorder?.record("apply_files", "warn", `preserve-id move failed: ${errorMessage(error)}`, {
+            from_path: action.from_path,
+            to_path: action.to_path,
+          });
+        }
+      }
+    }
     if (actions.length > 0) {
-      const deletePaths = sourcePathsToDelete(actions, normalized.blocks);
+      const remainingActions = actions.filter(
+        (action) => !(action.action === "move" && action.from_path && movedSources.has(normalizeWikiFilePath(action.from_path))),
+      );
+      const deletePaths = sourcePathsToDelete(remainingActions, normalized.blocks);
       for (const rel of deletePaths) normalized.blocks.set(rel, "---DELETE---\n");
       if (deletePaths.length > 0) {
         this.recorder?.record(

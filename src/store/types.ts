@@ -68,6 +68,7 @@ export interface SearchChunk {
   title: string;
   path: string;
   file_type: string;
+  page_type?: string;
   score: number;
   match_type?: string;
 }
@@ -353,7 +354,49 @@ export interface ChangeSet {
   created_at: string;
 }
 
-export type RevisionOperation = "create" | "update" | "delete" | "restore";
+export type RevisionOperation = "create" | "update" | "delete" | "restore" | "move";
+
+export interface WikiFolder {
+  path: string;
+  display_name: string;
+  description: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WikiFolderWithCounts extends WikiFolder {
+  direct_count: number;
+  total_count: number;
+}
+
+export type FolderDeleteMode = "empty" | "move_to_parent" | "cascade";
+
+export interface MoveDocumentResult {
+  document: Document;
+  old_relative_path: string;
+  change_set_id: string;
+  updated_link_paths: string[];
+}
+
+export interface MoveFolderResult {
+  from_path: string;
+  to_path: string;
+  moved_folders: number;
+  moved_documents: number;
+  moved_doc_paths: string[];
+  change_set_id: string;
+  updated_link_paths: string[];
+}
+
+export interface DeleteFolderResult {
+  path: string;
+  mode: FolderDeleteMode;
+  deleted_folders: number;
+  moved_documents: number;
+  deleted_documents: number;
+  change_set_id: string;
+}
 
 export interface PageRevision {
   id: string;

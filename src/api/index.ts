@@ -1,6 +1,7 @@
 import type { ApiContext } from "./context.js";
 import { capabilitiesApi } from "./capabilities.js";
 import { documentsApi } from "./documents.js";
+import { foldersApi } from "./folders.js";
 import { graphApi, lintApi } from "./graph.js";
 import { historyApi } from "./history.js";
 import { ingestJobsApi } from "./ingest_jobs.js";
@@ -17,6 +18,7 @@ export type Api = ReturnType<typeof createApi>;
 export function createApi(ctx: ApiContext) {
   return {
     ...documentsApi(ctx),
+    ...foldersApi(ctx),
     ...searchApi(ctx),
     ...graphApi(ctx),
     ...lintApi(ctx),

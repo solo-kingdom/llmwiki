@@ -58,18 +58,19 @@ export function graphRepo(
 
       const nodes: GraphNode[] = [];
       for (const row of allRows.slice(0, effectiveLimit)) {
-        const doc = await queryOne<[string, string]>(
+        const doc = await queryOne<[string, string, string]>(
           pool,
-          `SELECT id, COALESCE(title, '') FROM documents d
+          `SELECT id, COALESCE(title, ''), COALESCE(page_type, '') FROM documents d
            WHERE d.relative_path = $1 AND COALESCE(d.deleted_at, '') = ''`,
           [row.relPath],
         );
         if (!doc) continue;
+        const storedType = asString(doc[2]);
         nodes.push({
           id: row.relPath,
           document_id: asString(doc[0]),
           title: asString(doc[1]),
-          type: wikiPageType(row.relPath),
+          type: storedType || wikiPageType(row.relPath),
           link_count: row.linkCount,
         });
       }

@@ -4,6 +4,7 @@ import { activityRepo } from "./activity_logs.js";
 import { chunksRepo } from "./chunks.js";
 import { configRepo } from "./config.js";
 import { documentsRepo } from "./documents.js";
+import { foldersRepo } from "./folders.js";
 import { graphRepo } from "./graph.js";
 import { ingestJobsRepo } from "./ingest_jobs.js";
 import { ingestReviewsRepo } from "./ingest_reviews.js";
@@ -18,6 +19,7 @@ import { workspaceRepo } from "./workspace.js";
 export function createStore(pool: Pool): Store {
   const store = {
     ...documentsRepo(pool),
+    ...foldersRepo(pool),
     ...chunksRepo(pool),
     ...graphRepo(pool),
     ...referenceEntriesRepo(pool),

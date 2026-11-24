@@ -40,6 +40,12 @@ import type {
   ACPAgentCheckResult,
   AgentKind,
   WorkspaceOverview,
+  WikiFolder,
+  WikiTreeResponse,
+  FolderDeleteMode,
+  MoveDocumentResponse,
+  MoveFolderResponse,
+  DeleteFolderResponse,
 } from "@/types"
 
 const BASE = ""
@@ -79,6 +85,103 @@ export function listDocuments(params?: {
 
 export function getDocument(id: string): Promise<Document> {
   return request<Document>(`/api/v1/documents/${encodeURIComponent(id)}`)
+}
+
+export function getWikiTree(params?: {
+  exclude_hidden?: boolean
+  types?: string[]
+}): Promise<WikiTreeResponse> {
+  const q = new URLSearchParams()
+  if (params?.exclude_hidden === false) q.set("exclude_hidden", "false")
+  for (const t of params?.types ?? []) q.append("types", t)
+  const qs = q.toString()
+  return request<WikiTreeResponse>(`/api/v1/tree${qs ? `?${qs}` : ""}`)
+}
+
+export function createFolder(payload: {
+  path: string
+  display_name?: string
+  description?: string
+  sort_order?: number
+}): Promise<WikiFolder> {
+  return request<WikiFolder>("/api/v1/folders", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateFolder(payload: {
+  path: string
+  display_name?: string
+  description?: string
+  sort_order?: number
+}): Promise<WikiFolder> {
+  return request<WikiFolder>("/api/v1/folders", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function moveFolder(payload: {
+  from_path: string
+  to_path: string
+}): Promise<MoveFolderResponse> {
+  return request<MoveFolderResponse>("/api/v1/folders/move", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteFolder(params: {
+  path: string
+  mode: FolderDeleteMode
+  target_folder?: string
+}): Promise<DeleteFolderResponse> {
+  const q = new URLSearchParams({ path: params.path, mode: params.mode })
+  if (params.target_folder) q.set("target_folder", params.target_folder)
+  return request<DeleteFolderResponse>(`/api/v1/folders?${q.toString()}`, {
+    method: "DELETE",
+  })
+}
+
+export function createDocument(payload: {
+  filename: string
+  path: string
+  title?: string
+  content?: string
+  tags?: string[]
+  page_type?: string
+}): Promise<Document> {
+  return request<Document>("/api/v1/documents", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateDocumentMetadata(
+  id: string,
+  payload: { title?: string; tags?: string[]; date?: string; metadata?: string; page_type?: string },
+): Promise<Document> {
+  return request<Document>(`/api/v1/documents/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function moveDocument(
+  id: string,
+  payload: { target_folder: string; filename?: string },
+): Promise<MoveDocumentResponse> {
+  return request<MoveDocumentResponse>(`/api/v1/documents/${encodeURIComponent(id)}/move`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteDocument(id: string): Promise<{ status: string; path: string }> {
+  return request<{ status: string; path: string }>(`/api/v1/documents/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  })
 }
 
 export function searchDocuments(

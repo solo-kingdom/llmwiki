@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import { wikiPageTypeFromPaths, WIKI_HIDDEN_SUBDIRS } from "../../engine/wiki_org.js";
+import {
+  folderPathFromWikiRelPath,
+  resolvePageType,
+  wikiPageTypeFromPaths,
+  WIKI_HIDDEN_SUBDIRS,
+} from "../../engine/wiki_org.js";
 import type { DocumentStore } from "../interfaces.js";
 import type { Chunk, Document, ListDocumentsFilter } from "../types.js";
+import { ensureFolderAncestorsTx } from "./folders.js";
 import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
 const DOCUMENT_SELECT = `
@@ -14,17 +20,20 @@ const DOCUMENT_SELECT = `
   COALESCE(d.metadata, ''), COALESCE(d.error_message, ''), COALESCE(d.version, 0),
   COALESCE(d.parser, ''), COALESCE(d.content_hash, ''), COALESCE(d.stale_since, ''),
   COALESCE(d.highlights, '[]'), COALESCE(d.created_at, ''), COALESCE(d.updated_at, ''),
-  COALESCE(d.deleted_at, '')`;
+  COALESCE(d.deleted_at, ''), COALESCE(d.page_type, '')`;
 
 function scanDocument(row: unknown[]): Document {
   const tagsRaw = asString(row[13]);
+  const relPath = asString(row[5]);
+  const filePath = asString(row[4]);
+  const storedPageType = asString(row[25]);
   return {
     id: asString(row[0]),
     user_id: asString(row[1]),
     filename: asString(row[2]),
     title: asString(row[3]),
-    path: asString(row[4]),
-    relative_path: asString(row[5]),
+    path: filePath,
+    relative_path: relPath,
     source_kind: asString(row[6]),
     file_type: asString(row[7]),
     file_size: asNumber(row[8]),
@@ -44,6 +53,7 @@ function scanDocument(row: unknown[]): Document {
     created_at: asString(row[22]),
     updated_at: asString(row[23]),
     deleted_at: asString(row[24]),
+    page_type: storedPageType || wikiPageTypeFromPaths(relPath, filePath),
   };
 }
 
@@ -72,39 +82,51 @@ export function documentsRepo(pool: Pool): DocumentStore {
     async createDocument(doc: Document): Promise<void> {
       const id = doc.id || randomUUID();
       const tags = tagsJson(doc.tags);
-      const row = await queryOne<[number]>(pool, "SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents");
-      const documentNumber = row ? asNumber(row[0]) : 1;
-      await exec(
-        pool,
-        `INSERT INTO documents (
-          id, user_id, filename, title, path, relative_path, source_kind,
-          file_type, file_size, document_number, status, content, tags, date,
-          metadata, version, parser, content_hash, highlights
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
-        [
-          id,
-          doc.user_id,
-          doc.filename,
-          doc.title,
-          doc.path,
-          doc.relative_path,
-          doc.source_kind,
-          doc.file_type,
-          doc.file_size,
-          documentNumber,
-          doc.status,
-          doc.content,
-          tags,
-          doc.date,
-          doc.metadata,
-          doc.version,
-          doc.parser,
-          doc.content_hash,
-          doc.highlights,
-        ],
-      );
-      doc.id = id;
-      doc.document_number = documentNumber;
+      const pageType =
+        doc.source_kind === "wiki"
+          ? resolvePageType("", doc.page_type ?? "", doc.relative_path)
+          : (doc.page_type ?? "");
+      await withTransaction(pool, async (client) => {
+        const row = await queryOne<[number]>(client, "SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents");
+        const documentNumber = row ? asNumber(row[0]) : 1;
+        await exec(
+          client,
+          `INSERT INTO documents (
+            id, user_id, filename, title, path, relative_path, source_kind,
+            file_type, file_size, document_number, status, content, tags, date,
+            metadata, version, parser, content_hash, highlights, page_type
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+          [
+            id,
+            doc.user_id,
+            doc.filename,
+            doc.title,
+            doc.path,
+            doc.relative_path,
+            doc.source_kind,
+            doc.file_type,
+            doc.file_size,
+            documentNumber,
+            doc.status,
+            doc.content,
+            tags,
+            doc.date,
+            doc.metadata,
+            doc.version,
+            doc.parser,
+            doc.content_hash,
+            doc.highlights,
+            pageType,
+          ],
+        );
+        if (doc.source_kind === "wiki") {
+          const folder = folderPathFromWikiRelPath(doc.relative_path);
+          if (folder) await ensureFolderAncestorsTx(client, folder);
+        }
+        doc.id = id;
+        doc.document_number = documentNumber;
+        doc.page_type = pageType;
+      });
     },
 
     async getDocument(id: string): Promise<Document | null> {
@@ -206,7 +228,7 @@ export function documentsRepo(pool: Pool): DocumentStore {
     async listDocumentsFiltered(filter: ListDocumentsFilter): Promise<Document[]> {
       let sql = `
         SELECT id, filename, title, path, file_type, COALESCE(page_count, 0), COALESCE(updated_at, ''),
-          COALESCE(relative_path, ''), COALESCE(source_kind, '')
+          COALESCE(relative_path, ''), COALESCE(source_kind, ''), COALESCE(page_type, '')
         FROM documents WHERE status != 'failed' AND COALESCE(deleted_at, '') = '' `;
       const args: unknown[] = [];
       if (filter.source_kind) {
@@ -221,6 +243,7 @@ export function documentsRepo(pool: Pool): DocumentStore {
       const rows = await queryRows(pool, sql, args);
       const docs: Document[] = [];
       for (const row of rows) {
+        const storedType = asString(row[9]);
         const doc: Document = {
           id: asString(row[0]),
           filename: asString(row[1]),
@@ -247,7 +270,7 @@ export function documentsRepo(pool: Pool): DocumentStore {
           highlights: "",
           created_at: "",
         };
-        doc.page_type = wikiPageTypeFromPaths(doc.relative_path, doc.path);
+        doc.page_type = storedType || wikiPageTypeFromPaths(doc.relative_path, doc.path);
         if (filter.page_types?.length && !filter.page_types.includes(doc.page_type)) continue;
         docs.push(doc);
       }
@@ -261,35 +284,41 @@ export function documentsRepo(pool: Pool): DocumentStore {
           COALESCE(page_count, 0), COALESCE(status, ''), COALESCE(source_kind, ''),
           COALESCE(relative_path, ''), COALESCE(tags, '[]'), COALESCE(date, ''),
           COALESCE(metadata, ''), COALESCE(stale_since, ''), COALESCE(highlights, '[]'),
-          COALESCE(version, 0)
+          COALESCE(version, 0), COALESCE(page_type, '')
         FROM documents WHERE status != 'failed' AND COALESCE(deleted_at, '') = '' ORDER BY path, filename`,
       );
-      return rows.map((row) => ({
-        id: asString(row[0]),
-        filename: asString(row[1]),
-        title: asString(row[2]),
-        path: asString(row[3]),
-        content: asString(row[4]),
-        file_type: asString(row[5]),
-        page_count: asNumber(row[6]),
-        status: asString(row[7]),
-        source_kind: asString(row[8]),
-        relative_path: asString(row[9]),
-        tags: parseTags(asString(row[10])),
-        date: asString(row[11]),
-        metadata: asString(row[12]),
-        stale_since: asString(row[13]),
-        highlights: asString(row[14]),
-        version: asNumber(row[15]),
-        user_id: "",
-        document_number: 0,
-        file_size: 0,
-        error_message: "",
-        parser: "",
-        content_hash: "",
-        created_at: "",
-        updated_at: "",
-      }));
+      return rows.map((row) => {
+        const pathVal = asString(row[3]);
+        const relPath = asString(row[9]);
+        const storedType = asString(row[16]);
+        return {
+          id: asString(row[0]),
+          filename: asString(row[1]),
+          title: asString(row[2]),
+          path: pathVal,
+          content: asString(row[4]),
+          file_type: asString(row[5]),
+          page_count: asNumber(row[6]),
+          status: asString(row[7]),
+          source_kind: asString(row[8]),
+          relative_path: relPath,
+          tags: parseTags(asString(row[10])),
+          date: asString(row[11]),
+          metadata: asString(row[12]),
+          stale_since: asString(row[13]),
+          highlights: asString(row[14]),
+          version: asNumber(row[15]),
+          page_type: storedType || wikiPageTypeFromPaths(relPath, pathVal),
+          user_id: "",
+          document_number: 0,
+          file_size: 0,
+          error_message: "",
+          parser: "",
+          content_hash: "",
+          created_at: "",
+          updated_at: "",
+        };
+      });
     },
   };
 }

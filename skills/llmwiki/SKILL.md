@@ -51,8 +51,10 @@ raw/sources/…         source material (uploads, fetched pages) — read-only f
 wiki/overview.md      top-level orientation page
 wiki/index.md         generated table of contents — never hand-edit
 wiki/log.md           append-only journal: `## [YYYY-MM-DD] action | description`
-wiki/entities/ concepts/ synthesis/ comparisons/ queries/ sources/
-PostgreSQL             pages, revisions, search, graph, lint — the only source of truth
+wiki/<topic>/...        nested topic folders (page `type` in frontmatter: entity|concept|synthesis|comparison|query|page)
+wiki/sources/         source summaries (hidden from listing/search/graph)
+wiki/templates/       system page templates
+PostgreSQL            pages, folders, revisions, search, graph, lint — the only source of truth
 ```
 
 - **Files are the truth, the index is derived.** Write through the API, then let it reindex. Changes made behind the server's back need `POST /api/v1/reindex` before search, graph or lint can see them.

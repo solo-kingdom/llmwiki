@@ -74,6 +74,23 @@ export function publicWikiApi(ctx: ApiContext) {
       }
     },
 
+    async getPublicWikiTree(c: Context): Promise<Response> {
+      const denied = requirePublicWiki(ctx, c);
+      if (denied) return denied;
+      try {
+        const [folders, docs] = await Promise.all([
+          ctx.db.listFolders(true),
+          ctx.db.listDocumentsFiltered({
+            source_kind: "wiki",
+            exclude_hidden: true,
+          }),
+        ]);
+        return writeJson(c, 200, { folders, documents: docs.map(toPublicListItem) });
+      } catch (error) {
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
     async getPublicWikiDocument(c: Context): Promise<Response> {
       const denied = requirePublicWiki(ctx, c);
       if (denied) return denied;

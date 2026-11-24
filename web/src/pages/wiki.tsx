@@ -1,7 +1,27 @@
 import * as React from "react"
 import { useParams } from "react-router"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon, FoldVerticalIcon, HistoryIcon, InfoIcon, Link2Icon, ListTreeIcon, LocateFixedIcon, RotateCcwIcon, SearchIcon, UnfoldVerticalIcon } from "lucide-react"
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ExternalLinkIcon,
+  FilePlusIcon,
+  FoldVerticalIcon,
+  FolderInputIcon,
+  FolderPenIcon,
+  FolderPlusIcon,
+  HistoryIcon,
+  InfoIcon,
+  Link2Icon,
+  ListTreeIcon,
+  LocateFixedIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  RotateCcwIcon,
+  SearchIcon,
+  Trash2Icon,
+  UnfoldVerticalIcon,
+} from "lucide-react"
 import { Markdown } from "@/components/blocks/markdown"
 import { ReferencesBlock } from "@/components/blocks/references-block"
 import { useAppNavigate } from "@/components/blocks/router"
@@ -14,18 +34,26 @@ import { notify } from "@/components/blocks/notify"
 import { useContainerWidth } from "@/components/blocks/use-container-width"
 import { useApp } from "@/context/app-context"
 import { Button } from "@/components/ui/button"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
+  deleteDocument,
   getBacklinks,
   getDocument,
   getForwardReferences,
-  listDocuments,
+  getWikiTree,
   listPageHistory,
+  moveDocument,
+  moveFolder,
   restoreRevision,
   searchDocuments,
+  updateDocumentMetadata,
 } from "@/lib/api"
-import type { DocumentListItem } from "@/types"
+import { WikiTreeDialogs, type TreeDialogState } from "@/pages/wiki-tree-dialogs"
+import type { DocumentListItem, WikiFolder } from "@/types"
 
 function useDebounced<T>(value: T, delay = 280): T {
   const [debounced, setDebounced] = React.useState(value)
@@ -42,13 +70,20 @@ function pageTypeOf(doc: { relative_path?: string | undefined; path?: string | u
   return ({ entities: "entity", concepts: "concept", sources: "source", synthesis: "synthesis", comparisons: "comparison", queries: "query" } as Record<string, string>)[subdir] ?? "page"
 }
 
-type TreeNode = { key: string; segment: string; doc?: DocumentListItem; children?: TreeNode[] }
+type TreeNode = {
+  key: string
+  segment: string
+  folderPath?: string
+  folder?: WikiFolder
+  doc?: DocumentListItem
+  children?: TreeNode[]
+}
 type TreeModel = { nodes: TreeNode[]; folderKeys: string[]; ancestors: Map<string, string[]> }
+type DragPayload = { kind: "doc"; id: string; folder: string } | { kind: "folder"; path: string }
 
 const FOLDER_LABELS: Record<string, { zh: string; en: string }> = {
   concepts: { zh: "概念", en: "Concepts" },
   entities: { zh: "实体", en: "Entities" },
-  other: { zh: "其他", en: "Other" },
   sources: { zh: "来源", en: "Sources" },
   synthesis: { zh: "综合", en: "Synthesis" },
   comparisons: { zh: "对比", en: "Comparisons" },
@@ -58,125 +93,342 @@ const FOLDER_LABELS: Record<string, { zh: string; en: string }> = {
   archive: { zh: "归档", en: "Archive" },
 }
 
-function folderLabel(segment: string, lang: "zh" | "en"): string {
+function folderLabel(segment: string, lang: "zh" | "en", folder?: WikiFolder): string {
+  if (folder?.display_name) return folder.display_name
   const entry = FOLDER_LABELS[segment.toLowerCase()]
   return entry === undefined ? segment : lang === "en" ? entry.en : entry.zh
 }
 
-/** Page path hoisted so the first tree level is always 概念 / 实体 / 其他. */
-function treeSegments(doc: DocumentListItem): string[] {
-  const segments = (doc.relative_path ?? doc.path ?? doc.filename).replace(/\.md$/i, "").split("/").filter((part) => part !== "")
-  const group = segments.find((segment) => ["concepts", "entities"].includes(segment.toLowerCase()))
-  if (group !== undefined) {
-    return [group.toLowerCase(), ...segments.slice(segments.indexOf(group) + 1)]
-  }
-  // Everything else folds into 其他; storage roots (wiki/, raw/) are not meaningful to readers.
-  const rest = segments.filter((segment) => !["wiki", "raw"].includes(segment.toLowerCase()))
-  return ["other", ...(rest.length > 0 ? rest : segments.slice(-1))]
+function folderPathOfDoc(doc: { relative_path?: string | undefined; path?: string | undefined }): string {
+  const raw = (doc.relative_path ?? doc.path ?? "").replace(/^\/+/, "").replace(/^wiki\//, "")
+  const idx = raw.lastIndexOf("/")
+  return idx >= 0 ? raw.slice(0, idx) : ""
 }
 
-function buildTree(documents: DocumentListItem[]): TreeModel {
+function buildTree(folders: WikiFolder[], documents: DocumentListItem[], typeFilter: string): TreeModel {
+  const folderByPath = new Map(folders.map((f) => [f.path, f]))
   const nodes: TreeNode[] = []
   const folderKeys: string[] = []
   const ancestors = new Map<string, string[]>()
   const index = new Map<string, TreeNode>()
-  for (const doc of documents) {
-    const parts = treeSegments(doc)
+
+  const ensureFolderChain = (folderPath: string): { level: TreeNode[]; chain: string[] } => {
+    if (!folderPath) return { level: nodes, chain: [] }
+    const parts = folderPath.split("/").filter(Boolean)
     const chain: string[] = []
     let level = nodes
     let prefix = ""
-    for (const part of parts.slice(0, -1)) {
+    for (const part of parts) {
       prefix = prefix === "" ? part : `${prefix}/${part}`
-      let folder = index.get(prefix)
-      if (folder === undefined) {
-        folder = { key: `folder:${prefix}`, segment: part, children: [] }
-        index.set(prefix, folder)
-        folderKeys.push(folder.key)
-        level.push(folder)
+      let folderNode = index.get(prefix)
+      if (folderNode === undefined) {
+        const meta = folderByPath.get(prefix)
+        folderNode = {
+          key: `folder:${prefix}`,
+          segment: part,
+          folderPath: prefix,
+          ...(meta ? { folder: meta } : {}),
+          children: [],
+        }
+        index.set(prefix, folderNode)
+        folderKeys.push(folderNode.key)
+        level.push(folderNode)
       }
-      chain.push(folder.key)
-      level = folder.children ?? (folder.children = [])
+      chain.push(folderNode.key)
+      level = folderNode.children ?? (folderNode.children = [])
     }
+    return { level, chain }
+  }
+
+  // Only show empty folders when no type filter is active
+  if (typeFilter === "all") {
+    for (const folder of folders) {
+      ensureFolderChain(folder.path)
+    }
+  }
+
+  for (const doc of documents) {
+    if (typeFilter !== "all" && pageTypeOf(doc) !== typeFilter) continue
+    const folderPath = folderPathOfDoc(doc)
+    const { level, chain } = ensureFolderChain(folderPath)
     level.push({ key: `doc:${doc.id}`, segment: doc.title || doc.filename, doc })
     ancestors.set(doc.id, chain)
   }
+
   return { nodes, folderKeys, ancestors }
 }
 
-const TREE_RANK: Record<string, number> = { concepts: 0, entities: 1, other: 2 }
-
-/** Folders first; 概念/实体/其他 keep their fixed order; names sort by the displayed label. */
+/** Folders first (by sort_order then label); documents sorted by title/filename. */
 function sortNodes(nodes: TreeNode[], lang: "zh" | "en"): TreeNode[] {
   return [...nodes].sort((a, b) => {
-    const rankA = TREE_RANK[a.segment.toLowerCase()] ?? 9
-    const rankB = TREE_RANK[b.segment.toLowerCase()] ?? 9
-    if (rankA !== rankB) return rankA - rankB
     const folderA = a.children === undefined ? 1 : 0
     const folderB = b.children === undefined ? 1 : 0
     if (folderA !== folderB) return folderA - folderB
-    const nameA = a.children === undefined ? a.segment : folderLabel(a.segment, lang)
-    const nameB = b.children === undefined ? b.segment : folderLabel(b.segment, lang)
+    if (folderA === 0) {
+      const sa = a.folder?.sort_order ?? 0
+      const sb = b.folder?.sort_order ?? 0
+      if (sa !== sb) return sa - sb
+    }
+    const nameA = a.children === undefined ? a.segment : folderLabel(a.segment, lang, a.folder)
+    const nameB = b.children === undefined ? b.segment : folderLabel(b.segment, lang, b.folder)
     return nameA.localeCompare(nameB, lang === "en" ? "en" : "zh-Hans-CN")
   })
 }
 
-function TreeRows({ nodes, depth, lang, isOpen, toggle, currentId }: {
+function TreeRows({
+  nodes,
+  depth,
+  lang,
+  isOpen,
+  toggle,
+  currentId,
+  dragOverKey,
+  setDragOverKey,
+  onDropOnFolder,
+  onOpenDialog,
+  onDeleteDoc,
+}: {
   nodes: TreeNode[]
   depth: number
   lang: "zh" | "en"
   isOpen: (key: string) => boolean
   toggle: (key: string) => void
   currentId?: string | undefined
+  dragOverKey: string | null
+  setDragOverKey: (key: string | null) => void
+  onDropOnFolder: (targetFolder: string, payload: DragPayload) => void
+  onOpenDialog: (dialog: TreeDialogState) => void
+  onDeleteDoc: (doc: DocumentListItem) => void
 }) {
+  const clampedDepth = Math.min(3, depth)
   return (
     <>
       {sortNodes(nodes, lang).map((node) => {
-        if (node.children !== undefined) {
+        if (node.children !== undefined && node.folderPath !== undefined) {
+          const folderPath = node.folderPath
+          const folderObj: WikiFolder = node.folder ?? {
+            path: folderPath,
+            display_name: "",
+            description: "",
+            sort_order: 0,
+            created_at: "",
+            updated_at: "",
+            direct_count: 0,
+            total_count: 0,
+          }
           const open = isOpen(node.key)
+          const label = folderLabel(node.segment, lang, node.folder)
+          const isDropTarget = dragOverKey === node.key
+          const menuItems = (
+            <>
+              <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "create-folder", parentPath: folderPath })}>
+                <FolderPlusIcon />新建子目录
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "create-page", folderPath })}>
+                <FilePlusIcon />在此新建页面
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "edit-folder", folder: folderObj })}>
+                <PencilIcon />编辑目录
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "move-folder", folder: folderObj })}>
+                <FolderPenIcon />移动 / 重命名
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={() => onOpenDialog({ kind: "delete-folder", folder: folderObj })}>
+                <Trash2Icon />删除目录
+              </DropdownMenuItem>
+            </>
+          )
+          const ctxItems = (
+            <>
+              <ContextMenuItem onSelect={() => onOpenDialog({ kind: "create-folder", parentPath: folderPath })}>
+                <FolderPlusIcon />新建子目录
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => onOpenDialog({ kind: "create-page", folderPath })}>
+                <FilePlusIcon />在此新建页面
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onSelect={() => onOpenDialog({ kind: "edit-folder", folder: folderObj })}>
+                <PencilIcon />编辑目录
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => onOpenDialog({ kind: "move-folder", folder: folderObj })}>
+                <FolderPenIcon />移动 / 重命名
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem variant="destructive" onSelect={() => onOpenDialog({ kind: "delete-folder", folder: folderObj })}>
+                <Trash2Icon />删除目录
+              </ContextMenuItem>
+            </>
+          )
           return (
             <React.Fragment key={node.key}>
-              <NavItem
-                depth={depth}
-                icon={open ? <ChevronDownIcon /> : <ChevronRightIcon />}
-                onSelect={() => toggle(node.key)}
-              >
-                {folderLabel(node.segment, lang)}
-              </NavItem>
-              {open ? <TreeRows nodes={node.children} depth={depth + 1} lang={lang} isOpen={isOpen} toggle={toggle} currentId={currentId} /> : null}
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <div
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("application/x-llmwiki-tree", JSON.stringify({ kind: "folder", path: folderPath } satisfies DragPayload))
+                      e.dataTransfer.effectAllowed = "move"
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault()
+                      if (dragOverKey !== node.key) setDragOverKey(node.key)
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverKey === node.key) setDragOverKey(null)
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      setDragOverKey(null)
+                      const raw = e.dataTransfer.getData("application/x-llmwiki-tree")
+                      if (!raw) return
+                      try {
+                        onDropOnFolder(folderPath, JSON.parse(raw) as DragPayload)
+                      } catch {
+                        // ignore invalid drag payload
+                      }
+                    }}
+                    className={isDropTarget ? "bg-accent/50" : undefined}
+                  >
+                    <NavItem
+                      depth={clampedDepth}
+                      icon={open ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                      onSelect={() => toggle(node.key)}
+                      trailing={
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label={`操作目录 ${label}`}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <MoreHorizontalIcon />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">{menuItems}</DropdownMenuContent>
+                        </DropdownMenu>
+                      }
+                    >
+                      {label}
+                    </NavItem>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent>{ctxItems}</ContextMenuContent>
+              </ContextMenu>
+              {open ? (
+                <TreeRows
+                  nodes={node.children}
+                  depth={depth + 1}
+                  lang={lang}
+                  isOpen={isOpen}
+                  toggle={toggle}
+                  currentId={currentId}
+                  dragOverKey={dragOverKey}
+                  setDragOverKey={setDragOverKey}
+                  onDropOnFolder={onDropOnFolder}
+                  onOpenDialog={onOpenDialog}
+                  onDeleteDoc={onDeleteDoc}
+                />
+              ) : null}
             </React.Fragment>
           )
         }
         const doc = node.doc as DocumentListItem
         return (
-          <NavItem
-            key={node.key}
-            depth={depth}
-            to={`/wiki/${encodeURIComponent(doc.id)}`}
-            active={doc.id === currentId}
-          >
-            {doc.title || doc.filename}
-          </NavItem>
+          <ContextMenu key={node.key}>
+            <ContextMenuTrigger asChild>
+              <div
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(
+                    "application/x-llmwiki-tree",
+                    JSON.stringify({ kind: "doc", id: doc.id, folder: folderPathOfDoc(doc) } satisfies DragPayload),
+                  )
+                  e.dataTransfer.effectAllowed = "move"
+                }}
+              >
+                <NavItem
+                  depth={clampedDepth}
+                  to={`/wiki/${encodeURIComponent(doc.id)}`}
+                  active={doc.id === currentId}
+                  trailing={
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="icon-xs"
+                          variant="ghost"
+                          aria-label={`操作页面 ${doc.title || doc.filename}`}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                          }}
+                        >
+                          <MoreHorizontalIcon />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "move-doc", doc })}>
+                          <FolderInputIcon />移动 / 重命名
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem variant="destructive" onSelect={() => onDeleteDoc(doc)}>
+                          <Trash2Icon />删除页面
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  }
+                >
+                  {doc.title || doc.filename}
+                </NavItem>
+              </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem onSelect={() => onOpenDialog({ kind: "move-doc", doc })}>
+                <FolderInputIcon />移动 / 重命名
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem variant="destructive" onSelect={() => onDeleteDoc(doc)}>
+                <Trash2Icon />删除页面
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         )
       })}
     </>
   )
 }
 
-function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; currentId?: string | undefined }) {
+function WikiPane({
+  folders,
+  documents,
+  currentId,
+}: {
+  folders: WikiFolder[]
+  documents: DocumentListItem[]
+  currentId?: string | undefined
+}) {
   const { settings } = useApp()
+  const navigate = useAppNavigate()
+  const confirm = useConfirm()
+  const queryClient = useQueryClient()
   const lang: "zh" | "en" = settings?.ui_language === "en" ? "en" : "zh"
   const [query, setQuery] = React.useState("")
+  const [typeFilter, setTypeFilter] = React.useState("all")
+  const [dialogState, setDialogState] = React.useState<TreeDialogState>(null)
+  const [dragOverKey, setDragOverKey] = React.useState<string | null>(null)
   // Folders are collapsed by default; only the open page's ancestors are expanded. `overrides` records
   // explicit user choices (toggle / expand-all / collapse-all) so they win over the derived default.
   const [overrides, setOverrides] = React.useState<ReadonlyMap<string, boolean>>(new Map())
   const debounced = useDebounced(query)
   const search = useQuery({
-    queryKey: ["wiki-search", debounced],
-    queryFn: () => searchDocuments(debounced, 20),
+    queryKey: ["wiki-search", debounced, typeFilter],
+    queryFn: () => searchDocuments(debounced, 20, typeFilter === "all" ? undefined : [typeFilter]),
     enabled: debounced.trim().length > 0,
   })
 
-  const tree = React.useMemo(() => buildTree(documents), [documents])
+  const tree = React.useMemo(() => buildTree(folders, documents, typeFilter), [folders, documents, typeFilter])
   const searching = debounced.trim() !== ""
   const results = React.useMemo(() => {
     if (!searching) return []
@@ -186,6 +438,67 @@ function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; cur
       .filter((doc): doc is DocumentListItem => doc !== undefined)
   }, [documents, search.data, searching])
 
+  const invalidateTree = React.useCallback(async (docId?: string) => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["wiki-tree"] }),
+      queryClient.invalidateQueries({ queryKey: ["documents", "wiki"] }),
+      queryClient.invalidateQueries({ queryKey: ["workspace"] }),
+      ...(docId ? [queryClient.invalidateQueries({ queryKey: ["document", docId] })] : []),
+    ])
+  }, [queryClient])
+
+  const moveDocMut = useMutation({
+    mutationFn: ({ id, targetFolder }: { id: string; targetFolder: string }) =>
+      moveDocument(id, { target_folder: targetFolder }),
+    onSuccess: async (_res, vars) => {
+      notify.success("已移动页面")
+      await invalidateTree(vars.id)
+    },
+    onError: (err) => notify.error(err, "移动页面失败"),
+  })
+
+  const moveFolderMut = useMutation({
+    mutationFn: ({ fromPath, toPath }: { fromPath: string; toPath: string }) =>
+      moveFolder({ from_path: fromPath, to_path: toPath }),
+    onSuccess: async () => {
+      notify.success("已移动目录")
+      await invalidateTree()
+    },
+    onError: (err) => notify.error(err, "移动目录失败"),
+  })
+
+  const deleteDocMut = useMutation({
+    mutationFn: (id: string) => deleteDocument(id),
+    onSuccess: async (_res, id) => {
+      notify.success("页面已删除")
+      await invalidateTree(id)
+      if (id === currentId) navigate("/wiki")
+    },
+    onError: (err) => notify.error(err, "删除页面失败"),
+  })
+
+  const handleDropOnFolder = (targetFolder: string, payload: DragPayload) => {
+    if (payload.kind === "doc") {
+      if (payload.folder === targetFolder) return
+      moveDocMut.mutate({ id: payload.id, targetFolder })
+      return
+    }
+    const seg = payload.path.includes("/") ? payload.path.slice(payload.path.lastIndexOf("/") + 1) : payload.path
+    const toPath = targetFolder ? `${targetFolder}/${seg}` : seg
+    if (toPath === payload.path || toPath.startsWith(`${payload.path}/`)) return
+    moveFolderMut.mutate({ fromPath: payload.path, toPath })
+  }
+
+  const handleDeleteDoc = async (doc: DocumentListItem) => {
+    const ok = await confirm({
+      title: `删除页面“${doc.title || doc.filename}”？`,
+      description: "页面将移入归档，可在历史中恢复。",
+      confirmLabel: "删除",
+      destructive: true,
+    })
+    if (ok) deleteDocMut.mutate(doc.id)
+  }
+
   const currentAncestors = currentId === undefined ? [] : tree.ancestors.get(currentId) ?? []
   const isOpen = (key: string) => overrides.get(key) ?? currentAncestors.includes(key)
   const toggle = (key: string) => {
@@ -193,7 +506,7 @@ function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; cur
   }
   const expandAll = () => setOverrides(new Map(tree.folderKeys.map((key) => [key, true])))
   const collapseAll = () => setOverrides(new Map(tree.folderKeys.map((key) => [key, false])))
-  const allOpen = tree.folderKeys.every((key) => isOpen(key))
+  const allOpen = tree.folderKeys.length > 0 && tree.folderKeys.every((key) => isOpen(key))
   const locateCurrent = () => {
     setOverrides((previous) => {
       const next = new Map(previous)
@@ -217,6 +530,15 @@ function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; cur
             onChange={(event) => setQuery(event.target.value)}
           />
         </InputGroup>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label="新建目录"
+          title="新建目录"
+          onClick={() => setDialogState({ kind: "create-folder", parentPath: "" })}
+        >
+          <FolderPlusIcon />
+        </Button>
         <Button size="icon-sm" variant="ghost" aria-label="定位当前页面" title="定位当前页面" onClick={locateCurrent}>
           <LocateFixedIcon />
         </Button>
@@ -230,29 +552,79 @@ function WikiPane({ documents, currentId }: { documents: DocumentListItem[]; cur
           {allOpen ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
         </Button>
       </Toolbar>
+      <Select value={typeFilter} onValueChange={setTypeFilter}>
+        <SelectTrigger aria-label="按页面类型筛选" className="w-full">
+          <SelectValue placeholder="全部类型" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部类型</SelectItem>
+          <SelectItem value="concept">概念 (concept)</SelectItem>
+          <SelectItem value="entity">实体 (entity)</SelectItem>
+          <SelectItem value="synthesis">综合 (synthesis)</SelectItem>
+          <SelectItem value="comparison">对比 (comparison)</SelectItem>
+          <SelectItem value="query">问题 (query)</SelectItem>
+          <SelectItem value="page">普通页面 (page)</SelectItem>
+        </SelectContent>
+      </Select>
       {search.isError ? <ErrorState error={search.error} onRetry={() => void search.refetch()} /> : null}
-      {!search.isError && (searching ? results.length === 0 : documents.length === 0) ? (
+      {!search.isError && (searching ? results.length === 0 : tree.nodes.length === 0) ? (
         <EmptyState
           title={searching ? "没有匹配的页面" : "工作区还没有 wiki 页面"}
           description={searching ? `没有匹配“${debounced}”的结果` : undefined}
         />
       ) : null}
-      <NavList label="Wiki 页面">
-        {searching ? (
-          results.map((doc) => (
-            <NavItem
-              key={doc.id}
-              to={`/wiki/${encodeURIComponent(doc.id)}`}
-              active={doc.id === currentId}
-              trailing={<StatusBadge status={pageTypeOf(doc)} />}
-            >
-              {doc.title || doc.filename}
-            </NavItem>
-          ))
-        ) : (
-          <TreeRows nodes={tree.nodes} depth={0} lang={lang} isOpen={isOpen} toggle={toggle} currentId={currentId} />
-        )}
-      </NavList>
+      <div
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          const raw = e.dataTransfer.getData("application/x-llmwiki-tree")
+          if (!raw) return
+          try {
+            const payload = JSON.parse(raw) as DragPayload
+            if (payload.kind === "folder" && payload.path.includes("/")) {
+              e.preventDefault()
+              setDragOverKey(null)
+              handleDropOnFolder("", payload)
+            }
+          } catch {
+            // ignore
+          }
+        }}
+      >
+        <NavList label="Wiki 页面">
+          {searching ? (
+            results.map((doc) => (
+              <NavItem
+                key={doc.id}
+                to={`/wiki/${encodeURIComponent(doc.id)}`}
+                active={doc.id === currentId}
+                trailing={<StatusBadge status={pageTypeOf(doc)} />}
+              >
+                {doc.title || doc.filename}
+              </NavItem>
+            ))
+          ) : (
+            <TreeRows
+              nodes={tree.nodes}
+              depth={0}
+              lang={lang}
+              isOpen={isOpen}
+              toggle={toggle}
+              currentId={currentId}
+              dragOverKey={dragOverKey}
+              setDragOverKey={setDragOverKey}
+              onDropOnFolder={handleDropOnFolder}
+              onOpenDialog={setDialogState}
+              onDeleteDoc={handleDeleteDoc}
+            />
+          )}
+        </NavList>
+      </div>
+      <WikiTreeDialogs
+        state={dialogState}
+        folders={folders}
+        onClose={() => setDialogState(null)}
+        onCreatedDoc={(id) => navigate(`/wiki/${encodeURIComponent(id)}`)}
+      />
     </Stack>
   )
 }
@@ -319,7 +691,15 @@ function slugify(text: string): string {
 type OutlineEntry = { id: string; text: string; level: number }
 type ReaderDialog = "info" | "backlinks" | "forward" | "history" | "toc" | null
 
-function Reader({ docId, documents }: { docId: string; documents: DocumentListItem[] }) {
+function Reader({
+  docId,
+  folders,
+  documents,
+}: {
+  docId: string
+  folders: WikiFolder[]
+  documents: DocumentListItem[]
+}) {
   const queryClient = useQueryClient()
   const navigate = useAppNavigate()
   const confirm = useConfirm()
@@ -337,6 +717,36 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
     enabled: (doc?.relative_path ?? "") !== "",
     placeholderData: keepPreviousData,
   })
+
+  const updateTypeMut = useMutation({
+    mutationFn: (pageType: string) => updateDocumentMetadata(docId, { page_type: pageType }),
+    onSuccess: async () => {
+      notify.success("已更新页面类型")
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["document", docId] }),
+        queryClient.invalidateQueries({ queryKey: ["wiki-tree"] }),
+        queryClient.invalidateQueries({ queryKey: ["documents", "wiki"] }),
+      ])
+    },
+    onError: (err) => notify.error(err, "更新页面类型失败"),
+  })
+
+  const [moveDialog, setMoveDialog] = React.useState<TreeDialogState>(null)
+
+  const breadcrumbs = React.useMemo(() => {
+    const items: { label: string; to: string }[] = [{ label: "Wiki", to: "/wiki" }]
+    if (!doc) return items
+    const folderPath = folderPathOfDoc(doc)
+    if (!folderPath) return items
+    const folderMap = new Map(folders.map((f) => [f.path, f]))
+    const parts = folderPath.split("/").filter(Boolean)
+    let prefix = ""
+    for (const part of parts) {
+      prefix = prefix === "" ? part : `${prefix}/${part}`
+      items.push({ label: folderLabel(part, lang, folderMap.get(prefix)), to: "/wiki" })
+    }
+    return items
+  }, [doc, folders, lang])
 
   const restore = useMutation({
     mutationFn: (revisionId: string) => restoreRevision(revisionId),
@@ -497,7 +907,22 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
         <Panel padding="none">
           <Rows label="页面信息">
             {[
-              { label: "类型", value: <StatusBadge status={pageTypeOf(doc)} /> },
+              {
+                label: "类型",
+                value: (
+                  <Select value={pageTypeOf(doc)} onValueChange={(v) => updateTypeMut.mutate(v)}>
+                    <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="concept">concept</SelectItem>
+                      <SelectItem value="entity">entity</SelectItem>
+                      <SelectItem value="synthesis">synthesis</SelectItem>
+                      <SelectItem value="comparison">comparison</SelectItem>
+                      <SelectItem value="query">query</SelectItem>
+                      <SelectItem value="page">page</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ),
+              },
               { label: "路径", value: doc.relative_path },
               { label: "更新", value: <Time value={doc.updated_at} mode="datetime" /> },
               { label: "版本", value: `${doc.version}` },
@@ -511,6 +936,15 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
             ))}
           </Rows>
         </Panel>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setDialog(null)
+            setMoveDialog({ kind: "move-doc", doc })
+          }}
+        >
+          <FolderInputIcon />移动到其他目录…
+        </Button>
       </DialogContent>
     </Dialog>
   )
@@ -623,7 +1057,7 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
     <Page
       title={doc.title || doc.filename}
       layout="fill"
-      breadcrumbs={[{ label: "Wiki", to: "/wiki" }]}
+      breadcrumbs={breadcrumbs}
       inlineMax={5}
       actions={[
         ...tocAction,
@@ -638,7 +1072,7 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
           sideLabel="Wiki 页面"
           sideWidth="lg"
           collapseBelow={900}
-          side={<WikiPane documents={documents} currentId={docId} />}
+          side={<WikiPane folders={folders} documents={documents} currentId={docId} />}
         >
           {!narrow && !tocHidden && outline.length > 0 ? (
             <Split
@@ -663,6 +1097,12 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
       {forwardDialog}
       {historyDialog}
       {tocDialog}
+      <WikiTreeDialogs
+        state={moveDialog}
+        folders={folders}
+        onClose={() => setMoveDialog(null)}
+        onCreatedDoc={(newId) => navigate(`/wiki/${encodeURIComponent(newId)}`)}
+      />
     </Page>
   )
 }
@@ -670,11 +1110,12 @@ function Reader({ docId, documents }: { docId: string; documents: DocumentListIt
 export function WikiReaderPage() {
   const { id } = useParams()
   const navigate = useAppNavigate()
-  const documentsQuery = useQuery({
-    queryKey: ["documents", "wiki"],
-    queryFn: () => listDocuments({ exclude_hidden: true }),
+  const treeQuery = useQuery({
+    queryKey: ["wiki-tree"],
+    queryFn: () => getWikiTree({ exclude_hidden: true }),
   })
-  const documents = React.useMemo(() => documentsQuery.data ?? [], [documentsQuery.data])
+  const folders = React.useMemo(() => treeQuery.data?.folders ?? [], [treeQuery.data])
+  const documents = React.useMemo(() => treeQuery.data?.documents ?? [], [treeQuery.data])
 
   React.useEffect(() => {
     if (id === undefined && documents.length > 0) {
@@ -682,17 +1123,24 @@ export function WikiReaderPage() {
     }
   }, [documents, id, navigate])
 
-  if (documentsQuery.isLoading) return <RowsSkeleton rows={8} />
-  if (documentsQuery.isError) return <ErrorState error={documentsQuery.error} onRetry={() => void documentsQuery.refetch()} />
+  if (treeQuery.isLoading) return <RowsSkeleton rows={8} />
+  if (treeQuery.isError) return <ErrorState error={treeQuery.error} onRetry={() => void treeQuery.refetch()} />
 
   if (id === undefined) {
     return (
       <Page title="Wiki" layout="fill">
-        <Body width="full" align="start">
-          <EmptyState title="选择一个页面" description="从左侧列表选择，或搜索标题与内容。" />
-        </Body>
+        <Split
+          sideLabel="Wiki 页面"
+          sideWidth="lg"
+          collapseBelow={900}
+          side={<WikiPane folders={folders} documents={documents} />}
+        >
+          <Body width="full" align="start">
+            <EmptyState title="选择一个页面" description="从左侧目录树选择或新建目录/页面，或搜索标题与内容。" />
+          </Body>
+        </Split>
       </Page>
     )
   }
-  return <Reader docId={id} documents={documents} />
+  return <Reader docId={id} folders={folders} documents={documents} />
 }

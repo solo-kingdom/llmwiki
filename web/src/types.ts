@@ -40,6 +40,50 @@ export interface DocumentListItem {
   updated_at: string
 }
 
+export interface WikiFolder {
+  path: string
+  display_name: string
+  description: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+  direct_count: number
+  total_count: number
+}
+
+export interface WikiTreeResponse {
+  folders: WikiFolder[]
+  documents: DocumentListItem[]
+}
+
+export type FolderDeleteMode = "empty" | "move_to_parent" | "cascade"
+
+export interface MoveDocumentResponse {
+  document: Document
+  old_relative_path: string
+  change_set_id: string
+  updated_link_count: number
+}
+
+export interface MoveFolderResponse {
+  from_path: string
+  to_path: string
+  moved_folders: number
+  moved_documents: number
+  moved_doc_paths: string[]
+  change_set_id: string
+  updated_link_paths: string[]
+}
+
+export interface DeleteFolderResponse {
+  path: string
+  mode: FolderDeleteMode
+  deleted_folders: number
+  moved_documents: number
+  deleted_documents: number
+  change_set_id: string
+}
+
 /** Structured reference entry from document_reference_entries (trailing
  * 相关/来源 sections extracted server-side). */
 export interface ReferenceEntry {

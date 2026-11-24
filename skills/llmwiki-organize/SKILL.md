@@ -36,9 +36,9 @@ tags: [transformer, nlp]
 
 Rules the linter enforces:
 
-- `type` must match the directory (singular type, plural directory).
-- Business pages live only in typed subdirs. `wiki/foo.md` is `misplaced_wiki_page`; only `wiki/overview.md`, `wiki/index.md` and `wiki/log.md` may sit at the top level.
-- Links use Obsidian syntax: `[[entities/transformer|Transformer]]`, `[[concepts/attention]]`, or bare `[[attention]]` when the slug is unique. Markdown links `[text](/wiki/concepts/attention.md)` work too. A link to a missing page is `dead_link`.
+- `type` must be valid (`entity`, `concept`, `source`, `synthesis`, `comparison`, `query`, `page`). Only `wiki/sources/` requires `type: source`; business pages can live in any nested topic folder under `wiki/`.
+- Business pages live inside topic subfolders (e.g. `wiki/AI-Engineering/Agent/harness.md`). `wiki/foo.md` is `misplaced_wiki_page`; only `wiki/overview.md`, `wiki/index.md` and `wiki/log.md` may sit at the top level.
+- Links use Obsidian syntax: `[[AI-Engineering/Agent/harness|Harness]]`, `[[entities/transformer|Transformer]]`, or bare `[[attention]]` when the slug is unique. Markdown links `[text](/wiki/concepts/attention.md)` work too. A link to a missing page is `dead_link`.
 - One page, one subject. If a page grows two subjects, split it and link the halves.
 
 ## Create a page
@@ -85,7 +85,7 @@ Avoid `PATCH /api/v1/documents/{id}` (`title`, `tags`, `date`, `metadata`): it u
 
 ## Move or rename
 
-There is no move endpoint. Create the destination page, repoint links, delete the old one. Reindex afterwards; skipping the link repair leaves `dead_link` errors.
+Use `POST /api/v1/documents/{id}/move` (`{"target_folder": "AI-Engineering/Agent", "filename": "new-name.md"}`) or `POST /api/v1/folders/move` (`{"from_path": "old", "to_path": "new"}`). Moves preserve `document_id`, version history, and automatically rewrite explicit path-qualified wikilinks/markdown links. Use `GET /api/v1/tree` and `POST/PATCH/DELETE /api/v1/folders` to inspect and manage the folder tree.
 
 ## Delete a page
 

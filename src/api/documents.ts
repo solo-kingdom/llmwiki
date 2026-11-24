@@ -1,6 +1,18 @@
 import path from "node:path";
 import type { Context } from "hono";
 import { record, logDocument } from "../activity/index.js";
+import { parseFrontmatter, upsertFrontmatterType } from "../engine/frontmatter.js";
+import {
+  isValidPageType,
+  resolvePageType,
+  validateWikiWritePath,
+} from "../engine/wiki_org.js";
+import { rebuildReferences } from "../ingest/dbapply.js";
+import {
+  FolderConflictError,
+  FolderNotFoundError,
+  FolderValidationError,
+} from "../store/postgres/folders.js";
 import type { Document } from "../store/types.js";
 import {
   applyPageDelete,
@@ -22,6 +34,7 @@ interface CreateDocumentRequest {
   content?: string;
   title?: string;
   tags?: string[];
+  page_type?: string;
 }
 
 interface UpdateContentRequest {
@@ -33,6 +46,12 @@ interface UpdateMetadataRequest {
   tags?: string[];
   date?: string;
   metadata?: string;
+  page_type?: string;
+}
+
+interface MoveDocumentRequest {
+  target_folder?: string;
+  filename?: string;
 }
 
 interface BulkDeleteRequest {
@@ -97,14 +116,34 @@ export function documentsApi(ctx: ApiContext) {
 
       const relPath = path.posix.join("/", req.path ?? "", req.filename).replace(/^\/+/, "");
       const sourceKind = relPath.startsWith("wiki/") ? "wiki" : "source";
+      if (sourceKind === "wiki") {
+        try {
+          validateWikiWritePath(relPath);
+        } catch (error) {
+          return writeError(c, 400, errorMessage(error));
+        }
+      }
+      if (req.page_type && !isValidPageType(req.page_type)) {
+        return writeError(c, 400, `invalid page_type: ${req.page_type}`);
+      }
       let dir = path.posix.dirname(`/${relPath}`);
       if (!dir.endsWith("/")) dir += "/";
+
+      const fm = parseFrontmatter(req.content ?? "");
+      const resolvedPageType =
+        sourceKind === "wiki"
+          ? resolvePageType(fm.type, req.page_type ?? "", relPath)
+          : "";
+      const initialContent =
+        sourceKind === "wiki" && req.page_type && !fm.type
+          ? upsertFrontmatterType(req.content ?? "", resolvedPageType)
+          : (req.content ?? "");
 
       const doc: Document = {
         id: "",
         user_id: "",
         filename: path.posix.basename(relPath),
-        title: req.title ?? "",
+        title: req.title || fm.title || "",
         path: dir,
         relative_path: relPath,
         source_kind: sourceKind,
@@ -113,18 +152,19 @@ export function documentsApi(ctx: ApiContext) {
         document_number: 0,
         status: "ready",
         page_count: 0,
-        content: req.content ?? "",
-        tags: req.tags ?? [],
-        date: "",
+        content: initialContent,
+        tags: req.tags ?? fm.tags ?? [],
+        date: fm.date || "",
         metadata: "",
         error_message: "",
         version: 0,
         parser: "",
-        content_hash: contentHash(req.content ?? ""),
+        content_hash: contentHash(initialContent),
         stale_since: "",
         highlights: "[]",
         created_at: "",
         updated_at: "",
+        page_type: resolvedPageType,
       };
 
       try {
@@ -151,6 +191,12 @@ export function documentsApi(ctx: ApiContext) {
         if (!doc) return writeError(c, 404, "document not found");
         doc.content = req.content ?? "";
         doc.content_hash = contentHash(doc.content);
+        if (doc.source_kind === "wiki") {
+          const fm = parseFrontmatter(doc.content);
+          if (fm.type) {
+            doc.page_type = resolvePageType(fm.type, doc.page_type ?? "", doc.relative_path);
+          }
+        }
         await withPageLock(ctx, doc.relative_path, () =>
           applyPageWrite(ctx, "manual", "update page content", doc, "update"),
         );
@@ -171,6 +217,16 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const existing = await ctx.db.getDocument(id);
         if (!existing) return writeError(c, 404, "document not found");
+        if (req.page_type !== undefined) {
+          if (!isValidPageType(req.page_type)) {
+            return writeError(c, 400, `invalid page_type: ${req.page_type}`);
+          }
+          const cleanType = req.page_type.trim().toLowerCase();
+          existing.page_type = cleanType;
+          if (existing.source_kind === "wiki") {
+            existing.content = upsertFrontmatterType(existing.content ?? "", cleanType);
+          }
+        }
         existing.title = req.title || existing.title;
         existing.tags = req.tags ?? existing.tags;
         existing.date = req.date || existing.date;
@@ -180,6 +236,37 @@ export function documentsApi(ctx: ApiContext) {
         logDocument(ctx.db, "updated", id, existing.relative_path, "api");
         return writeJson(c, 200, doc);
       } catch (error) {
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
+    async moveDocument(c: Context): Promise<Response> {
+      const id = getID(c);
+      if (!id) return writeError(c, 400, "missing document id");
+      const req = await readJsonBody<MoveDocumentRequest>(c);
+      if (!req || !req.target_folder) {
+        return writeError(c, 400, "target_folder is required");
+      }
+      try {
+        const result = await ctx.db.moveDocument(id, req.target_folder, req.filename, "api");
+        const toRebuild = [
+          result.document.relative_path,
+          ...result.updated_link_paths,
+        ].filter(Boolean);
+        if (toRebuild.length > 0) {
+          await rebuildReferences(ctx.db, [...new Set(toRebuild)]).catch(() => undefined);
+        }
+        logDocument(ctx.db, "moved", id, result.document.relative_path, "api");
+        return writeJson(c, 200, {
+          document: result.document,
+          old_relative_path: result.old_relative_path,
+          change_set_id: result.change_set_id,
+          updated_link_count: result.updated_link_paths.length,
+        });
+      } catch (error) {
+        if (error instanceof FolderValidationError) return writeError(c, 400, error.message);
+        if (error instanceof FolderNotFoundError) return writeError(c, 404, error.message);
+        if (error instanceof FolderConflictError) return writeError(c, 409, error.message);
         return writeError(c, 500, errorMessage(error));
       }
     },

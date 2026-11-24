@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTextIngestJob, getDocument, listDocuments, searchDocuments } from "./api";
+import {
+  createFolder,
+  createTextIngestJob,
+  deleteFolder,
+  getDocument,
+  getWikiTree,
+  listDocuments,
+  moveDocument,
+  moveFolder,
+  searchDocuments,
+} from "./api";
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   const fetchMock = vi.fn(async () => ({
@@ -51,5 +61,23 @@ describe("api client", () => {
   it("surfaces server error messages", async () => {
     mockFetch({ error: "document not found" }, false, 404);
     await expect(getDocument("missing")).rejects.toThrow("document not found");
+  });
+
+  it("calls tree, folder CRUD, and document move endpoints", async () => {
+    const fetchMock = mockFetch({ folders: [], documents: [] });
+    await getWikiTree({ exclude_hidden: true, types: ["concept"] });
+    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe("/api/v1/tree?types=concept");
+
+    await createFolder({ path: "AI工程/Agent", display_name: "Agent" });
+    expect((fetchMock.mock.calls[1] as unknown as [string])[0]).toBe("/api/v1/folders");
+
+    await moveFolder({ from_path: "a", to_path: "b" });
+    expect((fetchMock.mock.calls[2] as unknown as [string])[0]).toBe("/api/v1/folders/move");
+
+    await deleteFolder({ path: "a", mode: "empty" });
+    expect((fetchMock.mock.calls[3] as unknown as [string])[0]).toBe("/api/v1/folders?path=a&mode=empty");
+
+    await moveDocument("doc-1", { target_folder: "b" });
+    expect((fetchMock.mock.calls[4] as unknown as [string])[0]).toBe("/api/v1/documents/doc-1/move");
   });
 });

@@ -52,8 +52,10 @@ raw/sources/…         原始材料（上传、抓取），agent 只读
 wiki/overview.md      顶层概览页
 wiki/index.md         reindex 生成的目录，永远不要手写
 wiki/log.md           追加式日志：`## [YYYY-MM-DD] action | description`
-wiki/entities/ concepts/ synthesis/ comparisons/ queries/ sources/
-.llmwiki/index.db     派生索引（搜索/图谱/lint），可重建，不要编辑
+wiki/<主题>/…          多级主题目录（页面类型由 frontmatter \`type:\` 标注：entity|concept|synthesis|comparison|query|page）
+wiki/sources/         源摘要页（默认在列表/搜索/图谱中隐藏）
+wiki/templates/       系统模板目录
+PostgreSQL            页面、目录树、版本、搜索、图谱、lint — 唯一真源
 ```
 
 - **文件是真相，索引是派生。** 写操作走 API 让它自己重建索引；绕过服务端改的文件，必须先 `POST /api/v1/reindex`，否则搜索、图谱、lint 都看不见。

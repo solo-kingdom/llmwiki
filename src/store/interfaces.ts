@@ -4,7 +4,9 @@ import type {
   ChangeSet,
   Chunk,
   ChunkEmbedding,
+  DeleteFolderResult,
   Document,
+  FolderDeleteMode,
   GraphData,
   GraphEdge,
   IngestJob,
@@ -17,6 +19,8 @@ import type {
   IngestSessionReference,
   ListDocumentsFilter,
   ModelInfo,
+  MoveDocumentResult,
+  MoveFolderResult,
   PageRevision,
   PageWrite,
   ProviderInfo,
@@ -30,6 +34,8 @@ import type {
   SourceBlob,
   StalePage,
   UncitedSource,
+  WikiFolder,
+  WikiFolderWithCounts,
   Workspace,
 } from "./types.js";
 
@@ -249,8 +255,38 @@ export interface WorkspaceStore {
   upsertWorkspace(ws: Workspace): Promise<void>;
 }
 
+export interface FolderStore {
+  listFolders(excludeHidden?: boolean): Promise<WikiFolderWithCounts[]>;
+  getFolder(folderPath: string): Promise<WikiFolder | null>;
+  ensureFolders(folderPaths: string[]): Promise<void>;
+  createFolder(input: {
+    path: string;
+    display_name?: string;
+    description?: string;
+    sort_order?: number;
+  }): Promise<WikiFolder>;
+  updateFolder(
+    folderPath: string,
+    patch: { display_name?: string; description?: string; sort_order?: number },
+  ): Promise<WikiFolder | null>;
+  moveFolder(fromPath: string, toPath: string, actor?: string): Promise<MoveFolderResult>;
+  deleteFolder(
+    folderPath: string,
+    mode: FolderDeleteMode,
+    targetFolder?: string,
+    actor?: string,
+  ): Promise<DeleteFolderResult>;
+  moveDocument(
+    docId: string,
+    targetFolder: string,
+    newFilename?: string,
+    actor?: string,
+  ): Promise<MoveDocumentResult>;
+}
+
 export interface Store
   extends DocumentStore,
+    FolderStore,
     IndexStore,
     RevisionStore,
     SourceStore,

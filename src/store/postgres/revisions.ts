@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Pool, PoolClient } from "pg";
+import { folderPathFromWikiRelPath, resolvePageType } from "../../engine/wiki_org.js";
 import type { RevisionStore } from "../interfaces.js";
 import type { ChangeSet, Chunk, Document, PageRevision, PageWrite, RefEdge, RevisionOperation } from "../types.js";
+import { ensureFolderAncestorsTx, releaseSoftDeletedPath } from "./folders.js";
 import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
 const REVISION_COLUMNS = `
@@ -23,7 +25,8 @@ const REVISION_DOCUMENT_COLUMNS = `
   COALESCE(tags, '[]'), COALESCE(date, ''), COALESCE(metadata, ''),
   COALESCE(error_message, ''), COALESCE(version, 0), COALESCE(parser, ''),
   COALESCE(content_hash, ''), COALESCE(stale_since, ''), COALESCE(highlights, '[]'),
-  COALESCE(created_at, ''), COALESCE(updated_at, ''), COALESCE(deleted_at, '')`;
+  COALESCE(created_at, ''), COALESCE(updated_at, ''), COALESCE(deleted_at, ''),
+  COALESCE(page_type, '')`;
 
 function scanRevision(row: unknown[]): PageRevision {
   return {
@@ -98,6 +101,7 @@ function scanRevisionDocument(row: unknown[]): Document {
     created_at: asString(row[22]),
     updated_at: asString(row[23]),
     deleted_at: asString(row[24]),
+    page_type: asString(row[25]),
   };
 }
 
@@ -284,8 +288,13 @@ async function applyPageWrite(
   if (!doc.filename) doc.filename = path.posix.basename(relPath);
   if (!doc.user_id) doc.user_id = "default";
   if (!doc.status) doc.status = "ready";
+  doc.page_type =
+    doc.source_kind === "wiki"
+      ? resolvePageType("", doc.page_type ?? "", relPath)
+      : (doc.page_type ?? "");
 
   if (!existing) {
+    await releaseSoftDeletedPath(client, relPath);
     if (!doc.id) doc.id = randomUUID();
     if (!doc.document_number) {
       const row = await queryOne<[number]>(
@@ -298,8 +307,8 @@ async function applyPageWrite(
       `INSERT INTO documents (id, user_id, filename, title, path, relative_path, source_kind,
         file_type, file_size, document_number, status, page_count, content, tags, date,
         metadata, error_message, version, parser, content_hash, stale_since, highlights,
-        deleted_at, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,'',${NOW_TEXT},${NOW_TEXT})`,
+        page_type, deleted_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,'',${NOW_TEXT},${NOW_TEXT})`,
       [
         doc.id,
         doc.user_id,
@@ -323,17 +332,21 @@ async function applyPageWrite(
         doc.content_hash,
         doc.stale_since,
         doc.highlights,
+        doc.page_type,
       ],
     );
   } else {
     doc.id = existing.id;
     if (!doc.document_number) doc.document_number = existing.document_number;
+    if (existing.relative_path !== relPath) {
+      await releaseSoftDeletedPath(client, relPath);
+    }
     await client.query(
       `UPDATE documents SET user_id=$2, filename=$3, title=$4, path=$5, relative_path=$6,
         source_kind=$7, file_type=$8, file_size=$9, document_number=$10, status=$11,
         page_count=$12, content=$13, tags=$14, date=$15, metadata=$16, error_message=$17,
         version=$18, parser=$19, content_hash=$20, stale_since=$21, highlights=$22,
-        deleted_at='', updated_at=(${NOW_TEXT})
+        page_type=$23, deleted_at='', updated_at=(${NOW_TEXT})
        WHERE id=$1`,
       [
         doc.id,
@@ -358,9 +371,15 @@ async function applyPageWrite(
         doc.content_hash,
         doc.stale_since,
         doc.highlights,
+        doc.page_type,
       ],
     );
     doc.version = existing.version + 1;
+  }
+
+  if (doc.source_kind === "wiki") {
+    const folder = folderPathFromWikiRelPath(relPath);
+    if (folder) await ensureFolderAncestorsTx(client, folder);
   }
 
   const operation: RevisionOperation =
@@ -446,13 +465,33 @@ export function revisionsRepo(pool: Pool): RevisionStore {
       ]);
     },
 
-    async listPageRevisions(relativePath: string, limit: number): Promise<PageRevision[]> {
+    async listPageRevisions(relativePathOrDocId: string, limit: number): Promise<PageRevision[]> {
       const effectiveLimit = limit <= 0 ? 100 : limit;
-      return queryRevisions(
+      const docRow = await queryOne<[string]>(
         pool,
-        "WHERE r.relative_path=$1 ORDER BY r.revision_no DESC LIMIT $2",
-        [relativePath, effectiveLimit],
+        `SELECT id FROM documents WHERE id = $1 OR relative_path = $1 LIMIT 1`,
+        [relativePathOrDocId],
       );
+      if (docRow) {
+        return queryRevisions(
+          pool,
+          "WHERE r.document_id=$1 ORDER BY r.revision_no DESC LIMIT $2",
+          [asString(docRow[0]), effectiveLimit],
+        );
+      }
+      const revRow = await queryOne<[string]>(
+        pool,
+        `SELECT document_id FROM page_revisions WHERE relative_path=$1 ORDER BY revision_no DESC LIMIT 1`,
+        [relativePathOrDocId],
+      );
+      if (revRow) {
+        return queryRevisions(
+          pool,
+          "WHERE r.document_id=$1 ORDER BY r.revision_no DESC LIMIT $2",
+          [asString(revRow[0]), effectiveLimit],
+        );
+      }
+      return [];
     },
 
     async latestRevision(documentID: string): Promise<PageRevision | null> {
@@ -525,21 +564,24 @@ export function revisionsRepo(pool: Pool): RevisionStore {
               `SELECT ${REVISION_COLUMNS} FROM page_revisions r WHERE r.id=$1`,
               [revision.parent_revision_id],
             );
-            write = parentRow
-              ? {
-                  relative_path: revision.relative_path,
-                  document: documentFromRevision(scanRevision(parentRow)),
-                  operation: "restore",
-                  chunks: [],
-                  refs: [],
-                }
-              : {
-                  relative_path: revision.relative_path,
-                  document: null,
-                  operation: "delete",
-                  chunks: [],
-                  refs: [],
-                };
+            if (parentRow) {
+              const parentRev = scanRevision(parentRow);
+              write = {
+                relative_path: parentRev.relative_path,
+                document: documentFromRevision(parentRev),
+                operation: "restore",
+                chunks: [],
+                refs: [],
+              };
+            } else {
+              write = {
+                relative_path: revision.relative_path,
+                document: null,
+                operation: "delete",
+                chunks: [],
+                refs: [],
+              };
+            }
           }
           await applyPageWrite(client, newChangeSet.id, newChangeSet.kind, write);
           newChangeSet.page_count += 1;

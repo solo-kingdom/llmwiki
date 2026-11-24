@@ -17,6 +17,8 @@ function pathFilterClause(pathFilter: string): string {
 }
 
 function scanSearchChunk(row: unknown[]): SearchChunk {
+  const pathVal = asString(row[7]);
+  const storedPageType = asString(row[10]);
   return {
     document_id: asString(row[0]),
     content: asString(row[1]),
@@ -25,9 +27,10 @@ function scanSearchChunk(row: unknown[]): SearchChunk {
     chunk_index: asNumber(row[4]),
     filename: asString(row[5]),
     title: asString(row[6]),
-    path: asString(row[7]),
+    path: pathVal,
     file_type: asString(row[8]),
     score: Number(row[9] ?? 0),
+    page_type: storedPageType || wikiPageTypeFromPaths("", pathVal.replace(/^\/+/, "")),
   };
 }
 
@@ -48,7 +51,9 @@ function mergeSearchResults(primary: SearchChunk[], extra: SearchChunk[], limit:
 function filterByPageType(results: SearchChunk[], pageTypes: string[]): SearchChunk[] {
   if (pageTypes.length === 0) return results;
   const allowed = new Set(pageTypes);
-  return results.filter((item) => allowed.has(wikiPageTypeFromPaths("", item.path.replace(/^\/+/, ""))));
+  return results.filter((item) =>
+    allowed.has(item.page_type || wikiPageTypeFromPaths("", item.path.replace(/^\/+/, ""))),
+  );
 }
 
 export function chunksRepo(
@@ -62,7 +67,8 @@ export function chunksRepo(
       SELECT d.id, dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
         d.filename, d.title, d.path, d.file_type,
         (ts_rank_cd(to_tsvector('simple', dc.content), websearch_to_tsquery('simple', $1))
-         + similarity(dc.content, $1)) AS score
+         + similarity(dc.content, $1)) AS score,
+        COALESCE(d.page_type, '')
       FROM document_chunks dc
       JOIN documents d ON dc.document_id = d.id
       WHERE d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
@@ -77,7 +83,8 @@ export function chunksRepo(
   async function searchLIKE(query: string, limit: number, pathFilter: string) {
     let sql = `
       SELECT d.id, dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
-        d.filename, d.title, d.path, d.file_type, 0.0 AS score
+        d.filename, d.title, d.path, d.file_type, 0.0 AS score,
+        COALESCE(d.page_type, '')
       FROM document_chunks dc
       JOIN documents d ON dc.document_id = d.id
       WHERE dc.content ILIKE '%' || $1 || '%' AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = '' `;
@@ -90,7 +97,8 @@ export function chunksRepo(
   async function searchMetadata(query: string, limit: number, pathFilter: string) {
     let sql = `
       SELECT d.id, COALESCE(SUBSTR(d.content, 1, 300), ''), 0, '', 0,
-        d.filename, d.title, d.path, d.file_type, 0.0 AS score
+        d.filename, d.title, d.path, d.file_type, 0.0 AS score,
+        COALESCE(d.page_type, '')
       FROM documents d
       WHERE d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
         AND (d.filename ILIKE '%' || $1 || '%'
@@ -318,7 +326,8 @@ export function chunksRepo(
       let sql = `
         SELECT d.id, dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
           d.filename, d.title, d.path, d.file_type,
-          (1 - (ce.embedding <=> $1::vector)) AS score
+          (1 - (ce.embedding <=> $1::vector)) AS score,
+          COALESCE(d.page_type, '')
         FROM chunk_embeddings ce
         JOIN document_chunks dc ON dc.id = ce.chunk_id
         JOIN documents d ON dc.document_id = d.id

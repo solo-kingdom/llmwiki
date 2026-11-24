@@ -359,6 +359,74 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_ref_entries_target ON document_reference_entries(target_document_id)`,
     ],
   },
+  {
+    version: 4,
+    statements: [
+      `ALTER TABLE documents ADD COLUMN IF NOT EXISTS page_type TEXT NOT NULL DEFAULT ''`,
+      `CREATE INDEX IF NOT EXISTS idx_documents_page_type ON documents(page_type)`,
+      `WITH fm AS (
+         SELECT id,
+           lower(COALESCE(
+             substring(
+               substring(content FROM '\\A---[ \\t]*\\r?\\n(.*?)\\r?\\n---[ \\t]*(?:\\r?\\n|$)')
+               FROM '(?n)^type:[ \\t]*([a-zA-Z]+)[ \\t]*\\r?$'
+             ),
+             ''
+           )) AS fm_type
+         FROM documents
+         WHERE page_type = ''
+       )
+       UPDATE documents d
+       SET page_type = CASE
+         WHEN d.source_kind != 'wiki' THEN ''
+         WHEN d.relative_path LIKE 'wiki/templates/%' THEN 'template'
+         WHEN d.relative_path LIKE 'wiki/sources/%' THEN 'source'
+         WHEN fm.fm_type IN ('entity','concept','source','synthesis','comparison','query','page') THEN fm.fm_type
+         WHEN d.relative_path LIKE 'wiki/entities/%' THEN 'entity'
+         WHEN d.relative_path LIKE 'wiki/concepts/%' THEN 'concept'
+         WHEN d.relative_path LIKE 'wiki/synthesis/%' THEN 'synthesis'
+         WHEN d.relative_path LIKE 'wiki/comparisons/%' THEN 'comparison'
+         WHEN d.relative_path LIKE 'wiki/queries/%' THEN 'query'
+         ELSE 'page'
+       END
+       FROM fm
+       WHERE d.id = fm.id`,
+      `CREATE TABLE IF NOT EXISTS wiki_folders (
+        path TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (${nowText}),
+        updated_at TEXT NOT NULL DEFAULT (${nowText})
+      )`,
+      `WITH RECURSIVE doc_folders AS (
+        SELECT DISTINCT regexp_replace(
+          regexp_replace(relative_path, '^wiki/', ''),
+          '/[^/]+$',
+          ''
+        ) AS folder_path
+        FROM documents
+        WHERE source_kind = 'wiki'
+          AND COALESCE(deleted_at, '') = ''
+          AND relative_path LIKE 'wiki/%/%'
+          AND relative_path NOT LIKE 'wiki/templates/%'
+          AND relative_path NOT LIKE 'wiki/sources/%'
+      ),
+      ancestors AS (
+        SELECT folder_path FROM doc_folders WHERE folder_path != ''
+        UNION
+        SELECT regexp_replace(folder_path, '/[^/]+$', '')
+        FROM ancestors
+        WHERE folder_path LIKE '%/%'
+      )
+      INSERT INTO wiki_folders (path)
+      SELECT DISTINCT folder_path FROM ancestors WHERE folder_path != ''
+      ON CONFLICT (path) DO NOTHING`,
+      `ALTER TABLE page_revisions DROP CONSTRAINT IF EXISTS page_revisions_operation_check`,
+      `ALTER TABLE page_revisions ADD CONSTRAINT page_revisions_operation_check
+        CHECK (operation IN ('create','update','delete','restore','move'))`,
+    ],
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

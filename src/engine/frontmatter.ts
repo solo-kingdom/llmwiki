@@ -5,7 +5,7 @@ import {
   LINT_SEVERITY_ERROR,
   type LintIssue,
 } from "./lint_types.js";
-import { WIKI_SUBDIR_PAGE_TYPES } from "./wiki_org.js";
+import { isValidPageType } from "./wiki_org.js";
 
 export interface Frontmatter {
   title: string;
@@ -47,14 +47,22 @@ export function validateFrontmatter(
     return issues;
   }
 
-  const expected = WIKI_SUBDIR_PAGE_TYPES[subdir];
-  if (!expected) return issues;
-  if (frontmatter.type !== expected) {
+  if (!isValidPageType(frontmatter.type)) {
     issues.push({
       severity: LINT_SEVERITY_ERROR,
       code: LINT_CODE_TYPE_DIR_MISMATCH,
       path: relPath,
-      message: `type 与目录不匹配：目录 ${subdir}/ 应为 type: ${expected}，实际为 ${frontmatter.type}`,
+      message: `无效的页面 type "${frontmatter.type}"，应为 entity / concept / source / synthesis / comparison / query / page`,
+    });
+    return issues;
+  }
+
+  if (subdir === "sources" && frontmatter.type.trim().toLowerCase() !== "source") {
+    issues.push({
+      severity: LINT_SEVERITY_ERROR,
+      code: LINT_CODE_TYPE_DIR_MISMATCH,
+      path: relPath,
+      message: `type 与目录不匹配：目录 sources/ 应为 type: source，实际为 ${frontmatter.type}`,
     });
   }
   return issues;
@@ -93,6 +101,35 @@ function normalizeFrontmatterDate(value: unknown): string {
 
 function emptyFrontmatter(): Frontmatter {
   return { title: "", description: "", date: "", type: "", tags: [] };
+}
+
+/** Insert or replace `type: <newType>` inside YAML frontmatter; adds minimal frontmatter if absent. */
+export function upsertFrontmatterType(content: string, newType: string): string {
+  const cleanType = newType.trim().toLowerCase();
+  if (!cleanType) return content;
+  const match = FRONTMATTER_RE.exec(content);
+  if (!match) {
+    return `---\ntype: ${cleanType}\n---\n\n${content.replace(/^\n+/, "")}`;
+  }
+  const block = match[1] ?? "";
+  const rest = content.slice(match[0].length);
+  const lines = block.split("\n");
+  let replaced = false;
+  const nextLines = lines.map((line) => {
+    if (/^type\s*:/.test(line)) {
+      replaced = true;
+      return `type: ${cleanType}`;
+    }
+    return line;
+  });
+  if (!replaced) {
+    // insert right before trailing empty line from split
+    const insertAt = nextLines.length > 0 && nextLines[nextLines.length - 1] === ""
+      ? nextLines.length - 1
+      : nextLines.length;
+    nextLines.splice(insertAt, 0, `type: ${cleanType}`);
+  }
+  return `---\n${nextLines.join("\n")}---\n${rest}`;
 }
 
 export function getTagsString(frontmatter: Frontmatter): string {

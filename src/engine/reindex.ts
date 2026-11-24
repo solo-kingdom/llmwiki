@@ -7,6 +7,7 @@ import { IndexBuilder, INDEX_REL_PATH } from "./index_builder.js";
 import { docRelativePath } from "./lint.js";
 import { ReferenceParser } from "./references.js";
 import type { ChunkData, DocData, EngineStore } from "./store_iface.js";
+import { folderPathFromWikiRelPath, resolvePageType } from "./wiki_org.js";
 
 const IGNORE_DIRS = new Set([".llmwiki", ".git", "node_modules", "__pycache__", ".venv", "venv"]);
 const TEXT_TYPES = new Set(["md", "txt", "csv", "html", "svg", "json", "xml"]);
@@ -21,13 +22,25 @@ export class Reindexer {
     const files: string[] = [];
     await walkFiles(this.workspace, files);
 
+    const folderSet = new Set<string>();
     let indexed = 0;
     for (const relPath of files) {
       try {
         await this.indexFile(userID, relPath, path.join(this.workspace, relPath));
         indexed += 1;
+        if (relPath.startsWith("wiki/")) {
+          const folder = folderPathFromWikiRelPath(relPath);
+          if (folder) folderSet.add(folder);
+        }
       } catch (error) {
         console.warn(`Warning: failed to index ${relPath}: ${errorMessage(error)}`);
+      }
+    }
+    if (folderSet.size > 0 && this.store.ensureFolders) {
+      try {
+        await this.store.ensureFolders([...folderSet]);
+      } catch (error) {
+        console.warn(`Warning: failed to ensure wiki folders: ${errorMessage(error)}`);
       }
     }
 
@@ -93,12 +106,14 @@ export class Reindexer {
     let tags: string[] = [];
     let date = "";
     let metadata = "";
+    let pageType = "";
     if (sourceKind === "wiki" && ext === "md") {
       const frontmatter = parseFrontmatter(content);
       tags = frontmatter.tags;
       date = frontmatter.date;
       metadata = getMetadataJSON(frontmatter);
       if (frontmatter.title) title = frontmatter.title;
+      pageType = resolvePageType(frontmatter.type, "", relPath);
     }
 
     const doc: DocData = {
@@ -115,6 +130,7 @@ export class Reindexer {
       date,
       metadata,
       contentHash,
+      pageType,
     };
 
     const existing = await this.store.getDocumentByPath(filename, dir);

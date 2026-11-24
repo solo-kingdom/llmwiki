@@ -113,12 +113,14 @@ export function historyApi(ctx: ApiContext) {
     },
 
     async pageHistory(c: Context): Promise<Response> {
+      const docId = (c.req.query("document_id") ?? "").trim();
       const rel = (c.req.query("path") ?? "").trim().replace(/^\/+/, "");
-      if (!rel) return writeError(c, 400, "query parameter 'path' is required");
+      const key = docId || rel;
+      if (!key) return writeError(c, 400, "query parameter 'path' or 'document_id' is required");
       const limit = parseQueryInt(c, "limit", 100);
       try {
-        const revisions = await ctx.db.listPageRevisions(rel, limit);
-        return writeJson(c, 200, { path: rel, revisions });
+        const revisions = await ctx.db.listPageRevisions(key, limit);
+        return writeJson(c, 200, { path: rel || key, revisions });
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }

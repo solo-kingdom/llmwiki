@@ -46,4 +46,16 @@ describe("frontmatter", () => {
     expect(titleFromFilename("wiki_org.md")).toBe("Wiki Org");
     expect(titleFromFilename("README")).toBe("README");
   });
+
+  it("validates frontmatter type without locking to directory name (except sources/)", async () => {
+    const { validateFrontmatter, upsertFrontmatterType } = await import("./frontmatter.js");
+    const fm = { title: "Harness", description: "", date: "2026-11-24", type: "concept", tags: [] };
+    expect(validateFrontmatter("wiki/AI工程/Agent/harness.md", fm, "AI工程")).toEqual([]);
+    expect(validateFrontmatter("wiki/sources/src.md", fm, "sources")).toHaveLength(1);
+
+    const updated = upsertFrontmatterType("---\ntitle: A\ntype: page\n---\n\nBody", "concept");
+    expect(updated).toContain("type: concept");
+    const added = upsertFrontmatterType("# Title\n\nBody", "entity");
+    expect(added.startsWith("---\ntype: entity\n---\n")).toBe(true);
+  });
 });

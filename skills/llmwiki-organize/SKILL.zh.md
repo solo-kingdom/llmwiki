@@ -37,9 +37,9 @@ tags: [transformer, nlp]
 
 Lint 会强制检查的规则：
 
-- `type` 必须与目录一致（type 单数、目录复数）。
-- 业务页只能放在类型子目录里。`wiki/foo.md` 会报 `misplaced_wiki_page`；顶层只允许 `wiki/overview.md`、`wiki/index.md`、`wiki/log.md`。
-- 链接用 Obsidian 语法：`[[entities/transformer|Transformer]]`、`[[concepts/attention]]`，slug 唯一时可写 `[[attention]]`；markdown 链接 `[文本](/wiki/concepts/attention.md)` 也认。指向不存在页面的链接是 `dead_link`。
+- `type` 必须是合法枚举值（`entity` / `concept` / `source` / `synthesis` / `comparison` / `query` / `page`）；仅 `wiki/sources/` 强制 `type: source`，其余业务页可放在任意主题多级目录。
+- 业务页只能放在主题子目录里（如 `wiki/AI工程/Agent/harness.md`）。`wiki/foo.md` 会报 `misplaced_wiki_page`；顶层只允许 `wiki/overview.md`、`wiki/index.md`、`wiki/log.md`。
+- 链接用 Obsidian 语法：`[[AI工程/Agent/harness|Harness]]`、`[[entities/transformer|Transformer]]`，slug 唯一时可写 `[[attention]]`；markdown 链接 `[文本](/wiki/concepts/attention.md)` 也认。指向不存在页面的链接是 `dead_link`。
 - 一页一个主题。页面里长出第二个主题时拆开并互相链接。
 
 ## 新建页面
@@ -86,7 +86,7 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/documents/{id}/content" \
 
 ## 移动/改名
 
-没有 move 接口：在目标位置新建页面、改好链接、删掉旧页。之后必须 reindex；漏改链接就会留下 `dead_link`。
+使用 `POST /api/v1/documents/{id}/move`（`{"target_folder": "AI工程/Agent", "filename": "new-name.md"}`）或 `POST /api/v1/folders/move`（`{"from_path": "旧目录", "to_path": "新目录"}`）。移动会保留 `document_id` 与历史链，并自动重写显式路径链接。可通过 `GET /api/v1/tree` 与 `POST/PATCH/DELETE /api/v1/folders` 管理目录树。
 
 ## 删除页面
 

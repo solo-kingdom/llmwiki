@@ -21,8 +21,8 @@
 | `/logs` | log-viewer | |
 | `/settings` | settings | 重定向到 `/settings/models` |
 | `/settings/:section` | settings | 5 分区：模型 / 摄入与检索 / 访问控制 / 外部集成 / 规则文件；SectionLayout 导航 + 42rem 居中窄列 |
-| `/wiki` | tree-nav | 左树：概念 / 实体 / 其他；默认仅当前页祖先展开；定位/展折控件 |
-| `/wiki/:id` | reader | 单页头 + 正文（无卡片、不限宽）+ 右目录（滚动跟踪、可隐藏并持久化）；元信息/引用/历史进页头弹窗 |
+| `/wiki` | tree-nav | 左树：按主题自由建多级目录 + `page_type` 筛选；默认仅当前页祖先展开；支持增删改移、拖拽与定位展折 |
+| `/wiki/:id` | reader | 单页头（真实目录面包屑）+ 正文（无卡片、不限宽）+ 右目录（滚动跟踪、可隐藏并持久化）；元信息（含 `page_type` 切换与移动）/引用/历史进页头弹窗 |
 | `/wiki/graph` | canvas | 无卡片全宽；节点 hover 浮层；选中详情进页头弹窗 |
 | `/help` | page | 章节目录用 NavList |
 

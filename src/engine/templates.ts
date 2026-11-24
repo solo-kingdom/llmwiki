@@ -155,28 +155,34 @@ tags: []
 
 export function templateGuidanceForGeneration(docLang: string): string {
   if (docLang === "en") {
-    return `Page types, required sections, and allowed directories:
-- entity → wiki/entities/: Overview, Key Facts, Related Concepts, Sources
-- concept → wiki/concepts/: Definition, Key Points, Related Entities, Sources
-- source → wiki/sources/: Summary, Key Points, Related Entities/Concepts
-- synthesis → wiki/synthesis/: Question/Purpose, Analysis, References, Next Steps
-- comparison → wiki/comparisons/: Comparison Dimensions, Similarities and Differences, Conclusion
-- query → wiki/queries/: Question, Answer, References
+    return `Page types (frontmatter \`type:\`) and required sections:
+- entity: Overview, Key Facts, Related Concepts, Sources
+- concept: Definition, Key Points, Related Entities, Sources
+- source (must be under wiki/sources/): Summary, Key Points, Related Entities/Concepts
+- synthesis: Question/Purpose, Analysis, References, Next Steps
+- comparison: Comparison Dimensions, Similarities and Differences, Conclusion
+- query: Question, Answer, References
 
-Trailing reference sections (Related Entities/Concepts, Sources, References) are extracted into structured reference data on ingest and stripped from stored content — still generate them per template, as bullet lists of [[wikilinks]] with optional "— annotation" notes.
+Directory placement:
+- Business pages (entity/concept/synthesis/comparison/query) are organized by knowledge topic into nested folders under wiki/ (e.g. wiki/AI工程/Agent/harness.md). Prefer reusing existing folders; create shallow new topic folders (2-3 levels max) only when needed.
+- Source summaries MUST be written under wiki/sources/.
+- Trailing reference sections (Related Entities/Concepts, Sources, References) are extracted into structured reference data on ingest and stripped from stored content — still generate them per template, as bullet lists of [[wikilinks]] with optional "— annotation" notes.
 
 Business pages MUST NOT be written as top-level wiki/*.md files. Only wiki/overview.md, wiki/index.md, and wiki/log.md may live at the wiki root.
 Use the corresponding template file under wiki/templates/ as the structural reference.`;
   }
-  return `页面类型、必需章节与允许目录：
-- entity → wiki/entities/：概述、关键事实、相关概念、来源
-- concept → wiki/concepts/：定义、核心要点、相关实体、来源
-- source → wiki/sources/：摘要、关键观点、相关实体/概念
-- synthesis → wiki/synthesis/：问题/目的、分析、引用、后续
-- comparison → wiki/comparisons/：对比维度、异同、结论
-- query → wiki/queries/：问题、回答、引用
+  return `页面类型（frontmatter \`type:\`）与必需章节：
+- entity：概述、关键事实、相关概念、来源
+- concept：定义、核心要点、相关实体、来源
+- source（必须放在 wiki/sources/）：摘要、关键观点、相关实体/概念
+- synthesis：问题/目的、分析、引用、后续
+- comparison：对比维度、异同、结论
+- query：问题、回答、引用
 
-尾部引用章节（相关实体/概念、来源、引用）会在入库时提取为结构化引用数据并从正文中剥离——仍按模板生成，写成 [[wikilink]] bullet 列表，可带「— 说明」标注。
+目录放置规范：
+- 业务知识页（entity/concept/synthesis/comparison/query）按知识主题组织在 wiki/ 下的多级目录中（如 wiki/AI工程/Agent/harness.md）；优先复用已有匹配目录，仅在无合适目录时新建浅层主题目录（建议 2–3 层）。
+- 源摘要页必须写入 wiki/sources/。
+- 尾部引用章节（相关实体/概念、来源、引用）会在入库时提取为结构化引用数据并从正文中剥离——仍按模板生成，写成 [[wikilink]] bullet 列表，可带「— 说明」标注。
 
 业务知识页不得写入 wiki/ 顶层（仅允许 wiki/overview.md、wiki/index.md、wiki/log.md）。
 参考 wiki/templates/ 下对应模板文件结构。`;

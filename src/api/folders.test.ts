@@ -1,0 +1,219 @@
+import { describe, expect, it, vi } from "vitest";
+import { createApp } from "../server/app.js";
+import {
+  FolderConflictError,
+  FolderNotFoundError,
+  FolderValidationError,
+} from "../store/postgres/folders.js";
+import type { Store } from "../store/interfaces.js";
+
+function makeMockStore(overrides: Partial<Store> = {}): Store {
+  return {
+    getConfig: vi.fn().mockResolvedValue(""),
+    countActivityLogs: vi.fn().mockResolvedValue(0),
+    createActivityLog: vi.fn().mockResolvedValue(undefined),
+    listFolders: vi.fn().mockResolvedValue([
+      {
+        path: "AI工程",
+        display_name: "AI 工程",
+        description: "AI 工程实践",
+        sort_order: 1,
+        created_at: "2026-11-24",
+        updated_at: "2026-11-24",
+        direct_count: 1,
+        total_count: 1,
+      },
+    ]),
+    listDocumentsFiltered: vi.fn().mockResolvedValue([
+      {
+        id: "doc-1",
+        filename: "harness.md",
+        title: "Harness",
+        path: "/wiki/AI工程/",
+        relative_path: "wiki/AI工程/harness.md",
+        source_kind: "wiki",
+        page_type: "concept",
+        file_type: "md",
+        page_count: 0,
+        updated_at: "2026-11-24",
+      },
+    ]),
+    listDocuments: vi.fn().mockResolvedValue([]),
+    listReferenceEntries: vi.fn().mockResolvedValue([]),
+    createFolder: vi.fn().mockResolvedValue({
+      path: "AI工程/Agent",
+      display_name: "Agent",
+      description: "",
+      sort_order: 0,
+      created_at: "2026-11-24",
+      updated_at: "2026-11-24",
+    }),
+    updateFolder: vi.fn().mockResolvedValue({
+      path: "AI工程",
+      display_name: "AI Engineering",
+      description: "updated",
+      sort_order: 2,
+      created_at: "2026-11-24",
+      updated_at: "2026-11-24",
+    }),
+    moveFolder: vi.fn().mockResolvedValue({
+      from_path: "AI工程/Agent",
+      to_path: "工程/Agent",
+      moved_folders: 1,
+      moved_documents: 1,
+      moved_doc_paths: ["wiki/工程/Agent/harness.md"],
+      change_set_id: "cs-1",
+      updated_link_paths: [],
+    }),
+    deleteFolder: vi.fn().mockResolvedValue({
+      path: "AI工程/Agent",
+      mode: "empty",
+      deleted_folders: 1,
+      moved_documents: 0,
+      deleted_documents: 0,
+      change_set_id: "",
+    }),
+    moveDocument: vi.fn().mockResolvedValue({
+      document: {
+        id: "doc-1",
+        filename: "harness.md",
+        title: "Harness",
+        path: "/wiki/工程/",
+        relative_path: "wiki/工程/harness.md",
+        source_kind: "wiki",
+        page_type: "concept",
+      },
+      old_relative_path: "wiki/AI工程/harness.md",
+      change_set_id: "cs-2",
+      updated_link_paths: [],
+    }),
+    ...overrides,
+  } as unknown as Store;
+}
+
+function makeApp(store: Store) {
+  return createApp({
+    db: store,
+    token: "",
+    publicWiki: true,
+    noMcp: true,
+    mcpAllowWrite: false,
+    workspace: "/tmp/nonexistent-llmwiki-ws",
+    webRoot: "/tmp/nonexistent-web",
+    skillsRoot: "/tmp/nonexistent-skills",
+  });
+}
+
+describe("folders and tree API", () => {
+  it("GET /api/v1/tree returns folders and documents", async () => {
+    const app = makeApp(makeMockStore());
+    const res = await app.request("/api/v1/tree");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { folders: unknown[]; documents: unknown[] };
+    expect(body.folders).toHaveLength(1);
+    expect(body.documents).toHaveLength(1);
+  });
+
+  it("GET /api/public/wiki/tree returns public tree", async () => {
+    const app = makeApp(makeMockStore());
+    const res = await app.request("/api/public/wiki/tree");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { folders: unknown[]; documents: unknown[] };
+    expect(body.folders).toHaveLength(1);
+    expect(body.documents).toHaveLength(1);
+  });
+
+  it("POST /api/v1/folders creates folder and maps conflict/validation errors", async () => {
+    const okApp = makeApp(makeMockStore());
+    const res1 = await okApp.request("/api/v1/folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "AI工程/Agent", display_name: "Agent" }),
+    });
+    expect(res1.status).toBe(201);
+
+    const conflictApp = makeApp(
+      makeMockStore({
+        createFolder: vi.fn().mockRejectedValue(new FolderConflictError("already exists")),
+      }),
+    );
+    const res2 = await conflictApp.request("/api/v1/folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "AI工程" }),
+    });
+    expect(res2.status).toBe(409);
+
+    const invalidApp = makeApp(
+      makeMockStore({
+        createFolder: vi.fn().mockRejectedValue(new FolderValidationError("bad path")),
+      }),
+    );
+    const res3 = await invalidApp.request("/api/v1/folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "../bad" }),
+    });
+    expect(res3.status).toBe(400);
+  });
+
+  it("PATCH /api/v1/folders updates metadata and returns 404 when missing", async () => {
+    const app = makeApp(makeMockStore());
+    const res = await app.request("/api/v1/folders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "AI工程", display_name: "AI Engineering" }),
+    });
+    expect(res.status).toBe(200);
+
+    const missingApp = makeApp(makeMockStore({ updateFolder: vi.fn().mockResolvedValue(null) }));
+    const res404 = await missingApp.request("/api/v1/folders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "missing", display_name: "X" }),
+    });
+    expect(res404.status).toBe(404);
+  });
+
+  it("POST /api/v1/folders/move and DELETE /api/v1/folders handle validation and success", async () => {
+    const app = makeApp(makeMockStore());
+    const moveRes = await app.request("/api/v1/folders/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from_path: "AI工程/Agent", to_path: "工程/Agent" }),
+    });
+    expect(moveRes.status).toBe(200);
+
+    const badDelRes = await app.request("/api/v1/folders?path=AI工程&mode=invalid", {
+      method: "DELETE",
+    });
+    expect(badDelRes.status).toBe(400);
+
+    const delRes = await app.request("/api/v1/folders?path=AI工程/Agent&mode=empty", {
+      method: "DELETE",
+    });
+    expect(delRes.status).toBe(200);
+  });
+
+  it("POST /api/v1/documents/:id/move moves document and maps 404", async () => {
+    const app = makeApp(makeMockStore());
+    const res = await app.request("/api/v1/documents/doc-1/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_folder: "工程" }),
+    });
+    expect(res.status).toBe(200);
+
+    const missingApp = makeApp(
+      makeMockStore({
+        moveDocument: vi.fn().mockRejectedValue(new FolderNotFoundError("not found")),
+      }),
+    );
+    const res404 = await missingApp.request("/api/v1/documents/doc-404/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_folder: "工程" }),
+    });
+    expect(res404.status).toBe(404);
+  });
+});

@@ -1,6 +1,8 @@
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { WorkspaceFileIndexer } from "../engine/file_indexer.js";
+import { parseFrontmatter } from "../engine/frontmatter.js";
+import { resolvePageType, validateWikiWritePath } from "../engine/wiki_org.js";
 import { workspaceLayoutSummary } from "../engine/workspace_layout.js";
 import type { Store } from "../store/interfaces.js";
 import type { Document } from "../store/types.js";
@@ -164,6 +166,47 @@ export function registerTools(
 
   register(
     {
+      name: "move",
+      description:
+        "Move or rename a wiki page to another folder while preserving document ID, history, and rewriting explicit path links.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Document ID or relative_path" },
+          target_folder: { type: "string", description: "Target folder relative to wiki/ (e.g. AI工程/Agent)" },
+          filename: { type: "string", description: "Optional new filename (e.g. new-name.md)" },
+        },
+        required: ["id", "target_folder"],
+      },
+    },
+    async (args) => moveToolHandler(db, args, activity),
+  );
+
+  register(
+    {
+      name: "folder",
+      description:
+        "Manage wiki folders: list, create, update metadata, move subtree, or delete (empty/move_to_parent/cascade).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["list", "create", "update", "move", "delete"] },
+          path: { type: "string", description: "Folder path relative to wiki/" },
+          to_path: { type: "string", description: "Destination path for move action" },
+          display_name: { type: "string" },
+          description: { type: "string" },
+          sort_order: { type: "integer" },
+          mode: { type: "string", enum: ["empty", "move_to_parent", "cascade"], default: "empty" },
+          target_folder: { type: "string" },
+        },
+        required: ["action"],
+      },
+    },
+    async (args) => folderToolHandler(db, args, activity),
+  );
+
+  register(
+    {
       name: "ping",
       description: "Test connectivity",
       inputSchema: { type: "object", properties: {}, required: [] },
@@ -301,6 +344,13 @@ async function writeToolHandler(
     : [];
   const filename = `${title.toLowerCase().replace(/ /g, "-")}.md`;
   const relPath = `${dirPath.replace(/^\/+/, "")}${filename}`;
+  try {
+    validateWikiWritePath(relPath);
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  const fm = parseFrontmatter(content);
+  const pageType = resolvePageType(fm.type, "", relPath);
 
   const existing = await db.getDocumentByPath(filename, dirPath);
   if (existing) {
@@ -340,6 +390,7 @@ async function writeToolHandler(
     highlights: "[]",
     created_at: "",
     updated_at: "",
+    page_type: pageType,
   };
   await db.createDocument(doc);
   if (indexer) {
@@ -368,6 +419,91 @@ async function deleteToolHandler(
   const affected = await db.archiveDocuments([doc.id]);
   await activity?.logDocument(db, "deleted", doc.id, doc.relative_path, "mcp");
   return `Deleted ${affected} document(s): ${doc.title} (ID: ${doc.id})`;
+}
+
+async function moveToolHandler(
+  db: Store,
+  args: Record<string, unknown>,
+  activity?: McpActivity,
+): Promise<string> {
+  if (!db) return "Error: database not connected";
+  const idOrPath = typeof args["id"] === "string" ? args["id"].trim() : "";
+  const targetFolder = typeof args["target_folder"] === "string" ? args["target_folder"].trim() : "";
+  const filename = typeof args["filename"] === "string" ? args["filename"].trim() : undefined;
+  if (!idOrPath || !targetFolder) return "Error: id and target_folder are required";
+
+  let doc = await db.getDocument(idOrPath);
+  if (!doc) doc = await db.getDocumentByRelativePath(idOrPath.replace(/^\/+/, ""));
+  if (!doc) doc = await db.findDocumentByName(idOrPath);
+  if (!doc) return `Document not found: ${idOrPath}`;
+
+  try {
+    const result = await db.moveDocument(doc.id, targetFolder, filename, "mcp");
+    await activity?.logDocument(db, "moved", doc.id, result.document.relative_path, "mcp");
+    return `Moved: ${result.old_relative_path} -> ${result.document.relative_path} (updated ${result.updated_link_paths.length} backlink(s))`;
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+async function folderToolHandler(
+  db: Store,
+  args: Record<string, unknown>,
+  activity?: McpActivity,
+): Promise<string> {
+  if (!db) return "Error: database not connected";
+  const action = typeof args["action"] === "string" ? args["action"].trim() : "";
+  const folderPath = typeof args["path"] === "string" ? args["path"].trim() : "";
+
+  try {
+    switch (action) {
+      case "list": {
+        const folders = await db.listFolders(true);
+        if (folders.length === 0) return "No folders found.";
+        return folders
+          .map((f) => `- ${f.path}/ (${f.display_name || f.path}, ${f.total_count} pages)${f.description ? ` — ${f.description}` : ""}`)
+          .join("\n");
+      }
+      case "create": {
+        if (!folderPath) return "Error: path is required";
+        const created = await db.createFolder({
+          path: folderPath,
+          display_name: typeof args["display_name"] === "string" ? args["display_name"] : undefined,
+          description: typeof args["description"] === "string" ? args["description"] : undefined,
+          sort_order: typeof args["sort_order"] === "number" ? args["sort_order"] : undefined,
+        });
+        return `Created folder: ${created.path}`;
+      }
+      case "update": {
+        if (!folderPath) return "Error: path is required";
+        const updated = await db.updateFolder(folderPath, {
+          display_name: typeof args["display_name"] === "string" ? args["display_name"] : undefined,
+          description: typeof args["description"] === "string" ? args["description"] : undefined,
+          sort_order: typeof args["sort_order"] === "number" ? args["sort_order"] : undefined,
+        });
+        if (!updated) return `Folder not found: ${folderPath}`;
+        return `Updated folder: ${updated.path}`;
+      }
+      case "move": {
+        const toPath = typeof args["to_path"] === "string" ? args["to_path"].trim() : "";
+        if (!folderPath || !toPath) return "Error: path and to_path are required";
+        const result = await db.moveFolder(folderPath, toPath, "mcp");
+        return `Moved folder: ${result.from_path} -> ${result.to_path} (${result.moved_folders} folders, ${result.moved_documents} docs)`;
+      }
+      case "delete": {
+        if (!folderPath) return "Error: path is required";
+        const mode = (typeof args["mode"] === "string" ? args["mode"] : "empty") as "empty" | "move_to_parent" | "cascade";
+        const targetFolder = typeof args["target_folder"] === "string" ? args["target_folder"] : "";
+        const result = await db.deleteFolder(folderPath, mode, targetFolder, "mcp");
+        await activity?.logDocument(db, "folder_deleted", folderPath, `wiki/${result.path}`, "mcp");
+        return `Deleted folder: ${result.path} (mode=${result.mode}, moved=${result.moved_documents}, deleted=${result.deleted_documents})`;
+      }
+      default:
+        return `Unknown folder action: ${action}`;
+    }
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 async function writeWikiPageFile(workspace: string, relPath: string, content: string): Promise<void> {

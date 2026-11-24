@@ -50,9 +50,11 @@ export function lintEntityConceptCoupling(
 
   const issues: LintIssue[] = [];
   for (const page of pages) {
-    if (page.subdir !== "concepts" || !page.inTypedSubdir || page.isSystem) continue;
+    if (!page.inTypedSubdir || page.isSystem) continue;
     const content = pageContents.get(page.relPath) ?? "";
     const frontmatter = parseFrontmatter(content);
+    const pageType = frontmatter.type.trim().toLowerCase() || (page.subdir === "concepts" ? "concept" : "");
+    if (pageType !== "concept") continue;
     let title = frontmatter.title.trim();
     if (!title) title = titleFromFilename(path.posix.basename(page.relPath));
 
@@ -95,9 +97,11 @@ function collectEntityNameEntries(
   };
 
   for (const page of pages) {
-    if (page.subdir !== "entities" || !page.inTypedSubdir || page.isSystem) continue;
+    if (!page.inTypedSubdir || page.isSystem) continue;
     const content = pageContents.get(page.relPath) ?? "";
     const frontmatter = parseFrontmatter(content);
+    const pageType = frontmatter.type.trim().toLowerCase() || (page.subdir === "entities" ? "entity" : "");
+    if (pageType !== "entity") continue;
     if (frontmatter.title) add(frontmatter.title);
     const base = path.posix.basename(page.relPath);
     const ext = path.posix.extname(base);

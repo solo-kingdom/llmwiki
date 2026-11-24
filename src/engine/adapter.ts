@@ -72,6 +72,7 @@ export function engineStoreFromStore(store: Store): EngineStore {
         highlights: "[]",
         created_at: "",
         updated_at: "",
+        page_type: doc.pageType ?? "",
       };
       await store.createDocument(row);
       doc.id = row.id;
@@ -143,5 +144,7 @@ export function engineStoreFromStore(store: Store): EngineStore {
     archiveDocument: async (docID) => {
       await store.archiveDocuments([docID]);
     },
+
+    ensureFolders: (folderPaths) => store.ensureFolders(folderPaths),
   };
 }

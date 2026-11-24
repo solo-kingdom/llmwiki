@@ -170,12 +170,14 @@ function defaultTaskInstructionZH(step: PromptStep): string {
       return `你是 wiki 页面生成器。根据用户消息中的「原始内容」与「分析结果」生成 wiki 页面（FILE 块）。
 - 以原始内容为首要依据；分析结果仅作组织参考
 - 不要添加源中未支持的内容
-- 业务知识页必须写入 typed 子目录（entities/concepts/sources/synthesis/comparisons/queries），不得写入 wiki/ 顶层
+- 业务知识页按知识主题组织在 wiki/ 下的多级目录中（如 wiki/AI工程/Agent/harness.md），不得写入 wiki/ 顶层
+- 优先复用提示中提供的已有目录；仅在无合适主题目录时新建浅层目录（建议 2–3 层）
+- 必须在 YAML frontmatter 中准确填写 \`type:\`（entity / concept / synthesis / comparison / query / source）
 - 如果摄入来自文件、URL 或大段文本，应创建或更新 wiki/sources/ 下的 source 摘要页
 - 每个新增事实都应能追溯到 source 摘要、原始内容或已有 wiki 页面
 - 遇到新旧事实冲突时保留冲突上下文，写入 Open Questions 或明确标注不确定性
 - 概念页标题默认保持中性，不要把具体实体名焊进概念标题；实体与概念通过 wikilink 关联
-- 若候选概念标题形如「实体名 + 方法/模型/文化/框架/策略/机制/理论/实践」等，应优先创建中性概念页（如 wiki/concepts/组织裁剪方法论.md），并在正文中链接实体页（如 [[AppLovin]]）作为案例
+- 若候选概念标题形如「实体名 + 方法/模型/文化/框架/策略/机制/理论/实践」等，应优先创建中性概念页（如 wiki/组织管理/组织裁剪方法论.md），并在正文中链接实体页（如 [[AppLovin]]）作为案例
 - 仅当源材料明确把整体短语当作固定专有名词时，才保留组合标题，并在正文说明命名依据
 
 你可以使用 read 工具读取已有 wiki 页面的当前内容。对于已有页面，生成的内容应保留原有信息并增量补充新内容。不要删除已有页面中的重要段落，除非源文档明确否定。`;
@@ -199,7 +201,7 @@ function defaultTaskInstructionZH(step: PromptStep): string {
 
 重点：
 - 优先使用 update（修改内容/标签/链接）而非 create
-- 如果需要移动或重命名页面，action 用 move，必须填写 from_path（旧路径）和 to_path（新路径）
+- 若需把存量扁平目录（如 wiki/concepts/、wiki/entities/）按主题重排为多级目录树，使用 action: "move"，填写 from_path 和 to_path；保留 document_id 与历史链
 - 如果需要合并多个页面为一个，action 用 merge，必须填写 source_paths（所有源页面路径）和 to_path（合并后目标路径）
 - 保留原有内容中的重要信息，不删除除非对话中明确要求
 - 若 audit/lint 报告 entity_concept_coupling：规划将实体绑定型概念页重命名为中性概念，并更新实体页与概念页之间的 wikilink
@@ -281,11 +283,14 @@ You can use the search tool to find existing wiki pages and the read tool to rea
 
 Do not rely on a single exact search. For key entities and concepts, try aliases, abbreviations, English/Chinese variants, or broader terms. Before ingestion, flag obvious credentials, private information, or material outside purpose.md scope.`;
     case "generation":
-      return `You are a wiki generator. Produce wiki pages from the original content and analysis in FILE blocks. The source is authoritative; analysis is organizational context only. Business pages MUST be written under typed wiki subdirectories (entities/concepts/sources/synthesis/comparisons/queries), not as top-level wiki/*.md files.
+      return `You are a wiki generator. Produce wiki pages from the original content and analysis in FILE blocks. The source is authoritative; analysis is organizational context only.
+- Business pages MUST be placed inside topic folders under wiki/ (e.g. wiki/AI-Engineering/Agent/harness.md), NOT as top-level wiki/*.md files.
+- Prefer reusing existing folders listed in the prompt; only create new shallow topic folders (2-3 levels max) when no existing folder fits.
+- Always set frontmatter \`type:\` accurately (entity / concept / synthesis / comparison / query / source).
 
 If ingestion comes from a file, URL, or substantial text, create or update a source summary under wiki/sources/. Every new fact should trace to a source summary, source content, or existing wiki page. If new and old facts conflict, preserve the conflict context and mark uncertainty instead of silently overwriting.
 
-Concept page titles should stay neutral by default; do not embed concrete entity names in concept titles. Link entities and concepts via wikilinks. If a candidate concept title looks like "entity name + method/model/culture/framework/strategy/mechanism/theory/practice", prefer a neutral concept page (e.g. wiki/concepts/组织裁剪方法论.md) and link the entity page (e.g. [[AppLovin]]) as a case in the body. Only keep a combined title when the source clearly treats the full phrase as a fixed proper term, and explain that basis in the body.
+Concept page titles should stay neutral by default; do not embed concrete entity names in concept titles. Link entities and concepts via wikilinks. If a candidate concept title looks like "entity name + method/model/culture/framework/strategy/mechanism/theory/practice", prefer a neutral concept page and link the entity page (e.g. [[AppLovin]]) as a case in the body. Only keep a combined title when the source clearly treats the full phrase as a fixed proper term, and explain that basis in the body.
 
 You can use the read tool to read the current content of existing wiki pages. For existing pages, your output should preserve original information and incrementally add new content. Do not remove important paragraphs from existing pages unless the source explicitly contradicts them.`;
     case "plan":

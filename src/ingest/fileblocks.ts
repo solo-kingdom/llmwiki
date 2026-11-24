@@ -33,7 +33,7 @@ export function parseFileBlocksWithContent(output: string): Map<string, string> 
 }
 
 export function normalizeWikiFilePath(input: string): string {
-  const value = input.trim();
+  const value = input.trim().replace(/\\/g, "/").replace(/^\/+/, "");
   if (!value) throw new Error("empty FILE path");
   if (value.startsWith("wiki/")) return value;
   const mappings: Array<[string, string]> = [
@@ -52,6 +52,7 @@ export function normalizeWikiFilePath(input: string): string {
   for (const [prefix, target] of mappings) {
     if (value.startsWith(prefix)) return target + value.slice(prefix.length);
   }
+  if (value.includes("/")) return `wiki/${value}`;
   throw new Error(`unrecognized wiki FILE path prefix: ${value}`);
 }
 

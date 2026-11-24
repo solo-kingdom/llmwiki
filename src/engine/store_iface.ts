@@ -27,6 +27,7 @@ export interface DocData {
   date: string;
   metadata: string;
   contentHash: string;
+  pageType?: string;
 }
 
 export interface ChunkData {
@@ -88,4 +89,5 @@ export interface EngineStore {
   storeChunks(docID: string, chunks: ChunkData[]): Promise<void>;
   deleteChunks(docID: string): Promise<void>;
   archiveDocument(docID: string): Promise<void>;
+  ensureFolders?(folderPaths: string[]): Promise<void>;
 }

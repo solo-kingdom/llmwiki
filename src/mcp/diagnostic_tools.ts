@@ -14,9 +14,9 @@ import {
   type LintReport,
 } from "../engine/lint_types.js";
 import { lintGhostIndexEntries, lintWorkspace } from "../engine/lint.js";
-import { classifyWikiPath, isWikiSystemPath, TYPED_WIKI_SUBDIRS } from "../engine/wiki_org.js";
+import { classifyWikiPath, folderPathFromWikiRelPath, isWikiSystemPath } from "../engine/wiki_org.js";
 import type { Store } from "../store/interfaces.js";
-import type { Document } from "../store/types.js";
+import type { Document, WikiFolderWithCounts } from "../store/types.js";
 import { createEngineStoreAdapter } from "./store_adapter.js";
 import type { Tool } from "./types.js";
 
@@ -182,16 +182,75 @@ function matchesFocus(code: string, focus: string): boolean {
   }
 }
 
+export function formatFolderTreeForPrompt(
+  folders: WikiFolderWithCounts[],
+  docs: Document[],
+  maxFolders = 80,
+): string {
+  const folderMeta = new Map(folders.map((f) => [f.path, f]));
+  const childrenMap = new Map<string, string[]>();
+  const allPaths = new Set<string>(folders.map((f) => f.path));
+
+  for (const doc of docs) {
+    if (doc.source_kind !== "wiki" || isWikiSystemPath(doc.relative_path)) continue;
+    const folder = folderPathFromWikiRelPath(doc.relative_path);
+    if (!folder || folder === "sources") continue;
+    const parts = folder.split("/");
+    for (let i = 1; i <= parts.length; i += 1) {
+      allPaths.add(parts.slice(0, i).join("/"));
+    }
+  }
+
+  for (const p of allPaths) {
+    const parent = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "";
+    const list = childrenMap.get(parent) ?? [];
+    list.push(p);
+    childrenMap.set(parent, list);
+  }
+  for (const list of childrenMap.values()) {
+    list.sort((a, b) => {
+      const sa = folderMeta.get(a)?.sort_order ?? 0;
+      const sb = folderMeta.get(b)?.sort_order ?? 0;
+      return sa !== sb ? sa - sb : a.localeCompare(b);
+    });
+  }
+
+  const lines: string[] = [];
+  let count = 0;
+  function walk(parent: string, indent: string): void {
+    const children = childrenMap.get(parent) ?? [];
+    for (const child of children) {
+      if (count >= maxFolders) return;
+      count += 1;
+      const meta = folderMeta.get(child);
+      const seg = child.includes("/") ? child.slice(child.lastIndexOf("/") + 1) : child;
+      const label = meta?.display_name ? `${seg}/ (${meta.display_name})` : `${seg}/`;
+      const counts = meta ? ` [${meta.total_count} 页]` : "";
+      const desc = meta?.description ? ` — ${meta.description}` : "";
+      lines.push(`${indent}- wiki/${child}/ (${label})${counts}${desc}`);
+      walk(child, `${indent}  `);
+    }
+  }
+  walk("", "");
+  if (lines.length === 0) return "（尚无主题目录，可按内容主题在 wiki/<主题>/ 下创建）";
+  if (count >= maxFolders) lines.push("  …（更多目录已省略）");
+  return lines.join("\n");
+}
+
 export async function executeLocalStructure(
   workspace: string,
   db: Store,
 ): Promise<string> {
   if (!workspace) return "Error: workspace not configured";
-  const docs = await db.listDocuments();
+  const [docs, folders] = await Promise.all([
+    db.listDocuments(),
+    typeof db.listFolders === "function" ? db.listFolders(false).catch(() => []) : Promise.resolve([]),
+  ]);
   const wikiDocs = filterBySourceKind(docs, "wiki");
   const contentCount = wikiDocs.filter((doc) => !isWikiSystemPath(doc.relative_path)).length;
 
   const dirPages = new Map<string, Document[]>();
+  const allDirs = new Set<string>(folders.map((f) => f.path));
   for (const doc of wikiDocs) {
     let dir = path.posix.dirname(doc.relative_path);
     dir = dir.replace(/^wiki\//, "");
@@ -199,13 +258,35 @@ export async function executeLocalStructure(
     const pages = dirPages.get(dir) ?? [];
     pages.push(doc);
     dirPages.set(dir, pages);
+    if (dir && dir !== "templates") {
+      const parts = dir.split("/");
+      for (let i = 1; i <= parts.length; i += 1) {
+        allDirs.add(parts.slice(0, i).join("/"));
+      }
+    }
+  }
+
+  const folderMeta = new Map(folders.map((f) => [f.path, f]));
+  const childrenMap = new Map<string, string[]>();
+  for (const dir of allDirs) {
+    const parent = dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : "";
+    const list = childrenMap.get(parent) ?? [];
+    list.push(dir);
+    childrenMap.set(parent, list);
+  }
+  for (const list of childrenMap.values()) {
+    list.sort((a, b) => {
+      const sa = folderMeta.get(a)?.sort_order ?? 0;
+      const sb = folderMeta.get(b)?.sort_order ?? 0;
+      return sa !== sb ? sa - sb : a.localeCompare(b);
+    });
   }
 
   let output = "# Wiki 目录结构\n\n";
   output += `工作区：\`${workspace}\`\n`;
   output +=
-    "数据来源：SQLite index（与文件系统不一致时请运行 `llmwiki reindex`，将自动清理幽灵索引）\n\n";
-  output += `总计 ${wikiDocs.length} 个 wiki 文档（${contentCount} 个业务内容页）\n\n`;
+    "数据来源：PostgreSQL index（与文件系统不一致时请运行 `llmwiki reindex`，将自动清理幽灵索引）\n\n";
+  output += `总计 ${wikiDocs.length} 个 wiki 文档（${contentCount} 个业务内容页，${allDirs.size} 个目录）\n\n`;
 
   const reserved: Document[] = [];
   const misplaced: Document[] = [];
@@ -223,40 +304,57 @@ export async function executeLocalStructure(
   if (misplaced.length > 0) {
     output += `## 待整理页面 (${misplaced.length})\n\n`;
     for (const doc of misplaced) {
-      output += `- ${doc.title || doc.filename} — \`${doc.relative_path}\`（应移入 typed 子目录）\n`;
+      output += `- ${doc.title || doc.filename} — \`${doc.relative_path}\`（应移入主题子目录）\n`;
     }
     output += "\n";
   }
 
-  const shownDirs = new Set<string>();
-  for (const dir of TYPED_WIKI_SUBDIRS) {
+  function renderFolder(dir: string, prefix: string, isLast: boolean): void {
+    const meta = folderMeta.get(dir);
+    const seg = dir.includes("/") ? dir.slice(dir.lastIndexOf("/") + 1) : dir;
+    const label = meta?.display_name ? `${seg}/ (${meta.display_name})` : `${seg}/`;
+    const desc = meta?.description ? ` — ${meta.description}` : "";
     const pages = dirPages.get(dir) ?? [];
-    shownDirs.add(dir);
-    output += `├── ${dir}/ (${pages.length} 页)\n`;
-    pages.forEach((doc, index) => {
-      const prefix = index === pages.length - 1 ? "│   └── " : "│   ├── ";
+    const subdirs = childrenMap.get(dir) ?? [];
+    const branch = isLast ? "└── " : "├── ";
+    const childPrefix = prefix + (isLast ? "    " : "│   ");
+
+    output += `${prefix}${branch}${label} (${pages.length} 页)${desc}\n`;
+    if (pages.length === 0 && subdirs.length === 0) {
+      output += `${childPrefix}(空目录)\n`;
+      return;
+    }
+
+    const totalItems = subdirs.length + pages.length;
+    subdirs.forEach((sub, idx) => {
+      renderFolder(sub, childPrefix, idx === totalItems - 1);
+    });
+    pages.forEach((doc, idx) => {
+      const itemIdx = subdirs.length + idx;
+      const itemBranch = itemIdx === totalItems - 1 ? "└── " : "├── ";
+      const pageType = doc.page_type ? ` [${doc.page_type}]` : "";
       const tags = doc.tags.length > 0 ? ` [${doc.tags.join(", ")}]` : "";
-      output += `${prefix}${doc.title || doc.filename}${tags}\n`;
+      output += `${childPrefix}${itemBranch}${doc.title || doc.filename}${pageType}${tags} (\`${doc.relative_path}\`)\n`;
     });
-    if (pages.length === 0) output += "│   (空目录)\n";
   }
 
+  const topDirs = childrenMap.get("") ?? [];
   const templates = dirPages.get("templates") ?? [];
-  if (templates.length > 0) {
-    shownDirs.add("templates");
-    output += `├── templates/ (${templates.length} 个系统模板)\n`;
-    templates.forEach((doc, index) => {
-      const prefix = index === templates.length - 1 ? "│   └── " : "│   ├── ";
-      output += `${prefix}${doc.title || doc.filename} (系统模板)\n`;
-    });
-  } else if (await templatesDirExists(workspace)) {
-    output += "├── templates/ (0 个系统模板)\n│   (空目录)\n";
-  }
+  const hasTemplates = templates.length > 0 || (await templatesDirExists(workspace));
 
-  for (const [dir, pages] of dirPages) {
-    if (shownDirs.has(dir) || dir === "") continue;
-    output += `├── ${dir}/ (${pages.length} 页)\n`;
-    for (const doc of pages) output += `│   ├── ${doc.title || doc.filename}\n`;
+  topDirs.forEach((dir, idx) => {
+    const isLast = !hasTemplates && idx === topDirs.length - 1;
+    renderFolder(dir, "", isLast);
+  });
+
+  if (templates.length > 0) {
+    output += `└── templates/ (${templates.length} 个系统模板)\n`;
+    templates.forEach((doc, index) => {
+      const branch = index === templates.length - 1 ? "    └── " : "    ├── ";
+      output += `${branch}${doc.title || doc.filename} (系统模板)\n`;
+    });
+  } else if (hasTemplates) {
+    output += "└── templates/ (0 个系统模板)\n    (空目录)\n";
   }
 
   const tagCount = new Map<string, number>();

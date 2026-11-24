@@ -265,9 +265,10 @@ function lintDuplicatePages(pages: WikiPage[]): LintIssue[] {
   const groups = new Map<string, WikiPage[]>();
   for (const page of pages) {
     if (!page.inTypedSubdir || page.isSystem) continue;
-    const list = groups.get(page.subdir) ?? [];
+    const dir = path.posix.dirname(page.relPath);
+    const list = groups.get(dir) ?? [];
     list.push(page);
-    groups.set(page.subdir, list);
+    groups.set(dir, list);
   }
 
   const issues: LintIssue[] = [];

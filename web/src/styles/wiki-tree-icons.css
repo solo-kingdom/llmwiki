@@ -1,0 +1,119 @@
+/*
+ * Wiki directory tree icon colors and alignment.
+ * Calibrated for quiet-inset light (oklch 0.982) and dark (oklch 0.185) surfaces.
+ * Unlayered rules override Tailwind utility classes (e.g. NavItem's [&_svg]:size-4)
+ * without modifying locked ui-template files.
+ */
+
+:root {
+  --wiki-icon-folder: oklch(0.60 0.145 72);
+  --wiki-icon-folder-fill: oklch(0.60 0.145 72 / 0.14);
+  --wiki-icon-folder-open: oklch(0.56 0.16 62);
+  --wiki-icon-folder-open-fill: oklch(0.56 0.16 62 / 0.18);
+
+  --wiki-icon-markdown: oklch(0.54 0.155 248);
+  --wiki-icon-html: oklch(0.58 0.175 38);
+  --wiki-icon-video: oklch(0.53 0.18 298);
+  --wiki-icon-image: oklch(0.53 0.145 158);
+  --wiki-icon-audio: oklch(0.56 0.185 352);
+  --wiki-icon-pdf: oklch(0.54 0.195 22);
+  --wiki-icon-word: oklch(0.49 0.165 262);
+  --wiki-icon-spreadsheet: oklch(0.50 0.15 145);
+  --wiki-icon-presentation: oklch(0.57 0.17 50);
+  --wiki-icon-code: oklch(0.53 0.135 205);
+  --wiki-icon-data: oklch(0.54 0.155 275);
+  --wiki-icon-archive: oklch(0.54 0.105 62);
+  --wiki-icon-text: oklch(0.50 0.03 255);
+  --wiki-icon-other: oklch(0.52 0.015 280);
+}
+
+.dark {
+  --wiki-icon-folder: oklch(0.76 0.135 76);
+  --wiki-icon-folder-fill: oklch(0.76 0.135 76 / 0.16);
+  --wiki-icon-folder-open: oklch(0.81 0.14 78);
+  --wiki-icon-folder-open-fill: oklch(0.81 0.14 78 / 0.20);
+
+  --wiki-icon-markdown: oklch(0.72 0.14 245);
+  --wiki-icon-html: oklch(0.73 0.16 42);
+  --wiki-icon-video: oklch(0.73 0.165 298);
+  --wiki-icon-image: oklch(0.73 0.14 158);
+  --wiki-icon-audio: oklch(0.73 0.165 352);
+  --wiki-icon-pdf: oklch(0.71 0.175 22);
+  --wiki-icon-word: oklch(0.69 0.15 262);
+  --wiki-icon-spreadsheet: oklch(0.71 0.145 145);
+  --wiki-icon-presentation: oklch(0.74 0.155 54);
+  --wiki-icon-code: oklch(0.73 0.13 205);
+  --wiki-icon-data: oklch(0.73 0.135 275);
+  --wiki-icon-archive: oklch(0.72 0.10 66);
+  --wiki-icon-text: oklch(0.70 0.03 255);
+  --wiki-icon-other: oklch(0.68 0.015 280);
+}
+
+.wiki-tree-folder-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  flex-shrink: 0;
+}
+
+.wiki-tree-file-lead {
+  display: inline-flex;
+  align-items: center;
+  padding-left: 0.875rem;
+  flex-shrink: 0;
+}
+
+.wiki-tree-chevron {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex-shrink: 0;
+  color: var(--faint-foreground);
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.wiki-tree-row:hover .wiki-tree-chevron,
+.wiki-tree-row:focus-within .wiki-tree-chevron {
+  color: var(--muted-foreground);
+}
+
+.wiki-tree-folder-label {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.wiki-icon-folder {
+  color: var(--wiki-icon-folder);
+  fill: var(--wiki-icon-folder-fill);
+}
+
+.wiki-icon-folder-open {
+  color: var(--wiki-icon-folder-open);
+  fill: var(--wiki-icon-folder-open-fill);
+}
+
+.wiki-icon-markdown { color: var(--wiki-icon-markdown); }
+.wiki-icon-html { color: var(--wiki-icon-html); }
+.wiki-icon-video { color: var(--wiki-icon-video); }
+.wiki-icon-image { color: var(--wiki-icon-image); }
+.wiki-icon-audio { color: var(--wiki-icon-audio); }
+.wiki-icon-pdf { color: var(--wiki-icon-pdf); }
+.wiki-icon-word { color: var(--wiki-icon-word); }
+.wiki-icon-spreadsheet { color: var(--wiki-icon-spreadsheet); }
+.wiki-icon-presentation { color: var(--wiki-icon-presentation); }
+.wiki-icon-code { color: var(--wiki-icon-code); }
+.wiki-icon-data { color: var(--wiki-icon-data); }
+.wiki-icon-archive { color: var(--wiki-icon-archive); }
+.wiki-icon-text { color: var(--wiki-icon-text); }
+.wiki-icon-other { color: var(--wiki-icon-other); }
+
+@media (hover: hover) {
+  .wiki-tree-row .wiki-tree-row-actions {
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+  .wiki-tree-row:hover .wiki-tree-row-actions,
+  .wiki-tree-row:focus-within .wiki-tree-row-actions,
+  .wiki-tree-row .wiki-tree-row-actions:has([aria-expanded="true"]) {
+    opacity: 1;
+  }
+}

@@ -2,8 +2,6 @@ import * as React from "react"
 import { useParams } from "react-router"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  ChevronDownIcon,
-  ChevronRightIcon,
   ExternalLinkIcon,
   FilePlusIcon,
   FoldVerticalIcon,
@@ -52,6 +50,7 @@ import {
   searchDocuments,
   updateDocumentMetadata,
 } from "@/lib/api"
+import { WikiFileIcon, WikiFolderIcon } from "@/lib/file-icons"
 import { WikiTreeDialogs, type TreeDialogState } from "@/pages/wiki-tree-dialogs"
 import type { DocumentListItem, WikiFolder } from "@/types"
 
@@ -289,29 +288,31 @@ function TreeRows({
                         // ignore invalid drag payload
                       }
                     }}
-                    className={isDropTarget ? "bg-accent/50" : undefined}
+                    className={isDropTarget ? "wiki-tree-row bg-accent/50" : "wiki-tree-row"}
                   >
                     <NavItem
                       depth={clampedDepth}
-                      icon={open ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                      icon={<WikiFolderIcon open={open} />}
                       onSelect={() => toggle(node.key)}
                       trailing={
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              size="icon-xs"
-                              variant="ghost"
-                              aria-label={`操作目录 ${label}`}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <MoreHorizontalIcon />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">{menuItems}</DropdownMenuContent>
-                        </DropdownMenu>
+                        <span className="wiki-tree-row-actions">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                size="icon-xs"
+                                variant="ghost"
+                                aria-label={`操作目录 ${label}`}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MoreHorizontalIcon />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">{menuItems}</DropdownMenuContent>
+                          </DropdownMenu>
+                        </span>
                       }
                     >
-                      {label}
+                      <span className="wiki-tree-folder-label">{label}</span>
                     </NavItem>
                   </div>
                 </ContextMenuTrigger>
@@ -341,6 +342,7 @@ function TreeRows({
             <ContextMenuTrigger asChild>
               <div
                 draggable
+                className="wiki-tree-row"
                 onDragStart={(e) => {
                   e.dataTransfer.setData(
                     "application/x-llmwiki-tree",
@@ -353,31 +355,34 @@ function TreeRows({
                   depth={clampedDepth}
                   to={`/wiki/${encodeURIComponent(doc.id)}`}
                   active={doc.id === currentId}
+                  icon={<WikiFileIcon doc={doc} treeAligned />}
                   trailing={
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          aria-label={`操作页面 ${doc.title || doc.filename}`}
-                          onClick={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                          }}
-                        >
-                          <MoreHorizontalIcon />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "move-doc", doc })}>
-                          <FolderInputIcon />移动 / 重命名
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem variant="destructive" onSelect={() => onDeleteDoc(doc)}>
-                          <Trash2Icon />删除页面
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <span className="wiki-tree-row-actions">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            size="icon-xs"
+                            variant="ghost"
+                            aria-label={`操作页面 ${doc.title || doc.filename}`}
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                            }}
+                          >
+                            <MoreHorizontalIcon />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "move-doc", doc })}>
+                            <FolderInputIcon />移动 / 重命名
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem variant="destructive" onSelect={() => onDeleteDoc(doc)}>
+                            <Trash2Icon />删除页面
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </span>
                   }
                 >
                   {doc.title || doc.filename}
@@ -597,6 +602,7 @@ function WikiPane({
                 key={doc.id}
                 to={`/wiki/${encodeURIComponent(doc.id)}`}
                 active={doc.id === currentId}
+                icon={<WikiFileIcon doc={doc} />}
                 trailing={<StatusBadge status={pageTypeOf(doc)} />}
               >
                 {doc.title || doc.filename}

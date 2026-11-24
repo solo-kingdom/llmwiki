@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { openStore, type PartialStore } from "./db.js";
+import { openStore } from "./db.js";
+import { FolderConflictError, FolderValidationError } from "./folders.js";
+import type { Store } from "../interfaces.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 describe.skipIf(!databaseUrl)("postgres store integration", () => {
   let pool: Pool;
-  let store: PartialStore;
+  let store: Store;
   const suffix = randomUUID().slice(0, 8);
 
   beforeAll(async () => {
@@ -18,7 +20,11 @@ describe.skipIf(!databaseUrl)("postgres store integration", () => {
 
   afterAll(async () => {
     if (!pool) return;
-    await pool.query("DELETE FROM documents WHERE relative_path LIKE $1", [`integration-${suffix}%`]);
+    await pool.query("DELETE FROM documents WHERE relative_path LIKE $1 OR relative_path LIKE $2", [
+      `integration-${suffix}%`,
+      `wiki/tree-${suffix}%`,
+    ]);
+    await pool.query("DELETE FROM wiki_folders WHERE path LIKE $1", [`tree-${suffix}%`]);
     await pool.end();
   });
 
@@ -167,5 +173,258 @@ describe.skipIf(!databaseUrl)("postgres store integration", () => {
 
     await store.insertIngestJobEvent(job.id, "normalize", "done", "ok", { integration: true }, 200);
     expect(await store.listIngestJobEvents(job.id, 10)).toHaveLength(1);
+  });
+
+  it("verifies migration v4 backfill regex and folder creation on live PostgreSQL", async () => {
+    const legacyId = randomUUID();
+    const topicId = randomUUID();
+    await pool.query(
+      `INSERT INTO documents (id, user_id, filename, title, path, relative_path, source_kind, file_type, status, content, page_type)
+       VALUES
+       ($1, 'default', 'old.md', 'Old', '/wiki/concepts/', $2, 'wiki', 'md', 'ready', '# Old', ''),
+       ($3, 'default', 'fm.md', 'FM', $4, $5, 'wiki', 'md', 'ready', $6, '')`,
+      [
+        legacyId,
+        `wiki/concepts/legacy-${suffix}.md`,
+        topicId,
+        `/wiki/tree-${suffix}/ai/`,
+        `wiki/tree-${suffix}/ai/fm.md`,
+        `---\ntitle: FM\ntype: Concept\ndate: 2026-11-24\n---\n\n# FM\n`,
+      ],
+    );
+
+    // Re-run the v4 backfill statements against empty page_type rows to verify PG ARE syntax
+    await pool.query(`
+      WITH fm AS (
+        SELECT id,
+          lower(COALESCE(
+            substring(
+              substring(content FROM '\\A---[ \\t]*\\r?\\n(.*?)\\r?\\n---[ \\t]*(?:\\r?\\n|$)')
+              FROM '(?n)^type:[ \\t]*([a-zA-Z]+)[ \\t]*\\r?$'
+            ),
+            ''
+          )) AS fm_type
+        FROM documents
+        WHERE page_type = ''
+      )
+      UPDATE documents d
+      SET page_type = CASE
+        WHEN d.source_kind != 'wiki' THEN ''
+        WHEN d.relative_path LIKE 'wiki/templates/%' THEN 'template'
+        WHEN d.relative_path LIKE 'wiki/sources/%' THEN 'source'
+        WHEN fm.fm_type IN ('entity','concept','source','synthesis','comparison','query','page') THEN fm.fm_type
+        WHEN d.relative_path LIKE 'wiki/entities/%' THEN 'entity'
+        WHEN d.relative_path LIKE 'wiki/concepts/%' THEN 'concept'
+        WHEN d.relative_path LIKE 'wiki/synthesis/%' THEN 'synthesis'
+        WHEN d.relative_path LIKE 'wiki/comparisons/%' THEN 'comparison'
+        WHEN d.relative_path LIKE 'wiki/queries/%' THEN 'query'
+        ELSE 'page'
+      END
+      FROM fm
+      WHERE d.id = fm.id
+    `);
+
+    const legacyDoc = await store.getDocument(legacyId);
+    const topicDoc = await store.getDocument(topicId);
+    expect(legacyDoc?.page_type).toBe("concept");
+    expect(topicDoc?.page_type).toBe("concept");
+
+    await pool.query("DELETE FROM documents WHERE id = ANY($1::text[])", [[legacyId, topicId]]);
+  });
+
+  it("supports folder CRUD, document move with link rewrite/history/undo, soft-delete collision, folder move and delete modes", async () => {
+    const root = `tree-${suffix}`;
+    const leaf = await store.createFolder({
+      path: `${root}/sub/leaf`,
+      display_name: "Leaf",
+      description: "Leaf folder",
+      sort_order: 2,
+    });
+    expect(leaf.path).toBe(`${root}/sub/leaf`);
+    expect((await store.getFolder(`${root}/sub`))?.path).toBe(`${root}/sub`);
+
+    await expect(store.createFolder({ path: `${root}/sub/leaf` })).rejects.toBeInstanceOf(FolderConflictError);
+
+    const updated = await store.updateFolder(`${root}/sub/leaf`, { display_name: "Leaf Updated", sort_order: 5 });
+    expect(updated?.display_name).toBe("Leaf Updated");
+    expect(updated?.sort_order).toBe(5);
+
+    const docAId = randomUUID();
+    const docBId = randomUUID();
+    const docAPath = `wiki/${root}/old/a.md`;
+    const docBPath = `wiki/${root}/sub/b.md`;
+
+    await store.applyChangeSet(
+      { id: "", kind: "manual", summary: "seed tree docs", page_count: 2, created_at: "" },
+      [
+        {
+          relative_path: docAPath,
+          document: {
+            id: docAId,
+            user_id: "default",
+            filename: "a.md",
+            title: "Doc A",
+            path: `/wiki/${root}/old/`,
+            relative_path: docAPath,
+            source_kind: "wiki",
+            file_type: "md",
+            file_size: 10,
+            document_number: 0,
+            status: "ready",
+            page_count: 1,
+            content: "---\ntitle: Doc A\ntype: concept\ndate: 2026-11-24\n---\n\n# Doc A\n",
+            tags: [],
+            date: "2026-11-24",
+            metadata: "{}",
+            error_message: "",
+            version: 0,
+            parser: "",
+            content_hash: "h1",
+            stale_since: "",
+            highlights: "[]",
+            created_at: "",
+            updated_at: "",
+            page_type: "concept",
+          },
+          operation: "create",
+          chunks: [],
+          refs: [],
+        },
+        {
+          relative_path: docBPath,
+          document: {
+            id: docBId,
+            user_id: "default",
+            filename: "b.md",
+            title: "Doc B",
+            path: `/wiki/${root}/sub/`,
+            relative_path: docBPath,
+            source_kind: "wiki",
+            file_type: "md",
+            file_size: 20,
+            document_number: 0,
+            status: "ready",
+            page_count: 1,
+            content: `---\ntitle: Doc B\ntype: entity\ndate: 2026-11-24\n---\n\nSee [[${root}/old/a|A]] and [A](/wiki/${root}/old/a.md).\n`,
+            tags: [],
+            date: "2026-11-24",
+            metadata: "{}",
+            error_message: "",
+            version: 0,
+            parser: "",
+            content_hash: "h2",
+            stale_since: "",
+            highlights: "[]",
+            created_at: "",
+            updated_at: "",
+            page_type: "entity",
+          },
+          operation: "create",
+          chunks: [],
+          refs: [],
+        },
+      ],
+    );
+
+    const folders = await store.listFolders(true);
+    const rootMeta = folders.find((f) => f.path === root);
+    expect(rootMeta?.total_count).toBe(2);
+
+    // Move Doc A and verify id preservation, link rewrite, cross-path history, and undo
+    const moveRes = await store.moveDocument(docAId, `${root}/new`, "a-renamed.md", "test");
+    expect(moveRes.document.id).toBe(docAId);
+    expect(moveRes.document.relative_path).toBe(`wiki/${root}/new/a-renamed.md`);
+    expect(moveRes.updated_link_paths).toContain(docBPath);
+
+    const docBAfter = await store.getDocument(docBId);
+    expect(docBAfter?.content).toContain(`[[${root}/new/a-renamed|A]]`);
+    expect(docBAfter?.content).toContain(`[A](/wiki/${root}/new/a-renamed.md)`);
+
+    const revisions = await store.listPageRevisions(moveRes.document.relative_path, 10);
+    expect(revisions.map((r) => r.operation)).toEqual(["move", "create"]);
+
+    await store.undoChangeSet(moveRes.change_set_id, "test");
+    const docARestored = await store.getDocument(docAId);
+    expect(docARestored?.relative_path).toBe(docAPath);
+
+    // Soft-delete collision guard: create + delete at target path, then move Doc A there
+    const collidePath = `wiki/${root}/new/collide.md`;
+    const collideId = randomUUID();
+    await store.applyChangeSet(
+      { id: "", kind: "manual", summary: "seed collide", page_count: 1, created_at: "" },
+      [
+        {
+          relative_path: collidePath,
+          document: {
+            id: collideId,
+            user_id: "default",
+            filename: "collide.md",
+            title: "Collide",
+            path: `/wiki/${root}/new/`,
+            relative_path: collidePath,
+            source_kind: "wiki",
+            file_type: "md",
+            file_size: 5,
+            document_number: 0,
+            status: "ready",
+            page_count: 1,
+            content: "# Collide\n",
+            tags: [],
+            date: "",
+            metadata: "{}",
+            error_message: "",
+            version: 0,
+            parser: "",
+            content_hash: "hc",
+            stale_since: "",
+            highlights: "[]",
+            created_at: "",
+            updated_at: "",
+            page_type: "page",
+          },
+          operation: "create",
+          chunks: [],
+          refs: [],
+        },
+      ],
+    );
+    await store.archiveDocuments([collideId]);
+    const movedOverDeleted = await store.moveDocument(docAId, `${root}/new`, "collide.md", "test");
+    expect(movedOverDeleted.document.relative_path).toBe(collidePath);
+
+    // Folder move + cycle guard
+    await expect(store.moveFolder(`${root}/sub`, `${root}/sub/leaf/bad`)).rejects.toBeInstanceOf(
+      FolderValidationError,
+    );
+    const folderMove = await store.moveFolder(`${root}/sub`, `${root}/moved-sub`, "test");
+    expect(folderMove.moved_folders).toBe(2);
+    expect(folderMove.moved_documents).toBe(1);
+    expect((await store.getDocument(docBId))?.relative_path).toBe(`wiki/${root}/moved-sub/b.md`);
+
+    // Folder delete modes
+    await expect(store.deleteFolder(`${root}/moved-sub`, "empty")).rejects.toBeInstanceOf(FolderConflictError);
+    await store.deleteFolder(`${root}/moved-sub/leaf`, "empty");
+    const moveParentDel = await store.deleteFolder(`${root}/moved-sub`, "move_to_parent", "", "test");
+    expect(moveParentDel.moved_documents).toBe(1);
+    expect((await store.getDocument(docBId))?.relative_path).toBe(`wiki/${root}/b.md`);
+
+    const cascadeDel = await store.deleteFolder(`${root}/new`, "cascade", "", "test");
+    expect(cascadeDel.deleted_documents).toBe(1);
+    expect(await store.getDocument(docAId)).not.toBeNull();
+    expect((await store.getDocument(docAId))?.deleted_at).not.toBe("");
+
+    // System page protection
+    const ovId = randomUUID();
+    await pool.query(
+      `INSERT INTO documents (id, user_id, filename, title, path, relative_path, source_kind, file_type, status, content, page_type)
+       VALUES ($1, 'default', 'overview.md', 'Overview', '/wiki/', 'wiki/overview.md', 'wiki', 'md', 'ready', '# Overview', 'page')
+       ON CONFLICT (relative_path) DO NOTHING`,
+      [ovId],
+    );
+    const ovDoc = await store.getDocumentByRelativePath("wiki/overview.md");
+    if (ovDoc) {
+      await expect(store.moveDocument(ovDoc.id, `${root}`)).rejects.toBeInstanceOf(FolderValidationError);
+      if (ovDoc.id === ovId) await pool.query("DELETE FROM documents WHERE id = $1", [ovId]);
+    }
   });
 });

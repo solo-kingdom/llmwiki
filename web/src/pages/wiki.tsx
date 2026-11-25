@@ -52,7 +52,7 @@ import {
   searchDocuments,
   updateDocumentMetadata,
 } from "@/lib/api"
-import { WikiFileIcon, WikiFolderIcon } from "@/lib/file-icons"
+import { WikiFileIcon, WikiFolderIcon, WikiPageTypeIcon } from "@/lib/file-icons"
 import { WikiTreeDialogs, type TreeDialogState } from "@/pages/wiki-tree-dialogs"
 import type { DocumentListItem, WikiFolder } from "@/types"
 
@@ -593,14 +593,14 @@ function WikiPane({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">全部类型</SelectItem>
-          <SelectItem value="concept">概念 (concept)</SelectItem>
-          <SelectItem value="entity">实体 (entity)</SelectItem>
-          <SelectItem value="experience">经验 (experience)</SelectItem>
-          <SelectItem value="ledger">台账 (ledger)</SelectItem>
-          <SelectItem value="synthesis">综合 (synthesis)</SelectItem>
-          <SelectItem value="comparison">对比 (comparison)</SelectItem>
-          <SelectItem value="query">问题 (query)</SelectItem>
-          <SelectItem value="page">普通页面 (page)</SelectItem>
+          <SelectItem value="concept"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="concept" />概念 (concept)</span></SelectItem>
+          <SelectItem value="entity"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="entity" />实体 (entity)</span></SelectItem>
+          <SelectItem value="experience"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="experience" />经验 (experience)</span></SelectItem>
+          <SelectItem value="ledger"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="ledger" />台账 (ledger)</span></SelectItem>
+          <SelectItem value="synthesis"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="synthesis" />综合 (synthesis)</span></SelectItem>
+          <SelectItem value="comparison"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="comparison" />对比 (comparison)</span></SelectItem>
+          <SelectItem value="query"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="query" />问题 (query)</span></SelectItem>
+          <SelectItem value="page"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="page" />普通页面 (page)</span></SelectItem>
         </SelectContent>
       </Select>
       {onShowArchivedChange ? (

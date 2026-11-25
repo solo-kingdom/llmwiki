@@ -1,7 +1,32 @@
 import { useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "react-router"
-import { ArchiveIcon, CpuIcon, PaperclipIcon, PencilIcon, PlusIcon, RotateCcwIcon, SendIcon, SquareIcon, Trash2Icon } from "lucide-react"
+import {
+  ArchiveIcon,
+  BotIcon,
+  BrainIcon,
+  CalendarClockIcon,
+  CheckCircle2Icon,
+  CircleIcon,
+  Clock3Icon,
+  CpuIcon,
+  ListTodoIcon,
+  Loader2Icon,
+  MessageSquareIcon,
+  MessageSquareTextIcon,
+  MoreHorizontalIcon,
+  PaperclipIcon,
+  PencilIcon,
+  PlusIcon,
+  RotateCcwIcon,
+  SearchIcon,
+  SendIcon,
+  SparklesIcon,
+  SquareIcon,
+  Trash2Icon,
+  UserIcon,
+  WrenchIcon,
+} from "lucide-react"
 import { useConfirm } from "@/components/blocks/confirm"
 import { notify } from "@/components/blocks/notify"
 import {
@@ -19,12 +44,13 @@ import { Time } from "@/components/blocks/format"
 import { ListDetailLayout, ListPaneTrigger, PaneHeader, PaneSection } from "@/components/blocks/list-detail"
 import { Markdown } from "@/components/blocks/markdown"
 import { AppLink } from "@/components/blocks/router"
-import { Body, Inline, Page, Row, Rows, ScrollRegion, Stack } from "@/components/blocks/surfaces"
+import { Body, Inline, Page, ScrollRegion, Stack } from "@/components/blocks/surfaces"
 import { EmptyState } from "@/components/blocks/state-boundary"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { InputGroup, InputGroupAddon, InputGroupTextarea } from "@/components/ui/input-group"
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupTextarea } from "@/components/ui/input-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useApp } from "@/context/app-context"
@@ -41,7 +67,7 @@ import {
   updateIngestSession,
   uploadIngestSessionAttachment,
 } from "@/lib/api"
-import type { ACPPlanEntry, IngestSession, IngestSessionMessage } from "@/types"
+import type { ACPPlanEntry, IngestSession, IngestSessionMessage, SessionListItem } from "@/types"
 
 function payloadString(data: unknown, key: string): string {
   if (typeof data !== "object" || data === null) return ""
@@ -65,42 +91,212 @@ function patchMessage(
   return list.map((message) => (message.id === id ? patch(message) : message))
 }
 
+type RecencyKey = "today" | "yesterday" | "week" | "older"
+
+const RECENCY_GROUPS: readonly { key: RecencyKey; label: string; recent: boolean }[] = [
+  { key: "today", label: "今天", recent: true },
+  { key: "yesterday", label: "昨天", recent: true },
+  { key: "week", label: "7 天内", recent: false },
+  { key: "older", label: "更早", recent: false },
+]
+
+function recencyBucket(time: string | undefined, now: Date): RecencyKey {
+  if (!time) return "older"
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const parsed = new Date(time).getTime()
+  if (Number.isNaN(parsed)) return "older"
+  if (parsed >= start) return "today"
+  if (parsed >= start - 86_400_000) return "yesterday"
+  if (parsed >= start - 6 * 86_400_000) return "week"
+  return "older"
+}
+
 function ChatPane({ sessionId, onCreate, creating }: { sessionId: string | undefined; onCreate: () => void; creating: boolean }) {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const confirm = useConfirm()
+  const [filter, setFilter] = useState("")
+  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
   const sessionsQuery = useQuery({ queryKey: ["ingest-sessions"], queryFn: listIngestSessions })
-  const sessions = sessionsQuery.data?.sessions ?? []
+  const sessions = useMemo(() => sessionsQuery.data?.sessions ?? [], [sessionsQuery.data])
+
+  const rename = useMutation({
+    mutationFn: (value: { id: string; title: string }) => updateIngestSession(value.id, { title: value.title }),
+    onSuccess: async (_res, vars) => {
+      notify.success("会话已重命名")
+      setRenaming(null)
+      await queryClient.invalidateQueries({ queryKey: ["ingest-sessions"] })
+      await queryClient.invalidateQueries({ queryKey: ["ingest-session", vars.id] })
+    },
+    onError: (error: Error) => notify.error(error),
+  })
+
+  const archive = useMutation({
+    mutationFn: (session: SessionListItem) => archiveIngestSession(session.id, session.title),
+    onSuccess: (result) => {
+      notify.success(`已归档：${result.review_id}`)
+      void queryClient.invalidateQueries({ queryKey: ["ingest-sessions"] })
+    },
+    onError: (error: Error) => notify.error(error),
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: string) => deleteIngestSession(id),
+    onSuccess: async (_res, deletedId) => {
+      notify.success("会话已删除")
+      await queryClient.invalidateQueries({ queryKey: ["ingest-sessions"] })
+      if (deletedId === sessionId) navigate("/chat")
+    },
+    onError: (error: Error) => notify.error(error),
+  })
+
+  const filtered = useMemo(() => {
+    const needle = filter.trim().toLowerCase()
+    if (needle === "") return sessions
+    return sessions.filter((session) => (session.title || "未命名对话").toLowerCase().includes(needle))
+  }, [sessions, filter])
+
+  const grouped = useMemo(() => {
+    const now = new Date()
+    const map = new Map<RecencyKey, SessionListItem[]>()
+    for (const session of filtered) {
+      const key = recencyBucket(session.updated_at, now)
+      map.set(key, [...(map.get(key) ?? []), session])
+    }
+    return map
+  }, [filtered])
 
   return (
     <>
       <PaneHeader>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">会话</span>
+        <div className="llmwiki-chat-pane-title">
+          <MessageSquareIcon className="size-4 shrink-0 llmwiki-tone-sky" aria-hidden="true" />
+          <span className="truncate text-sm font-medium">会话</span>
+          {sessions.length > 0 ? <span className="llmwiki-chat-count">{sessions.length}</span> : null}
+        </div>
         <Button size="sm" variant="ghost" disabled={creating} onClick={onCreate}>
           <PlusIcon />新对话
         </Button>
       </PaneHeader>
       <PaneSection grow>
+        {sessions.length > 0 ? (
+          <InputGroup>
+            <InputGroupAddon><SearchIcon /></InputGroupAddon>
+            <InputGroupInput
+              aria-label="筛选会话"
+              placeholder="搜索对话…"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+            />
+          </InputGroup>
+        ) : null}
         {sessions.length === 0 ? (
           <p className="text-sm text-muted-foreground">还没有会话，点“新对话”开始。</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-muted-foreground">没有匹配“{filter}”的会话。</p>
         ) : (
-          <Rows label="会话列表">
-            {sessions.map((session) => (
-              <Row key={session.id}>
-                <div className="min-w-0 flex-1">
-                  <AppLink
-                    to={`/chat/${session.id}`}
-                    aria-current={sessionId === session.id ? "page" : undefined}
-                    className="block truncate text-sm hover:text-brand"
-                  >
-                    {session.title || "未命名对话"}
-                  </AppLink>
-                  <div className="text-xs text-muted-foreground">
-                    <Time value={session.updated_at} mode="datetime" />
-                  </div>
-                </div>
-              </Row>
-            ))}
-          </Rows>
+          <div className="llmwiki-chat-groups" aria-label="会话列表">
+            {RECENCY_GROUPS.map((group) => {
+              const list = grouped.get(group.key)
+              if (list === undefined || list.length === 0) return null
+              return (
+                <section key={group.key} className="llmwiki-chat-group" aria-label={group.label}>
+                  <h2 className="llmwiki-chat-group-header">
+                    {group.recent ? <Clock3Icon aria-hidden="true" /> : <CalendarClockIcon aria-hidden="true" />}
+                    <span>{group.label}</span>
+                  </h2>
+                  <ul className="llmwiki-chat-list">
+                    {list.map((session) => {
+                      const active = sessionId === session.id
+                      const archived = session.status === "archived"
+                      const title = session.title || "未命名对话"
+                      return (
+                        <li key={session.id} className="llmwiki-chat-item" data-active={active ? "true" : "false"}>
+                          <AppLink
+                            to={`/chat/${session.id}`}
+                            aria-current={active ? "page" : undefined}
+                            className="llmwiki-chat-item-link"
+                          >
+                            <span className="llmwiki-chat-item-avatar" data-archived={archived ? "true" : "false"} aria-hidden="true">
+                              {archived ? <ArchiveIcon /> : <MessageSquareTextIcon />}
+                            </span>
+                            <span className="llmwiki-chat-item-body">
+                              <span className="llmwiki-chat-item-title">{title}</span>
+                              <span className="llmwiki-chat-item-meta">
+                                <Time value={session.updated_at} />
+                                {archived ? <span className="llmwiki-chat-item-tag">已归档</span> : null}
+                              </span>
+                            </span>
+                          </AppLink>
+                          <div className="llmwiki-chat-item-actions">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  aria-label={`操作会话 ${title}`}
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  <MoreHorizontalIcon />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onSelect={() => setRenaming({ id: session.id, title: session.title || "" })}>
+                                  <PencilIcon />重命名
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => archive.mutate(session)}>
+                                  <ArchiveIcon />归档
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  variant="destructive"
+                                  onSelect={async () => {
+                                    const ok = await confirm({
+                                      title: `删除会话「${title}」？`,
+                                      description: "会话消息会一并删除，已归档的评审不受影响。",
+                                      confirmLabel: "删除",
+                                      destructive: true,
+                                    })
+                                    if (ok) remove.mutate(session.id)
+                                  }}
+                                >
+                                  <Trash2Icon />删除
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </section>
+              )
+            })}
+          </div>
         )}
       </PaneSection>
+      <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) setRenaming(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>重命名会话</DialogTitle>
+            <DialogDescription>标题只影响列表展示。</DialogDescription>
+          </DialogHeader>
+          <Input
+            aria-label="会话标题"
+            value={renaming?.title ?? ""}
+            onChange={(event) => setRenaming((current) => current === null ? current : { ...current, title: event.target.value })}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenaming(null)}>取消</Button>
+            <Button
+              disabled={renaming === null || renaming.title.trim() === "" || rename.isPending}
+              onClick={() => { if (renaming !== null) rename.mutate({ id: renaming.id, title: renaming.title.trim() }) }}
+            >
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
@@ -133,7 +329,7 @@ function ModelPicker({ session }: { session: IngestSession }) {
     <Popover>
       <PopoverTrigger asChild>
         <Button size="icon-sm" variant="ghost" aria-label="模型设置" title="模型设置">
-          <CpuIcon />
+          <CpuIcon className="llmwiki-tone-indigo" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" side="top" className="w-64">
@@ -169,26 +365,77 @@ function ModelPicker({ session }: { session: IngestSession }) {
   )
 }
 
+function PlanStatusIcon({ status }: { status: string }) {
+  if (status === "completed") return <CheckCircle2Icon className="llmwiki-plan-icon llmwiki-tone-emerald" aria-hidden="true" />
+  if (status === "in_progress") return <Loader2Icon className="llmwiki-plan-icon llmwiki-tone-sky animate-spin" aria-hidden="true" />
+  return <CircleIcon className="llmwiki-plan-icon text-muted-foreground" aria-hidden="true" />
+}
+
 function MessageView({ message, onRetry }: { message: IngestSessionMessage; onRetry: () => void }) {
   const isUser = message.role === "user"
+  const isSystem = message.role === "system"
   return (
     <Turn>
       <Message
         meta={
           <>
-            {isUser ? "你" : message.role === "system" ? "系统" : "助手"}
+            <span className="llmwiki-role-badge">
+              <span
+                className={
+                  isUser
+                    ? "llmwiki-role-icon llmwiki-role-icon--user"
+                    : isSystem
+                      ? "llmwiki-role-icon llmwiki-role-icon--system"
+                      : "llmwiki-role-icon llmwiki-role-icon--assistant"
+                }
+                aria-hidden="true"
+              >
+                {isUser ? <UserIcon /> : isSystem ? <BotIcon /> : <SparklesIcon />}
+              </span>
+              {isUser ? "你" : isSystem ? "系统" : "助手"}
+            </span>
             {message.created_at !== "" ? <> · <Time value={message.created_at} /></> : null}
           </>
         }
       >
-        {message.tool_status != null ? <Steps summary={message.tool_status} defaultOpen /> : null}
+        {message.tool_status != null ? (
+          <Steps
+            summary={
+              <span className="llmwiki-step-summary">
+                <WrenchIcon className="llmwiki-tone-amber" aria-hidden="true" />
+                <span>{message.tool_status}</span>
+              </span>
+            }
+            defaultOpen
+          />
+        ) : null}
         {message.thought_text !== undefined && message.thought_text !== "" ? (
-          <Steps summary="思考过程"><Step>{message.thought_text}</Step></Steps>
+          <Steps
+            summary={
+              <span className="llmwiki-step-summary">
+                <BrainIcon className="llmwiki-tone-violet" aria-hidden="true" />
+                <span>思考过程</span>
+              </span>
+            }
+          >
+            <Step>{message.thought_text}</Step>
+          </Steps>
         ) : null}
         {message.plan_entries !== undefined && message.plan_entries.length > 0 ? (
-          <Steps summary={`计划 ${message.plan_entries.length} 项`} defaultOpen>
+          <Steps
+            summary={
+              <span className="llmwiki-step-summary">
+                <ListTodoIcon className="llmwiki-tone-sky" aria-hidden="true" />
+                <span>计划 {message.plan_entries.length} 项</span>
+              </span>
+            }
+            defaultOpen
+          >
             {message.plan_entries.map((entry: ACPPlanEntry, index: number) => (
-              <Step key={`${index}-${entry.content}`}>{entry.status} · {entry.content}</Step>
+              <Step key={`${index}-${entry.content}`}>
+                <PlanStatusIcon status={entry.status} />
+                <span>{entry.content}</span>
+              </Step>
             ))}
           </Steps>
         ) : null}

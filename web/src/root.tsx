@@ -1,3 +1,4 @@
+import * as React from "react"
 import { Outlet } from "react-router"
 import {
   BookOpenIcon,
@@ -8,32 +9,42 @@ import {
   NetworkIcon,
   ScrollTextIcon,
   SettingsIcon,
+  type LucideIcon,
+  type LucideProps,
 } from "lucide-react"
 import { AppShell, type NavGroup } from "@/components/blocks/app-shell"
 import { ThemeMenu } from "@/components/blocks/theme-menu"
+
+function tinted(Icon: LucideIcon, tone: string): LucideIcon {
+  const TintedIcon = React.forwardRef<SVGSVGElement, LucideProps>(({ className, ...props }, ref) => (
+    <Icon ref={ref} {...props} className={className ? `${className} ${tone}` : tone} />
+  ))
+  TintedIcon.displayName = `Tinted(${Icon.displayName ?? Icon.name ?? "Icon"})`
+  return TintedIcon
+}
 
 const nav: NavGroup[] = [
   {
     label: "知识库",
     items: [
-      { label: "Wiki", to: "/wiki", icon: BookOpenIcon },
-      { label: "图谱", to: "/wiki/graph", icon: NetworkIcon },
+      { label: "Wiki", to: "/wiki", icon: tinted(BookOpenIcon, "llmwiki-tone-indigo") },
+      { label: "图谱", to: "/wiki/graph", icon: tinted(NetworkIcon, "llmwiki-tone-violet") },
     ],
   },
   {
     label: "工作台",
     items: [
-      { label: "对话", to: "/", icon: MessageSquareIcon },
-      { label: "任务", to: "/jobs", icon: ListChecksIcon },
-      { label: "时间线", to: "/timeline", icon: HistoryIcon },
-      { label: "日志", to: "/logs", icon: ScrollTextIcon },
+      { label: "对话", to: "/", icon: tinted(MessageSquareIcon, "llmwiki-tone-sky") },
+      { label: "任务", to: "/jobs", icon: tinted(ListChecksIcon, "llmwiki-tone-emerald") },
+      { label: "时间线", to: "/timeline", icon: tinted(HistoryIcon, "llmwiki-tone-amber") },
+      { label: "日志", to: "/logs", icon: tinted(ScrollTextIcon, "llmwiki-tone-cyan") },
     ],
   },
   {
     label: "系统",
     items: [
-      { label: "设置", to: "/settings", icon: SettingsIcon },
-      { label: "帮助", to: "/help", icon: CircleHelpIcon },
+      { label: "设置", to: "/settings", icon: tinted(SettingsIcon, "llmwiki-tone-slate") },
+      { label: "帮助", to: "/help", icon: tinted(CircleHelpIcon, "llmwiki-tone-rose") },
     ],
   },
 ]

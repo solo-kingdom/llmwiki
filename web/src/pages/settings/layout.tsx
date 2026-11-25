@@ -7,11 +7,11 @@ import { useApp } from "@/context/app-context"
 
 /** One route per section; `/settings` redirects to the first (see main.tsx). */
 export const SETTINGS_SECTIONS: SectionNavItem[] = [
-  { label: "模型", to: "/settings/models", icon: <CpuIcon /> },
-  { label: "摄入与检索", to: "/settings/ingest", icon: <DatabaseIcon /> },
-  { label: "访问控制", to: "/settings/access", icon: <KeyRoundIcon /> },
-  { label: "外部集成", to: "/settings/integrations", icon: <PlugIcon /> },
-  { label: "规则文件", to: "/settings/rules", icon: <ScrollTextIcon /> },
+  { label: "模型", to: "/settings/models", icon: <CpuIcon className="llmwiki-tone-indigo" /> },
+  { label: "摄入与检索", to: "/settings/ingest", icon: <DatabaseIcon className="llmwiki-tone-cyan" /> },
+  { label: "访问控制", to: "/settings/access", icon: <KeyRoundIcon className="llmwiki-tone-amber" /> },
+  { label: "外部集成", to: "/settings/integrations", icon: <PlugIcon className="llmwiki-tone-violet" /> },
+  { label: "规则文件", to: "/settings/rules", icon: <ScrollTextIcon className="llmwiki-tone-emerald" /> },
 ]
 
 export function SettingsLayout() {

@@ -1,7 +1,17 @@
 import { useMemo, useState } from "react"
 import type { ColumnDef } from "@tanstack/react-table"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { RotateCcwIcon, SearchIcon } from "lucide-react"
+import {
+  CheckCircle2Icon,
+  FileTextIcon,
+  FileUpIcon,
+  GlobeIcon,
+  Loader2Icon,
+  MessageSquareIcon,
+  RotateCcwIcon,
+  SearchIcon,
+  XCircleIcon,
+} from "lucide-react"
 import { notify } from "@/components/blocks/notify"
 import { DataTable } from "@/components/blocks/data-table"
 import { Id, Num, Time } from "@/components/blocks/format"
@@ -15,8 +25,32 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { cancelIngestJob, getIngestJob, getIngestJobEvents, listIngestJobs, retryIngestJob } from "@/lib/api"
 import type { IngestJob } from "@/types"
 
+function JobSourceIcon({ inputType }: { inputType: string }) {
+  const kind = inputType.toLowerCase()
+  if (kind === "url" || kind === "web") {
+    return <span className="llmwiki-icon-chip llmwiki-icon-chip--sky" aria-hidden="true"><GlobeIcon /></span>
+  }
+  if (kind === "file" || kind === "upload") {
+    return <span className="llmwiki-icon-chip llmwiki-icon-chip--emerald" aria-hidden="true"><FileUpIcon /></span>
+  }
+  if (kind === "session" || kind === "chat") {
+    return <span className="llmwiki-icon-chip llmwiki-icon-chip--violet" aria-hidden="true"><MessageSquareIcon /></span>
+  }
+  return <span className="llmwiki-icon-chip llmwiki-icon-chip--amber" aria-hidden="true"><FileTextIcon /></span>
+}
+
 const columns: ColumnDef<IngestJob, unknown>[] = [
-  { accessorKey: "source_path", header: "来源", meta: { kind: "primary" }, cell: ({ getValue }) => <span className="truncate">{getValue<string>() || "—"}</span> },
+  {
+    accessorKey: "source_path",
+    header: "来源",
+    meta: { kind: "primary" },
+    cell: ({ row }) => (
+      <span className="llmwiki-cell-lead">
+        <JobSourceIcon inputType={row.original.input_type} />
+        <span className="truncate">{row.original.source_path || "—"}</span>
+      </span>
+    ),
+  },
   { accessorKey: "status", header: "状态", meta: { kind: "status" }, cell: ({ getValue }) => <StatusBadge status={getValue<string>()} /> },
   { accessorKey: "id", header: "Job", meta: { kind: "id", priority: 3 }, cell: ({ getValue }) => <Id value={getValue<string>()} /> },
   { accessorKey: "input_type", header: "类型", meta: { kind: "text", priority: 2 } },
@@ -82,8 +116,12 @@ function JobDetail({ jobId, onClose }: { jobId: string; onClose: () => void }) {
                 ]}
               />
               <Inline gap="sm">
-                <Button size="sm" variant="outline" disabled={!running && job.status !== "failed" || retry.isPending} onClick={() => retry.mutate()}>重试</Button>
-                <Button size="sm" variant="ghost" disabled={!running || cancel.isPending} onClick={() => cancel.mutate()}>取消</Button>
+                <Button size="sm" variant="outline" disabled={!running && job.status !== "failed" || retry.isPending} onClick={() => retry.mutate()}>
+                  <RotateCcwIcon />重试
+                </Button>
+                <Button size="sm" variant="ghost" disabled={!running || cancel.isPending} onClick={() => cancel.mutate()}>
+                  <XCircleIcon />取消
+                </Button>
               </Inline>
               <Panel title="事件" padding="none">
                 {events.length === 0 ? (
@@ -127,24 +165,58 @@ export function JobsPage() {
       return jobs.some((job) => job.status === "running" || job.status === "queued") ? 3000 : false
     },
   })
+  const allJobs = useMemo(() => jobsQuery.data ?? [], [jobsQuery.data])
+  const stats = useMemo(() => {
+    let running = 0
+    let succeeded = 0
+    let failed = 0
+    for (const job of allJobs) {
+      if (job.status === "running" || job.status === "queued") running += 1
+      else if (job.status === "succeeded") succeeded += 1
+      else if (job.status === "failed") failed += 1
+    }
+    return { running, succeeded, failed }
+  }, [allJobs])
+
   const rows = useMemo(() => {
-    const jobs = jobsQuery.data ?? []
     const needle = search.trim().toLowerCase()
-    if (needle === "") return jobs
-    return jobs.filter((job) =>
+    if (needle === "") return allJobs
+    return allJobs.filter((job) =>
       job.id.toLowerCase().includes(needle)
       || job.source_path.toLowerCase().includes(needle)
       || job.source_ref.toLowerCase().includes(needle),
     )
-  }, [jobsQuery.data, search])
+  }, [allJobs, search])
 
   return (
     <Page
       title="摄入任务"
       actions={[{ label: "刷新", icon: <RotateCcwIcon />, iconOnly: true, onSelect: () => { void jobsQuery.refetch() } }]}
     >
-      <Toolbar>
-        <InputGroup>
+      <Toolbar
+        end={
+          allJobs.length > 0 ? (
+            <span className="llmwiki-stat-pills" aria-label="任务状态汇总">
+              {stats.running > 0 ? (
+                <span className="llmwiki-stat-pill llmwiki-stat-pill--sky">
+                  <Loader2Icon className="animate-spin" aria-hidden="true" />运行中 {stats.running}
+                </span>
+              ) : null}
+              {stats.succeeded > 0 ? (
+                <span className="llmwiki-stat-pill llmwiki-stat-pill--emerald">
+                  <CheckCircle2Icon aria-hidden="true" />成功 {stats.succeeded}
+                </span>
+              ) : null}
+              {stats.failed > 0 ? (
+                <span className="llmwiki-stat-pill llmwiki-stat-pill--rose">
+                  <XCircleIcon aria-hidden="true" />失败 {stats.failed}
+                </span>
+              ) : null}
+            </span>
+          ) : undefined
+        }
+      >
+        <InputGroup className="max-w-sm">
           <InputGroupAddon><SearchIcon /></InputGroupAddon>
           <InputGroupInput
             aria-label="搜索任务"

@@ -1,84 +1,178 @@
 /*
- * Wiki directory tree icon colors and alignment.
- * Calibrated for quiet-inset light (oklch 0.982) and dark (oklch 0.185) surfaces.
+ * Wiki directory tree icon colors, duotone fills, and alignment.
+ * Calibrated for high clarity and vibrancy on both light (oklch 0.982) and dark (oklch 0.185) surfaces.
  * Unlayered rules override Tailwind utility classes (e.g. NavItem's [&_svg]:size-4)
  * without modifying locked ui-template files.
  */
 
 :root {
-  --wiki-icon-folder: oklch(0.60 0.145 72);
-  --wiki-icon-folder-fill: oklch(0.60 0.145 72 / 0.14);
-  --wiki-icon-folder-open: oklch(0.56 0.16 62);
-  --wiki-icon-folder-open-fill: oklch(0.56 0.16 62 / 0.18);
+  --wiki-icon-folder: oklch(0.60 0.195 66);
+  --wiki-icon-folder-fill: oklch(0.76 0.175 74 / 0.34);
+  --wiki-icon-folder-open: oklch(0.57 0.205 56);
+  --wiki-icon-folder-open-fill: oklch(0.74 0.185 66 / 0.40);
 
-  --wiki-icon-markdown: oklch(0.54 0.155 248);
-  --wiki-icon-html: oklch(0.58 0.175 38);
-  --wiki-icon-video: oklch(0.53 0.18 298);
-  --wiki-icon-image: oklch(0.53 0.145 158);
-  --wiki-icon-audio: oklch(0.56 0.185 352);
-  --wiki-icon-pdf: oklch(0.54 0.195 22);
-  --wiki-icon-word: oklch(0.49 0.165 262);
-  --wiki-icon-spreadsheet: oklch(0.50 0.15 145);
-  --wiki-icon-presentation: oklch(0.57 0.17 50);
-  --wiki-icon-code: oklch(0.53 0.135 205);
-  --wiki-icon-data: oklch(0.54 0.155 275);
-  --wiki-icon-archive: oklch(0.54 0.105 62);
-  --wiki-icon-text: oklch(0.50 0.03 255);
-  --wiki-icon-other: oklch(0.52 0.015 280);
+  /* File kinds */
+  --wiki-icon-markdown: oklch(0.54 0.21 255);
+  --wiki-icon-markdown-fill: oklch(0.54 0.21 255 / 0.18);
+  --wiki-icon-html: oklch(0.59 0.21 36);
+  --wiki-icon-html-fill: oklch(0.59 0.21 36 / 0.18);
+  --wiki-icon-video: oklch(0.54 0.22 298);
+  --wiki-icon-video-fill: oklch(0.54 0.22 298 / 0.18);
+  --wiki-icon-image: oklch(0.54 0.19 156);
+  --wiki-icon-image-fill: oklch(0.54 0.19 156 / 0.18);
+  --wiki-icon-audio: oklch(0.56 0.22 350);
+  --wiki-icon-audio-fill: oklch(0.56 0.22 350 / 0.18);
+  --wiki-icon-pdf: oklch(0.55 0.23 22);
+  --wiki-icon-pdf-fill: oklch(0.55 0.23 22 / 0.18);
+  --wiki-icon-word: oklch(0.50 0.20 262);
+  --wiki-icon-word-fill: oklch(0.50 0.20 262 / 0.18);
+  --wiki-icon-spreadsheet: oklch(0.52 0.19 148);
+  --wiki-icon-spreadsheet-fill: oklch(0.52 0.19 148 / 0.18);
+  --wiki-icon-presentation: oklch(0.59 0.21 48);
+  --wiki-icon-presentation-fill: oklch(0.59 0.21 48 / 0.18);
+  --wiki-icon-code: oklch(0.53 0.18 205);
+  --wiki-icon-code-fill: oklch(0.53 0.18 205 / 0.18);
+  --wiki-icon-data: oklch(0.55 0.21 280);
+  --wiki-icon-data-fill: oklch(0.55 0.21 280 / 0.18);
+  --wiki-icon-archive: oklch(0.56 0.15 62);
+  --wiki-icon-archive-fill: oklch(0.56 0.15 62 / 0.18);
+  --wiki-icon-text: oklch(0.50 0.06 255);
+  --wiki-icon-text-fill: oklch(0.50 0.06 255 / 0.14);
+  --wiki-icon-other: oklch(0.52 0.04 275);
+  --wiki-icon-other-fill: oklch(0.52 0.04 275 / 0.14);
+
+  /* Wiki semantic page_type icons (for Markdown wiki pages) */
+  --wiki-type-concept: oklch(0.60 0.20 74);
+  --wiki-type-concept-fill: oklch(0.75 0.18 82 / 0.26);
+  --wiki-type-entity: oklch(0.53 0.22 264);
+  --wiki-type-entity-fill: oklch(0.53 0.22 264 / 0.18);
+  --wiki-type-experience: oklch(0.54 0.20 156);
+  --wiki-type-experience-fill: oklch(0.54 0.20 156 / 0.18);
+  --wiki-type-ledger: oklch(0.53 0.18 204);
+  --wiki-type-ledger-fill: oklch(0.53 0.18 204 / 0.18);
+  --wiki-type-source: oklch(0.54 0.22 296);
+  --wiki-type-source-fill: oklch(0.54 0.22 296 / 0.18);
+  --wiki-type-synthesis: oklch(0.54 0.19 180);
+  --wiki-type-synthesis-fill: oklch(0.54 0.19 180 / 0.18);
+  --wiki-type-comparison: oklch(0.57 0.22 10);
+  --wiki-type-comparison-fill: oklch(0.57 0.22 10 / 0.18);
+  --wiki-type-query: oklch(0.60 0.21 40);
+  --wiki-type-query-fill: oklch(0.60 0.21 40 / 0.18);
 }
 
 .dark {
-  --wiki-icon-folder: oklch(0.76 0.135 76);
-  --wiki-icon-folder-fill: oklch(0.76 0.135 76 / 0.16);
-  --wiki-icon-folder-open: oklch(0.81 0.14 78);
-  --wiki-icon-folder-open-fill: oklch(0.81 0.14 78 / 0.20);
+  --wiki-icon-folder: oklch(0.82 0.17 76);
+  --wiki-icon-folder-fill: oklch(0.82 0.17 76 / 0.28);
+  --wiki-icon-folder-open: oklch(0.86 0.17 82);
+  --wiki-icon-folder-open-fill: oklch(0.86 0.17 82 / 0.34);
 
-  --wiki-icon-markdown: oklch(0.72 0.14 245);
-  --wiki-icon-html: oklch(0.73 0.16 42);
-  --wiki-icon-video: oklch(0.73 0.165 298);
-  --wiki-icon-image: oklch(0.73 0.14 158);
-  --wiki-icon-audio: oklch(0.73 0.165 352);
-  --wiki-icon-pdf: oklch(0.71 0.175 22);
-  --wiki-icon-word: oklch(0.69 0.15 262);
-  --wiki-icon-spreadsheet: oklch(0.71 0.145 145);
-  --wiki-icon-presentation: oklch(0.74 0.155 54);
-  --wiki-icon-code: oklch(0.73 0.13 205);
-  --wiki-icon-data: oklch(0.73 0.135 275);
-  --wiki-icon-archive: oklch(0.72 0.10 66);
-  --wiki-icon-text: oklch(0.70 0.03 255);
-  --wiki-icon-other: oklch(0.68 0.015 280);
+  /* File kinds */
+  --wiki-icon-markdown: oklch(0.76 0.17 248);
+  --wiki-icon-markdown-fill: oklch(0.76 0.17 248 / 0.22);
+  --wiki-icon-html: oklch(0.78 0.18 44);
+  --wiki-icon-html-fill: oklch(0.78 0.18 44 / 0.22);
+  --wiki-icon-video: oklch(0.77 0.19 298);
+  --wiki-icon-video-fill: oklch(0.77 0.19 298 / 0.22);
+  --wiki-icon-image: oklch(0.77 0.17 156);
+  --wiki-icon-image-fill: oklch(0.77 0.17 156 / 0.22);
+  --wiki-icon-audio: oklch(0.76 0.19 352);
+  --wiki-icon-audio-fill: oklch(0.76 0.19 352 / 0.22);
+  --wiki-icon-pdf: oklch(0.74 0.20 22);
+  --wiki-icon-pdf-fill: oklch(0.74 0.20 22 / 0.22);
+  --wiki-icon-word: oklch(0.74 0.18 262);
+  --wiki-icon-word-fill: oklch(0.74 0.18 262 / 0.22);
+  --wiki-icon-spreadsheet: oklch(0.76 0.17 148);
+  --wiki-icon-spreadsheet-fill: oklch(0.76 0.17 148 / 0.22);
+  --wiki-icon-presentation: oklch(0.79 0.18 54);
+  --wiki-icon-presentation-fill: oklch(0.79 0.18 54 / 0.22);
+  --wiki-icon-code: oklch(0.78 0.16 205);
+  --wiki-icon-code-fill: oklch(0.78 0.16 205 / 0.22);
+  --wiki-icon-data: oklch(0.77 0.17 280);
+  --wiki-icon-data-fill: oklch(0.77 0.17 280 / 0.22);
+  --wiki-icon-archive: oklch(0.77 0.14 68);
+  --wiki-icon-archive-fill: oklch(0.77 0.14 68 / 0.22);
+  --wiki-icon-text: oklch(0.74 0.05 255);
+  --wiki-icon-text-fill: oklch(0.74 0.05 255 / 0.18);
+  --wiki-icon-other: oklch(0.72 0.04 275);
+  --wiki-icon-other-fill: oklch(0.72 0.04 275 / 0.18);
+
+  /* Wiki semantic page_type icons */
+  --wiki-type-concept: oklch(0.84 0.17 82);
+  --wiki-type-concept-fill: oklch(0.84 0.17 82 / 0.24);
+  --wiki-type-entity: oklch(0.76 0.18 264);
+  --wiki-type-entity-fill: oklch(0.76 0.18 264 / 0.24);
+  --wiki-type-experience: oklch(0.78 0.17 156);
+  --wiki-type-experience-fill: oklch(0.78 0.17 156 / 0.24);
+  --wiki-type-ledger: oklch(0.78 0.16 204);
+  --wiki-type-ledger-fill: oklch(0.78 0.16 204 / 0.24);
+  --wiki-type-source: oklch(0.77 0.19 296);
+  --wiki-type-source-fill: oklch(0.77 0.19 296 / 0.24);
+  --wiki-type-synthesis: oklch(0.78 0.16 180);
+  --wiki-type-synthesis-fill: oklch(0.78 0.16 180 / 0.24);
+  --wiki-type-comparison: oklch(0.76 0.19 14);
+  --wiki-type-comparison-fill: oklch(0.76 0.19 14 / 0.24);
+  --wiki-type-query: oklch(0.80 0.18 46);
+  --wiki-type-query-fill: oklch(0.80 0.18 46 / 0.24);
 }
 
 .wiki-tree-folder-lead {
   display: inline-flex;
   align-items: center;
-  gap: 0.125rem;
+  gap: 0.25rem;
   flex-shrink: 0;
 }
 
 .wiki-tree-file-lead {
   display: inline-flex;
   align-items: center;
-  padding-left: 0.875rem;
+  padding-left: 1rem;
   flex-shrink: 0;
 }
 
 .wiki-tree-chevron {
-  width: 0.75rem;
-  height: 0.75rem;
+  width: 0.8125rem;
+  height: 0.8125rem;
   flex-shrink: 0;
-  color: var(--faint-foreground);
+  color: var(--muted-foreground);
   transition: color var(--duration-fast) var(--ease-out);
 }
 
 .wiki-tree-row:hover .wiki-tree-chevron,
 .wiki-tree-row:focus-within .wiki-tree-chevron {
-  color: var(--muted-foreground);
+  color: var(--foreground);
 }
 
 .wiki-tree-folder-label {
   color: var(--foreground);
   font-weight: 500;
+}
+
+/* Crisp stroke + vibrant duotone fills */
+.wiki-icon-folder,
+.wiki-icon-folder-open,
+.wiki-icon-markdown,
+.wiki-icon-html,
+.wiki-icon-video,
+.wiki-icon-image,
+.wiki-icon-audio,
+.wiki-icon-pdf,
+.wiki-icon-word,
+.wiki-icon-spreadsheet,
+.wiki-icon-presentation,
+.wiki-icon-code,
+.wiki-icon-data,
+.wiki-icon-archive,
+.wiki-icon-text,
+.wiki-icon-other,
+.wiki-type-icon-concept,
+.wiki-type-icon-entity,
+.wiki-type-icon-experience,
+.wiki-type-icon-ledger,
+.wiki-type-icon-source,
+.wiki-type-icon-synthesis,
+.wiki-type-icon-comparison,
+.wiki-type-icon-query {
+  stroke-width: 1.9;
 }
 
 .wiki-icon-folder {
@@ -91,20 +185,29 @@
   fill: var(--wiki-icon-folder-open-fill);
 }
 
-.wiki-icon-markdown { color: var(--wiki-icon-markdown); }
-.wiki-icon-html { color: var(--wiki-icon-html); }
-.wiki-icon-video { color: var(--wiki-icon-video); }
-.wiki-icon-image { color: var(--wiki-icon-image); }
-.wiki-icon-audio { color: var(--wiki-icon-audio); }
-.wiki-icon-pdf { color: var(--wiki-icon-pdf); }
-.wiki-icon-word { color: var(--wiki-icon-word); }
-.wiki-icon-spreadsheet { color: var(--wiki-icon-spreadsheet); }
-.wiki-icon-presentation { color: var(--wiki-icon-presentation); }
-.wiki-icon-code { color: var(--wiki-icon-code); }
-.wiki-icon-data { color: var(--wiki-icon-data); }
-.wiki-icon-archive { color: var(--wiki-icon-archive); }
-.wiki-icon-text { color: var(--wiki-icon-text); }
-.wiki-icon-other { color: var(--wiki-icon-other); }
+.wiki-icon-markdown { color: var(--wiki-icon-markdown); fill: var(--wiki-icon-markdown-fill); }
+.wiki-icon-html { color: var(--wiki-icon-html); fill: var(--wiki-icon-html-fill); }
+.wiki-icon-video { color: var(--wiki-icon-video); fill: var(--wiki-icon-video-fill); }
+.wiki-icon-image { color: var(--wiki-icon-image); fill: var(--wiki-icon-image-fill); }
+.wiki-icon-audio { color: var(--wiki-icon-audio); fill: var(--wiki-icon-audio-fill); }
+.wiki-icon-pdf { color: var(--wiki-icon-pdf); fill: var(--wiki-icon-pdf-fill); }
+.wiki-icon-word { color: var(--wiki-icon-word); fill: var(--wiki-icon-word-fill); }
+.wiki-icon-spreadsheet { color: var(--wiki-icon-spreadsheet); fill: var(--wiki-icon-spreadsheet-fill); }
+.wiki-icon-presentation { color: var(--wiki-icon-presentation); fill: var(--wiki-icon-presentation-fill); }
+.wiki-icon-code { color: var(--wiki-icon-code); fill: var(--wiki-icon-code-fill); }
+.wiki-icon-data { color: var(--wiki-icon-data); fill: var(--wiki-icon-data-fill); }
+.wiki-icon-archive { color: var(--wiki-icon-archive); fill: var(--wiki-icon-archive-fill); }
+.wiki-icon-text { color: var(--wiki-icon-text); fill: var(--wiki-icon-text-fill); }
+.wiki-icon-other { color: var(--wiki-icon-other); fill: var(--wiki-icon-other-fill); }
+
+.wiki-type-icon-concept { color: var(--wiki-type-concept); fill: var(--wiki-type-concept-fill); }
+.wiki-type-icon-entity { color: var(--wiki-type-entity); fill: var(--wiki-type-entity-fill); }
+.wiki-type-icon-experience { color: var(--wiki-type-experience); fill: var(--wiki-type-experience-fill); }
+.wiki-type-icon-ledger { color: var(--wiki-type-ledger); fill: var(--wiki-type-ledger-fill); }
+.wiki-type-icon-source { color: var(--wiki-type-source); fill: var(--wiki-type-source-fill); }
+.wiki-type-icon-synthesis { color: var(--wiki-type-synthesis); fill: var(--wiki-type-synthesis-fill); }
+.wiki-type-icon-comparison { color: var(--wiki-type-comparison); fill: var(--wiki-type-comparison-fill); }
+.wiki-type-icon-query { color: var(--wiki-type-query); fill: var(--wiki-type-query-fill); }
 
 @media (hover: hover) {
   .wiki-tree-row .wiki-tree-row-actions {

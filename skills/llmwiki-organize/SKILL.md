@@ -20,6 +20,8 @@ Writes go through the API so the file, the index and the graph stay consistent. 
 | `wiki/synthesis/` | `synthesis` | 问题或目的 / 分析 / 引用 / 后续 |
 | `wiki/comparisons/` | `comparison` | 对比维度 / 异同 / 结论 |
 | `wiki/queries/` | `query` | 问题 / 回答 / 引用 |
+| `wiki/experiences/` | `experience` | 适用场景 / 触发信号 / 经验结论 / 预防与处理 / 验证方式 / 证据 / 边界与失效条件 / 来源 (+ 误判与弯路 / 最短判别 / 复发记录 for pitfall/pattern) |
+| `wiki/ledgers/` | `ledger` | 当前状态 / 历史 / 来源 |
 | `wiki/sources/` | `source` | 摘要 / 关键观点 / 相关实体或概念 |
 
 Frontmatter on every wiki page — a missing `title`, `date` or `type` is a lint error:
@@ -36,7 +38,8 @@ tags: [transformer, nlp]
 
 Rules the linter enforces:
 
-- `type` must be valid (`entity`, `concept`, `source`, `synthesis`, `comparison`, `query`, `page`). Only `wiki/sources/` requires `type: source`; business pages can live in any nested topic folder under `wiki/`.
+- `type` must be valid (`entity`, `concept`, `source`, `synthesis`, `comparison`, `query`, `experience`, `ledger`, `page`). Only `wiki/sources/` requires `type: source`; business pages can live in any nested topic folder under `wiki/`.
+- `experience` requires `status` (`draft`/`validated`/`deprecated`) and supports `kind` (`practice`/`pitfall`/`pattern`) and `symptoms`; `ledger` requires `status`; `confidence: high` requires `last_verified`, and `validated` experience requires `last_verified` and `review_after`.
 - Business pages live inside topic subfolders (e.g. `wiki/AI-Engineering/Agent/harness.md`). `wiki/foo.md` is `misplaced_wiki_page`; only `wiki/overview.md`, `wiki/index.md` and `wiki/log.md` may sit at the top level.
 - Links use Obsidian syntax: `[[AI-Engineering/Agent/harness|Harness]]`, `[[entities/transformer|Transformer]]`, or bare `[[attention]]` when the slug is unique. Markdown links `[text](/wiki/concepts/attention.md)` work too. A link to a missing page is `dead_link`.
 - One page, one subject. If a page grows two subjects, split it and link the halves.
@@ -86,6 +89,18 @@ Avoid `PATCH /api/v1/documents/{id}` (`title`, `tags`, `date`, `metadata`): it u
 ## Move or rename
 
 Use `POST /api/v1/documents/{id}/move` (`{"target_folder": "AI-Engineering/Agent", "filename": "new-name.md"}`) or `POST /api/v1/folders/move` (`{"from_path": "old", "to_path": "new"}`). Moves preserve `document_id`, version history, and automatically rewrite explicit path-qualified wikilinks/markdown links. Use `GET /api/v1/tree` and `POST/PATCH/DELETE /api/v1/folders` to inspect and manage the folder tree.
+
+## Archive and reopen (in-place, distinct from delete)
+
+```bash
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/documents/{id}/archive" \
+  -H 'Content-Type: application/json' \
+  -d '{"reason":"Superseded by newer design","superseded_by":"[[new-page]]"}'
+
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/documents/{id}/reopen" \
+  -H 'Content-Type: application/json' \
+  -d '{"reason":"Re-verified","confidence":"medium","last_verified":"2026-11-25"}'
+```
 
 ## Delete a page
 

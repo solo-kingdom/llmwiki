@@ -168,6 +168,8 @@ export function createApp(deps: AppDeps): Hono {
   app.put("/api/v1/documents/:id/content", api.updateDocumentContent);
   app.patch("/api/v1/documents/:id", api.updateDocumentMetadata);
   app.post("/api/v1/documents/:id/move", api.moveDocument);
+  app.post("/api/v1/documents/:id/archive", api.archiveDocument);
+  app.post("/api/v1/documents/:id/reopen", api.reopenDocument);
   app.delete("/api/v1/documents/:id", api.deleteDocument);
 
   // Search, lint, graph

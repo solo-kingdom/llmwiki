@@ -35,7 +35,14 @@ title: Wiki 规则
 ## 页面策略
 
 - 默认创建 source / entity / concept 类页面
+- 可复用经验、踩坑与排查模式归入 experience（kind: practice | pitfall | pattern、status: draft | validated | deprecated；pitfall/pattern 需写 symptoms 现象词）
+- 业务对象当前状态与追加历史归入 ledger（status 必填）
 - 除非源中明确存在综合论述，否则不要创建 synthesis 页面
+
+## 证据与隐私
+
+- 每页标注 confidence: high | medium | low，high 与 validated 经验需填 last_verified（validated 另需 review_after）
+- 凭据、密钥、个人联系方式与内部主机名写成 <REDACTED>，不得明文入库
 
 ## 领域约束
 
@@ -172,7 +179,9 @@ function defaultTaskInstructionZH(step: PromptStep): string {
 - 不要添加源中未支持的内容
 - 业务知识页按知识主题组织在 wiki/ 下的多级目录中（如 wiki/AI工程/Agent/harness.md），不得写入 wiki/ 顶层
 - 优先复用提示中提供的已有目录；仅在无合适主题目录时新建浅层目录（建议 2–3 层）
-- 必须在 YAML frontmatter 中准确填写 \`type:\`（entity / concept / synthesis / comparison / query / source）
+- 必须在 YAML frontmatter 中准确填写 \`type:\`（entity / concept / synthesis / comparison / query / experience / ledger / source）与 \`confidence:\`（high / medium / low）
+- 若为 experience，需填写 kind: practice | pitfall | pattern 与 status: draft | validated | deprecated；pitfall / pattern 需填写 symptoms 现象检索词；ledger 需填写 status
+- 凭据、密钥、个人联系方式、内部主机名统一脱敏为 <REDACTED>
 - 如果摄入来自文件、URL 或大段文本，应创建或更新 wiki/sources/ 下的 source 摘要页
 - 每个新增事实都应能追溯到 source 摘要、原始内容或已有 wiki 页面
 - 遇到新旧事实冲突时保留冲突上下文，写入 Open Questions 或明确标注不确定性
@@ -236,7 +245,8 @@ function defaultTaskInstructionZH(step: PromptStep): string {
 - 如果 references 无法基于当前上下文定位 document ID，可退回 search/read 建立依据
 - 首次搜索无结果时，尝试同义词、别名、缩写、中文/英文变体或更宽泛查询
 - 不确定的信息明确标注「不确定」，不要当作已证实事实
-- 回答需引用来源页面路径，方便用户追溯
+- 回答需引用来源页面路径，并标明置信度、状态（如 draft/validated/deprecated）与核实日期（last_verified）；draft/deprecated/已归档页不作为现行真理
+- 遇到排障、报错或相似任务预检时，优先用 search 检索 experience（含 pitfall / pattern 与 symptoms 现象词），命中坑页时先给「最短判别」与已知误判
 - 优先综合多个相关页面给出完整回答`;
     case "session_organize":
       return (
@@ -251,6 +261,7 @@ function defaultTaskInstructionZH(step: PromptStep): string {
         "- 诊断时列出具体问题（路径 + 问题类型 + 影响范围）\n" +
         "- 建议时给出可操作的重组方案（移动/合并/拆分/补充标签/补充链接）\n" +
         "- 对 lint 报告中的 entity_concept_coupling 警告：将实体绑定型概念标题拆为中性概念页，并通过 wikilink 链接实体案例\n" +
+        "- 若存在 ≥2 个共享相同触发信号或最短判别的活跃 pitfall，建议归纳为 kind: pattern 经验页；对 review_overdue 建议复审或通过归档（archive）隔离过时页面\n" +
         "- 优先处理影响最大的问题，给出优先级排序\n" +
         "- 不要建议删除 overview.md、index.md、log.md；合并/移动前必须保留所有独特信息并考虑链接更新\n" +
         "- 用户满意后会点击「归档」将重组方案写入 wiki"
@@ -286,7 +297,9 @@ Do not rely on a single exact search. For key entities and concepts, try aliases
       return `You are a wiki generator. Produce wiki pages from the original content and analysis in FILE blocks. The source is authoritative; analysis is organizational context only.
 - Business pages MUST be placed inside topic folders under wiki/ (e.g. wiki/AI-Engineering/Agent/harness.md), NOT as top-level wiki/*.md files.
 - Prefer reusing existing folders listed in the prompt; only create new shallow topic folders (2-3 levels max) when no existing folder fits.
-- Always set frontmatter \`type:\` accurately (entity / concept / synthesis / comparison / query / source).
+- Always set frontmatter \`type:\` accurately (entity / concept / synthesis / comparison / query / experience / ledger / source) and \`confidence: high | medium | low\`.
+- For experience, include kind: practice | pitfall | pattern and status: draft | validated | deprecated (plus symptoms for pitfall/pattern); for ledger, include status.
+- Redact credentials, secrets, personal contacts, and internal hostnames as <REDACTED>.
 
 If ingestion comes from a file, URL, or substantial text, create or update a source summary under wiki/sources/. Every new fact should trace to a source summary, source content, or existing wiki page. If new and old facts conflict, preserve the conflict context and mark uncertainty instead of silently overwriting.
 
@@ -321,7 +334,8 @@ You can use search, read, and references to find existing wiki pages. Keep tool 
 - If references cannot be used because no document ID is available, fall back to search/read for evidence
 - If the first search fails, try synonyms, aliases, abbreviations, English/Chinese variants, or broader terms
 - Mark uncertain information clearly; do not present it as established fact
-- Cite source page paths in your answers for traceability
+- Cite source page paths along with confidence, page_status (e.g. draft/validated/deprecated), and last_verified; never present draft, deprecated, or archived pages as current truth
+- For troubleshooting or pre-task checks, search experience pages (including pitfall/pattern and symptoms) first and highlight shortest discrimination steps and known misconceptions
 - Synthesize multiple relevant pages for comprehensive answers when possible`;
     case "session_organize":
       return (

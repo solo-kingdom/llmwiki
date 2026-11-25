@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { lintWorkspace } from "../engine/lint.js";
+import { lintDocuments, lintWorkspace } from "../engine/lint.js";
 import { getID, parseQueryInt, writeError, writeJson, type ApiContext } from "./context.js";
 
 export function graphApi(ctx: ApiContext) {
@@ -62,9 +62,11 @@ export function graphApi(ctx: ApiContext) {
 export function lintApi(ctx: ApiContext) {
   return {
     async lint(c: Context): Promise<Response> {
-      if (!ctx.workspace) return writeError(c, 400, "workspace not configured");
+      if (!ctx.workspace && !ctx.db) return writeError(c, 400, "workspace not configured");
       try {
-        const report = await lintWorkspace(ctx.workspace);
+        const report = ctx.db
+          ? await lintDocuments(ctx.db, { workspace: ctx.workspace })
+          : await lintWorkspace(ctx.workspace);
         return writeJson(c, 200, { ...report, issues: report.issues ?? [] });
       } catch (error) {
         return writeError(c, 500, errorMessage(error));

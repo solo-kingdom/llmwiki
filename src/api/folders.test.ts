@@ -216,4 +216,80 @@ describe("folders and tree API", () => {
     });
     expect(res404.status).toBe(404);
   });
+
+  it("POST /api/v1/documents/:id/archive and /reopen validate and apply changes", async () => {
+    const sampleDoc = {
+      id: "doc-exp",
+      user_id: "default",
+      filename: "pg-pool.md",
+      title: "PG Pool",
+      path: "/wiki/experiences/",
+      relative_path: "wiki/experiences/pg-pool.md",
+      source_kind: "wiki",
+      file_type: "md",
+      file_size: 40,
+      document_number: 1,
+      status: "ready",
+      page_count: 1,
+      content: "---\ntitle: PG Pool\ntype: experience\nkind: pitfall\nstatus: draft\nconfidence: low\ndate: 2026-11-20\n---\n\n# 适用场景\n",
+      tags: [],
+      date: "2026-11-20",
+      metadata: "{}",
+      error_message: "",
+      version: 1,
+      parser: "",
+      content_hash: "h1",
+      stale_since: "",
+      highlights: "[]",
+      created_at: "",
+      updated_at: "",
+      page_type: "experience",
+      archived_at: "",
+    };
+    let currentDoc = { ...sampleDoc };
+    const store = makeMockStore({
+      getDocument: vi.fn().mockImplementation(async (id) => (id === "doc-exp" ? currentDoc : null)),
+      getDocumentByRelativePath: vi.fn().mockResolvedValue(currentDoc),
+      applyChangeSet: vi.fn().mockImplementation(async (_cs, writes) => {
+        if (writes[0]?.document) currentDoc = { ...writes[0].document };
+      }),
+      replaceReferenceEntriesInTx: vi.fn().mockResolvedValue(undefined),
+      replaceReferencesInTx: vi.fn().mockResolvedValue(undefined),
+      listDocumentsWithContent: vi.fn().mockImplementation(async () => [currentDoc]),
+      listSourceBlobs: vi.fn().mockResolvedValue([]),
+    });
+    const app = makeApp(store);
+
+    const badArchive = await app.request("/api/v1/documents/doc-exp/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "   " }),
+    });
+    expect(badArchive.status).toBe(400);
+
+    const archRes = await app.request("/api/v1/documents/doc-exp/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "已替代", superseded_by: "[[new-pool]]", date: "2026-11-25" }),
+    });
+    expect(archRes.status).toBe(200);
+    const archivedBody = (await archRes.json()) as { archived_at: string; archive_reason: string };
+    expect(archivedBody.archived_at).toBe("2026-11-25");
+    expect(archivedBody.archive_reason).toBe("已替代");
+
+    const lintRes = await app.request("/api/v1/lint");
+    expect(lintRes.status).toBe(200);
+    const lintBody = (await lintRes.json()) as { stats: { archived: number } };
+    expect(lintBody.stats.archived).toBe(1);
+
+    const reopenRes = await app.request("/api/v1/documents/doc-exp/reopen", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "重新核实", confidence: "high", last_verified: "2026-11-25", date: "2026-11-25" }),
+    });
+    expect(reopenRes.status).toBe(200);
+    const reopenedBody = (await reopenRes.json()) as { archived_at: string; confidence: string };
+    expect(reopenedBody.archived_at).toBe("");
+    expect(reopenedBody.confidence).toBe("high");
+  });
 });

@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
+import { getMetadataJSON, parseFrontmatter } from "../../engine/frontmatter.js";
 import {
   folderPathFromWikiRelPath,
   resolvePageType,
+  VALID_PAGE_TYPES,
   wikiPageTypeFromPaths,
   WIKI_HIDDEN_SUBDIRS,
 } from "../../engine/wiki_org.js";
@@ -208,6 +210,11 @@ export function documentsRepo(pool: Pool): DocumentStore {
       date: string,
       metadata: string,
     ): Promise<void> {
+      const fm = parseFrontmatter(content);
+      const fmMetaJson = getMetadataJSON(fm);
+      const effectiveMeta = metadata || (fmMetaJson !== "{}" ? fmMetaJson : "");
+      const pageTypeFromFm =
+        fm.type && (VALID_PAGE_TYPES as readonly string[]).includes(fm.type) ? fm.type : "";
       await exec(
         pool,
         `UPDATE documents SET
@@ -216,10 +223,39 @@ export function documentsRepo(pool: Pool): DocumentStore {
           tags = $3,
           date = COALESCE(NULLIF($4, ''), date),
           metadata = COALESCE(NULLIF($5, ''), metadata),
+          confidence = CASE WHEN source_kind = 'wiki' THEN $7 ELSE confidence END,
+          page_status = CASE WHEN source_kind = 'wiki' THEN $8 ELSE page_status END,
+          experience_kind = CASE WHEN source_kind = 'wiki' THEN $9 ELSE experience_kind END,
+          last_verified = CASE WHEN source_kind = 'wiki' THEN $10 ELSE last_verified END,
+          review_after = CASE WHEN source_kind = 'wiki' THEN $11 ELSE review_after END,
+          archived_at = CASE WHEN source_kind = 'wiki' THEN $12 ELSE archived_at END,
+          archive_reason = CASE WHEN source_kind = 'wiki' THEN $13 ELSE archive_reason END,
+          superseded_by = CASE WHEN source_kind = 'wiki' THEN $14 ELSE superseded_by END,
+          aliases = CASE WHEN source_kind = 'wiki' THEN $15 ELSE aliases END,
+          symptoms = CASE WHEN source_kind = 'wiki' THEN $16 ELSE symptoms END,
+          page_type = CASE WHEN source_kind = 'wiki' AND $17 != '' THEN $17 ELSE page_type END,
           version = COALESCE(version, 0) + 1,
           updated_at = ${NOW_TEXT}
         WHERE id = $6`,
-        [content, title, stringArrayJson(tags), date, metadata, id],
+        [
+          content,
+          title,
+          stringArrayJson(tags),
+          date,
+          effectiveMeta,
+          id,
+          fm.confidence ?? "",
+          fm.status ?? "",
+          fm.kind ?? "",
+          fm.last_verified ?? "",
+          fm.review_after ?? "",
+          fm.archived_at ?? "",
+          fm.archive_reason ?? "",
+          fm.superseded_by ?? "",
+          stringArrayJson(fm.aliases),
+          stringArrayJson(fm.symptoms),
+          pageTypeFromFm,
+        ],
       );
     },
 

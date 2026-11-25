@@ -51,7 +51,7 @@ raw/sources/…         source material (uploads, fetched pages) — read-only f
 wiki/overview.md      top-level orientation page
 wiki/index.md         generated table of contents — never hand-edit
 wiki/log.md           append-only journal: `## [YYYY-MM-DD] action | description`
-wiki/<topic>/...        nested topic folders (page `type` in frontmatter: entity|concept|synthesis|comparison|query|page)
+wiki/<topic>/...        nested topic folders (page `type` in frontmatter: entity|concept|synthesis|comparison|query|experience|ledger|page)
 wiki/sources/         source summaries (hidden from listing/search/graph)
 wiki/templates/       system page templates
 PostgreSQL            pages, folders, revisions, search, graph, lint — the only source of truth
@@ -79,8 +79,8 @@ Read the stage skill before starting its task; each one lists the exact payloads
 
 1. **Read before you write.** `GET /api/v1/documents?source_kind=wiki` and the search endpoint tell you what exists; never create a page that duplicates an existing one without merging.
 2. **One page, one truth.** Content edits go to `PUT /api/v1/documents/{id}/content` with the full markdown body including frontmatter. The file wins; DB metadata is a cache.
-3. **Frontmatter is mandatory** on wiki pages: `title`, `date` (`YYYY-MM-DD`), `type` matching the directory.
-4. **No silent inventing.** If the vault lacks the evidence, say so and ingest a source instead of guessing.
+3. **Frontmatter is mandatory** on wiki pages: `title`, `date` (`YYYY-MM-DD`), `type`; `status` is required for `experience`/`ledger`; include `confidence` (`high|medium|low`) and `sources`.
+4. **No silent inventing.** If the vault lacks the evidence, say so and ingest a source instead of guessing; never present `draft`, `deprecated`, or archived pages as current truth.
 5. **Verify with lint after every batch** of page changes; do not report success while `GET /api/v1/lint` returns `severity: error` issues you caused.
 6. **Never edit `wiki/index.md`, `.llmwiki/` or `raw/`.**
 7. **Report evidence, not activity**: list the paths you changed, the lint result, and the change set id when you rolled back.

@@ -26,8 +26,9 @@ curl -fsS -G "${AUTH[@]}" "$LLMWIKI_URL/api/v1/search" \
 - `filter=wiki`（默认）只查 wiki 页面，并跳过隐藏目录（`wiki/sources/`、`wiki/templates/`）。
 - `filter=sources` 只查原始材料（`raw/…`、摄取原件）。
 - 其他值表示全库检索。
-- `types` 可重复（`types=concept&types=entity`），按页面类型缩小范围。
-- 结果是片段：`{document_id, content, header_breadcrumb, chunk_index, filename, title, path, file_type, score}`。
+- `types` 可重复（`types=concept&types=entity&types=experience`），按页面类型缩小范围；还支持 `kinds`（`practice|pitfall|pattern`）、`statuses`（`draft|validated|deprecated`）、`confidences`（`high|medium|low`）、`archived`（`exclude|include|only`，默认排除已归档）、`review_overdue=true`。
+- 检索会匹配 `aliases` 与 `symptoms`（现象检索词）；排障或相似任务预检时，先用现象/报错词查 `types=experience`，命中 `pitfall`/`pattern` 时先看「最短判别」与「误判与弯路」。
+- 结果是片段：`{document_id, content, header_breadcrumb, chunk_index, filename, title, path, file_type, score, page_type, confidence, page_status, experience_kind, last_verified, review_after, symptoms}`。
 - `path` 是**目录**（前后都带斜杠，如 `/wiki/concepts/`），引用页面时用 `path + filename` → `wiki/concepts/attention.md`。
 
 会影响结论的检索特性：

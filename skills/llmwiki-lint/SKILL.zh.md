@@ -44,6 +44,14 @@ curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/lint"
 | `entity_concept_coupling` | warning | 概念页标题绑定到某个实体 | 把概念页标题改中性，用 `[[entities/…]]` 链案例 |
 | `log_format_invalid` | error | `wiki/log.md` 条目不符合 `## [YYYY-MM-DD] action \| description` | 改这一条；不要重排日志 |
 | `log_date_decreasing` | warning | 日志条目时间倒序 | 重排条目，一条都不能丢 |
+| `confidence_invalid` / `confidence_missing` | error / warning | `confidence` 非法或活跃页缺失 | 补 `high`/`medium`/`low` |
+| `verification_missing` | error | `high` 缺 `last_verified` 或 `validated` 经验缺核实/复审日期 | 补齐 `last_verified` / `review_after` |
+| `date_invalid` | error | 日期非合法 `YYYY-MM-DD` | 修正日期格式 |
+| `archive_metadata_invalid` | error | 归档字段不成对（缺 `archive_reason` 或无 `archived_at`） | 补齐或改走 `/archive` / `/reopen` |
+| `kind_invalid` / `experience_status_invalid` | error | `kind` 或 `experience.status` 取值非法 | 修正为合法枚举 |
+| `ambiguous_link` | error | 短链接命中多页 | 改用路径限定链接 `[[folder/slug]]` |
+| `symptoms_missing` / `pattern_instances_insufficient` | warning | `pitfall`/`pattern` 缺现象词，或 `pattern` 活跃实例 `< 2` | 补 `symptoms` 或补充实例链接 |
+| `review_overdue` / `archived_reference` | warning | 已过复审日 / 活跃页引用了归档页 | 复审更新或改指替代页 |
 
 `wiki/templates/` 是脚手架，所有检查都会跳过它——刚初始化的库 lint 应当是空的；不是空就说明库本身有问题。
 

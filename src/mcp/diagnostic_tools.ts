@@ -1,19 +1,36 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import {
+  LINT_CODE_AMBIGUOUS_LINK,
+  LINT_CODE_ARCHIVE_METADATA_INVALID,
+  LINT_CODE_ARCHIVED_REFERENCE,
+  LINT_CODE_CONFIDENCE_INVALID,
+  LINT_CODE_CONFIDENCE_MISSING,
+  LINT_CODE_DATE_INVALID,
   LINT_CODE_DEAD_LINK,
+  LINT_CODE_DESCRIPTION_MISSING,
   LINT_CODE_DUPLICATE_PAGE,
   LINT_CODE_ENTITY_CONCEPT_COUPLING,
+  LINT_CODE_EXPERIENCE_STATUS_INVALID,
+  LINT_CODE_FRONTMATTER_INVALID,
   LINT_CODE_GHOST_INDEX_ENTRY,
+  LINT_CODE_KIND_INVALID,
   LINT_CODE_MISPLACED_WIKI_PAGE,
   LINT_CODE_MISSING_FRONTMATTER,
   LINT_CODE_ORPHAN_PAGE,
+  LINT_CODE_PATTERN_INSTANCES_INSUFFICIENT,
+  LINT_CODE_REVIEW_OVERDUE,
+  LINT_CODE_SOURCE_INVALID,
+  LINT_CODE_SOURCE_METADATA_MISSING,
+  LINT_CODE_SOURCES_MISSING,
+  LINT_CODE_SYMPTOMS_MISSING,
   LINT_CODE_TYPE_DIR_MISMATCH,
+  LINT_CODE_VERIFICATION_MISSING,
   LINT_SEVERITY_ERROR,
   LINT_SEVERITY_WARNING,
   type LintReport,
 } from "../engine/lint_types.js";
-import { lintGhostIndexEntries, lintWorkspace } from "../engine/lint.js";
+import { lintDocuments, lintGhostIndexEntries, lintWorkspace } from "../engine/lint.js";
 import { classifyWikiPath, folderPathFromWikiRelPath, isWikiSystemPath } from "../engine/wiki_org.js";
 import type { Store } from "../store/interfaces.js";
 import type { Document, WikiFolderWithCounts } from "../store/types.js";
@@ -122,9 +139,12 @@ export async function executeLocalAudit(
   }
 
   if (focus === "all" || focus === "structure" || focus === "links" || focus === "metadata") {
-    if (workspace) {
+    if (db || workspace) {
       try {
-        const report = await lintWorkspace(workspace);
+        const report = db
+          ? await lintDocuments(db, { workspace })
+          : await lintWorkspace(workspace);
+        output += `\n- 活跃: ${report.stats.active} / 已归档: ${report.stats.archived} / 待复审: ${report.stats.review_overdue}\n`;
         if (report.issues.length > 0) {
           output += formatAuditLintSection(report, focus);
         }
@@ -172,11 +192,32 @@ function matchesFocus(code: string, focus: string): boolean {
         LINT_CODE_ENTITY_CONCEPT_COUPLING,
         LINT_CODE_DUPLICATE_PAGE,
         LINT_CODE_GHOST_INDEX_ENTRY,
+        LINT_CODE_PATTERN_INSTANCES_INSUFFICIENT,
       ].includes(code);
     case "links":
-      return code === LINT_CODE_DEAD_LINK;
+      return [
+        LINT_CODE_DEAD_LINK,
+        LINT_CODE_AMBIGUOUS_LINK,
+        LINT_CODE_ARCHIVED_REFERENCE,
+        LINT_CODE_SOURCE_INVALID,
+      ].includes(code);
     case "metadata":
-      return code === LINT_CODE_MISSING_FRONTMATTER;
+      return [
+        LINT_CODE_FRONTMATTER_INVALID,
+        LINT_CODE_MISSING_FRONTMATTER,
+        LINT_CODE_CONFIDENCE_INVALID,
+        LINT_CODE_CONFIDENCE_MISSING,
+        LINT_CODE_VERIFICATION_MISSING,
+        LINT_CODE_DATE_INVALID,
+        LINT_CODE_ARCHIVE_METADATA_INVALID,
+        LINT_CODE_KIND_INVALID,
+        LINT_CODE_EXPERIENCE_STATUS_INVALID,
+        LINT_CODE_SOURCES_MISSING,
+        LINT_CODE_SOURCE_METADATA_MISSING,
+        LINT_CODE_DESCRIPTION_MISSING,
+        LINT_CODE_SYMPTOMS_MISSING,
+        LINT_CODE_REVIEW_OVERDUE,
+      ].includes(code);
     default:
       return true;
   }

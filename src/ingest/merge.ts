@@ -9,9 +9,26 @@ import { recordLLMRequest, recordLLMResponse } from "./job_events.js";
 const MERGE_MIN_BODY_RATIO = 0.7;
 const WIKI_FRONTMATTER_RE = /^---[ \t]*\n([\s\S]+?\n)---[ \t]*\n([\s\S]*)$/;
 
-const LOCKED_FRONTMATTER_KEYS = ["type", "title", "created"];
-const UNION_FRONTMATTER_KEYS = ["tags", "sources", "related"];
-const PREFER_NEW_IF_SET_KEYS = ["date", "description"];
+const LOCKED_FRONTMATTER_KEYS = [
+  "type",
+  "title",
+  "created",
+  "origin",
+  "captured_at",
+  "archived_at",
+  "archive_reason",
+  "superseded_by",
+];
+const UNION_FRONTMATTER_KEYS = ["tags", "aliases", "sources", "related", "symptoms"];
+const PREFER_NEW_IF_SET_KEYS = [
+  "date",
+  "description",
+  "confidence",
+  "status",
+  "kind",
+  "last_verified",
+  "review_after",
+];
 
 function splitWikiPage(content: string): { frontmatter: string; body: string; hasFrontmatter: boolean } {
   const match = WIKI_FRONTMATTER_RE.exec(content);

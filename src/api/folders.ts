@@ -6,7 +6,7 @@ import {
   FolderNotFoundError,
   FolderValidationError,
 } from "../store/postgres/folders.js";
-import type { FolderDeleteMode } from "../store/types.js";
+import type { ArchiveFilter, FolderDeleteMode } from "../store/types.js";
 import { readJsonBody, writeError, writeJson, type ApiContext } from "./context.js";
 
 function mapFolderError(c: Context, error: unknown): Response {
@@ -22,13 +22,30 @@ export function foldersApi(ctx: ApiContext) {
     async getTree(c: Context): Promise<Response> {
       const excludeHidden = c.req.query("exclude_hidden") !== "false";
       const pageTypes = c.req.queries("types") ?? c.req.queries("type") ?? [];
+      const experienceKinds = c.req.queries("kinds") ?? c.req.queries("kind") ?? [];
+      const statuses = c.req.queries("statuses") ?? c.req.queries("status") ?? [];
+      const confidences = c.req.queries("confidences") ?? c.req.queries("confidence") ?? [];
+      const rawArchived = (c.req.query("archived") ?? "").trim().toLowerCase();
+      const archived: ArchiveFilter =
+        rawArchived === "include" || rawArchived === "only" || rawArchived === "exclude"
+          ? rawArchived
+          : c.req.query("include_archived") === "true"
+            ? "include"
+            : "exclude";
+      const includeArchived = archived !== "exclude";
+      const reviewOverdue = c.req.query("review_overdue") === "true";
       try {
         const [folders, documents] = await Promise.all([
-          ctx.db.listFolders(excludeHidden),
+          ctx.db.listFolders(excludeHidden, includeArchived),
           ctx.db.listDocumentsFiltered({
             source_kind: "wiki",
             exclude_hidden: excludeHidden,
             page_types: pageTypes,
+            experience_kinds: experienceKinds,
+            statuses,
+            confidences,
+            archived,
+            review_overdue: reviewOverdue,
           }),
         ]);
         return writeJson(c, 200, { folders, documents });

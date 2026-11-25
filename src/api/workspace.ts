@@ -2,7 +2,8 @@ import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Context } from "hono";
 import { loadRuleFilesPreview } from "../ingest/prompts.js";
-import { PAGE_TYPE_TO_WIKI_SUBDIR, WIKI_SYSTEM_SUBDIRS, wikiPageType } from "../engine/wiki_org.js";
+import { PAGE_TYPE_TO_WIKI_SUBDIR, WIKI_SYSTEM_SUBDIRS, isWikiSystemPath, wikiPageType } from "../engine/wiki_org.js";
+import { todayIsoDate } from "../store/postgres/doc_meta.js";
 import type { Document } from "../store/types.js";
 import {
   indexDocumentRelPath,
@@ -32,12 +33,22 @@ interface WorkspaceDir {
   count: number;
 }
 
+interface WorkspaceLifecycle {
+  active: number;
+  archived: number;
+  draft: number;
+  validated: number;
+  deprecated: number;
+  review_overdue: number;
+}
+
 interface WorkspaceOverview {
   root: string;
   layout: WorkspaceLayout;
   counts: WorkspaceCounts;
   page_types: Record<string, number>;
   wiki_dirs: WorkspaceDir[];
+  lifecycle?: WorkspaceLifecycle;
   last_updated?: string;
 }
 
@@ -139,21 +150,41 @@ export function workspaceApi(ctx: ApiContext) {
       };
 
       try {
-        const docs = await ctx.db.listDocuments();
+        const docs = await ctx.db.listDocumentsFiltered({ archived: "include" });
+        const today = todayIsoDate();
+        const lifecycle: WorkspaceLifecycle = {
+          active: 0,
+          archived: 0,
+          draft: 0,
+          validated: 0,
+          deprecated: 0,
+          review_overdue: 0,
+        };
         for (const doc of docs) {
           overview.counts.documents += 1;
           if (doc.source_kind === "wiki") {
             overview.counts.wiki_pages += 1;
             const pageType = doc.page_type || wikiPageType(doc.relative_path);
-            if (PAGE_TYPE_TO_WIKI_SUBDIR[pageType]) {
+            if (!doc.archived_at && PAGE_TYPE_TO_WIKI_SUBDIR[pageType]) {
               overview.page_types[pageType] = (overview.page_types[pageType] ?? 0) + 1;
+            }
+            if (!isWikiSystemPath(doc.relative_path)) {
+              if (doc.archived_at) lifecycle.archived += 1;
+              else lifecycle.active += 1;
+              if (doc.page_status === "draft") lifecycle.draft += 1;
+              else if (doc.page_status === "validated") lifecycle.validated += 1;
+              else if (doc.page_status === "deprecated") lifecycle.deprecated += 1;
+              if (!doc.archived_at && doc.review_after && doc.review_after < today) {
+                lifecycle.review_overdue += 1;
+              }
             }
           } else if (doc.source_kind === "source") {
             overview.counts.sources += 1;
           }
           if (doc.updated_at > (overview.last_updated ?? "")) overview.last_updated = doc.updated_at;
         }
-        overview.wiki_dirs = wikiDirsFromDocuments(docs);
+        overview.wiki_dirs = wikiDirsFromDocuments(docs.filter((d) => !d.archived_at));
+        overview.lifecycle = lifecycle;
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }

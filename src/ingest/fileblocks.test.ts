@@ -7,6 +7,8 @@ describe("fileblocks", () => {
     expect(normalizeWikiFilePath("AI工程/Agent/harness.md")).toBe("wiki/AI工程/Agent/harness.md");
     expect(normalizeWikiFilePath("concepts/attention.md")).toBe("wiki/concepts/attention.md");
     expect(normalizeWikiFilePath("entity/openai.md")).toBe("wiki/entities/openai.md");
+    expect(normalizeWikiFilePath("experience/pg-pool.md")).toBe("wiki/experiences/pg-pool.md");
+    expect(normalizeWikiFilePath("ledgers/accounts.md")).toBe("wiki/ledgers/accounts.md");
     expect(() => normalizeWikiFilePath("top-level.md")).toThrow();
   });
 });

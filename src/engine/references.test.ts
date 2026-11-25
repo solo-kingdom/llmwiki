@@ -81,3 +81,18 @@ describe("ReferenceParser.resolveLink space/underscore variants", () => {
     expect(resolve("Adam Foroughi", "/wiki/concepts/Y.md")).toBe("d1");
   });
 });
+
+describe("ReferenceParser escaped pipe in table cells", () => {
+  const docs = [
+    { id: "d1", filename: "Adam_Foroughi.md", title: "Adam Foroughi", path: "/wiki/entities/" },
+  ];
+
+  it("resolves the generated index form [[path\\|label]]", () => {
+    const parser = new ReferenceParser(docs);
+    const refs = parser.parseReferences(
+      "[[entities/Adam_Foroughi\\|Adam Foroughi]]",
+      "/wiki/index.md",
+    );
+    expect(refs.some((ref) => ref.targetPath === "d1")).toBe(true);
+  });
+});

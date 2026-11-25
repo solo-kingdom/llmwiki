@@ -60,7 +60,7 @@ export function rewriteWikiPathLinks(
     if (fence !== "") return line;
 
     let nextLine = line.replace(
-      /\[\[([^\]|#]+)((?:#[^\]|]*)?)((?:\|[^\]]*)?)\]\]/g,
+      /\[\[([^\]|#]+?)\\?((?:#[^\]|]*)?)((?:\|[^\]]*)?)\]\]/g,
       (full, rawTarget: string, anchor: string, label: string) => {
         const trimmed = rawTarget.trim();
         if (!trimmed.includes("/")) return full;

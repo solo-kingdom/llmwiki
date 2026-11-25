@@ -11,7 +11,7 @@ export interface DocIndexEntry {
   path: string;
 }
 
-export const WIKI_DOUBLE_BRACKET_RE = /\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]/g;
+export const WIKI_DOUBLE_BRACKET_RE = /\[\[([^\]|#]+?)\\?(?:\|[^\]]*)?\]\]/g;
 export const WIKI_LINK_RE = /(!?)\[([^\]]*)\]\(([^)]+)\)/g;
 
 export class ReferenceParser {

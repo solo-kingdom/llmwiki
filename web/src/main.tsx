@@ -8,6 +8,7 @@ import { ThemeProvider } from "@/components/blocks/theme"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AppProvider } from "@/context/app-context"
+import { installAutoHideScrollbars } from "@/lib/scrollbar-idle"
 import { ChatPage } from "./pages/chat"
 import { GraphPage } from "./pages/graph"
 import { HelpPage } from "./pages/help"
@@ -18,6 +19,8 @@ import { TimelinePage } from "./pages/timeline"
 import { WikiReaderPage } from "./pages/wiki"
 import { Root } from "./root"
 import "./index.css"
+
+installAutoHideScrollbars()
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } })
 

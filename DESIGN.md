@@ -32,6 +32,7 @@
 | --- | --- | --- | --- |
 | `web/src/lib/vocab.ts` | 补充 job / review / revision / page type 等领域状态词 | 状态徽标统一取词表 | 否（领域词） |
 | 阅读页正文宽度 | 不限宽（reader 默认 `full`） | 配合右侧目录与宽屏阅读 | 已回馈（reader pattern 默认 full） |
+| `web/src/styles/ui-enhancements.css`、`web/src/lib/scrollbar-idle.ts` | 滚动条保持细宽度；滚动时滑块着色，停止约 1 秒后滑块透明。侧栏与明确隐藏滚动条的导航不受影响 | Linux 常驻粗滚动条和 quiet-inset 的紧凑密度冲突；只改颜色、不改宽度，避免内容抖动 | 否（模板未定义滚动条外观；未改 lock 文件） |
 
 ## 验收记录
 
@@ -42,3 +43,4 @@
 | 2026-11-22 | 树形二级菜单 | 默认折叠 + 当前祖先展开、全展/全折、定位、搜索扁平、中英目录名 | 通过 |
 | 2026-11-22 | 图谱 | 全宽、hover 浮层、选中详情弹窗、显式选中 | 通过 |
 | 2026-11-22 | 全套门禁 | tsc / eslint / build / vitest 5/5 / fidelity 7/7 / validate project 0 error | 通过 |
+| 2026-11-25 | 滚动条 | `vitest run src/lib/scrollbar-idle.test.ts` 2/2。预览 `http://127.0.0.1:4173/wiki`：滚轮后 `.scrollbar-active`、滑块 `oklch(0 0 0 / 0.28)`，约 1 秒后类名去掉且滑块透明，`scrollTop` 保持；暗色滑块为白 28%。侧栏 `.no-scrollbar` 与 `[scrollbar-width:none]` 仍是 `none`。Playwright Chromium 是 overlay 滚动条（gutter 0），截图像素里看不到滑块 | 通过（显隐以计算样式为准） |

@@ -1,6 +1,6 @@
 /*
  * llmwiki UI/UX enhancements: semantic icon tones, conversation list styling,
- * message role badges, and page-level visual accents.
+ * message role badges, page-level visual accents, and idle-hiding scrollbars.
  * Calibrated for quiet-inset light (oklch 0.982) and dark (oklch 0.185) surfaces.
  */
 
@@ -409,4 +409,71 @@
   border-bottom: 1px solid var(--border);
   background: var(--background);
   padding: 0.75rem;
+}
+
+/* Scrollbars stay a constant thin width. The thumb is transparent until its
+   container is scrolling (`.scrollbar-active`, removed ~1s after the last
+   scroll event). Only the thumb color changes, so show/hide does not reflow
+   content. Do not color `::-webkit-scrollbar-thumb:hover` on its own: Chromium
+   treats that pseudo-class as hovered while the pointer is anywhere over the
+   scroller, which would keep the thumb visible. Opt-outs stay hidden:
+   `.no-scrollbar` and the template's `[scrollbar-width:none]`. These rules
+   are unlayered so they win over Tailwind layers; the opt-outs are restated
+   after the general rules for the same reason. */
+:root {
+  --llmwiki-scroll-thumb: oklch(0 0 0 / 0.28);
+  --llmwiki-scroll-thumb-hover: oklch(0 0 0 / 0.42);
+}
+.dark {
+  --llmwiki-scroll-thumb: oklch(1 0 0 / 0.28);
+  --llmwiki-scroll-thumb-hover: oklch(1 0 0 / 0.42);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 10px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  transition: background-color 200ms linear;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:where(:not(.no-scrollbar):not(.\[scrollbar-width\:none\])) {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scrollbar-active {
+  scrollbar-color: var(--llmwiki-scroll-thumb) transparent;
+}
+.scrollbar-active::-webkit-scrollbar-thumb {
+  background-color: var(--llmwiki-scroll-thumb);
+}
+.scrollbar-active::-webkit-scrollbar-thumb:hover {
+  background-color: var(--llmwiki-scroll-thumb-hover);
+}
+
+.no-scrollbar,
+.no-scrollbar.scrollbar-active,
+.\[scrollbar-width\:none\],
+.\[scrollbar-width\:none\].scrollbar-active {
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
+}
+.no-scrollbar::-webkit-scrollbar,
+.\[scrollbar-width\:none\]::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::-webkit-scrollbar-thumb {
+    transition: none;
+  }
 }

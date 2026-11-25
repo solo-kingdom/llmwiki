@@ -427,4 +427,134 @@ describe.skipIf(!databaseUrl)("postgres store integration", () => {
       if (ovDoc.id === ovId) await pool.query("DELETE FROM documents WHERE id = $1", [ovId]);
     }
   });
+
+  it("supports migration v5 metadata, in-place archive/reopen isolation, and symptom/alias search", async () => {
+    const { buildArchivedDocument, buildReopenedDocument } = await import("../../engine/archive.js");
+    const root = `v5-${suffix}`;
+    const pitfallId = randomUUID();
+    const pitfallPath = `wiki/${root}/pg-pool.md`;
+    const pitfallContent = [
+      "---",
+      "title: PG 连接池耗尽",
+      "type: experience",
+      "kind: pitfall",
+      "status: validated",
+      "confidence: high",
+      "date: 2026-11-20",
+      "last_verified: 2026-11-20",
+      "review_after: 2026-11-22",
+      "aliases: [pg-pool-exhausted]",
+      "symptoms: [too many clients already]",
+      "sources: [incident.md]",
+      "---",
+      "",
+      "# 适用场景",
+      "",
+      "高并发连接池配置。",
+    ].join("\n");
+
+    await store.applyChangeSet(
+      { id: "", kind: "manual", summary: "create pitfall", page_count: 1, created_at: "" },
+      [
+        {
+          relative_path: pitfallPath,
+          document: {
+            id: pitfallId,
+            user_id: "default",
+            filename: "pg-pool.md",
+            title: "PG 连接池耗尽",
+            path: `/wiki/${root}/`,
+            relative_path: pitfallPath,
+            source_kind: "wiki",
+            file_type: "md",
+            file_size: pitfallContent.length,
+            document_number: 0,
+            status: "ready",
+            page_count: 1,
+            content: pitfallContent,
+            tags: [],
+            date: "2026-11-20",
+            metadata: "{}",
+            error_message: "",
+            version: 0,
+            parser: "",
+            content_hash: "hp1",
+            stale_since: "",
+            highlights: "[]",
+            created_at: "",
+            updated_at: "",
+            page_type: "experience",
+          },
+          operation: "create",
+          chunks: [],
+          refs: [],
+        },
+      ],
+    );
+
+    const created = await store.getDocument(pitfallId);
+    expect(created?.page_type).toBe("experience");
+    expect(created?.experience_kind).toBe("pitfall");
+    expect(created?.page_status).toBe("validated");
+    expect(created?.confidence).toBe("high");
+    expect(created?.symptoms).toEqual(["too many clients already"]);
+    expect(created?.aliases).toEqual(["pg-pool-exhausted"]);
+
+    // Search by symptom and alias
+    const bySymptom = await store.searchChunks("too many clients", 10, "wiki", {
+      page_types: ["experience"],
+      experience_kinds: ["pitfall"],
+    });
+    expect(bySymptom.some((hit) => hit.document_id === pitfallId)).toBe(true);
+
+    const byAlias = await store.searchChunks("pg-pool-exhausted", 10, "wiki");
+    expect(byAlias.some((hit) => hit.document_id === pitfallId)).toBe(true);
+
+    const overdue = await store.listDocumentsFiltered({
+      source_kind: "wiki",
+      review_overdue: true,
+      today: "2026-11-25",
+    });
+    expect(overdue.some((doc) => doc.id === pitfallId)).toBe(true);
+
+    // In-place archive isolates from default list & search, but keeps getDocument readable
+    const archivedDoc = buildArchivedDocument(created!, {
+      reason: "已升级为自动池化",
+      supersededBy: "[[auto-pool]]",
+      date: "2026-11-25",
+    });
+    await store.applyChangeSet(
+      { id: "", kind: "manual", summary: "archive pitfall", page_count: 1, created_at: "" },
+      [{ relative_path: pitfallPath, document: archivedDoc, operation: "archive", chunks: [], refs: [] }],
+    );
+
+    expect((await store.listDocumentsFiltered({ source_kind: "wiki" })).some((d) => d.id === pitfallId)).toBe(false);
+    expect(
+      (await store.listDocumentsFiltered({ source_kind: "wiki", archived: "only" })).some((d) => d.id === pitfallId),
+    ).toBe(true);
+    expect((await store.searchChunks("too many clients", 10, "wiki")).some((h) => h.document_id === pitfallId)).toBe(
+      false,
+    );
+    expect((await store.getDocument(pitfallId))?.archived_at).toBe("2026-11-25");
+
+    // Reopen restores visibility and records revision
+    const loadedArchived = (await store.getDocument(pitfallId))!;
+    const reopenedDoc = buildReopenedDocument(loadedArchived, {
+      reason: "需要重新核实",
+      confidence: "medium",
+      lastVerified: "2026-11-25",
+      date: "2026-11-25",
+    });
+    await store.applyChangeSet(
+      { id: "", kind: "manual", summary: "reopen pitfall", page_count: 1, created_at: "" },
+      [{ relative_path: pitfallPath, document: reopenedDoc, operation: "reopen", chunks: [], refs: [] }],
+    );
+    expect((await store.listDocumentsFiltered({ source_kind: "wiki" })).some((d) => d.id === pitfallId)).toBe(true);
+    const revs = await store.listPageRevisions(pitfallPath, 10);
+    expect(revs.map((r) => r.operation)).toContain("archive");
+    expect(revs.map((r) => r.operation)).toContain("reopen");
+
+    await pool.query("DELETE FROM documents WHERE relative_path LIKE $1", [`wiki/${root}%`]);
+    await pool.query("DELETE FROM wiki_folders WHERE path LIKE $1", [`${root}%`]);
+  });
 });

@@ -427,6 +427,52 @@ export const MIGRATIONS: Migration[] = [
         CHECK (operation IN ('create','update','delete','restore','move'))`,
     ],
   },
+  {
+    version: 5,
+    statements: [
+      `ALTER TABLE documents ADD COLUMN IF NOT EXISTS confidence TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE documents ADD COLUMN IF NOT EXISTS page_status TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE documents ADD COLUMN IF NOT EXISTS experience_kind TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE documents ADD COLUMN IF NOT EXISTS last_verified TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE documents ADD COLUMN IF NOT EXISTS review_after TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE documents ADD COLUMN IF NOT EXISTS archived_at TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE documents ADD COLUMN IF NOT EXISTS archive_reason TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE documents ADD COLUMN IF NOT EXISTS superseded_by TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE documents ADD COLUMN IF NOT EXISTS aliases TEXT NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE documents ADD COLUMN IF NOT EXISTS symptoms TEXT NOT NULL DEFAULT '[]'`,
+      `CREATE INDEX IF NOT EXISTS idx_documents_archived_at ON documents(archived_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_documents_confidence ON documents(confidence)`,
+      `CREATE INDEX IF NOT EXISTS idx_documents_page_status ON documents(page_status)`,
+      `CREATE INDEX IF NOT EXISTS idx_documents_experience_kind ON documents(experience_kind)`,
+      `CREATE INDEX IF NOT EXISTS idx_documents_review_after ON documents(review_after)`,
+      `CREATE INDEX IF NOT EXISTS idx_documents_aliases_trgm ON documents USING gin (aliases gin_trgm_ops)`,
+      `CREATE INDEX IF NOT EXISTS idx_documents_symptoms_trgm ON documents USING gin (symptoms gin_trgm_ops)`,
+      `ALTER TABLE page_revisions DROP CONSTRAINT IF EXISTS page_revisions_operation_check`,
+      `ALTER TABLE page_revisions ADD CONSTRAINT page_revisions_operation_check
+        CHECK (operation IN ('create','update','delete','restore','move','archive','reopen'))`,
+      `WITH fm AS (
+         SELECT id,
+           lower(COALESCE(
+             substring(
+               substring(content FROM '\\A---[ \\t]*\\r?\\n(.*?)\\r?\\n---[ \\t]*(?:\\r?\\n|$)')
+               FROM '(?n)^type:[ \\t]*([a-zA-Z]+)[ \\t]*\\r?$'
+             ),
+             ''
+           )) AS fm_type
+         FROM documents
+         WHERE source_kind = 'wiki'
+       )
+       UPDATE documents d
+       SET page_type = CASE
+         WHEN fm.fm_type IN ('experience','ledger') THEN fm.fm_type
+         WHEN d.relative_path LIKE 'wiki/experiences/%' AND d.page_type IN ('', 'page') THEN 'experience'
+         WHEN d.relative_path LIKE 'wiki/ledgers/%' AND d.page_type IN ('', 'page') THEN 'ledger'
+         ELSE d.page_type
+       END
+       FROM fm
+       WHERE d.id = fm.id`,
+    ],
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

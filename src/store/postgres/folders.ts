@@ -285,7 +285,7 @@ const FULL_DOC_COLS = `
 
 export function foldersRepo(pool: Pool): FolderStore {
   return {
-    async listFolders(excludeHidden = true): Promise<WikiFolderWithCounts[]> {
+    async listFolders(excludeHidden = true, includeArchived = false): Promise<WikiFolderWithCounts[]> {
       const folderRows = await queryRows(
         pool,
         `SELECT path, display_name, description, sort_order, created_at, updated_at
@@ -296,11 +296,12 @@ export function foldersRepo(pool: Pool): FolderStore {
         .map(scanFolder)
         .filter((f) => !excludeHidden || !isHiddenFolderPath(f.path));
 
+      const archiveCond = includeArchived ? "" : " AND COALESCE(archived_at, '') = ''";
       const docRows = await queryRows<[string]>(
         pool,
         `SELECT relative_path
          FROM documents
-         WHERE source_kind = 'wiki' AND status != 'failed' AND COALESCE(deleted_at, '') = ''`,
+         WHERE source_kind = 'wiki' AND status != 'failed' AND COALESCE(deleted_at, '') = ''${archiveCond}`,
       );
 
       const directCounts = new Map<string, number>();

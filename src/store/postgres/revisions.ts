@@ -4,6 +4,7 @@ import type { Pool, PoolClient } from "pg";
 import { folderPathFromWikiRelPath, resolvePageType } from "../../engine/wiki_org.js";
 import type { RevisionStore } from "../interfaces.js";
 import type { ChangeSet, Chunk, Document, PageRevision, PageWrite, RefEdge, RevisionOperation } from "../types.js";
+import { parseStringArrayJson, stringArrayJson, syncDocumentMetaFromContent } from "./doc_meta.js";
 import { ensureFolderAncestorsTx, releaseSoftDeletedPath } from "./folders.js";
 import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
@@ -26,7 +27,11 @@ const REVISION_DOCUMENT_COLUMNS = `
   COALESCE(error_message, ''), COALESCE(version, 0), COALESCE(parser, ''),
   COALESCE(content_hash, ''), COALESCE(stale_since, ''), COALESCE(highlights, '[]'),
   COALESCE(created_at, ''), COALESCE(updated_at, ''), COALESCE(deleted_at, ''),
-  COALESCE(page_type, '')`;
+  COALESCE(page_type, ''),
+  COALESCE(confidence, ''), COALESCE(page_status, ''), COALESCE(experience_kind, ''),
+  COALESCE(last_verified, ''), COALESCE(review_after, ''), COALESCE(archived_at, ''),
+  COALESCE(archive_reason, ''), COALESCE(superseded_by, ''),
+  COALESCE(aliases, '[]'), COALESCE(symptoms, '[]')`;
 
 function scanRevision(row: unknown[]): PageRevision {
   return {
@@ -102,6 +107,16 @@ function scanRevisionDocument(row: unknown[]): Document {
     updated_at: asString(row[23]),
     deleted_at: asString(row[24]),
     page_type: asString(row[25]),
+    confidence: asString(row[26]),
+    page_status: asString(row[27]),
+    experience_kind: asString(row[28]),
+    last_verified: asString(row[29]),
+    review_after: asString(row[30]),
+    archived_at: asString(row[31]),
+    archive_reason: asString(row[32]),
+    superseded_by: asString(row[33]),
+    aliases: parseStringArrayJson(asString(row[34])),
+    symptoms: parseStringArrayJson(asString(row[35])),
   };
 }
 
@@ -288,6 +303,7 @@ async function applyPageWrite(
   if (!doc.filename) doc.filename = path.posix.basename(relPath);
   if (!doc.user_id) doc.user_id = "default";
   if (!doc.status) doc.status = "ready";
+  syncDocumentMetaFromContent(doc);
   doc.page_type =
     doc.source_kind === "wiki"
       ? resolvePageType("", doc.page_type ?? "", relPath)
@@ -307,8 +323,10 @@ async function applyPageWrite(
       `INSERT INTO documents (id, user_id, filename, title, path, relative_path, source_kind,
         file_type, file_size, document_number, status, page_count, content, tags, date,
         metadata, error_message, version, parser, content_hash, stale_since, highlights,
-        page_type, deleted_at, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,'',${NOW_TEXT},${NOW_TEXT})`,
+        page_type, confidence, page_status, experience_kind, last_verified, review_after,
+        archived_at, archive_reason, superseded_by, aliases, symptoms,
+        deleted_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,'',${NOW_TEXT},${NOW_TEXT})`,
       [
         doc.id,
         doc.user_id,
@@ -333,6 +351,16 @@ async function applyPageWrite(
         doc.stale_since,
         doc.highlights,
         doc.page_type,
+        doc.confidence ?? "",
+        doc.page_status ?? "",
+        doc.experience_kind ?? "",
+        doc.last_verified ?? "",
+        doc.review_after ?? "",
+        doc.archived_at ?? "",
+        doc.archive_reason ?? "",
+        doc.superseded_by ?? "",
+        stringArrayJson(doc.aliases),
+        stringArrayJson(doc.symptoms),
       ],
     );
   } else {
@@ -346,7 +374,9 @@ async function applyPageWrite(
         source_kind=$7, file_type=$8, file_size=$9, document_number=$10, status=$11,
         page_count=$12, content=$13, tags=$14, date=$15, metadata=$16, error_message=$17,
         version=$18, parser=$19, content_hash=$20, stale_since=$21, highlights=$22,
-        page_type=$23, deleted_at='', updated_at=(${NOW_TEXT})
+        page_type=$23, confidence=$24, page_status=$25, experience_kind=$26,
+        last_verified=$27, review_after=$28, archived_at=$29, archive_reason=$30,
+        superseded_by=$31, aliases=$32, symptoms=$33, deleted_at='', updated_at=(${NOW_TEXT})
        WHERE id=$1`,
       [
         doc.id,
@@ -372,6 +402,16 @@ async function applyPageWrite(
         doc.stale_since,
         doc.highlights,
         doc.page_type,
+        doc.confidence ?? "",
+        doc.page_status ?? "",
+        doc.experience_kind ?? "",
+        doc.last_verified ?? "",
+        doc.review_after ?? "",
+        doc.archived_at ?? "",
+        doc.archive_reason ?? "",
+        doc.superseded_by ?? "",
+        stringArrayJson(doc.aliases),
+        stringArrayJson(doc.symptoms),
       ],
     );
     doc.version = existing.version + 1;
@@ -395,7 +435,7 @@ async function queryRevisions(client: Pool | PoolClient, suffix: string, args: u
 }
 
 function documentFromRevision(revision: PageRevision): Document {
-  return {
+  const doc: Document = {
     id: revision.document_id ?? "",
     user_id: "default",
     filename: path.posix.basename(revision.relative_path),
@@ -421,6 +461,8 @@ function documentFromRevision(revision: PageRevision): Document {
     created_at: "",
     updated_at: "",
   };
+  syncDocumentMetaFromContent(doc);
+  return doc;
 }
 
 export function revisionsRepo(pool: Pool): RevisionStore {

@@ -19,6 +19,7 @@ export function graphRepo(
          WHERE dr.reference_type = 'links_to'
            AND src.status != 'failed' AND tgt.status != 'failed'
            AND COALESCE(src.deleted_at, '') = '' AND COALESCE(tgt.deleted_at, '') = ''
+           AND COALESCE(src.archived_at, '') = '' AND COALESCE(tgt.archived_at, '') = ''
            AND src.source_kind = 'wiki' AND tgt.source_kind = 'wiki'
            AND src.relative_path != '' AND tgt.relative_path != ''`,
       );
@@ -40,6 +41,7 @@ export function graphRepo(
            AND dr.reference_type = 'links_to'
          )
          WHERE d.source_kind = 'wiki' AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
+           AND COALESCE(d.archived_at, '') = ''
            AND d.relative_path != ''
            ${hiddenExclude}
          GROUP BY d.relative_path

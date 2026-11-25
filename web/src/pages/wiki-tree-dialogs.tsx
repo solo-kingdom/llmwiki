@@ -135,7 +135,7 @@ function CreateFolderDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>新建目录</DialogTitle>
           <DialogDescription>按知识主题组织多级目录，支持直接创建子目录。</DialogDescription>
@@ -219,7 +219,7 @@ function EditFolderDialog({ folder, onClose }: { folder: WikiFolder; onClose: ()
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>编辑目录</DialogTitle>
           <DialogDescription>{folder.path}</DialogDescription>
@@ -282,7 +282,7 @@ function MoveFolderDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>移动 / 重命名目录</DialogTitle>
           <DialogDescription>将同步迁移目录下所有子目录与页面，并自动更新引用链接。</DialogDescription>
@@ -349,7 +349,7 @@ function DeleteFolderDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>删除目录</DialogTitle>
           <DialogDescription>
@@ -466,7 +466,7 @@ function CreatePageDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>新建页面</DialogTitle>
           <DialogDescription>在指定主题目录下创建新的 Wiki 页面。</DialogDescription>
@@ -570,7 +570,7 @@ function MoveDocumentDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>移动 / 重命名页面</DialogTitle>
           <DialogDescription>{doc.title || doc.filename}</DialogDescription>
@@ -632,7 +632,7 @@ function ArchiveDocumentDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>归档页面</DialogTitle>
           <DialogDescription>{doc.title || doc.filename}</DialogDescription>
@@ -699,7 +699,7 @@ function ReopenDocumentDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>重新启用页面</DialogTitle>
           <DialogDescription>{doc.title || doc.filename}</DialogDescription>

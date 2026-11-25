@@ -128,7 +128,7 @@ export function GraphPage() {
 
   const detailDialog = (
     <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{selected?.title || selected?.id || "节点详情"}</DialogTitle>
           <DialogDescription>节点详情</DialogDescription>

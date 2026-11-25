@@ -143,7 +143,7 @@ function AgentApiKeysSection() {
       </Stack>
 
       <Dialog open={createOpen} onOpenChange={handleDialogChange}>
-        <DialogContent>
+        <DialogContent className={created === null ? undefined : "sm:max-w-2xl"}>
           {created === null ? (
             <>
               <DialogHeader>
@@ -185,19 +185,19 @@ function AgentApiKeysSection() {
               <Stack gap="md">
                 <Stack gap="xs">
                   <div className="text-xs font-medium text-muted-foreground">API Key 明文</div>
-                  <Inline>
-                    <Input readOnly className="font-mono text-xs" value={created.key} />
-                    <Button size="sm" variant="outline" onClick={() => void copyText(created.key, " API Key")}>
+                  <Stack direction="row" gap="sm" align="center">
+                    <Input readOnly className="min-w-0 flex-1 font-mono text-xs" value={created.key} />
+                    <Button size="sm" variant="outline" className="shrink-0" onClick={() => void copyText(created.key, " API Key")}>
                       <CopyIcon />复制
                     </Button>
-                  </Inline>
+                  </Stack>
                 </Stack>
 
                 <Stack gap="xs">
                   <div className="text-xs font-medium text-muted-foreground">Agent 接入话术（含完整密钥，请妥善保管）</div>
                   <Textarea
                     readOnly
-                    className="min-h-40 font-mono text-xs"
+                    className="min-h-40 font-mono text-xs break-words field-sizing-fixed"
                     value={agentHandoffText(apiBase, created.key)}
                   />
                 </Stack>
@@ -206,7 +206,7 @@ function AgentApiKeysSection() {
                   <div className="text-xs font-medium text-muted-foreground">curl 验证示例</div>
                   <Textarea
                     readOnly
-                    className="min-h-16 font-mono text-xs"
+                    className="min-h-16 font-mono text-xs break-words field-sizing-fixed"
                     value={apiKeyCurlExample(apiBase, created.key)}
                   />
                 </Stack>

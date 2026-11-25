@@ -98,7 +98,7 @@ function ProviderInstances({ onSaved }: { onSaved: () => Promise<void> }) {
       ) : null}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>添加 Provider 实例</DialogTitle>
             <DialogDescription>选择内置 Provider，填入 API Key 与可选的自定义地址。</DialogDescription>

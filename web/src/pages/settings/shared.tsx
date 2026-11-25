@@ -86,13 +86,13 @@ export function JsonDialog({ title, description, value, onChange, onSave, onChec
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>编辑</Button>
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <Stack gap="md">
-          <Textarea className="min-h-48 font-mono text-xs" value={value} onChange={(event) => onChange(event.target.value)} />
+          <Textarea className="min-h-48 font-mono text-xs break-words field-sizing-fixed" value={value} onChange={(event) => onChange(event.target.value)} />
           {checkResult}
         </Stack>
         <DialogFooter>

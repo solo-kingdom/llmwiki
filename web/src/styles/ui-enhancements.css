@@ -387,3 +387,26 @@
   height: 0.875rem;
   flex-shrink: 0;
 }
+
+/* Keep dialog titles clear of the close button, and let long fields shrink inside the grid. */
+[data-slot="dialog-header"] {
+  padding-right: 2rem;
+}
+[data-slot="dialog-content"] {
+  min-width: 0;
+}
+[data-slot="dialog-content"] > * {
+  min-width: 0;
+}
+
+/* Wiki tree pane: search, new folder, and the type filter stay put while the tree scrolls.
+   Split's side pads its content by 0.75rem; cancel that so the band is flush and opaque. */
+.llmwiki-wiki-pin {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin: -0.75rem -0.75rem 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+  padding: 0.75rem;
+}

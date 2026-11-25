@@ -32,7 +32,7 @@ function RuleFiles() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>编辑规则文件</Button>
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>工作区规则文件</DialogTitle>
           <DialogDescription>purpose.md 与 rules.md 会参与摄入和整理提示词。</DialogDescription>
@@ -41,9 +41,9 @@ function RuleFiles() {
         {ruleFiles.isLoading ? <RowsSkeleton rows={3} /> : null}
         <Stack gap="md">
           <div className="text-sm font-medium">purpose.md</div>
-          <Textarea className="min-h-32 font-mono text-xs" value={purpose} onChange={(event) => setDraft({ purpose: event.target.value, rules })} />
+          <Textarea className="min-h-32 font-mono text-xs break-words field-sizing-fixed" value={purpose} onChange={(event) => setDraft({ purpose: event.target.value, rules })} />
           <div className="text-sm font-medium">rules.md</div>
-          <Textarea className="min-h-32 font-mono text-xs" value={rules} onChange={(event) => setDraft({ purpose, rules: event.target.value })} />
+          <Textarea className="min-h-32 font-mono text-xs break-words field-sizing-fixed" value={rules} onChange={(event) => setDraft({ purpose, rules: event.target.value })} />
         </Stack>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>取消</Button>

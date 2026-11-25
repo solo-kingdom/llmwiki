@@ -3,6 +3,7 @@ import { Outlet } from "react-router"
 import {
   BookOpenIcon,
   CircleHelpIcon,
+  FolderArchiveIcon,
   HistoryIcon,
   ListChecksIcon,
   MessageSquareIcon,
@@ -28,6 +29,7 @@ const nav: NavGroup[] = [
     label: "知识库",
     items: [
       { label: "Wiki", to: "/wiki", icon: tinted(BookOpenIcon, "llmwiki-tone-indigo") },
+      { label: "档案", to: "/archives", icon: tinted(FolderArchiveIcon, "llmwiki-tone-teal") },
       { label: "图谱", to: "/wiki/graph", icon: tinted(NetworkIcon, "llmwiki-tone-violet") },
     ],
   },

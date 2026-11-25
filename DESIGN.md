@@ -20,10 +20,11 @@
 | `/timeline` | collection | 详情用 Sheet |
 | `/logs` | log-viewer | |
 | `/settings` | settings | 重定向到 `/settings/models` |
-| `/settings/:section` | settings | 5 分区：模型 / 摄入与检索 / 访问控制 / 外部集成 / 规则文件；SectionLayout 导航 + 42rem 居中窄列 |
+| `/settings/:section` | settings | 6 分区：模型 / 摄入与检索 / 存储 / 访问控制 / 外部集成 / 规则文件；SectionLayout 导航 + 42rem 居中窄列 |
 | `/wiki` | tree-nav | 左树：按主题自由建多级目录 + `page_type` 筛选；默认仅当前页祖先展开；支持增删改移、拖拽与定位展折 |
 | `/wiki/:id` | reader | 单页头（真实目录面包屑）+ 正文（无卡片、不限宽）+ 右目录（滚动跟踪、可隐藏并持久化）；元信息（含 `page_type` 切换与移动）/引用/历史进页头弹窗 |
 | `/wiki/graph` | canvas | 无卡片全宽；节点 hover 浮层；选中详情进页头弹窗 |
+| `/archives`、`/archives/:id` | tree-nav + reader | 独立于 Wiki 逻辑层的「档案」文件树：支持多级目录管理、多格式直传/拖拽、在线预览（Markdown/HTML 沙箱/图片/音视频 Range/PDF/文本编辑）、下载与关联 Wiki 跳转 |
 | `/help` | page | 章节目录用 NavList |
 
 ## 偏离

@@ -982,8 +982,10 @@ function Reader({
           <Markdown>{rendered || "_（空页面）_"}</Markdown>
           <ReferencesBlock
             entries={doc.reference_entries ?? []}
+            archiveSources={doc.archive_sources ?? []}
             lang={lang}
             onOpen={(id) => navigate(`/wiki/${encodeURIComponent(id)}`)}
+            onOpenArchive={(archiveId) => navigate(`/archives/${encodeURIComponent(archiveId)}`)}
           />
         </div>
       </Stack>
@@ -1031,6 +1033,30 @@ function Reader({
               { label: "版本", value: `${doc.version}` },
               { label: "反链", value: `${backlinks.data?.length ?? 0} 条` },
               { label: "引用", value: `${forward.data?.length ?? 0} 条` },
+              ...(doc.archive_sources && doc.archive_sources.length > 0
+                ? [
+                    {
+                      label: "关联源文件",
+                      value: (
+                        <Stack gap="xs">
+                          {doc.archive_sources.map((src) => (
+                            <button
+                              key={src.id}
+                              type="button"
+                              onClick={() => {
+                                setDialog(null)
+                                navigate(`/archives/${encodeURIComponent(src.id)}`)
+                              }}
+                              className="text-left text-sm text-primary hover:underline"
+                            >
+                              {src.relative_path}
+                            </button>
+                          ))}
+                        </Stack>
+                      ),
+                    },
+                  ]
+                : []),
             ].map((item) => (
               <Row key={item.label}>
                 <span className="shrink-0 text-xs text-muted-foreground">{item.label}</span>

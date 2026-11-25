@@ -60,8 +60,114 @@ export function Page({ title, breadcrumbs, primary, actions, inlineMax, leading,
 
 /**
  * ScrollRegion — a declared scroller (the only kind there is). `follow` keeps the view pinned to the bottom while
- * content grows (streaming) unless the user scrolled up.
+ * content grows (streaming) unless the user scrolled up. Native scrollbars are hidden (`no-scrollbar`) so rules and
+ * dividers reach the edge with 0px gutter; an overlay thumb appears on scroll/hover and fades after idle.
  */
+function OverlayScrollbar({ targetRef }: { targetRef: React.RefObject<HTMLDivElement | null> }) {
+  const [thumb, setThumb] = React.useState<{ height: number; top: number } | null>(null)
+  const [active, setActive] = React.useState(false)
+  const [hovering, setHovering] = React.useState(false)
+  const [dragging, setDragging] = React.useState(false)
+  const timerRef = React.useRef<number | undefined>(undefined)
+  const dragRef = React.useRef<{ startY: number; startTop: number; track: number; maxScroll: number } | null>(null)
+
+  React.useEffect(() => {
+    const el = targetRef.current
+    if (el === null) return
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(hover: none), (pointer: coarse)").matches) {
+      return
+    }
+    const update = () => {
+      const { scrollHeight, clientHeight, scrollTop } = el
+      if (scrollHeight <= clientHeight + 1) {
+        setThumb(null)
+        return
+      }
+      const track = Math.max(0, clientHeight - 4)
+      const height = Math.min(track, Math.max(24, Math.round((clientHeight / scrollHeight) * track)))
+      const maxScroll = Math.max(1, scrollHeight - clientHeight)
+      const maxTop = Math.max(0, track - height)
+      const top = Math.min(maxTop, Math.max(0, Math.round((scrollTop / maxScroll) * maxTop)))
+      setThumb({ height, top })
+    }
+    const onScroll = () => {
+      update()
+      setActive(true)
+      window.clearTimeout(timerRef.current)
+      timerRef.current = window.setTimeout(() => setActive(false), 800)
+    }
+    update()
+    const resize = new ResizeObserver(update)
+    resize.observe(el)
+    for (const child of Array.from(el.children)) resize.observe(child)
+    const mutations = new MutationObserver(() => {
+      resize.disconnect()
+      resize.observe(el)
+      for (const child of Array.from(el.children)) resize.observe(child)
+      update()
+    })
+    mutations.observe(el, { childList: true })
+    el.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      window.clearTimeout(timerRef.current)
+      resize.disconnect()
+      mutations.disconnect()
+      el.removeEventListener("scroll", onScroll)
+    }
+  }, [targetRef])
+
+  if (thumb === null) return null
+  const visible = active || hovering || dragging
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const el = targetRef.current
+    if (el === null) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const track = Math.max(1, el.clientHeight - 4 - thumb.height)
+    dragRef.current = { startY: event.clientY, startTop: el.scrollTop, track, maxScroll: Math.max(1, el.scrollHeight - el.clientHeight) }
+    setDragging(true)
+  }
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    const el = targetRef.current
+    if (drag === null || el === null) return
+    el.scrollTop = drag.startTop + ((event.clientY - drag.startY) / drag.track) * drag.maxScroll
+  }
+  const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current === null) return
+    dragRef.current = null
+    setDragging(false)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+
+  return (
+    <div
+      aria-hidden="true"
+      data-slot="scroll-rail"
+      data-state={visible ? "visible" : "hidden"}
+      onPointerEnter={() => setHovering(true)}
+      onPointerLeave={() => setHovering(false)}
+      className={cn(
+        "pointer-events-auto absolute inset-y-0.5 right-0 z-20 w-2 select-none transition-opacity duration-200 motion-reduce:transition-none",
+        visible ? "opacity-100" : "opacity-0",
+      )}
+    >
+      <div
+        data-slot="scroll-thumb"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        style={{ height: thumb.height, transform: `translateY(${thumb.top}px)` }}
+        className={cn(
+          "mx-auto w-1 rounded-full transition-colors duration-150",
+          dragging ? "bg-foreground/45" : "bg-foreground/25 hover:bg-foreground/45",
+        )}
+      />
+    </div>
+  )
+}
+
 export function ScrollRegion({ name = "main", label, follow = false, children }: {
   name?: string | undefined; label?: string | undefined; follow?: boolean | undefined; children: React.ReactNode
 }) {
@@ -79,9 +185,12 @@ export function ScrollRegion({ name = "main", label, follow = false, children }:
     return () => { observer.disconnect(); el.removeEventListener("scroll", onScroll) }
   }, [follow])
   return (
-    <div ref={ref} data-scroll-region={name} {...(label !== undefined ? { role: "region", "aria-label": label, tabIndex: 0 } : {})}
-      className="flex min-h-0 min-w-0 flex-1 flex-col relative overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset">
-      {children}
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div ref={ref} data-scroll-region={name} {...(label !== undefined ? { role: "region", "aria-label": label, tabIndex: 0 } : {})}
+        className="no-scrollbar flex min-h-0 min-w-0 flex-1 flex-col relative overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset">
+        {children}
+      </div>
+      <OverlayScrollbar targetRef={ref} />
     </div>
   )
 }
@@ -89,13 +198,15 @@ export function ScrollRegion({ name = "main", label, follow = false, children }:
 /**
  * Split — side column + main column, each its own scroll region, divider drawn by the container (full height,
  * meets the header rule above and the frame edge below). Below `collapseBelow` px it stacks: side on top, main scrolls.
+ * Optional `sideHeader` stays fixed above the side scroll region so its bottom border runs flush to the divider and
+ * the scrollbar begins beneath it.
  *
  * Padding contract: the side column carries `p-3`; the main column carries none. Content placed in `main`
  * must own its padding (a `Body`, or a full-bleed surface such as a canvas) — a bordered `Panel` dropped
  * straight into `main` puts its border against the divider and the header rule, reading as a double line.
  */
-export function Split({ side, sideLabel, sideWidth = "md", sidePosition = "start", collapseBelow = 720, children }: {
-  side: React.ReactNode; sideLabel: string; sideWidth?: "sm" | "md" | "lg" | undefined
+export function Split({ side, sideHeader, sideLabel, sideWidth = "md", sidePosition = "start", collapseBelow = 720, children }: {
+  side: React.ReactNode; sideHeader?: React.ReactNode | undefined; sideLabel: string; sideWidth?: "sm" | "md" | "lg" | undefined
   /** "end" puts the side column after the main column (e.g. a document outline rail); stacked mode keeps side first. */
   sidePosition?: "start" | "end" | undefined
   collapseBelow?: number | undefined; children: React.ReactNode
@@ -107,11 +218,18 @@ export function Split({ side, sideLabel, sideWidth = "md", sidePosition = "start
   const colsEnd = { sm: "grid-cols-[minmax(0,1fr)_12rem]", md: "grid-cols-[minmax(0,1fr)_14rem]", lg: "grid-cols-[minmax(0,1fr)_18rem]" }[sideWidth]
   return (
     <div ref={ref} data-surface="split" className={cn("flex min-h-0 min-w-0 flex-1", stacked ? "flex-col divide-y" : cn("grid", end ? colsEnd : cn(colsStart, "divide-x")))}>
-      <div data-surface="split-side" data-scroll-region="side" aria-label={sideLabel} role="region"
-        className={cn("min-w-0 relative overflow-y-auto", stacked ? "max-h-[40%] shrink-0" : "min-h-0", end && "order-2 border-l")}>
-        <div className="p-3">{side}</div>
+      <div data-surface="split-side" aria-label={sideLabel} role="region"
+        className={cn("flex min-w-0 flex-col overflow-hidden", stacked ? "max-h-[40%] shrink-0" : "min-h-0", end && "order-2 border-l")}>
+        {sideHeader !== undefined ? (
+          <div data-surface="split-side-header" className="shrink-0 border-b p-3">{sideHeader}</div>
+        ) : null}
+        <ScrollRegion name="side">
+          <div className="p-3">{side}</div>
+        </ScrollRegion>
       </div>
-      <div data-surface="split-main" data-scroll-region="main" className={cn("flex min-h-0 min-w-0 flex-1 flex-col relative overflow-y-auto", end && "order-1")}>{children}</div>
+      <div data-surface="split-main" className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", end && "order-1")}>
+        <ScrollRegion name="main">{children}</ScrollRegion>
+      </div>
     </div>
   )
 }

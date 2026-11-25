@@ -428,7 +428,7 @@ function TreeRows({
   )
 }
 
-function WikiPane({
+function useWikiPane({
   folders,
   documents,
   currentId,
@@ -553,135 +553,136 @@ function WikiPane({
     }))
   }
 
-  return (
-    <>
-      <div className="llmwiki-wiki-pin">
-        <Stack gap="sm">
-          <Toolbar>
-            <InputGroup className="min-w-0 flex-1">
-              <InputGroupAddon><SearchIcon /></InputGroupAddon>
-              <InputGroupInput
-                aria-label="搜索页面"
-                placeholder="搜索标题、路径或内容"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-            </InputGroup>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="新建目录"
-              title="新建目录"
-              onClick={() => setDialogState({ kind: "create-folder", parentPath: "" })}
-            >
-              <FolderPlusIcon />
-            </Button>
-            <Button size="icon-sm" variant="ghost" aria-label="定位当前页面" title="定位当前页面" onClick={locateCurrent}>
-              <LocateFixedIcon />
-            </Button>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label={allOpen ? "全部折叠" : "全部展开"}
-              title={allOpen ? "全部折叠" : "全部展开"}
-              onClick={allOpen ? collapseAll : expandAll}
-            >
-              {allOpen ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
-            </Button>
-          </Toolbar>
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
-            <SelectTrigger aria-label="按页面类型筛选" className="w-full">
-              <SelectValue placeholder="全部类型" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部类型</SelectItem>
-              <SelectItem value="concept"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="concept" />概念 (concept)</span></SelectItem>
-              <SelectItem value="entity"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="entity" />实体 (entity)</span></SelectItem>
-              <SelectItem value="experience"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="experience" />经验 (experience)</span></SelectItem>
-              <SelectItem value="ledger"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="ledger" />台账 (ledger)</span></SelectItem>
-              <SelectItem value="synthesis"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="synthesis" />综合 (synthesis)</span></SelectItem>
-              <SelectItem value="comparison"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="comparison" />对比 (comparison)</span></SelectItem>
-              <SelectItem value="query"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="query" />问题 (query)</span></SelectItem>
-              <SelectItem value="page"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="page" />普通页面 (page)</span></SelectItem>
-            </SelectContent>
-          </Select>
-          {onShowArchivedChange ? (
-            <Button
-              size="sm"
-              variant={showArchived ? "secondary" : "ghost"}
-              className="w-full justify-start"
-              onClick={() => onShowArchivedChange(!showArchived)}
-            >
-              <ArchiveIcon />
-              {showArchived ? "正在显示已归档页面（点击隐藏）" : "显示已归档页面"}
-            </Button>
-          ) : null}
-        </Stack>
-      </div>
-      <Stack gap="sm">
-        {search.isError ? <ErrorState error={search.error} onRetry={() => void search.refetch()} /> : null}
-        {!search.isError && (searching ? results.length === 0 : tree.nodes.length === 0) ? (
-          <EmptyState
-            title={searching ? "没有匹配的页面" : "工作区还没有 wiki 页面"}
-            description={searching ? `没有匹配“${debounced}”的结果` : undefined}
+  const sideHeader = (
+    <Stack gap="sm">
+      <Toolbar>
+        <InputGroup className="min-w-0 flex-1">
+          <InputGroupAddon><SearchIcon /></InputGroupAddon>
+          <InputGroupInput
+            aria-label="搜索页面"
+            placeholder="搜索标题、路径或内容"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
           />
-        ) : null}
-        <div
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            const raw = e.dataTransfer.getData("application/x-llmwiki-tree")
-            if (!raw) return
-            try {
-              const payload = JSON.parse(raw) as DragPayload
-              if (payload.kind === "folder" && payload.path.includes("/")) {
-                e.preventDefault()
-                setDragOverKey(null)
-                handleDropOnFolder("", payload)
-              }
-            } catch {
-              // ignore
-            }
-          }}
+        </InputGroup>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label="新建目录"
+          title="新建目录"
+          onClick={() => setDialogState({ kind: "create-folder", parentPath: "" })}
         >
-          <NavList label="Wiki 页面">
-            {searching ? (
-              results.map((doc) => (
-                <NavItem
-                  key={doc.id}
-                  to={`/wiki/${encodeURIComponent(doc.id)}`}
-                  active={doc.id === currentId}
-                  icon={<WikiFileIcon doc={doc} />}
-                  trailing={<StatusBadge status={pageTypeOf(doc)} />}
-                >
-                  {doc.title || doc.filename}
-                </NavItem>
-              ))
-            ) : (
-              <TreeRows
-                nodes={tree.nodes}
-                depth={0}
-                lang={lang}
-                isOpen={isOpen}
-                toggle={toggle}
-                currentId={currentId}
-                dragOverKey={dragOverKey}
-                setDragOverKey={setDragOverKey}
-                onDropOnFolder={handleDropOnFolder}
-                onOpenDialog={setDialogState}
-                onDeleteDoc={handleDeleteDoc}
-              />
-            )}
-          </NavList>
-        </div>
-        <WikiTreeDialogs
-          state={dialogState}
-          folders={folders}
-          onClose={() => setDialogState(null)}
-          onCreatedDoc={(id) => navigate(`/wiki/${encodeURIComponent(id)}`)}
-        />
-      </Stack>
-    </>
+          <FolderPlusIcon />
+        </Button>
+        <Button size="icon-sm" variant="ghost" aria-label="定位当前页面" title="定位当前页面" onClick={locateCurrent}>
+          <LocateFixedIcon />
+        </Button>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={allOpen ? "全部折叠" : "全部展开"}
+          title={allOpen ? "全部折叠" : "全部展开"}
+          onClick={allOpen ? collapseAll : expandAll}
+        >
+          {allOpen ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
+        </Button>
+      </Toolbar>
+      <Select value={typeFilter} onValueChange={setTypeFilter}>
+        <SelectTrigger aria-label="按页面类型筛选" className="w-full">
+          <SelectValue placeholder="全部类型" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部类型</SelectItem>
+          <SelectItem value="concept"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="concept" />概念 (concept)</span></SelectItem>
+          <SelectItem value="entity"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="entity" />实体 (entity)</span></SelectItem>
+          <SelectItem value="experience"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="experience" />经验 (experience)</span></SelectItem>
+          <SelectItem value="ledger"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="ledger" />台账 (ledger)</span></SelectItem>
+          <SelectItem value="synthesis"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="synthesis" />综合 (synthesis)</span></SelectItem>
+          <SelectItem value="comparison"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="comparison" />对比 (comparison)</span></SelectItem>
+          <SelectItem value="query"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="query" />问题 (query)</span></SelectItem>
+          <SelectItem value="page"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="page" />普通页面 (page)</span></SelectItem>
+        </SelectContent>
+      </Select>
+      {onShowArchivedChange ? (
+        <Button
+          size="sm"
+          variant={showArchived ? "secondary" : "ghost"}
+          className="w-full justify-start"
+          onClick={() => onShowArchivedChange(!showArchived)}
+        >
+          <ArchiveIcon />
+          {showArchived ? "正在显示已归档页面（点击隐藏）" : "显示已归档页面"}
+        </Button>
+      ) : null}
+    </Stack>
   )
+
+  const side = (
+    <Stack gap="sm">
+      {search.isError ? <ErrorState error={search.error} onRetry={() => void search.refetch()} /> : null}
+      {!search.isError && (searching ? results.length === 0 : tree.nodes.length === 0) ? (
+        <EmptyState
+          title={searching ? "没有匹配的页面" : "工作区还没有 wiki 页面"}
+          description={searching ? `没有匹配“${debounced}”的结果` : undefined}
+        />
+      ) : null}
+      <div
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          const raw = e.dataTransfer.getData("application/x-llmwiki-tree")
+          if (!raw) return
+          try {
+            const payload = JSON.parse(raw) as DragPayload
+            if (payload.kind === "folder" && payload.path.includes("/")) {
+              e.preventDefault()
+              setDragOverKey(null)
+              handleDropOnFolder("", payload)
+            }
+          } catch {
+            // ignore
+          }
+        }}
+      >
+        <NavList label="Wiki 页面">
+          {searching ? (
+            results.map((doc) => (
+              <NavItem
+                key={doc.id}
+                to={`/wiki/${encodeURIComponent(doc.id)}`}
+                active={doc.id === currentId}
+                icon={<WikiFileIcon doc={doc} />}
+                trailing={<StatusBadge status={pageTypeOf(doc)} />}
+              >
+                {doc.title || doc.filename}
+              </NavItem>
+            ))
+          ) : (
+            <TreeRows
+              nodes={tree.nodes}
+              depth={0}
+              lang={lang}
+              isOpen={isOpen}
+              toggle={toggle}
+              currentId={currentId}
+              dragOverKey={dragOverKey}
+              setDragOverKey={setDragOverKey}
+              onDropOnFolder={handleDropOnFolder}
+              onOpenDialog={setDialogState}
+              onDeleteDoc={handleDeleteDoc}
+            />
+          )}
+        </NavList>
+      </div>
+      <WikiTreeDialogs
+        state={dialogState}
+        folders={folders}
+        onClose={() => setDialogState(null)}
+        onCreatedDoc={(id) => navigate(`/wiki/${encodeURIComponent(id)}`)}
+      />
+    </Stack>
+  )
+
+  return { sideHeader, side }
 }
 
 function stripFrontmatter(content: string): string {
@@ -932,6 +933,14 @@ function Reader({
     setDialog(null)
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
+
+  const wikiPane = useWikiPane({
+    folders,
+    documents,
+    currentId: docId,
+    showArchived,
+    onShowArchivedChange,
+  })
 
   if (documentQuery.isLoading) return <RowsSkeleton rows={8} />
   if (documentQuery.isError) return <ErrorState error={documentQuery.error} onRetry={() => void documentQuery.refetch()} />
@@ -1224,15 +1233,8 @@ function Reader({
           sideLabel="Wiki 页面"
           sideWidth="lg"
           collapseBelow={900}
-          side={
-            <WikiPane
-              folders={folders}
-              documents={documents}
-              currentId={docId}
-              showArchived={showArchived}
-              onShowArchivedChange={onShowArchivedChange}
-            />
-          }
+          sideHeader={wikiPane.sideHeader}
+          side={wikiPane.side}
         >
           {!narrow && !tocHidden && outline.length > 0 ? (
             <Split
@@ -1278,6 +1280,13 @@ export function WikiReaderPage() {
   const folders = React.useMemo(() => treeQuery.data?.folders ?? [], [treeQuery.data])
   const documents = React.useMemo(() => treeQuery.data?.documents ?? [], [treeQuery.data])
 
+  const emptyWikiPane = useWikiPane({
+    folders,
+    documents,
+    showArchived,
+    onShowArchivedChange: setShowArchived,
+  })
+
   React.useEffect(() => {
     if (id === undefined && documents.length > 0) {
       navigate(`/wiki/${encodeURIComponent(documents[0]?.id ?? "")}`, { replace: true })
@@ -1294,14 +1303,8 @@ export function WikiReaderPage() {
           sideLabel="Wiki 页面"
           sideWidth="lg"
           collapseBelow={900}
-          side={
-            <WikiPane
-              folders={folders}
-              documents={documents}
-              showArchived={showArchived}
-              onShowArchivedChange={setShowArchived}
-            />
-          }
+          sideHeader={emptyWikiPane.sideHeader}
+          side={emptyWikiPane.side}
         >
           <Body width="full" align="start">
             <EmptyState title="选择一个页面" description="从左侧目录树选择或新建目录/页面，或搜索标题与内容。" />

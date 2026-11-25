@@ -11,6 +11,7 @@ import { cn } from "cn"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { AppLink, useIsActive } from "@/components/blocks/router"
+import { ScrollRegion } from "@/components/blocks/surfaces"
 import { useContainerWidth } from "@/components/blocks/use-container-width"
 
 type PaneState = { collapsed: boolean; label: string; open: () => void }
@@ -38,15 +39,17 @@ export function ListDetailLayout({ pane, label, children, breakpoint = 900 }: {
           <Sheet open={sheet} onOpenChange={setSheet}>
             <SheetContent side="left" className="w-72 gap-0 p-0">
               <SheetTitle className="sr-only">{label}</SheetTitle>
-              <div className="flex min-h-0 flex-1 flex-col">{pane}</div>
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{pane}</div>
             </SheetContent>
           </Sheet>
         ) : (
-          <aside aria-label={label} data-scroll-region="pane" data-surface="split-side" className="flex min-h-0 flex-col relative overflow-y-auto border-r">
+          <aside aria-label={label} data-surface="split-side" className="flex min-h-0 flex-col overflow-hidden border-r">
             {pane}
           </aside>
         )}
-        <div data-scroll-region="detail" className="flex min-h-0 min-w-0 flex-1 flex-col relative overflow-y-auto">{children}</div>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <ScrollRegion name="detail">{children}</ScrollRegion>
+        </div>
       </div>
     </PaneContext.Provider>
   )
@@ -113,12 +116,20 @@ export function RecencyList({ items, labels = DEFAULT_LABELS, className }: {
 }
 
 /** Pane header row: same 48px height and rule as PageHeader, so the two align across the divider.
- *  The pane itself is the scroll container, so the header is sticky — a long list must not carry the title away. */
+ *  Lives outside the pane scroll region (`PaneSection grow`), so its rule runs flush to the divider and the
+ *  scrollbar starts below it. */
 export function PaneHeader({ children }: { children: React.ReactNode }) {
-  return <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 border-b bg-background px-2">{children}</div>
+  return <div data-surface="pane-header" className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-2">{children}</div>
 }
 
-/** Pane body block (search, filters, the list). `grow` takes the remaining height. */
+/** Pane body block (search, filters, the list). `grow` owns the pane's scroll region so preceding sections stay fixed. */
 export function PaneSection({ grow = false, children }: { grow?: boolean | undefined; children: React.ReactNode }) {
-  return <div className={cn("flex min-w-0 flex-col gap-2 p-2", grow && "min-h-0 flex-1")}>{children}</div>
+  if (grow) {
+    return (
+      <ScrollRegion name="pane">
+        <div className="flex min-w-0 flex-1 flex-col gap-2 p-2">{children}</div>
+      </ScrollRegion>
+    )
+  }
+  return <div className="flex min-w-0 shrink-0 flex-col gap-2 p-2">{children}</div>
 }

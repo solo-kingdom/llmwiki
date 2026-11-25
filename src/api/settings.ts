@@ -20,7 +20,23 @@ import {
   CONFIG_EMBEDDING_MODEL,
 } from "../llm/embeddings.js";
 import {
+  ArchiveStorageService,
+  defaultArchiveLocalDir,
+  parseArchiveInlineMaxBytes,
+} from "../archive/storage.js";
+import {
   CONFIG_API_TOKEN,
+  CONFIG_ARCHIVE_INLINE_MAX_BYTES,
+  CONFIG_ARCHIVE_LOCAL_DIR,
+  CONFIG_ARCHIVE_S3_ACCESS_KEY_ID,
+  CONFIG_ARCHIVE_S3_BUCKET,
+  CONFIG_ARCHIVE_S3_ENDPOINT,
+  CONFIG_ARCHIVE_S3_FORCE_PATH_STYLE,
+  CONFIG_ARCHIVE_S3_PREFIX,
+  CONFIG_ARCHIVE_S3_REGION,
+  CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY,
+  CONFIG_ARCHIVE_STORAGE_BACKEND,
+  DEFAULT_ARCHIVE_INLINE_MAX_BYTES,
   DEFAULT_JOB_EVENTS_MAX_COUNT,
   DEFAULT_SESSION_MSG_EVENTS_MAX_COUNT,
   parseJobEventsMaxCount,
@@ -178,6 +194,16 @@ const ALLOWED_KEYS = new Set([
   CONFIG_EMBEDDING_MODEL,
   CONFIG_EMBEDDING_DIM,
   CONFIG_API_TOKEN,
+  CONFIG_ARCHIVE_INLINE_MAX_BYTES,
+  CONFIG_ARCHIVE_STORAGE_BACKEND,
+  CONFIG_ARCHIVE_LOCAL_DIR,
+  CONFIG_ARCHIVE_S3_ENDPOINT,
+  CONFIG_ARCHIVE_S3_REGION,
+  CONFIG_ARCHIVE_S3_BUCKET,
+  CONFIG_ARCHIVE_S3_PREFIX,
+  CONFIG_ARCHIVE_S3_ACCESS_KEY_ID,
+  CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY,
+  CONFIG_ARCHIVE_S3_FORCE_PATH_STYLE,
 ]);
 
 export function settingsApi(ctx: ApiContext) {
@@ -235,6 +261,23 @@ export function settingsApi(ctx: ApiContext) {
       api_token_set: value(CONFIG_API_TOKEN) !== "",
       api_token_masked: maskKey(value(CONFIG_API_TOKEN)),
       api_token_source: apiTokenSource(ctx, value(CONFIG_API_TOKEN)),
+      archive_inline_max_bytes:
+        value(CONFIG_ARCHIVE_INLINE_MAX_BYTES).trim() || String(DEFAULT_ARCHIVE_INLINE_MAX_BYTES),
+      archive_storage_backend:
+        value(CONFIG_ARCHIVE_STORAGE_BACKEND).trim().toLowerCase() === "s3" ? "s3" : "local",
+      archive_local_dir: value(CONFIG_ARCHIVE_LOCAL_DIR),
+      archive_local_dir_effective:
+        value(CONFIG_ARCHIVE_LOCAL_DIR).trim() || defaultArchiveLocalDir(ctx.workspace),
+      archive_s3_endpoint: value(CONFIG_ARCHIVE_S3_ENDPOINT),
+      archive_s3_region: value(CONFIG_ARCHIVE_S3_REGION) || "us-east-1",
+      archive_s3_bucket: value(CONFIG_ARCHIVE_S3_BUCKET),
+      archive_s3_prefix: value(CONFIG_ARCHIVE_S3_PREFIX),
+      archive_s3_force_path_style:
+        value(CONFIG_ARCHIVE_S3_FORCE_PATH_STYLE).trim().toLowerCase() === "true",
+      archive_s3_access_key_id_set: value(CONFIG_ARCHIVE_S3_ACCESS_KEY_ID) !== "",
+      archive_s3_access_key_id_masked: maskKey(value(CONFIG_ARCHIVE_S3_ACCESS_KEY_ID)),
+      archive_s3_secret_access_key_set: value(CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY) !== "",
+      archive_s3_secret_access_key_masked: maskKey(value(CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY)),
     });
   }
 
@@ -244,7 +287,12 @@ export function settingsApi(ctx: ApiContext) {
     async updateSettings(c: Context): Promise<Response> {
       const req = await readJsonBody<Record<string, unknown>>(c);
       if (!req) return writeError(c, 400, "invalid request body");
-      if (isApiKeyRequest(c) && CONFIG_API_TOKEN in req) {
+      if (
+        isApiKeyRequest(c) &&
+        (CONFIG_API_TOKEN in req ||
+          CONFIG_ARCHIVE_S3_ACCESS_KEY_ID in req ||
+          CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY in req)
+      ) {
         return writeError(c, 403, "api key cannot manage credentials");
       }
 
@@ -322,6 +370,25 @@ export function settingsApi(ctx: ApiContext) {
           if (key === CONFIG_API_TOKEN) {
             value = value.trim();
             validateApiToken(value);
+          }
+          if (key === CONFIG_ARCHIVE_INLINE_MAX_BYTES) {
+            value = String(parseArchiveInlineMaxBytes(value));
+          }
+          if (key === CONFIG_ARCHIVE_STORAGE_BACKEND) {
+            value = value.trim().toLowerCase() || "local";
+            if (value !== "local" && value !== "s3") {
+              throw new Error("archive_storage_backend must be 'local' or 's3'");
+            }
+          }
+          if (key === CONFIG_ARCHIVE_S3_FORCE_PATH_STYLE) {
+            value = value.trim().toLowerCase() === "true" || value.trim() === "1" ? "true" : "false";
+          }
+          if (
+            (key === CONFIG_ARCHIVE_S3_ACCESS_KEY_ID || key === CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY) &&
+            !value.trim()
+          ) {
+            // Keep existing secret when form leaves password field blank unless explicitly cleared via separate action.
+            continue;
           }
         } catch (error) {
           return writeError(c, 400, errorMessage(error));
@@ -480,6 +547,43 @@ export function settingsApi(ctx: ApiContext) {
       }
       const { checkAgents } = await import("../acp/check.js");
       return writeJson(c, 200, { agents: await checkAgents(cfg, ctx.workspace) });
+    },
+
+    async checkArchiveStorage(c: Context): Promise<Response> {
+      const body = (await readJsonBody<Record<string, unknown>>(c)) ?? {};
+      const override: Record<string, string> = {};
+      if (!isApiKeyRequest(c)) {
+        const candidateKeys = [
+          CONFIG_ARCHIVE_STORAGE_BACKEND,
+          CONFIG_ARCHIVE_LOCAL_DIR,
+          CONFIG_ARCHIVE_S3_ENDPOINT,
+          CONFIG_ARCHIVE_S3_REGION,
+          CONFIG_ARCHIVE_S3_BUCKET,
+          CONFIG_ARCHIVE_S3_PREFIX,
+          CONFIG_ARCHIVE_S3_ACCESS_KEY_ID,
+          CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY,
+          CONFIG_ARCHIVE_S3_FORCE_PATH_STYLE,
+        ];
+        for (const key of candidateKeys) {
+          if (key in body && body[key] !== undefined && body[key] !== null) {
+            const parsed = parseSettingsValue(body[key]);
+            if (
+              (key === CONFIG_ARCHIVE_S3_ACCESS_KEY_ID || key === CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY) &&
+              !parsed.trim()
+            ) {
+              continue;
+            }
+            override[key] = parsed;
+          }
+        }
+      }
+      try {
+        const storage = new ArchiveStorageService(ctx.db, ctx.workspace);
+        const result = await storage.checkConnectivity(override);
+        return writeJson(c, 200, result);
+      } catch (error) {
+        return writeError(c, 500, errorMessage(error));
+      }
     },
   };
 }

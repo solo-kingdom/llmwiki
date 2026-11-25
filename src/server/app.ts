@@ -68,8 +68,8 @@ export function createApp(deps: AppDeps): Hono {
     cors({
       origin: "*",
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: ["Accept", "Authorization", "Content-Type"],
-      exposeHeaders: ["Link"],
+      allowHeaders: ["Accept", "Authorization", "Content-Type", "Range"],
+      exposeHeaders: ["Link", "Content-Range", "Accept-Ranges", "Content-Disposition"],
       credentials: true,
       maxAge: 300,
     }),
@@ -201,6 +201,20 @@ export function createApp(deps: AppDeps): Hono {
   app.delete("/api/v1/logs", api.deleteAllActivityLogs);
   app.get("/api/v1/capabilities", api.getCapabilities);
   app.post("/api/v1/settings/mcp/check", api.checkMcpStatus);
+  app.post("/api/v1/settings/storage/check", api.checkArchiveStorage);
+
+  // Archives (file tree & multi-format storage)
+  app.get("/api/v1/archives/tree", api.getArchiveTree);
+  app.post("/api/v1/archives/folders", api.createArchiveFolder);
+  app.patch("/api/v1/archives/folders", api.updateArchiveFolder);
+  app.post("/api/v1/archives/folders/move", api.moveArchiveFolder);
+  app.delete("/api/v1/archives/folders", api.deleteArchiveFolder);
+  app.post("/api/v1/archives/files", api.uploadArchiveFiles);
+  app.get("/api/v1/archives/files/:id", api.getArchiveFile);
+  app.get("/api/v1/archives/files/:id/raw", api.getArchiveFileRaw);
+  app.patch("/api/v1/archives/files/:id", api.updateArchiveFileLocation);
+  app.put("/api/v1/archives/files/:id/content", api.updateArchiveFileContent);
+  app.delete("/api/v1/archives/files/:id", api.deleteArchiveFile);
 
   // History and revisions
   app.get("/api/v1/history", api.listHistory);
@@ -354,6 +368,8 @@ function isStreamingRequest(
   streamQuery: string | undefined,
   accept: string,
 ): boolean {
+  if (method === "POST" && requestPath === "/api/v1/archives/files") return true;
+  if (method === "GET" && /^\/api\/v1\/archives\/files\/[^/]+\/raw$/.test(requestPath)) return true;
   if (method !== "POST") return false;
   if (!requestPath.includes("/ingest/sessions/")) return false;
   const wantsStream = streamQuery === "1" || accept.includes("text/event-stream");

@@ -539,6 +539,9 @@ export class ArchiveStorageService {
       inlineBytes = null;
     }
 
+    const prevBackend = file.storage_backend;
+    const prevKey = file.storage_key;
+
     let updated: ArchiveFile;
     try {
       updated = await this.db.updateArchiveFileContentMeta(file.id, {
@@ -557,8 +560,6 @@ export class ArchiveStorageService {
       throw error;
     }
 
-    const prevBackend = file.storage_backend;
-    const prevKey = file.storage_key;
     if (prevBackend !== "db" && prevKey && (prevBackend !== nextBackend || prevKey !== nextKey)) {
       await this.deleteExternal(cfg, prevBackend, prevKey);
     }

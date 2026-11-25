@@ -1,6 +1,6 @@
 import * as React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { DownloadIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
+import { ChevronsDownIcon, DownloadIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
 import { LogView, type LogLine } from "@/components/blocks/log-view"
 import { useConfirm } from "@/components/blocks/confirm"
 import { notify } from "@/components/blocks/notify"
@@ -108,7 +108,7 @@ export function LogsPage() {
           </SelectContent>
         </Select>
         <Button size="sm" variant="outline" onClick={() => setLimit((value) => Math.min(value + 200, 500))} disabled={limit >= 500}>
-          加载更多
+          <ChevronsDownIcon />加载更多
         </Button>
       </Toolbar>
 

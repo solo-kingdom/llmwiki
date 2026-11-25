@@ -13,6 +13,19 @@ type Section = { id: string; text: string }
 
 /** Section icons pair by order with help.zh.md / help.en.md (both keep the same chapter order). */
 const SECTION_ICONS = [ZapIcon, LightbulbIcon, FolderTreeIcon, BookOpenIcon, MonitorIcon, MessageSquareIcon, HeartPulseIcon, WorkflowIcon, TerminalIcon, PlugIcon, CircleHelpIcon]
+const SECTION_TONES = [
+  "llmwiki-tone-amber",
+  "llmwiki-tone-orange",
+  "llmwiki-tone-indigo",
+  "llmwiki-tone-sky",
+  "llmwiki-tone-cyan",
+  "llmwiki-tone-violet",
+  "llmwiki-tone-emerald",
+  "llmwiki-tone-indigo",
+  "llmwiki-tone-slate",
+  "llmwiki-tone-violet",
+  "llmwiki-tone-rose",
+]
 
 function slugify(text: string): string {
   return text.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "")
@@ -102,10 +115,11 @@ export function HelpPage() {
               <NavList label="文档目录">
                 {sections.map((section, index) => {
                   const Icon = SECTION_ICONS[index]
+                  const tone = SECTION_TONES[index % SECTION_TONES.length]
                   return (
                     <NavItem
                       key={section.id}
-                      icon={Icon === undefined ? <HashIcon /> : <Icon />}
+                      icon={Icon === undefined ? <HashIcon className={tone} /> : <Icon className={tone} />}
                       active={sectionId === section.id}
                       onSelect={() => jumpTo(section.id)}
                     >

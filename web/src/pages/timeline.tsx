@@ -1,7 +1,7 @@
 import * as React from "react"
 import type { ColumnDef } from "@tanstack/react-table"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CheckIcon, RotateCcwIcon } from "lucide-react"
+import { CheckIcon, ClipboardCheckIcon, FilePenLineIcon, FilePlus2Icon, HistoryIcon, RotateCcwIcon, SendIcon, Trash2Icon } from "lucide-react"
 import { DataTable, useLimitPaging } from "@/components/blocks/data-table"
 import { Id, Num, Time } from "@/components/blocks/format"
 import { StatusBadge } from "@/components/blocks/status-badge"
@@ -28,16 +28,27 @@ import {
 } from "@/lib/api"
 import type { ChangeSet } from "@/types"
 
+function ChangeKindIcon({ kind }: { kind: string }) {
+  if (kind === "create") return <span className="llmwiki-icon-chip llmwiki-icon-chip--emerald" aria-hidden="true"><FilePlus2Icon /></span>
+  if (kind === "update") return <span className="llmwiki-icon-chip llmwiki-icon-chip--sky" aria-hidden="true"><FilePenLineIcon /></span>
+  if (kind === "delete") return <span className="llmwiki-icon-chip llmwiki-icon-chip--rose" aria-hidden="true"><Trash2Icon /></span>
+  if (kind === "restore" || kind === "rollback") return <span className="llmwiki-icon-chip llmwiki-icon-chip--amber" aria-hidden="true"><RotateCcwIcon /></span>
+  return <span className="llmwiki-icon-chip llmwiki-icon-chip--indigo" aria-hidden="true"><HistoryIcon /></span>
+}
+
 const columns: ColumnDef<ChangeSet, unknown>[] = [
   {
     accessorKey: "summary",
     header: "变更",
     meta: { kind: "primary" },
     cell: ({ row }) => (
-      <div className="min-w-0">
-        <div className="truncate">{row.original.summary}</div>
-        <div className="text-xs text-muted-foreground">{row.original.kind} · {row.original.page_count} 页</div>
-      </div>
+      <span className="llmwiki-cell-lead">
+        <ChangeKindIcon kind={row.original.kind} />
+        <div className="min-w-0">
+          <div className="truncate">{row.original.summary}</div>
+          <div className="text-xs text-muted-foreground">{row.original.kind} · {row.original.page_count} 页</div>
+        </div>
+      </span>
     ),
   },
   { accessorKey: "kind", header: "类型", meta: { kind: "status", priority: 2 }, cell: ({ getValue }) => <StatusBadge status={getValue<string>()} /> },
@@ -199,6 +210,7 @@ function ReviewsSection() {
         <Rows label="归档评审">
           {reviews.data?.map((review) => (
             <Row key={review.id}>
+              <span className="llmwiki-icon-chip llmwiki-icon-chip--amber" aria-hidden="true"><ClipboardCheckIcon /></span>
               <button
                 type="button"
                 className="min-w-0 flex-1 truncate text-left text-sm hover:text-brand"
@@ -237,7 +249,7 @@ function ReviewsSection() {
             />
             <Inline>
               <Button size="sm" onClick={() => sendFeedback.mutate()} disabled={feedback.trim() === "" || sendFeedback.isPending}>
-                提交反馈
+                <SendIcon />提交反馈
               </Button>
               <Button size="sm" variant="outline" onClick={() => replan.mutate()} disabled={replan.isPending}>
                 <RotateCcwIcon />重新规划

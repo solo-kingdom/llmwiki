@@ -177,6 +177,8 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/api/v1/documents/:id/move", api.moveDocument);
   app.post("/api/v1/documents/:id/archive", api.archiveDocument);
   app.post("/api/v1/documents/:id/reopen", api.reopenDocument);
+  app.post("/api/v1/documents/:id/archive-sources", api.linkDocumentArchiveSource);
+  app.delete("/api/v1/documents/:id/archive-sources/:archiveId", api.unlinkDocumentArchiveSource);
   app.delete("/api/v1/documents/:id", api.deleteDocument);
 
   // Search, lint, graph
@@ -210,8 +212,11 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/api/v1/archives/folders/move", api.moveArchiveFolder);
   app.delete("/api/v1/archives/folders", api.deleteArchiveFolder);
   app.post("/api/v1/archives/files", api.uploadArchiveFiles);
+  app.get("/api/v1/archives/files/by-path", api.getArchiveFileByPath);
+  app.get("/api/v1/archives/files/by-path/raw", api.getArchiveFileRawByPath);
   app.get("/api/v1/archives/files/:id", api.getArchiveFile);
   app.get("/api/v1/archives/files/:id/raw", api.getArchiveFileRaw);
+  app.post("/api/v1/archives/files/:id/ingest", api.ingestArchiveFile);
   app.patch("/api/v1/archives/files/:id", api.updateArchiveFileLocation);
   app.put("/api/v1/archives/files/:id/content", api.updateArchiveFileContent);
   app.delete("/api/v1/archives/files/:id", api.deleteArchiveFile);
@@ -369,6 +374,7 @@ function isStreamingRequest(
   accept: string,
 ): boolean {
   if (method === "POST" && requestPath === "/api/v1/archives/files") return true;
+  if (method === "GET" && requestPath === "/api/v1/archives/files/by-path/raw") return true;
   if (method === "GET" && /^\/api\/v1\/archives\/files\/[^/]+\/raw$/.test(requestPath)) return true;
   if (method !== "POST") return false;
   if (!requestPath.includes("/ingest/sessions/")) return false;

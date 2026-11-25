@@ -26,7 +26,7 @@ const IMAGE_SOURCE_EXTENSIONS: Record<string, string> = {
 
 const TEXT_SOURCE_EXTENSIONS = new Set([".md", ".txt"]);
 
-const SUPPORTED_INGEST_EXTENSIONS = new Set([
+export const SUPPORTED_INGEST_EXTENSIONS = new Set([
   ".md", ".txt", ".pdf",
   ".doc", ".docx",
   ".ppt", ".pptx",

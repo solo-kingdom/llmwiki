@@ -12,7 +12,15 @@ import {
   normalizeArchiveFolderPath,
   validateArchiveFilename,
 } from "../store/postgres/archives.js";
-import type { ApiKeyRecord, ArchiveFile, ArchiveFolder, FolderDeleteMode } from "../store/types.js";
+import type {
+  ApiKeyRecord,
+  ArchiveFile,
+  ArchiveFolder,
+  ArchiveSourceSummary,
+  Document,
+  FolderDeleteMode,
+  IngestJob,
+} from "../store/types.js";
 
 function makeInMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
   const config = new Map<string, string>(Object.entries(initialConfig));
@@ -20,6 +28,9 @@ function makeInMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
   const files = new Map<string, ArchiveFile>();
   const inlineMap = new Map<string, Uint8Array | null>();
   const keys = new Map<string, ApiKeyRecord & { key_hash: string }>();
+  const docs = new Map<string, Document>();
+  const jobs = new Map<string, IngestJob>();
+  const links: Array<{ documentId: string; archiveFileId: string; relation: string }> = [];
 
   const store = {
     getConfig: vi.fn(async (key: string) => config.get(key) ?? ""),
@@ -213,10 +224,61 @@ function makeInMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
       inlineMap.delete(id);
       return cur;
     }),
-    listArchiveFileDocuments: vi.fn(async () => []),
+    listArchiveFileDocuments: vi.fn(async (archiveFileId: string) =>
+      links
+        .filter((l) => l.archiveFileId === archiveFileId)
+        .map((l) => {
+          const d = docs.get(l.documentId)!;
+          return {
+            document_id: d.id,
+            title: d.title,
+            relative_path: d.relative_path,
+            page_type: d.page_type ?? "",
+            relation: l.relation,
+            created_at: "2026-11-26",
+          };
+        }),
+    ),
+    getDocument: vi.fn(async (id: string) => docs.get(id) ?? null),
+    linkDocumentArchiveSource: vi.fn(async (documentId: string, archiveFileId: string, _cs = "", relation = "manual_link") => {
+      const existing = links.find((l) => l.documentId === documentId && l.archiveFileId === archiveFileId);
+      if (existing) existing.relation = relation;
+      else links.push({ documentId, archiveFileId, relation });
+    }),
+    unlinkDocumentArchiveSource: vi.fn(async (documentId: string, archiveFileId: string) => {
+      const idx = links.findIndex((l) => l.documentId === documentId && l.archiveFileId === archiveFileId);
+      if (idx < 0) return false;
+      links.splice(idx, 1);
+      return true;
+    }),
+    listDocumentArchiveSources: vi.fn(async (documentId: string): Promise<ArchiveSourceSummary[]> =>
+      links
+        .filter((l) => l.documentId === documentId)
+        .map((l) => {
+          const f = files.get(l.archiveFileId)!;
+          return {
+            id: f.id,
+            filename: f.filename,
+            folder_path: f.folder_path,
+            relative_path: f.relative_path,
+            kind: f.kind,
+            media_type: f.media_type,
+            size: f.size,
+            origin: f.origin,
+            relation: l.relation,
+            created_at: f.created_at,
+          };
+        }),
+    ),
+    createIngestJob: vi.fn(async (job: IngestJob) => {
+      job.id = randomUUID();
+      jobs.set(job.id, { ...job });
+    }),
+    getJobEventsMaxCount: vi.fn().mockResolvedValue(200),
+    insertIngestJobEvent: vi.fn().mockResolvedValue(undefined),
   } as unknown as Store;
 
-  return { store, keys, config };
+  return { store, keys, config, docs, jobs };
 }
 
 describe("Archives HTTP API & storage settings", () => {
@@ -230,7 +292,7 @@ describe("Archives HTTP API & storage settings", () => {
   async function makeTestApp(initialConfig: Record<string, string> = {}) {
     const ws = await mkdtemp(path.join(os.tmpdir(), "llmwiki-archive-api-"));
     tmpDirs.push(ws);
-    const { store, keys, config } = makeInMemoryArchiveStore(initialConfig);
+    const { store, keys, config, docs, jobs } = makeInMemoryArchiveStore(initialConfig);
     const app = createApp({
       db: store,
       token: "",
@@ -239,9 +301,9 @@ describe("Archives HTTP API & storage settings", () => {
       mcpAllowWrite: false,
       workspace: ws,
       webRoot: "/tmp/nonexistent-web",
-      skillsRoot: "/tmp/nonexistent-skills",
+      skillsRoot: path.resolve("skills"),
     });
-    return { app, ws, store, keys, config };
+    return { app, ws, store, keys, config, docs, jobs };
   }
 
   it("supports folder CRUD, multi-file upload, tiered auto-promotion, range 206, and HTML CSP sandbox", async () => {
@@ -339,5 +401,94 @@ describe("Archives HTTP API & storage settings", () => {
     const checkBody = (await checkRes.json()) as { ok: boolean; backend: string };
     expect(checkBody.ok).toBe(true);
     expect(checkBody.backend).toBe("local");
+  });
+
+  it("supports by-path lookup/raw, manual wiki link/unlink, archive-to-ingest, and llmwiki-archive skill discovery", async () => {
+    const { app, docs, jobs } = await makeTestApp();
+    docs.set("doc-1", {
+      id: "doc-1",
+      user_id: "default",
+      filename: "guide.md",
+      title: "Guide",
+      path: "/wiki/concepts/",
+      relative_path: "wiki/concepts/guide.md",
+      source_kind: "wiki",
+      file_type: "md",
+      file_size: 10,
+      document_number: 1,
+      status: "ready",
+      page_count: 1,
+      content: "# Guide",
+      tags: [],
+      date: "",
+      metadata: "",
+      error_message: "",
+      version: 1,
+      parser: "",
+      content_hash: "",
+      stale_since: "",
+      highlights: "[]",
+      created_at: "2026-11-26",
+      updated_at: "2026-11-26",
+    });
+
+    const form = new FormData();
+    form.set("folder_path", "specs/v1");
+    form.append("files", new File(["# Spec\n\nDetails"], "spec.md", { type: "text/markdown" }));
+    form.append("files", new File(["video"], "clip.mp4", { type: "video/mp4" }));
+    const upRes = await app.request("/api/v1/archives/files", { method: "POST", body: form });
+    expect(upRes.status).toBe(201);
+    const uploaded = (await upRes.json()) as { files: ArchiveFile[] };
+    const specFile = uploaded.files.find((f) => f.filename === "spec.md")!;
+    const clipFile = uploaded.files.find((f) => f.filename === "clip.mp4")!;
+
+    // by-path metadata & raw
+    const byPathRes = await app.request("/api/v1/archives/files/by-path?path=specs/v1/spec.md");
+    expect(byPathRes.status).toBe(200);
+    expect(((await byPathRes.json()) as ArchiveFile).id).toBe(specFile.id);
+
+    const byPathRaw = await app.request("/api/v1/archives/files/by-path/raw?path=specs/v1/spec.md");
+    expect(byPathRaw.status).toBe(200);
+    expect(await byPathRaw.text()).toContain("# Spec");
+
+    // manual link & unlink
+    const linkRes = await app.request("/api/v1/documents/doc-1/archive-sources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "specs/v1/spec.md", relation: "reference" }),
+    });
+    expect(linkRes.status).toBe(201);
+    const linkBody = (await linkRes.json()) as { archive_sources: ArchiveSourceSummary[] };
+    expect(linkBody.archive_sources).toHaveLength(1);
+    expect(linkBody.archive_sources[0]!.relation).toBe("reference");
+
+    const unlinkRes = await app.request(`/api/v1/documents/doc-1/archive-sources/${specFile.id}`, {
+      method: "DELETE",
+    });
+    expect(unlinkRes.status).toBe(200);
+
+    // archive -> ingest
+    const ingestOk = await app.request(`/api/v1/archives/files/${specFile.id}/ingest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(ingestOk.status).toBe(201);
+    expect(jobs.size).toBe(1);
+
+    const ingestUnsupported = await app.request(`/api/v1/archives/files/${clipFile.id}/ingest`, {
+      method: "POST",
+    });
+    expect(ingestUnsupported.status).toBe(400);
+
+    // skill discovery
+    const skillsIndex = await app.request("/api/v1/skills");
+    expect(skillsIndex.status).toBe(200);
+    const idxJson = (await skillsIndex.json()) as { skills: Array<{ name: string }> };
+    expect(idxJson.skills.some((s) => s.name === "llmwiki-archive")).toBe(true);
+
+    const skillDoc = await app.request("/skills/llmwiki-archive.md");
+    expect(skillDoc.status).toBe(200);
+    expect(await skillDoc.text()).toContain("POST /api/v1/archives/files/:id/ingest");
   });
 });

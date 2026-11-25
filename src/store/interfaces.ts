@@ -351,6 +351,7 @@ export interface ArchiveStore {
     changeSetId?: string,
     relation?: string,
   ): Promise<void>;
+  unlinkDocumentArchiveSource(documentId: string, archiveFileId: string): Promise<boolean>;
   listDocumentArchiveSources(documentId: string): Promise<ArchiveSourceSummary[]>;
   listArchiveFileDocuments(archiveFileId: string): Promise<ArchiveLinkedDocument[]>;
 }

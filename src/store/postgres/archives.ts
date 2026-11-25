@@ -581,6 +581,15 @@ export function archivesRepo(pool: Pool): ArchiveStore {
       );
     },
 
+    async unlinkDocumentArchiveSource(documentId: string, archiveFileId: string): Promise<boolean> {
+      const affected = await exec(
+        pool,
+        `DELETE FROM document_archive_sources WHERE document_id = $1 AND archive_file_id = $2`,
+        [documentId, archiveFileId],
+      );
+      return affected > 0;
+    },
+
     async listDocumentArchiveSources(documentId: string): Promise<ArchiveSourceSummary[]> {
       const rows = await queryRows(
         pool,

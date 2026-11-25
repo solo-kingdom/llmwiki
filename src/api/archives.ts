@@ -1,14 +1,16 @@
 import path from "node:path";
 import type { Context } from "hono";
-import { record } from "../activity/index.js";
+import { logIngestJob, record } from "../activity/index.js";
 import { ArchiveStorageService } from "../archive/storage.js";
+import { recordRulesSnapshot } from "../ingest/processor.js";
 import {
   ArchiveConflictError,
   ArchiveNotFoundError,
   ArchiveValidationError,
 } from "../store/postgres/archives.js";
-import type { ArchiveFile, FolderDeleteMode } from "../store/types.js";
+import type { ArchiveFile, FolderDeleteMode, IngestJob } from "../store/types.js";
 import { getID, readJsonBody, writeError, writeJson, type ApiContext } from "./context.js";
+import { SUPPORTED_INGEST_EXTENSIONS } from "./ingest_jobs.js";
 
 function mapArchiveError(c: Context, error: unknown): Response {
   const message = error instanceof Error ? error.message : String(error);
@@ -33,6 +35,51 @@ function isSandboxedMedia(file: ArchiveFile): boolean {
 
 export function archivesApi(ctx: ApiContext) {
   const storage = () => new ArchiveStorageService(ctx.db, ctx.workspace);
+
+  async function serveArchiveRaw(c: Context, file: ArchiveFile): Promise<Response> {
+    const download = c.req.query("download") === "1" || c.req.query("download") === "true";
+    const rangeHeader = c.req.header("range");
+    const res = await storage().openRangeStream(file, rangeHeader);
+
+    const headers = new Headers();
+    headers.set("Accept-Ranges", "bytes");
+    headers.set("X-Content-Type-Options", "nosniff");
+    headers.set("Cache-Control", "private, max-age=60");
+
+    if (isSandboxedMedia(file)) {
+      headers.set("Content-Security-Policy", download ? "sandbox" : "sandbox allow-scripts");
+    }
+
+    if (res.status === 416) {
+      headers.set("Content-Range", res.contentRange ?? `bytes */${res.totalSize}`);
+      return new Response(null, { status: 416, headers });
+    }
+
+    headers.set("Content-Type", file.media_type || "application/octet-stream");
+    headers.set("Content-Length", String(res.contentLength));
+    if (res.status === 206 && res.contentRange) {
+      headers.set("Content-Range", res.contentRange);
+    }
+    if (download) {
+      headers.set(
+        "Content-Disposition",
+        `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+      );
+    }
+
+    return new Response(res.stream ?? null, {
+      status: res.status,
+      headers,
+    });
+  }
+
+  async function resolveArchiveByIdOrPath(id?: string, rawPath?: string): Promise<ArchiveFile | null> {
+    const cleanId = (id ?? "").trim();
+    if (cleanId) return ctx.db.getArchiveFile(cleanId);
+    const cleanPath = (rawPath ?? "").trim().replace(/^\/+/, "");
+    if (!cleanPath) return null;
+    return ctx.db.getArchiveFileByRelativePath(cleanPath);
+  }
 
   return {
     async getArchiveTree(c: Context): Promise<Response> {
@@ -220,40 +267,126 @@ export function archivesApi(ctx: ApiContext) {
       try {
         const file = await ctx.db.getArchiveFile(id);
         if (!file) return writeError(c, 404, "archive file not found");
+        return await serveArchiveRaw(c, file);
+      } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
 
-        const download = c.req.query("download") === "1" || c.req.query("download") === "true";
-        const rangeHeader = c.req.header("range");
-        const res = await storage().openRangeStream(file, rangeHeader);
+    async getArchiveFileByPath(c: Context): Promise<Response> {
+      const rawPath = (c.req.query("path") ?? "").trim().replace(/^\/+/, "");
+      if (!rawPath) return writeError(c, 400, "query parameter 'path' is required");
+      try {
+        const file = await ctx.db.getArchiveFileByRelativePath(rawPath);
+        if (!file) return writeError(c, 404, "archive file not found");
+        const wikiDocuments =
+          typeof ctx.db.listArchiveFileDocuments === "function"
+            ? await ctx.db.listArchiveFileDocuments(file.id)
+            : [];
+        return writeJson(c, 200, { ...file, wiki_documents: wikiDocuments });
+      } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
 
-        const headers = new Headers();
-        headers.set("Accept-Ranges", "bytes");
-        headers.set("X-Content-Type-Options", "nosniff");
-        headers.set("Cache-Control", "private, max-age=60");
+    async getArchiveFileRawByPath(c: Context): Promise<Response> {
+      const rawPath = (c.req.query("path") ?? "").trim().replace(/^\/+/, "");
+      if (!rawPath) return writeError(c, 400, "query parameter 'path' is required");
+      try {
+        const file = await ctx.db.getArchiveFileByRelativePath(rawPath);
+        if (!file) return writeError(c, 404, "archive file not found");
+        return await serveArchiveRaw(c, file);
+      } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
 
-        if (isSandboxedMedia(file)) {
-          headers.set("Content-Security-Policy", download ? "sandbox" : "sandbox allow-scripts");
+    async ingestArchiveFile(c: Context): Promise<Response> {
+      if (!ctx.workspace.trim()) return writeError(c, 503, "workspace not configured for ingest");
+      const id = getID(c);
+      if (!id) return writeError(c, 400, "missing archive file id");
+      const req = (await readJsonBody<{ source_ref?: string }>(c)) ?? {};
+      try {
+        const file = await ctx.db.getArchiveFile(id);
+        if (!file) return writeError(c, 404, "archive file not found");
+        const ext = path.extname(file.filename).toLowerCase();
+        if (!SUPPORTED_INGEST_EXTENSIONS.has(ext)) {
+          return writeError(c, 400, `unsupported file extension for ingest: ${ext || "(none)"}`);
         }
+        const job: IngestJob = {
+          id: "",
+          parent_job_id: "",
+          input_type: "upload",
+          source_path: file.relative_path,
+          source_ref: (req.source_ref ?? "").trim() || `archive:${file.relative_path}`,
+          archive_file_id: file.id,
+          status: "queued",
+          retries: 0,
+          max_retries: 3,
+          error: "",
+          error_code: "",
+          error_message: "",
+          missing_dependency: "",
+          remediation: "",
+          result_summary: "",
+          created_at: "",
+          updated_at: "",
+        };
+        await ctx.db.createIngestJob(job);
+        await recordRulesSnapshot(ctx.db, job.id, ctx.workspace);
+        logIngestJob(ctx.db, job, "queued", "api");
+        return writeJson(c, 201, { job, archive_file: file });
+      } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
 
-        if (res.status === 416) {
-          headers.set("Content-Range", res.contentRange ?? `bytes */${res.totalSize}`);
-          return new Response(null, { status: 416, headers });
-        }
+    async linkDocumentArchiveSource(c: Context): Promise<Response> {
+      const docId = getID(c);
+      if (!docId) return writeError(c, 400, "missing document id");
+      const req = await readJsonBody<{
+        archive_file_id?: string;
+        path?: string;
+        relation?: string;
+      }>(c);
+      if (!req || (!req.archive_file_id && !req.path)) {
+        return writeError(c, 400, "archive_file_id or path is required");
+      }
+      try {
+        const doc = await ctx.db.getDocument(docId);
+        if (!doc) return writeError(c, 404, "document not found");
+        const file = await resolveArchiveByIdOrPath(req.archive_file_id, req.path);
+        if (!file) return writeError(c, 404, "archive file not found");
+        const relation = (req.relation ?? "").trim() || "manual_link";
+        await ctx.db.linkDocumentArchiveSource(doc.id, file.id, "", relation);
+        const archiveSources =
+          typeof ctx.db.listDocumentArchiveSources === "function"
+            ? await ctx.db.listDocumentArchiveSources(doc.id)
+            : [];
+        return writeJson(c, 201, {
+          document_id: doc.id,
+          archive_file_id: file.id,
+          relation,
+          archive_sources: archiveSources,
+        });
+      } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
 
-        headers.set("Content-Type", file.media_type || "application/octet-stream");
-        headers.set("Content-Length", String(res.contentLength));
-        if (res.status === 206 && res.contentRange) {
-          headers.set("Content-Range", res.contentRange);
-        }
-        if (download) {
-          headers.set(
-            "Content-Disposition",
-            `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
-          );
-        }
-
-        return new Response(res.stream ?? null, {
-          status: res.status,
-          headers,
+    async unlinkDocumentArchiveSource(c: Context): Promise<Response> {
+      const docId = getID(c);
+      const archiveId = c.req.param("archiveId") ?? "";
+      if (!docId || !archiveId) return writeError(c, 400, "missing document or archive id");
+      try {
+        const doc = await ctx.db.getDocument(docId);
+        if (!doc) return writeError(c, 404, "document not found");
+        const unlinked = await ctx.db.unlinkDocumentArchiveSource(doc.id, archiveId);
+        if (!unlinked) return writeError(c, 404, "archive source link not found");
+        return writeJson(c, 200, {
+          unlinked: true,
+          document_id: doc.id,
+          archive_file_id: archiveId,
         });
       } catch (error) {
         return mapArchiveError(c, error);

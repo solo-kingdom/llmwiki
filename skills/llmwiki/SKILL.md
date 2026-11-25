@@ -58,7 +58,7 @@ If a file-based `llm-wiki` skill is also installed, the two cover different targ
 | Graph & Lint | `GET /api/v1/graph`, `GET /api/v1/graph/{backlinks/:id,forward/:id,uncited,stale}`, `GET /api/v1/lint` | Knowledge graph and vault health checks |
 | Ingest | `GET/POST /api/v1/ingest/jobs*`, `GET/POST /api/v1/ingest/sessions*`, `GET/POST /api/v1/ingest/reviews*` | Ingest jobs, interactive sessions, review plans |
 | History | `GET /api/v1/history`, `GET /api/v1/history/:id{,/diff}`, `POST /api/v1/history/:id/rollback`, `GET /api/v1/pages/history`, `POST /api/v1/revisions/:id/restore` | Change sets, diffs, rollback, revision restore |
-| Archives | `GET /api/v1/archives/tree`, `POST/PATCH/DELETE /api/v1/archives/folders`, `POST /api/v1/archives/folders/move`, `POST /api/v1/archives/files`, `GET/PATCH/DELETE /api/v1/archives/files/:id`, `GET /api/v1/archives/files/:id/raw`, `PUT /api/v1/archives/files/:id/content` | File tree & raw file storage (md/html/image/video/etc.), Range streaming & download |
+| Archives | `GET /api/v1/archives/tree`, `POST/PATCH/DELETE /api/v1/archives/folders`, `POST /api/v1/archives/folders/move`, `POST /api/v1/archives/files`, `GET /api/v1/archives/files/by-path{,/raw}`, `GET/PATCH/DELETE /api/v1/archives/files/:id`, `GET /api/v1/archives/files/:id/raw`, `PUT /api/v1/archives/files/:id/content`, `POST /api/v1/archives/files/:id/ingest`, `POST/DELETE /api/v1/documents/:id/archive-sources` | File tree & raw file storage (md/html/image/video/etc.), Range streaming, Wiki linking & ingest |
 | Settings | `GET/PUT /api/v1/settings`, `POST /api/v1/settings/storage/check`, `GET/PUT /api/v1/workspace/rule-files` | Runtime settings (`api_token` and S3 credentials blocked for API Keys) and `purpose.md` / `rules.md` |
 
 ## Vault model
@@ -89,6 +89,7 @@ PostgreSQL            pages, folders, revisions, search, graph, lint — the onl
 | Install, first run, configure models and embeddings, history and rollback | `llmwiki-guide` | `GET /skills/llmwiki-guide.md` |
 | Answer a question, find pages, inspect references | `llmwiki-query` | `GET /skills/llmwiki-query.md` |
 | Create, edit, merge, move or delete pages | `llmwiki-organize` | `GET /skills/llmwiki-organize.md` |
+| Manage raw files, folders, media & Wiki source links | `llmwiki-archive` | `GET /skills/llmwiki-archive.md` |
 | Turn files/URLs/paste into wiki knowledge | `llmwiki-ingest` | `GET /skills/llmwiki-ingest.md` |
 | Find and repair vault defects | `llmwiki-lint` | `GET /skills/llmwiki-lint.md` |
 

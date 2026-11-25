@@ -1,6 +1,10 @@
+import path from "node:path";
+import { logIngestJob } from "../activity/index.js";
+import { SUPPORTED_INGEST_EXTENSIONS } from "../api/ingest_jobs.js";
 import { ArchiveStorageService, isTextEditableKind } from "../archive/storage.js";
+import { recordRulesSnapshot } from "../ingest/processor.js";
 import type { Store } from "../store/interfaces.js";
-import type { FolderDeleteMode } from "../store/types.js";
+import type { FolderDeleteMode, IngestJob } from "../store/types.js";
 import type { Tool, ToolHandler } from "./types.js";
 
 const MAX_MCP_TEXT_READ_BYTES = 256 * 1024;
@@ -264,6 +268,112 @@ export function registerArchiveTools(
         return `Deleted archive folder ${res.path} (mode=${res.mode}, deleted_files=${res.deleted_files})`;
       }
       return "Error: target_type must be file or folder";
+    },
+  );
+
+  register(
+    {
+      name: "archive_link",
+      description: "Link or unlink an archive file to a Wiki document as its source.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["link", "unlink"] },
+          document_id: { type: "string", description: "Wiki document ID" },
+          archive_file_id: { type: "string", description: "Archive file ID" },
+          path: { type: "string", description: "Archive relative_path (alternative to archive_file_id)" },
+          relation: { type: "string", default: "manual_link" },
+        },
+        required: ["action", "document_id"],
+      },
+    },
+    async (args) => {
+      if (!db) return "Error: database not connected";
+      const action = args["action"];
+      const docId = typeof args["document_id"] === "string" ? args["document_id"].trim() : "";
+      if (!docId) return "Error: document_id is required";
+      const doc = await db.getDocument(docId);
+      if (!doc) return `Document not found: ${docId}`;
+
+      const fileId = typeof args["archive_file_id"] === "string" ? args["archive_file_id"].trim() : "";
+      const relPath = typeof args["path"] === "string" ? args["path"].trim().replace(/^\/+/, "") : "";
+      const file = fileId
+        ? await db.getArchiveFile(fileId)
+        : relPath
+          ? await db.getArchiveFileByRelativePath(relPath)
+          : null;
+      if (!file) return `Archive file not found: ${fileId || relPath}`;
+
+      if (action === "link") {
+        const relation = typeof args["relation"] === "string" && args["relation"].trim()
+          ? args["relation"].trim()
+          : "manual_link";
+        await db.linkDocumentArchiveSource(doc.id, file.id, "", relation);
+        return `Linked archive [${file.id}] ${file.relative_path} -> wiki [${doc.id}] ${doc.relative_path}`;
+      }
+      if (action === "unlink") {
+        const ok = await db.unlinkDocumentArchiveSource(doc.id, file.id);
+        return ok
+          ? `Unlinked archive [${file.id}] from wiki [${doc.id}]`
+          : `Link not found between archive [${file.id}] and wiki [${doc.id}]`;
+      }
+      return "Error: action must be link or unlink";
+    },
+  );
+
+  register(
+    {
+      name: "archive_ingest",
+      description: "Queue a Wiki ingest job from an existing file in Archives.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Archive file ID" },
+          path: { type: "string", description: "Archive relative_path (alternative to id)" },
+          source_ref: { type: "string", description: "Optional source reference label" },
+        },
+        required: [],
+      },
+    },
+    async (args) => {
+      if (!db) return "Error: database not connected";
+      if (!workspace.trim()) return "Error: workspace not configured for ingest";
+      const id = typeof args["id"] === "string" ? args["id"].trim() : "";
+      const relPath = typeof args["path"] === "string" ? args["path"].trim().replace(/^\/+/, "") : "";
+      if (!id && !relPath) return "Error: id or path is required";
+      const file = id ? await db.getArchiveFile(id) : await db.getArchiveFileByRelativePath(relPath);
+      if (!file) return `Archive file not found: ${id || relPath}`;
+      const ext = path.extname(file.filename).toLowerCase();
+      if (!SUPPORTED_INGEST_EXTENSIONS.has(ext)) {
+        return `Error: unsupported file extension for ingest: ${ext || "(none)"}`;
+      }
+      const sourceRef =
+        typeof args["source_ref"] === "string" && args["source_ref"].trim()
+          ? args["source_ref"].trim()
+          : `archive:${file.relative_path}`;
+      const job: IngestJob = {
+        id: "",
+        parent_job_id: "",
+        input_type: "upload",
+        source_path: file.relative_path,
+        source_ref: sourceRef,
+        archive_file_id: file.id,
+        status: "queued",
+        retries: 0,
+        max_retries: 3,
+        error: "",
+        error_code: "",
+        error_message: "",
+        missing_dependency: "",
+        remediation: "",
+        result_summary: "",
+        created_at: "",
+        updated_at: "",
+      };
+      await db.createIngestJob(job);
+      await recordRulesSnapshot(db, job.id, workspace);
+      logIngestJob(db, job, "queued", "mcp");
+      return `Queued ingest job [${job.id}] from archive [${file.id}] ${file.relative_path}`;
     },
   );
 }

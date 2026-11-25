@@ -62,6 +62,8 @@ export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
       "archive_upload",
       "archive_move",
       "archive_delete",
+      "archive_link",
+      "archive_ingest",
     ]),
   };
 }

@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Store } from "../store/interfaces.js";
 import { buildArchiveRelativePath, normalizeArchiveFolderPath } from "../store/postgres/archives.js";
-import type { ArchiveFile, ArchiveFolder, FolderDeleteMode } from "../store/types.js";
+import type { ArchiveFile, ArchiveFolder, Document, FolderDeleteMode, IngestJob } from "../store/types.js";
 import { defaultToolPolicy } from "./policy.js";
 import { McpServer } from "./server.js";
 import { registerTools } from "./tools.js";
@@ -15,6 +15,9 @@ function createMcpTestStore() {
   const folders = new Map<string, ArchiveFolder>();
   const files = new Map<string, ArchiveFile>();
   const inlineMap = new Map<string, Uint8Array | null>();
+  const docs = new Map<string, Document>();
+  const links: Array<{ documentId: string; archiveFileId: string }> = [];
+  const jobs = new Map<string, IngestJob>();
 
   const store = {
     getAllConfig: vi.fn(async () => Object.fromEntries(config.entries())),
@@ -98,9 +101,26 @@ function createMcpTestStore() {
       return f;
     }),
     listArchiveFileDocuments: vi.fn(async () => []),
+    getDocument: vi.fn(async (id: string) => docs.get(id) ?? null),
+    linkDocumentArchiveSource: vi.fn(async (documentId: string, archiveFileId: string) => {
+      links.push({ documentId, archiveFileId });
+    }),
+    unlinkDocumentArchiveSource: vi.fn(async (documentId: string, archiveFileId: string) => {
+      const idx = links.findIndex((l) => l.documentId === documentId && l.archiveFileId === archiveFileId);
+      if (idx < 0) return false;
+      links.splice(idx, 1);
+      return true;
+    }),
+    createIngestJob: vi.fn(async (job: IngestJob) => {
+      job.id = randomUUID();
+      jobs.set(job.id, { ...job });
+    }),
+    getJobEventsMaxCount: vi.fn().mockResolvedValue(200),
+    insertIngestJobEvent: vi.fn().mockResolvedValue(undefined),
+    createActivityLog: vi.fn().mockResolvedValue(undefined),
   } as unknown as Store;
 
-  return { store, files };
+  return { store, files, docs, links, jobs };
 }
 
 describe("MCP Archive Tools", () => {
@@ -129,6 +149,8 @@ describe("MCP Archive Tools", () => {
     expect(tools).toContain("archive_read");
     expect(tools).not.toContain("archive_upload");
     expect(tools).not.toContain("archive_mkdir");
+    expect(tools).not.toContain("archive_link");
+    expect(tools).not.toContain("archive_ingest");
 
     const blocked = await rpc(server, "tools/call", {
       name: "archive_upload",
@@ -140,7 +162,33 @@ describe("MCP Archive Tools", () => {
   it("supports full archive_mkdir -> archive_upload -> archive_list -> archive_read -> archive_move -> archive_delete when allowWrite=true", async () => {
     const ws = await mkdtemp(path.join(os.tmpdir(), "llmwiki-mcp-rw-"));
     tmpDirs.push(ws);
-    const { store, files } = createMcpTestStore();
+    const { store, files, docs, links, jobs } = createMcpTestStore();
+    docs.set("doc-1", {
+      id: "doc-1",
+      user_id: "default",
+      filename: "p.md",
+      title: "Page",
+      path: "/wiki/concepts/",
+      relative_path: "wiki/concepts/p.md",
+      source_kind: "wiki",
+      file_type: "md",
+      file_size: 4,
+      document_number: 1,
+      status: "ready",
+      page_count: 1,
+      content: "body",
+      tags: [],
+      date: "",
+      metadata: "",
+      error_message: "",
+      version: 1,
+      parser: "",
+      content_hash: "",
+      stale_since: "",
+      highlights: "[]",
+      created_at: "",
+      updated_at: "",
+    });
     const server = new McpServer("LLM Wiki", "");
     registerTools(server, ws, store, null);
     server.setToolPolicy(defaultToolPolicy(true));
@@ -170,6 +218,27 @@ describe("MCP Archive Tools", () => {
       arguments: { target_type: "file", id: uploaded.id, new_filename: "design-v2.md" },
     });
     expect(uploaded.relative_path).toBe("specs/design-v2.md");
+
+    // archive_link & archive_ingest
+    const linkRes = await rpc(server, "tools/call", {
+      name: "archive_link",
+      arguments: { action: "link", document_id: "doc-1", path: "specs/design-v2.md" },
+    });
+    expect(linkRes?.error).toBeUndefined();
+    expect(links).toHaveLength(1);
+
+    const ingestRes = await rpc(server, "tools/call", {
+      name: "archive_ingest",
+      arguments: { id: uploaded.id },
+    });
+    expect(ingestRes?.error).toBeUndefined();
+    expect(jobs.size).toBe(1);
+
+    await rpc(server, "tools/call", {
+      name: "archive_link",
+      arguments: { action: "unlink", document_id: "doc-1", archive_file_id: uploaded.id },
+    });
+    expect(links).toHaveLength(0);
 
     await rpc(server, "tools/call", {
       name: "archive_delete",

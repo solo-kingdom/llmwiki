@@ -11,6 +11,7 @@ import { buildPageChunks } from "../ingest/dbapply.js";
 import type { Store } from "../store/interfaces.js";
 import type { ArchiveFilter, Document, SearchOptions } from "../store/types.js";
 import { formatLintMcp } from "./local_tools.js";
+import { registerArchiveTools } from "./archive_tools.js";
 import type { AuditDb } from "./server.js";
 import { McpServer } from "./server.js";
 import type { Tool, ToolHandler } from "./types.js";
@@ -251,6 +252,8 @@ export function registerTools(
     },
     async (args) => reopenToolHandler(db, args, activity),
   );
+
+  registerArchiveTools(register, workspace, db);
 
   register(
     {

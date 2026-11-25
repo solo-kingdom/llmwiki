@@ -43,8 +43,26 @@ export interface ToolPolicy {
 export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
   return {
     allowWriteTools: allowWrite,
-    readonlyTools: new Set(["guide", "search", "read", "references", "lint", "ping"]),
-    writeTools: new Set(["write", "delete", "archive", "reopen"]),
+    readonlyTools: new Set([
+      "guide",
+      "search",
+      "read",
+      "references",
+      "lint",
+      "ping",
+      "archive_list",
+      "archive_read",
+    ]),
+    writeTools: new Set([
+      "write",
+      "delete",
+      "archive",
+      "reopen",
+      "archive_mkdir",
+      "archive_upload",
+      "archive_move",
+      "archive_delete",
+    ]),
   };
 }
 

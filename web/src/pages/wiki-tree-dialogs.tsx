@@ -9,11 +9,13 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  archiveDocument,
   createDocument,
   createFolder,
   deleteFolder,
   moveDocument,
   moveFolder,
+  reopenDocument,
   updateFolder,
 } from "@/lib/api"
 import type { DocumentListItem, FolderDeleteMode, WikiFolder } from "@/types"
@@ -25,11 +27,15 @@ export type TreeDialogState =
   | { kind: "delete-folder"; folder: WikiFolder }
   | { kind: "create-page"; folderPath: string }
   | { kind: "move-doc"; doc: DocumentListItem }
+  | { kind: "archive-doc"; doc: DocumentListItem }
+  | { kind: "reopen-doc"; doc: DocumentListItem }
   | null
 
 const PAGE_TYPE_OPTIONS = [
   { value: "concept", label: "概念 (concept)" },
   { value: "entity", label: "实体 (entity)" },
+  { value: "experience", label: "经验 (experience)" },
+  { value: "ledger", label: "台账 (ledger)" },
   { value: "synthesis", label: "综合 (synthesis)" },
   { value: "comparison", label: "对比 (comparison)" },
   { value: "query", label: "问题 (query)" },
@@ -81,6 +87,12 @@ export function WikiTreeDialogs({
       ) : null}
       {state?.kind === "move-doc" ? (
         <MoveDocumentDialog doc={state.doc} folders={folders} onClose={onClose} />
+      ) : null}
+      {state?.kind === "archive-doc" ? (
+        <ArchiveDocumentDialog doc={state.doc} onClose={onClose} />
+      ) : null}
+      {state?.kind === "reopen-doc" ? (
+        <ReopenDocumentDialog doc={state.doc} onClose={onClose} />
       ) : null}
     </>
   )
@@ -408,6 +420,8 @@ function CreatePageDialog({
   const [title, setTitle] = React.useState("")
   const [filename, setFilename] = React.useState("")
   const [pageType, setPageType] = React.useState("concept")
+  const [expKind, setExpKind] = React.useState("practice")
+  const [symptomsInput, setSymptomsInput] = React.useState("")
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -415,7 +429,24 @@ function CreatePageDialog({
       let file = filename.trim() || `${cleanTitle.replace(/\s+/g, "-")}.md`
       if (!file.toLowerCase().endsWith(".md")) file += ".md"
       const today = new Date().toISOString().slice(0, 10)
-      const content = `---\ntitle: ${cleanTitle}\ntype: ${pageType}\ndate: ${today}\ntags: []\n---\n\n# ${cleanTitle}\n\n`
+      let content = `---\ntitle: ${cleanTitle}\ntype: ${pageType}\ndate: ${today}\ntags: []\n---\n\n# ${cleanTitle}\n\n`
+      if (pageType === "experience") {
+        const symptoms = symptomsInput
+          .split(/[,，]/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+        const symptomsLine = symptoms.length > 0 ? `symptoms: [${symptoms.join(", ")}]\n` : ""
+        content =
+          `---\ntitle: ${cleanTitle}\ntype: experience\nkind: ${expKind}\nstatus: draft\nconfidence: medium\n` +
+          `date: ${today}\nlast_verified: ${today}\n${symptomsLine}tags: []\n---\n\n# ${cleanTitle}\n\n` +
+          (expKind === "pitfall"
+            ? "## 现象与触发条件\n\n## 根因分析\n\n## 解决方案\n\n## 预防措施\n\n"
+            : "## 适用场景\n\n## 核心做法\n\n## 注意事项\n\n")
+      } else if (pageType === "ledger") {
+        content =
+          `---\ntitle: ${cleanTitle}\ntype: ledger\nconfidence: high\ndate: ${today}\nlast_verified: ${today}\ntags: []\n---\n\n` +
+          `# ${cleanTitle}\n\n## 台账概览\n\n## 条目清单\n\n| 名称 | 状态 | 更新时间 | 备注 |\n| --- | --- | --- | --- |\n\n`
+      }
       return createDocument({
         filename: file,
         path: `/wiki/${folder.replace(/^\/+|\/+$/g, "")}`,
@@ -464,6 +495,30 @@ function CreatePageDialog({
               </SelectContent>
             </Select>
           </Stack>
+          {pageType === "experience" ? (
+            <>
+              <Stack gap="xs">
+                <Label htmlFor="create-page-exp-kind">经验子类</Label>
+                <Select value={expKind} onValueChange={setExpKind}>
+                  <SelectTrigger id="create-page-exp-kind"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="practice">最佳实践 (practice)</SelectItem>
+                    <SelectItem value="pitfall">踩坑记录 (pitfall)</SelectItem>
+                    <SelectItem value="pattern">可复用模式 (pattern)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Stack>
+              <Stack gap="xs">
+                <Label htmlFor="create-page-symptoms">现象关键词（可选，逗号分隔）</Label>
+                <Input
+                  id="create-page-symptoms"
+                  placeholder="例如：connection refused, ECONNRESET"
+                  value={symptomsInput}
+                  onChange={(e) => setSymptomsInput(e.target.value)}
+                />
+              </Stack>
+            </>
+          ) : null}
           <Actions align="end">
             <Button variant="outline" onClick={onClose}>取消</Button>
             <Button disabled={!title.trim() || !folder.trim() || mutation.isPending} onClick={() => mutation.mutate()}>
@@ -542,6 +597,146 @@ function MoveDocumentDialog({
             <Button variant="outline" onClick={onClose}>取消</Button>
             <Button disabled={!targetFolder.trim() || mutation.isPending} onClick={() => mutation.mutate()}>
               确认移动
+            </Button>
+          </Actions>
+        </Stack>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ArchiveDocumentDialog({
+  doc,
+  onClose,
+}: {
+  doc: DocumentListItem
+  onClose: () => void
+}) {
+  const invalidate = useInvalidateTree()
+  const [reason, setReason] = React.useState("")
+  const [supersededBy, setSupersededBy] = React.useState("")
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      archiveDocument(doc.id, {
+        reason: reason.trim(),
+        ...(supersededBy.trim() ? { superseded_by: supersededBy.trim() } : {}),
+      }),
+    onSuccess: async () => {
+      notify.success("页面已归档")
+      await invalidate(doc.id)
+      onClose()
+    },
+    onError: (err) => notify.error(err, "归档失败"),
+  })
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>归档页面</DialogTitle>
+          <DialogDescription>{doc.title || doc.filename}</DialogDescription>
+        </DialogHeader>
+        <Stack gap="md">
+          <Stack gap="xs">
+            <Label htmlFor="archive-doc-reason">归档原因（必填）</Label>
+            <Textarea
+              id="archive-doc-reason"
+              placeholder="例如：已被新架构方案替代，保留作历史参考"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </Stack>
+          <Stack gap="xs">
+            <Label htmlFor="archive-doc-superseded">替代页面（可选）</Label>
+            <Input
+              id="archive-doc-superseded"
+              placeholder="例如：[[新方案页面]] 或 wiki/concepts/new.md"
+              value={supersededBy}
+              onChange={(e) => setSupersededBy(e.target.value)}
+            />
+          </Stack>
+          <Actions align="end">
+            <Button variant="outline" onClick={onClose}>取消</Button>
+            <Button disabled={!reason.trim() || mutation.isPending} onClick={() => mutation.mutate()}>
+              确认归档
+            </Button>
+          </Actions>
+        </Stack>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ReopenDocumentDialog({
+  doc,
+  onClose,
+}: {
+  doc: DocumentListItem
+  onClose: () => void
+}) {
+  const invalidate = useInvalidateTree()
+  const [reason, setReason] = React.useState("")
+  const [confidence, setConfidence] = React.useState(doc.confidence || "medium")
+  const [lastVerified, setLastVerified] = React.useState(() => new Date().toISOString().slice(0, 10))
+  const [reviewAfter, setReviewAfter] = React.useState("")
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      reopenDocument(doc.id, {
+        ...(reason.trim() ? { reason: reason.trim() } : {}),
+        ...(confidence ? { confidence } : {}),
+        ...(lastVerified.trim() ? { last_verified: lastVerified.trim() } : {}),
+        ...(reviewAfter.trim() ? { review_after: reviewAfter.trim() } : {}),
+      }),
+    onSuccess: async () => {
+      notify.success("页面已重新启用")
+      await invalidate(doc.id)
+      onClose()
+    },
+    onError: (err) => notify.error(err, "重新启用失败"),
+  })
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>重新启用页面</DialogTitle>
+          <DialogDescription>{doc.title || doc.filename}</DialogDescription>
+        </DialogHeader>
+        <Stack gap="md">
+          <Stack gap="xs">
+            <Label htmlFor="reopen-doc-reason">重开原因（可选）</Label>
+            <Input
+              id="reopen-doc-reason"
+              placeholder="例如：旧方案重新恢复使用"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </Stack>
+          <Stack gap="xs">
+            <Label htmlFor="reopen-doc-confidence">置信度</Label>
+            <Select value={confidence} onValueChange={setConfidence}>
+              <SelectTrigger id="reopen-doc-confidence"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="high">高置信 (high)</SelectItem>
+                <SelectItem value="medium">中置信 (medium)</SelectItem>
+                <SelectItem value="low">低置信 (low)</SelectItem>
+              </SelectContent>
+            </Select>
+          </Stack>
+          <Stack gap="xs">
+            <Label htmlFor="reopen-doc-verified">最近核实日期</Label>
+            <Input id="reopen-doc-verified" value={lastVerified} onChange={(e) => setLastVerified(e.target.value)} />
+          </Stack>
+          <Stack gap="xs">
+            <Label htmlFor="reopen-doc-review-after">下次复审日期（可选，YYYY-MM-DD）</Label>
+            <Input id="reopen-doc-review-after" placeholder="YYYY-MM-DD" value={reviewAfter} onChange={(e) => setReviewAfter(e.target.value)} />
+          </Stack>
+          <Actions align="end">
+            <Button variant="outline" onClick={onClose}>取消</Button>
+            <Button disabled={mutation.isPending} onClick={() => mutation.mutate()}>
+              确认启用
             </Button>
           </Actions>
         </Stack>

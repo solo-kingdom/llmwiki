@@ -2,6 +2,8 @@ import * as React from "react"
 import { useParams } from "react-router"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   ExternalLinkIcon,
   FilePlusIcon,
   FoldVerticalIcon,
@@ -23,7 +25,7 @@ import {
 import { Markdown } from "@/components/blocks/markdown"
 import { ReferencesBlock } from "@/components/blocks/references-block"
 import { useAppNavigate } from "@/components/blocks/router"
-import { Body, NavItem, NavList, Page, Panel, Row, Rows, Split, Stack, Toolbar } from "@/components/blocks/surfaces"
+import { Actions, Body, NavItem, NavList, Page, Panel, Row, Rows, Split, Stack, Toolbar } from "@/components/blocks/surfaces"
 import { StatusBadge } from "@/components/blocks/status-badge"
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
 import { Time } from "@/components/blocks/format"
@@ -66,7 +68,7 @@ function useDebounced<T>(value: T, delay = 280): T {
 function pageTypeOf(doc: { relative_path?: string | undefined; path?: string | undefined; page_type?: string | undefined }): string {
   if (doc.page_type) return doc.page_type
   const subdir = (doc.relative_path ?? doc.path ?? "").replace(/^\/+/, "").split("/")[1] ?? ""
-  return ({ entities: "entity", concepts: "concept", sources: "source", synthesis: "synthesis", comparisons: "comparison", queries: "query" } as Record<string, string>)[subdir] ?? "page"
+  return ({ entities: "entity", concepts: "concept", experiences: "experience", ledgers: "ledger", sources: "source", synthesis: "synthesis", comparisons: "comparison", queries: "query" } as Record<string, string>)[subdir] ?? "page"
 }
 
 type TreeNode = {
@@ -83,6 +85,8 @@ type DragPayload = { kind: "doc"; id: string; folder: string } | { kind: "folder
 const FOLDER_LABELS: Record<string, { zh: string; en: string }> = {
   concepts: { zh: "概念", en: "Concepts" },
   entities: { zh: "实体", en: "Entities" },
+  experiences: { zh: "经验", en: "Experiences" },
+  ledgers: { zh: "台账", en: "Ledgers" },
   sources: { zh: "来源", en: "Sources" },
   synthesis: { zh: "综合", en: "Synthesis" },
   comparisons: { zh: "对比", en: "Comparisons" },
@@ -358,6 +362,7 @@ function TreeRows({
                   icon={<WikiFileIcon doc={doc} treeAligned />}
                   trailing={
                     <span className="wiki-tree-row-actions">
+                      {doc.archived_at ? <StatusBadge status="archived" /> : null}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -376,6 +381,15 @@ function TreeRows({
                           <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "move-doc", doc })}>
                             <FolderInputIcon />移动 / 重命名
                           </DropdownMenuItem>
+                          {doc.archived_at ? (
+                            <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "reopen-doc", doc })}>
+                              <ArchiveRestoreIcon />重新启用
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "archive-doc", doc })}>
+                              <ArchiveIcon />归档页面
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem variant="destructive" onSelect={() => onDeleteDoc(doc)}>
                             <Trash2Icon />删除页面
@@ -393,6 +407,15 @@ function TreeRows({
               <ContextMenuItem onSelect={() => onOpenDialog({ kind: "move-doc", doc })}>
                 <FolderInputIcon />移动 / 重命名
               </ContextMenuItem>
+              {doc.archived_at ? (
+                <ContextMenuItem onSelect={() => onOpenDialog({ kind: "reopen-doc", doc })}>
+                  <ArchiveRestoreIcon />重新启用
+                </ContextMenuItem>
+              ) : (
+                <ContextMenuItem onSelect={() => onOpenDialog({ kind: "archive-doc", doc })}>
+                  <ArchiveIcon />归档页面
+                </ContextMenuItem>
+              )}
               <ContextMenuSeparator />
               <ContextMenuItem variant="destructive" onSelect={() => onDeleteDoc(doc)}>
                 <Trash2Icon />删除页面
@@ -409,10 +432,14 @@ function WikiPane({
   folders,
   documents,
   currentId,
+  showArchived = false,
+  onShowArchivedChange,
 }: {
   folders: WikiFolder[]
   documents: DocumentListItem[]
   currentId?: string | undefined
+  showArchived?: boolean | undefined
+  onShowArchivedChange?: ((v: boolean) => void) | undefined
 }) {
   const { settings } = useApp()
   const navigate = useAppNavigate()
@@ -428,8 +455,11 @@ function WikiPane({
   const [overrides, setOverrides] = React.useState<ReadonlyMap<string, boolean>>(new Map())
   const debounced = useDebounced(query)
   const search = useQuery({
-    queryKey: ["wiki-search", debounced, typeFilter],
-    queryFn: () => searchDocuments(debounced, 20, typeFilter === "all" ? undefined : [typeFilter]),
+    queryKey: ["wiki-search", debounced, typeFilter, showArchived],
+    queryFn: () =>
+      searchDocuments(debounced, 20, typeFilter === "all" ? undefined : [typeFilter], undefined, {
+        archived: showArchived ? "include" : "exclude",
+      }),
     enabled: debounced.trim().length > 0,
   })
 
@@ -565,12 +595,25 @@ function WikiPane({
           <SelectItem value="all">全部类型</SelectItem>
           <SelectItem value="concept">概念 (concept)</SelectItem>
           <SelectItem value="entity">实体 (entity)</SelectItem>
+          <SelectItem value="experience">经验 (experience)</SelectItem>
+          <SelectItem value="ledger">台账 (ledger)</SelectItem>
           <SelectItem value="synthesis">综合 (synthesis)</SelectItem>
           <SelectItem value="comparison">对比 (comparison)</SelectItem>
           <SelectItem value="query">问题 (query)</SelectItem>
           <SelectItem value="page">普通页面 (page)</SelectItem>
         </SelectContent>
       </Select>
+      {onShowArchivedChange ? (
+        <Button
+          size="sm"
+          variant={showArchived ? "secondary" : "ghost"}
+          className="w-full justify-start"
+          onClick={() => onShowArchivedChange(!showArchived)}
+        >
+          <ArchiveIcon />
+          {showArchived ? "正在显示已归档页面（点击隐藏）" : "显示已归档页面"}
+        </Button>
+      ) : null}
       {search.isError ? <ErrorState error={search.error} onRetry={() => void search.refetch()} /> : null}
       {!search.isError && (searching ? results.length === 0 : tree.nodes.length === 0) ? (
         <EmptyState
@@ -701,10 +744,14 @@ function Reader({
   docId,
   folders,
   documents,
+  showArchived = false,
+  onShowArchivedChange,
 }: {
   docId: string
   folders: WikiFolder[]
   documents: DocumentListItem[]
+  showArchived?: boolean | undefined
+  onShowArchivedChange?: ((v: boolean) => void) | undefined
 }) {
   const queryClient = useQueryClient()
   const navigate = useAppNavigate()
@@ -890,16 +937,50 @@ function Reader({
     </NavItem>
   ))
 
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const isOverdue = Boolean(doc?.review_after && !doc?.archived_at && doc.review_after < todayIso)
+
   const content = (
     <Body width="full" align="start">
-      <div ref={articleRef} onClick={onContentClick}>
-        <Markdown>{rendered || "_（空页面）_"}</Markdown>
-        <ReferencesBlock
-          entries={doc.reference_entries ?? []}
-          lang={lang}
-          onOpen={(id) => navigate(`/wiki/${encodeURIComponent(id)}`)}
-        />
-      </div>
+      <Stack gap="md">
+        {doc?.archived_at ? (
+          <Panel padding="md">
+            <Actions align="between">
+              <Stack gap="xs">
+                <Actions align="start">
+                  <StatusBadge status="archived" />
+                  <span className="text-sm font-medium">此页面已于 {doc.archived_at} 归档</span>
+                </Actions>
+                {doc.archive_reason ? (
+                  <span className="text-xs text-muted-foreground">原因：{doc.archive_reason}</span>
+                ) : null}
+                {doc.superseded_by ? (
+                  <span className="text-xs text-muted-foreground">替代页面：{doc.superseded_by}</span>
+                ) : null}
+              </Stack>
+              <Button size="sm" variant="outline" onClick={() => setMoveDialog({ kind: "reopen-doc", doc })}>
+                <ArchiveRestoreIcon />重新启用
+              </Button>
+            </Actions>
+          </Panel>
+        ) : null}
+        {isOverdue ? (
+          <Panel padding="md">
+            <Actions align="start">
+              <StatusBadge status="overdue" />
+              <span className="text-xs text-muted-foreground">计划复审日期 {doc?.review_after} 已到期，建议核实内容后更新 `last_verified`。</span>
+            </Actions>
+          </Panel>
+        ) : null}
+        <div ref={articleRef} onClick={onContentClick}>
+          <Markdown>{rendered || "_（空页面）_"}</Markdown>
+          <ReferencesBlock
+            entries={doc.reference_entries ?? []}
+            lang={lang}
+            onOpen={(id) => navigate(`/wiki/${encodeURIComponent(id)}`)}
+          />
+        </div>
+      </Stack>
     </Body>
   )
 
@@ -921,6 +1002,8 @@ function Reader({
                     <SelectContent>
                       <SelectItem value="concept">concept</SelectItem>
                       <SelectItem value="entity">entity</SelectItem>
+                      <SelectItem value="experience">experience</SelectItem>
+                      <SelectItem value="ledger">ledger</SelectItem>
                       <SelectItem value="synthesis">synthesis</SelectItem>
                       <SelectItem value="comparison">comparison</SelectItem>
                       <SelectItem value="query">query</SelectItem>
@@ -929,6 +1012,14 @@ function Reader({
                   </Select>
                 ),
               },
+              ...(doc.confidence ? [{ label: "置信度", value: <StatusBadge status={doc.confidence} /> }] : []),
+              ...(doc.page_status ? [{ label: "状态", value: <StatusBadge status={doc.page_status} /> }] : []),
+              ...(doc.experience_kind ? [{ label: "经验子类", value: <StatusBadge status={doc.experience_kind} /> }] : []),
+              ...(doc.last_verified ? [{ label: "最近核实", value: doc.last_verified }] : []),
+              ...(doc.review_after ? [{ label: "复审日期", value: doc.review_after }] : []),
+              ...(doc.aliases && doc.aliases.length > 0 ? [{ label: "别名", value: doc.aliases.join("、") }] : []),
+              ...(doc.symptoms && doc.symptoms.length > 0 ? [{ label: "现象", value: doc.symptoms.join("、") }] : []),
+              ...(doc.archived_at ? [{ label: "归档时间", value: doc.archived_at }] : []),
               { label: "路径", value: doc.relative_path },
               { label: "更新", value: <Time value={doc.updated_at} mode="datetime" /> },
               { label: "版本", value: `${doc.version}` },
@@ -942,15 +1033,38 @@ function Reader({
             ))}
           </Rows>
         </Panel>
-        <Button
-          variant="outline"
-          onClick={() => {
-            setDialog(null)
-            setMoveDialog({ kind: "move-doc", doc })
-          }}
-        >
-          <FolderInputIcon />移动到其他目录…
-        </Button>
+        <Actions align="between">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setDialog(null)
+              setMoveDialog({ kind: "move-doc", doc })
+            }}
+          >
+            <FolderInputIcon />移动到其他目录…
+          </Button>
+          {doc.archived_at ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDialog(null)
+                setMoveDialog({ kind: "reopen-doc", doc })
+              }}
+            >
+              <ArchiveRestoreIcon />重新启用
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDialog(null)
+                setMoveDialog({ kind: "archive-doc", doc })
+              }}
+            >
+              <ArchiveIcon />归档页面…
+            </Button>
+          )}
+        </Actions>
       </DialogContent>
     </Dialog>
   )
@@ -1078,7 +1192,15 @@ function Reader({
           sideLabel="Wiki 页面"
           sideWidth="lg"
           collapseBelow={900}
-          side={<WikiPane folders={folders} documents={documents} currentId={docId} />}
+          side={
+            <WikiPane
+              folders={folders}
+              documents={documents}
+              currentId={docId}
+              showArchived={showArchived}
+              onShowArchivedChange={onShowArchivedChange}
+            />
+          }
         >
           {!narrow && !tocHidden && outline.length > 0 ? (
             <Split
@@ -1116,9 +1238,10 @@ function Reader({
 export function WikiReaderPage() {
   const { id } = useParams()
   const navigate = useAppNavigate()
+  const [showArchived, setShowArchived] = React.useState(false)
   const treeQuery = useQuery({
-    queryKey: ["wiki-tree"],
-    queryFn: () => getWikiTree({ exclude_hidden: true }),
+    queryKey: ["wiki-tree", showArchived],
+    queryFn: () => getWikiTree({ exclude_hidden: true, archived: showArchived ? "include" : "exclude" }),
   })
   const folders = React.useMemo(() => treeQuery.data?.folders ?? [], [treeQuery.data])
   const documents = React.useMemo(() => treeQuery.data?.documents ?? [], [treeQuery.data])
@@ -1139,7 +1262,14 @@ export function WikiReaderPage() {
           sideLabel="Wiki 页面"
           sideWidth="lg"
           collapseBelow={900}
-          side={<WikiPane folders={folders} documents={documents} />}
+          side={
+            <WikiPane
+              folders={folders}
+              documents={documents}
+              showArchived={showArchived}
+              onShowArchivedChange={setShowArchived}
+            />
+          }
         >
           <Body width="full" align="start">
             <EmptyState title="选择一个页面" description="从左侧目录树选择或新建目录/页面，或搜索标题与内容。" />
@@ -1148,5 +1278,13 @@ export function WikiReaderPage() {
       </Page>
     )
   }
-  return <Reader docId={id} folders={folders} documents={documents} />
+  return (
+    <Reader
+      docId={id}
+      folders={folders}
+      documents={documents}
+      showArchived={showArchived}
+      onShowArchivedChange={setShowArchived}
+    />
+  )
 }

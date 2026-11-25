@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  archiveDocument,
   createFolder,
   createTextIngestJob,
   deleteFolder,
@@ -8,6 +9,7 @@ import {
   listDocuments,
   moveDocument,
   moveFolder,
+  reopenDocument,
   searchDocuments,
 } from "./api";
 
@@ -79,5 +81,27 @@ describe("api client", () => {
 
     await moveDocument("doc-1", { target_folder: "b" });
     expect((fetchMock.mock.calls[4] as unknown as [string])[0]).toBe("/api/v1/documents/doc-1/move");
+  });
+
+  it("calls archive, reopen, and archived filter params", async () => {
+    const fetchMock = mockFetch({ id: "doc-1" });
+    await getWikiTree({ archived: "include", review_overdue: true });
+    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe(
+      "/api/v1/tree?archived=include&review_overdue=true",
+    );
+
+    await searchDocuments("panic", 5, ["experience"], "hybrid", {
+      archived: "only",
+      kinds: ["pitfall"],
+    });
+    expect((fetchMock.mock.calls[1] as unknown as [string])[0]).toBe(
+      "/api/v1/search?q=panic&limit=5&types=experience&mode=hybrid&archived=only&kinds=pitfall",
+    );
+
+    await archiveDocument("doc-1", { reason: "已由新方案替代" });
+    expect((fetchMock.mock.calls[2] as unknown as [string])[0]).toBe("/api/v1/documents/doc-1/archive");
+
+    await reopenDocument("doc-1", { reason: "重新启用" });
+    expect((fetchMock.mock.calls[3] as unknown as [string])[0]).toBe("/api/v1/documents/doc-1/reopen");
   });
 });

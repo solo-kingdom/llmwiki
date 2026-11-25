@@ -1,3 +1,5 @@
+export type ArchiveFilter = "exclude" | "include" | "only"
+
 export interface Document {
   id: string
   user_id: string
@@ -6,6 +8,17 @@ export interface Document {
   path: string
   relative_path: string
   source_kind: string
+  page_type?: string
+  confidence?: string
+  page_status?: string
+  experience_kind?: string
+  last_verified?: string
+  review_after?: string
+  archived_at?: string
+  archive_reason?: string
+  superseded_by?: string
+  aliases?: string[]
+  symptoms?: string[]
   file_type: string
   file_size: number
   document_number: number
@@ -35,6 +48,16 @@ export interface DocumentListItem {
   relative_path?: string
   source_kind?: string
   page_type?: string
+  confidence?: string
+  page_status?: string
+  experience_kind?: string
+  last_verified?: string
+  review_after?: string
+  archived_at?: string
+  archive_reason?: string
+  superseded_by?: string
+  aliases?: string[]
+  symptoms?: string[]
   file_type: string
   page_count: number
   updated_at: string

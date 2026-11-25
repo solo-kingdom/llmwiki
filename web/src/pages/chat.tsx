@@ -178,8 +178,8 @@ function ChatPane({ sessionId, onCreate, creating }: { sessionId: string | undef
           <PlusIcon />新对话
         </Button>
       </PaneHeader>
-      <PaneSection grow>
-        {sessions.length > 0 ? (
+      {sessions.length > 0 ? (
+        <PaneSection>
           <InputGroup>
             <InputGroupAddon><SearchIcon /></InputGroupAddon>
             <InputGroupInput
@@ -189,7 +189,9 @@ function ChatPane({ sessionId, onCreate, creating }: { sessionId: string | undef
               onChange={(event) => setFilter(event.target.value)}
             />
           </InputGroup>
-        ) : null}
+        </PaneSection>
+      ) : null}
+      <PaneSection grow>
         {sessions.length === 0 ? (
           <p className="text-sm text-muted-foreground">还没有会话，点“新对话”开始。</p>
         ) : filtered.length === 0 ? (

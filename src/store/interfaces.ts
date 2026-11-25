@@ -1,6 +1,7 @@
 import type {
   ActivityLog,
   ActivityLogListFilter,
+  ApiKeyRecord,
   ChangeSet,
   Chunk,
   ChunkEmbedding,
@@ -285,6 +286,15 @@ export interface FolderStore {
   ): Promise<MoveDocumentResult>;
 }
 
+export interface ApiKeyStore {
+  createApiKey(input: { id: string; name: string; key_hash: string; prefix: string }): Promise<ApiKeyRecord>;
+  listApiKeys(): Promise<ApiKeyRecord[]>;
+  countApiKeys(): Promise<number>;
+  findApiKeyByHash(keyHash: string): Promise<ApiKeyRecord | null>;
+  touchApiKey(id: string): Promise<void>;
+  deleteApiKey(id: string): Promise<boolean>;
+}
+
 export interface Store
   extends DocumentStore,
     FolderStore,
@@ -297,6 +307,7 @@ export interface Store
     ConfigStore,
     ProviderStore,
     ActivityStore,
-    WorkspaceStore {
+    WorkspaceStore,
+    ApiKeyStore {
   close(): Promise<void>;
 }

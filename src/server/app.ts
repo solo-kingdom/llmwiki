@@ -75,7 +75,14 @@ export function createApp(deps: AppDeps): Hono {
     }),
   );
 
-  app.use("*", bearerAuth(effectiveToken, { publicWiki: deps.publicWiki }));
+  app.use(
+    "*",
+    bearerAuth(effectiveToken, {
+      publicWiki: deps.publicWiki,
+      findApiKeyByHash: (keyHash) => deps.db.findApiKeyByHash(keyHash),
+      touchApiKey: (id) => deps.db.touchApiKey(id),
+    }),
+  );
 
   // Mirrors the Go server's timeoutUnlessStream: normal requests get 60s, SSE streams do not.
   app.use("*", async (c, next) => {
@@ -181,10 +188,13 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/v1/graph/uncited", api.uncitedSources);
   app.get("/api/v1/graph/stale", api.stalePages);
 
-  // Settings and logs
+  // Settings, API keys and logs
   app.get("/api/v1/settings", api.getSettings);
   app.put("/api/v1/settings", api.updateSettings);
   app.put("/api/v1/settings/last-model", api.updateLastModel);
+  app.get("/api/v1/api-keys", api.listApiKeys);
+  app.post("/api/v1/api-keys", api.createApiKey);
+  app.delete("/api/v1/api-keys/:id", api.deleteApiKey);
   app.get("/api/v1/workspace/rule-files", api.getWorkspaceRuleFiles);
   app.put("/api/v1/workspace/rule-files", api.updateWorkspaceRuleFiles);
   app.get("/api/v1/logs", api.listActivityLogs);

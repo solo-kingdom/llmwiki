@@ -468,6 +468,17 @@ export interface PageWrite {
 
 export const CONFIG_API_TOKEN = "api_token";
 
+export const API_KEY_PREFIX = "llmwiki_sk_";
+export const MAX_API_KEYS = 20;
+
+export interface ApiKeyRecord {
+  id: string;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 export const ACTIVE_INGEST_REVIEW_STATUSES = new Set([
   "planning",
   "ready_for_review",

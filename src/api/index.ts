@@ -1,4 +1,5 @@
 import type { ApiContext } from "./context.js";
+import { apiKeysApi } from "./api_keys.js";
 import { capabilitiesApi } from "./capabilities.js";
 import { documentsApi } from "./documents.js";
 import { foldersApi } from "./folders.js";
@@ -31,6 +32,7 @@ export function createApi(ctx: ApiContext) {
     ...ingestReviewsApi(ctx),
     ...ingestSessionsApi(ctx),
     ...capabilitiesApi(),
+    ...apiKeysApi(ctx),
   };
 }
 

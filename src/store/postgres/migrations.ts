@@ -473,6 +473,21 @@ export const MIGRATIONS: Migration[] = [
        WHERE d.id = fm.id`,
     ],
   },
+  {
+    version: 6,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS api_keys (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        key_hash TEXT NOT NULL,
+        prefix TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (${nowText}),
+        last_used_at TEXT
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`,
+      `CREATE INDEX IF NOT EXISTS idx_api_keys_created_at ON api_keys(created_at DESC)`,
+    ],
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

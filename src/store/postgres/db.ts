@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import type { Store } from "../interfaces.js";
 import { activityRepo } from "./activity_logs.js";
+import { apiKeysRepo } from "./api_keys.js";
 import { chunksRepo } from "./chunks.js";
 import { configRepo } from "./config.js";
 import { documentsRepo } from "./documents.js";
@@ -32,6 +33,7 @@ export function createStore(pool: Pool): Store {
     ...ingestSessionsRepo(pool),
     ...ingestReviewsRepo(pool),
     ...providersRepo(pool),
+    ...apiKeysRepo(pool),
     close: async () => {
       await pool.end();
     },

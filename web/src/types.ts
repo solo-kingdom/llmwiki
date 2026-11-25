@@ -284,6 +284,18 @@ export interface Settings {
   api_token_source?: "flag" | "settings" | "none"
 }
 
+export interface ApiKey {
+  id: string
+  name: string
+  prefix: string
+  created_at: string
+  last_used_at: string | null
+}
+
+export interface CreatedApiKey extends ApiKey {
+  key: string
+}
+
 export interface WorkspaceRuleFilesPreview {
   purpose_preview: string
   rules_preview: string

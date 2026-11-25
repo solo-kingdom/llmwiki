@@ -47,6 +47,8 @@ import type {
   MoveDocumentResponse,
   MoveFolderResponse,
   DeleteFolderResponse,
+  ApiKey,
+  CreatedApiKey,
 } from "@/types"
 
 const BASE = ""
@@ -927,4 +929,22 @@ export function restoreRevision(id: string): Promise<ChangeSet> {
 
 export function getWorkspace(): Promise<WorkspaceOverview> {
   return request<WorkspaceOverview>("/api/v1/workspace")
+}
+
+export async function listApiKeys(): Promise<ApiKey[]> {
+  const res = await request<{ api_keys: ApiKey[] }>("/api/v1/api-keys")
+  return res.api_keys
+}
+
+export function createApiKey(name: string): Promise<CreatedApiKey> {
+  return request<CreatedApiKey>("/api/v1/api-keys", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function deleteApiKey(id: string): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/api/v1/api-keys/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  })
 }

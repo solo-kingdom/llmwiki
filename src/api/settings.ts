@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { recordSync } from "../activity/index.js";
+import { isApiKeyRequest } from "../server/auth.js";
 import * as acpConfig from "../acp/config.js";
 import { validateRulesSupplement } from "../ingest/prompts.js";
 import * as mcpConfig from "../mcp/config.js";
@@ -243,6 +244,9 @@ export function settingsApi(ctx: ApiContext) {
     async updateSettings(c: Context): Promise<Response> {
       const req = await readJsonBody<Record<string, unknown>>(c);
       if (!req) return writeError(c, 400, "invalid request body");
+      if (isApiKeyRequest(c) && CONFIG_API_TOKEN in req) {
+        return writeError(c, 403, "api key cannot manage credentials");
+      }
 
       let pendingAcpJson = "";
       if ("acp_agents_json" in req) {

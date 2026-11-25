@@ -80,4 +80,32 @@ describe("ReferenceParser.resolveLink space/underscore variants", () => {
   it("resolves via spaced title directly", () => {
     expect(resolve("Adam Foroughi", "/wiki/concepts/Y.md")).toBe("d1");
   });
+
+  it("resolves aliases and detects ambiguous short links", () => {
+    const aliased = new ReferenceParser([
+      {
+        id: "e1",
+        filename: "pg-pool.md",
+        title: "PG 连接池耗尽",
+        path: "/wiki/experiences/",
+        aliases: ["pg-pool-exhausted", "连接池耗尽"],
+      },
+      {
+        id: "e2",
+        filename: "dup-a.md",
+        title: "缓存",
+        path: "/wiki/A/",
+      },
+      {
+        id: "e3",
+        filename: "dup-b.md",
+        title: "缓存",
+        path: "/wiki/B/",
+      },
+    ]);
+    expect(aliased.resolveLink("pg-pool-exhausted", "/wiki/concepts/c.md")).toBe("e1");
+    expect(aliased.resolveLink("连接池耗尽", "/wiki/concepts/c.md")).toBe("e1");
+    expect(aliased.resolveLinkDetailed("缓存", "/wiki/concepts/c.md").ambiguous).toBe(true);
+    expect(aliased.resolveLinkDetailed("A/dup-a", "/wiki/concepts/c.md").ambiguous).toBe(false);
+  });
 });

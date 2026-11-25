@@ -9,6 +9,13 @@ export interface DocIndexEntry {
   filename: string;
   title: string;
   path: string;
+  aliases?: string[];
+}
+
+export interface LinkResolution {
+  targetId: string;
+  ambiguous: boolean;
+  candidates: string[];
 }
 
 export const WIKI_DOUBLE_BRACKET_RE = /\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]/g;
@@ -19,18 +26,49 @@ export class ReferenceParser {
   private docsByBase = new Map<string, string>();
   private docsByWikiPath = new Map<string, string>();
   private docsBySlug = new Map<string, string>();
+  private docsByAlias = new Map<string, string>();
+  private ownersByKey = new Map<string, Set<string>>();
 
   constructor(docs: DocIndexEntry[]) {
+    const recordOwner = (key: string, docId: string) => {
+      const clean = key.trim().toLowerCase();
+      if (!clean) return;
+      let set = this.ownersByKey.get(clean);
+      if (!set) {
+        set = new Set();
+        this.ownersByKey.set(clean, set);
+      }
+      set.add(docId);
+    };
+
     for (const doc of docs) {
       const filenameLower = doc.filename.toLowerCase();
       this.docsByFilename.set(filenameLower, doc.id);
+      recordOwner(filenameLower, doc.id);
+      recordOwner(stripExtension(filenameLower), doc.id);
+
       if (doc.title) {
         const titleLower = doc.title.toLowerCase();
         if (!this.docsByFilename.has(titleLower)) {
           this.docsByFilename.set(titleLower, doc.id);
         }
+        recordOwner(titleLower, doc.id);
       }
       this.docsByBase.set(stripExtension(filenameLower), doc.id);
+
+      for (const alias of doc.aliases ?? []) {
+        const aliasLower = alias.trim().toLowerCase();
+        if (!aliasLower) continue;
+        if (!this.docsByAlias.has(aliasLower)) {
+          this.docsByAlias.set(aliasLower, doc.id);
+        }
+        recordOwner(aliasLower, doc.id);
+        const aliasSlug = slugify(aliasLower);
+        if (aliasSlug) {
+          if (!this.docsByAlias.has(aliasSlug)) this.docsByAlias.set(aliasSlug, doc.id);
+          recordOwner(aliasSlug, doc.id);
+        }
+      }
 
       if (doc.path.startsWith("/wiki")) {
         let relative = doc.path.slice("/wiki".length).replace(/^\/+/, "");
@@ -38,6 +76,8 @@ export class ReferenceParser {
         relative += doc.filename;
         const key = relative.toLowerCase();
         this.docsByWikiPath.set(key, doc.id);
+        recordOwner(key, doc.id);
+        recordOwner(stripExtension(key), doc.id);
 
         const slug = slugify(key);
         if (slug && !this.docsBySlug.has(slug)) {
@@ -71,6 +111,34 @@ export class ReferenceParser {
       wikiRel = index >= 0 ? wikiRel.slice(0, index + 1) : "";
     }
     return this.resolveWikiPath(target.trim(), wikiRel);
+  }
+
+  /** Resolve target with ambiguity details for lint diagnostics. */
+  resolveLinkDetailed(target: string, docPath: string): LinkResolution {
+    const clean = target.trim();
+    const targetId = this.resolveLink(clean, docPath);
+    // Path-qualified targets (containing "/") are explicit unless multiple exact paths collide.
+    const lower = clean.toLowerCase().replace(/^\/?wiki\//, "");
+    const candidates = new Set<string>();
+    for (const key of [lower, stripExtension(lower), slugify(lower)]) {
+      const owners = this.ownersByKey.get(key);
+      if (owners) {
+        for (const id of owners) candidates.add(id);
+      }
+    }
+    // If target contains "/", check exact path owners first so path-qualified links resolve ambiguity.
+    if (clean.includes("/")) {
+      const pathOwners =
+        this.ownersByKey.get(lower) ?? this.ownersByKey.get(`${lower}.md`);
+      if (pathOwners && pathOwners.size === 1) {
+        return { targetId, ambiguous: false, candidates: [...pathOwners] };
+      }
+    }
+    return {
+      targetId,
+      ambiguous: candidates.size > 1,
+      candidates: [...candidates],
+    };
   }
 
   private parseCitations(content: string): Reference[] {
@@ -194,7 +262,13 @@ export class ReferenceParser {
       if (byFilename) return byFilename;
       const byBase = this.docsByBase.get(stripExtension(variant));
       if (byBase) return byBase;
+      const byAlias = this.docsByAlias.get(variant) ?? this.docsByAlias.get(slugify(variant));
+      if (byAlias) return byAlias;
     }
+
+    const rawLower = href.trim().toLowerCase();
+    const rawAlias = this.docsByAlias.get(rawLower) ?? this.docsByAlias.get(slugify(rawLower));
+    if (rawAlias) return rawAlias;
 
     return "";
   }

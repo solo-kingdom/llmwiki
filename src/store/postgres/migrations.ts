@@ -488,6 +488,53 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_api_keys_created_at ON api_keys(created_at DESC)`,
     ],
   },
+  {
+    version: 7,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS archive_folders (
+        path TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (${nowText}),
+        updated_at TEXT NOT NULL DEFAULT (${nowText})
+      )`,
+      `CREATE TABLE IF NOT EXISTS archive_files (
+        id TEXT PRIMARY KEY,
+        folder_path TEXT NOT NULL DEFAULT '',
+        filename TEXT NOT NULL,
+        relative_path TEXT NOT NULL UNIQUE,
+        media_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+        kind TEXT NOT NULL DEFAULT 'other',
+        size BIGINT NOT NULL DEFAULT 0,
+        sha256 TEXT NOT NULL DEFAULT '',
+        storage_backend TEXT NOT NULL DEFAULT 'db' CHECK (storage_backend IN ('db','local','s3')),
+        storage_key TEXT NOT NULL DEFAULT '',
+        inline_bytes BYTEA,
+        origin TEXT NOT NULL DEFAULT 'upload',
+        source_ref TEXT NOT NULL DEFAULT '',
+        ingest_job_id TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (${nowText}),
+        updated_at TEXT NOT NULL DEFAULT (${nowText}),
+        UNIQUE(folder_path, filename)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_archive_files_folder ON archive_files(folder_path)`,
+      `CREATE INDEX IF NOT EXISTS idx_archive_files_kind ON archive_files(kind)`,
+      `CREATE INDEX IF NOT EXISTS idx_archive_files_sha256 ON archive_files(sha256)`,
+      `CREATE TABLE IF NOT EXISTS document_archive_sources (
+        document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        archive_file_id TEXT NOT NULL REFERENCES archive_files(id) ON DELETE CASCADE,
+        change_set_id TEXT NOT NULL DEFAULT '',
+        relation TEXT NOT NULL DEFAULT 'ingest_source',
+        created_at TEXT NOT NULL DEFAULT (${nowText}),
+        PRIMARY KEY (document_id, archive_file_id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_doc_archive_sources_file ON document_archive_sources(archive_file_id)`,
+      `ALTER TABLE ingest_jobs ADD COLUMN IF NOT EXISTS archive_file_id TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE change_sets ADD COLUMN IF NOT EXISTS archive_file_id TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE ingest_reviews ADD COLUMN IF NOT EXISTS archive_file_id TEXT NOT NULL DEFAULT ''`,
+    ],
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

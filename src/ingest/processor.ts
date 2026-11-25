@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import path from "node:path";
 import { logIngestJob, logSession, record } from "../activity/index.js";
+import { ArchiveStorageService } from "../archive/storage.js";
 import { clientFromInstance, clientFromWorkspace } from "../llm/instance_client.js";
 import type { Client } from "../llm/client.js";
 import { logger } from "../logger.js";
@@ -99,7 +100,7 @@ export class JobProcessor {
 
       let normalized;
       try {
-        normalized = await normalizeJobSource(this.workspace, job.input_type, job.source_path, job.source_ref);
+        normalized = await this.loadJobSource(job);
       } catch (error) {
         await this.failJob(job.id, "normalize_failed", `normalization failed: ${errorMessage(error)}`, "", "");
         return;
@@ -112,6 +113,7 @@ export class JobProcessor {
         "",
         path.basename(normalized.canonicalPath),
         new TextDecoder().decode(normalized.content),
+        job.archive_file_id ?? "",
       );
       this.pipeline.setMcpRouter(null);
       await this.checkRulesDrift(job.id);
@@ -129,6 +131,33 @@ export class JobProcessor {
       await this.db.clearIngestJobLease(job.id).catch(() => undefined);
       this.pipeline.setJobRecorder(null);
     }
+  }
+
+  private async loadJobSource(
+    job: IngestJob,
+    inputTypeOverride?: string,
+    reviewArchiveFileId?: string,
+  ) {
+    const archiveId = (job.archive_file_id || reviewArchiveFileId || "").trim();
+    if (archiveId && typeof this.db.getArchiveFile === "function") {
+      const archiveFile = await this.db.getArchiveFile(archiveId);
+      if (archiveFile) {
+        const content = await new ArchiveStorageService(this.db, this.workspace).readFullBytes(archiveFile);
+        const kind = (inputTypeOverride ?? job.input_type).trim() || "file";
+        return {
+          kind: (kind === "review_plan" || kind === "review_apply" ? "session_archive" : kind) as
+            | "upload"
+            | "text"
+            | "conversation"
+            | "session_archive",
+          canonicalPath: archiveFile.relative_path,
+          originalName: archiveFile.filename,
+          sourceRef: job.source_ref,
+          content,
+        };
+      }
+    }
+    return normalizeJobSource(this.workspace, inputTypeOverride ?? job.input_type, job.source_path, job.source_ref);
   }
 
   private async markJobSucceeded(jobId: string, files: string[]): Promise<void> {
@@ -385,7 +414,7 @@ export class JobProcessor {
 
     let normalized;
     try {
-      normalized = await normalizeJobSource(this.workspace, "session_archive", job.source_path, job.source_ref);
+      normalized = await this.loadJobSource(job, "session_archive", review.archive_file_id);
     } catch (error) {
       await this.failReviewPlanFailed(reviewId, job.id, "normalize_failed", error);
       return;
@@ -464,18 +493,20 @@ export class JobProcessor {
     }
     let normalized;
     try {
-      normalized = await normalizeJobSource(this.workspace, "session_archive", job.source_path, job.source_ref);
+      normalized = await this.loadJobSource(job, "session_archive", review.archive_file_id);
     } catch (error) {
       await this.failReviewApplyFailed(reviewId, job.id, "normalize_failed", error);
       return;
     }
 
+    const archiveFileId = job.archive_file_id || review.archive_file_id || "";
     this.pipeline.setChangeSetMeta(
       "review_apply",
       job.id,
       reviewId,
       path.basename(normalized.canonicalPath),
       new TextDecoder().decode(normalized.content),
+      archiveFileId,
     );
 
     let result;
@@ -613,6 +644,7 @@ export async function enqueueReviewPlanJob(
     input_type: "review_plan",
     source_path: review.archive_source_path,
     source_ref: reviewSourceRef(review.id),
+    archive_file_id: review.archive_file_id ?? "",
     status: "queued",
     retries: 0,
     max_retries: 3,
@@ -642,6 +674,7 @@ export async function enqueueReviewApplyJob(
     input_type: "review_apply",
     source_path: review.archive_source_path,
     source_ref: reviewSourceRef(review.id),
+    archive_file_id: review.archive_file_id ?? "",
     status: "queued",
     retries: 0,
     max_retries: 3,

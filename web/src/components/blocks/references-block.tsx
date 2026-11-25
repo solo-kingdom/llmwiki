@@ -1,6 +1,7 @@
 import * as React from "react"
+import { FileTextIcon } from "lucide-react"
 import { cn } from "cn"
-import type { ReferenceEntry } from "@/types"
+import type { ArchiveSourceSummary, ReferenceEntry } from "@/types"
 
 /** 参考资料 — structured reference entries rendered after the page body.
  * Related entries flow as quiet pills; source entries read as rows because
@@ -73,17 +74,21 @@ function Group({
 
 export function ReferencesBlock({
   entries,
+  archiveSources = [],
   lang,
   onOpen,
+  onOpenArchive,
 }: {
   entries: ReferenceEntry[]
+  archiveSources?: ArchiveSourceSummary[]
   lang: Lang
   onOpen: (docId: string) => void
+  onOpenArchive?: (archiveId: string) => void
 }) {
   const [expanded, setExpanded] = React.useState(false)
   const related = entries.filter((entry) => entry.kind === "related")
   const sources = entries.filter((entry) => entry.kind === "source")
-  if (related.length + sources.length === 0) return null
+  if (related.length + sources.length + archiveSources.length === 0) return null
 
   const overflow = Math.max(0, related.length - COLLAPSE_AFTER)
   const shownRelated = expanded ? related : related.slice(0, COLLAPSE_AFTER)
@@ -114,8 +119,24 @@ export function ReferencesBlock({
           )}
         </div>
       </Group>
-      <Group label={LABELS.sources[lang]} count={sources.length}>
+      <Group label={LABELS.sources[lang]} count={sources.length + archiveSources.length}>
         <ul className="space-y-1">
+          {archiveSources.map((src) => (
+            <li key={`archive-${src.id}`} className="flex min-w-0 items-center gap-1.5 text-xs">
+              <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <button
+                type="button"
+                onClick={() => onOpenArchive?.(src.id)}
+                title={src.relative_path}
+                className="min-w-0 shrink-0 max-w-full truncate text-primary/90 transition-colors hover:text-primary"
+              >
+                {src.relative_path}
+              </button>
+              <span className="min-w-0 truncate text-muted-foreground/80">
+                档案源文件 · {src.kind}
+              </span>
+            </li>
+          ))}
           {sources.map((entry, index) => (
             <li key={`${entry.raw_text}-${index}`} className="flex min-w-0 items-baseline gap-1.5 text-xs">
               {entry.target_document_id ? (

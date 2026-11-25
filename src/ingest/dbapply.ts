@@ -21,6 +21,7 @@ export interface ApplyState {
   changeSetKind: string;
   changeSetJobId: string;
   changeSetReviewId: string;
+  archiveFileId?: string;
   sourceFilename: string;
   normalizedContent: string;
   recorder: JobRecorder | null;
@@ -60,6 +61,7 @@ export async function applyBlocksToStore(
       kind: state.changeSetKind,
       job_id: state.changeSetJobId,
       review_id: state.changeSetReviewId,
+      archive_file_id: state.archiveFileId ?? "",
       source_filename: state.sourceFilename,
       normalized_content: state.normalizedContent,
       summary: `apply ${result.written.length} page(s)`,
@@ -99,6 +101,23 @@ export async function applyBlocksToStore(
     }
 
     await state.db.applyChangeSet(changeSet, writes);
+    if (state.archiveFileId && typeof state.db.linkDocumentArchiveSource === "function") {
+      for (const rel of result.written) {
+        try {
+          const doc = await state.db.getDocumentByRelativePath(rel);
+          if (doc) {
+            await state.db.linkDocumentArchiveSource(doc.id, state.archiveFileId, changeSet.id, "ingest_source");
+          }
+        } catch (error) {
+          state.recorder?.record(
+            "apply_files",
+            "warn",
+            `link archive source failed (${rel}): ${errorMessage(error)}`,
+            null,
+          );
+        }
+      }
+    }
     try {
       await storeReferenceEntries(state.db, extracted);
       await rebuildReferences(state.db, result.written);

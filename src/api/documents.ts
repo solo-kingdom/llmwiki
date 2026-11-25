@@ -136,8 +136,13 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const doc = await ctx.db.getDocument(id);
         if (!doc) return writeError(c, 404, "document not found");
-        const refs = await buildReferencesPayload(ctx.db, doc);
-        return writeJson(c, 200, { ...doc, ...refs });
+        const [refs, archiveSources] = await Promise.all([
+          buildReferencesPayload(ctx.db, doc),
+          typeof ctx.db.listDocumentArchiveSources === "function"
+            ? ctx.db.listDocumentArchiveSources(doc.id)
+            : Promise.resolve([]),
+        ]);
+        return writeJson(c, 200, { ...doc, ...refs, archive_sources: archiveSources });
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }

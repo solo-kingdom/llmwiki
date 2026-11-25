@@ -9,12 +9,13 @@ import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AppProvider } from "@/context/app-context"
 import { installAutoHideScrollbars } from "@/lib/scrollbar-idle"
+import { ArchivesPage } from "./pages/archives"
 import { ChatPage } from "./pages/chat"
 import { GraphPage } from "./pages/graph"
 import { HelpPage } from "./pages/help"
 import { JobsPage } from "./pages/jobs"
 import { LogsPage } from "./pages/logs"
-import { SettingsLayout, ModelsSection, IngestSection, AccessSection, IntegrationsSection, RulesSection } from "./pages/settings"
+import { SettingsLayout, ModelsSection, IngestSection, StorageSection, AccessSection, IntegrationsSection, RulesSection } from "./pages/settings"
 import { TimelinePage } from "./pages/timeline"
 import { WikiReaderPage } from "./pages/wiki"
 import { Root } from "./root"
@@ -35,6 +36,7 @@ const router = createBrowserRouter([{
       { index: true, element: <Navigate to="models" replace /> },
       { path: "models", element: <ModelsSection /> },
       { path: "ingest", element: <IngestSection /> },
+      { path: "storage", element: <StorageSection /> },
       { path: "access", element: <AccessSection /> },
       { path: "integrations", element: <IntegrationsSection /> },
       { path: "rules", element: <RulesSection /> },
@@ -43,6 +45,8 @@ const router = createBrowserRouter([{
     { path: "wiki", element: <WikiReaderPage /> },
     { path: "wiki/graph", element: <GraphPage /> },
     { path: "wiki/:id", element: <WikiReaderPage /> },
+    { path: "archives", element: <ArchivesPage /> },
+    { path: "archives/:id", element: <ArchivesPage /> },
     { path: "*", element: <NotFound /> },
   ],
 }])

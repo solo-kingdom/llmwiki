@@ -49,6 +49,11 @@ import type {
   DeleteFolderResponse,
   ApiKey,
   CreatedApiKey,
+  ArchiveTreeResponse,
+  ArchiveFolder,
+  ArchiveFile,
+  ArchiveFileDetail,
+  ArchiveStorageCheckResult,
 } from "@/types"
 
 const BASE = ""
@@ -946,5 +951,117 @@ export function createApiKey(name: string): Promise<CreatedApiKey> {
 export function deleteApiKey(id: string): Promise<{ deleted: boolean }> {
   return request<{ deleted: boolean }>(`/api/v1/api-keys/${encodeURIComponent(id)}`, {
     method: "DELETE",
+  })
+}
+
+export function getArchiveTree(params?: { kind?: string; q?: string }): Promise<ArchiveTreeResponse> {
+  const sp = new URLSearchParams()
+  if (params?.kind) sp.set("kind", params.kind)
+  if (params?.q) sp.set("q", params.q)
+  const qs = sp.toString()
+  return request(`/api/v1/archives/tree${qs ? `?${qs}` : ""}`)
+}
+
+export function createArchiveFolder(body: {
+  path: string
+  display_name?: string
+  description?: string
+  sort_order?: number
+}): Promise<ArchiveFolder> {
+  return request("/api/v1/archives/folders", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function updateArchiveFolder(body: {
+  path: string
+  display_name?: string
+  description?: string
+  sort_order?: number
+}): Promise<ArchiveFolder> {
+  return request("/api/v1/archives/folders", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
+}
+
+export function moveArchiveFolder(from_path: string, to_path: string): Promise<{
+  from_path: string
+  to_path: string
+  moved_folders: number
+  moved_files: number
+}> {
+  return request("/api/v1/archives/folders/move", {
+    method: "POST",
+    body: JSON.stringify({ from_path, to_path }),
+  })
+}
+
+export function deleteArchiveFolder(
+  path: string,
+  mode: FolderDeleteMode,
+  target_folder?: string,
+): Promise<{ path: string; mode: FolderDeleteMode; deleted_folders: number; moved_files: number; deleted_files: number }> {
+  const sp = new URLSearchParams({ path, mode })
+  if (target_folder !== undefined) sp.set("target_folder", target_folder)
+  return request(`/api/v1/archives/folders?${sp.toString()}`, { method: "DELETE" })
+}
+
+export function uploadArchiveFiles(
+  files: File[],
+  folder_path = "",
+  overwrite = false,
+): Promise<{ files: ArchiveFile[] }> {
+  const form = new FormData()
+  form.set("folder_path", folder_path)
+  if (overwrite) form.set("overwrite", "true")
+  for (const file of files) form.append("files", file)
+  return request("/api/v1/archives/files", { method: "POST", body: form })
+}
+
+export function getArchiveFile(id: string): Promise<ArchiveFileDetail> {
+  return request(`/api/v1/archives/files/${encodeURIComponent(id)}`)
+}
+
+export function archiveFileRawUrl(id: string, download = false): string {
+  const base = `${BASE}/api/v1/archives/files/${encodeURIComponent(id)}/raw`
+  return download ? `${base}?download=1` : base
+}
+
+export async function getArchiveFileText(id: string): Promise<string> {
+  const res = await fetch(archiveFileRawUrl(id))
+  if (!res.ok) throw new Error(res.statusText)
+  return res.text()
+}
+
+export function updateArchiveFileLocation(
+  id: string,
+  body: { folder_path?: string; filename?: string },
+): Promise<ArchiveFile> {
+  return request(`/api/v1/archives/files/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
+}
+
+export function updateArchiveFileContent(
+  id: string,
+  content: string,
+): Promise<{ file: ArchiveFile; promoted: boolean; previous_backend: string }> {
+  return request(`/api/v1/archives/files/${encodeURIComponent(id)}/content`, {
+    method: "PUT",
+    body: JSON.stringify({ content }),
+  })
+}
+
+export function deleteArchiveFile(id: string): Promise<{ deleted: boolean; id: string }> {
+  return request(`/api/v1/archives/files/${encodeURIComponent(id)}`, { method: "DELETE" })
+}
+
+export function checkArchiveStorage(body?: Record<string, unknown>): Promise<ArchiveStorageCheckResult> {
+  return request("/api/v1/settings/storage/check", {
+    method: "POST",
+    body: JSON.stringify(body ?? {}),
   })
 }

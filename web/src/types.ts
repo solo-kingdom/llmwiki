@@ -38,6 +38,7 @@ export interface Document {
   updated_at: string
   reference_entries?: ReferenceEntry[]
   wikilinks?: Wikilink[]
+  archive_sources?: ArchiveSourceSummary[]
 }
 
 export interface DocumentListItem {
@@ -137,6 +138,7 @@ export interface PublicWikiDocument {
   tags: string[]
   reference_entries?: ReferenceEntry[]
   wikilinks?: Wikilink[]
+  archive_sources?: ArchiveSourceSummary[]
 }
 
 export interface SearchChunk {
@@ -282,6 +284,107 @@ export interface Settings {
   api_token_set?: boolean
   api_token_masked?: string
   api_token_source?: "flag" | "settings" | "none"
+  archive_inline_max_bytes?: string
+  archive_storage_backend?: "local" | "s3"
+  archive_local_dir?: string
+  archive_local_dir_effective?: string
+  archive_s3_endpoint?: string
+  archive_s3_region?: string
+  archive_s3_bucket?: string
+  archive_s3_prefix?: string
+  archive_s3_force_path_style?: boolean
+  archive_s3_access_key_id?: string
+  archive_s3_access_key_id_set?: boolean
+  archive_s3_access_key_id_masked?: string
+  archive_s3_secret_access_key?: string
+  archive_s3_secret_access_key_set?: boolean
+  archive_s3_secret_access_key_masked?: string
+}
+
+export type ArchiveFileKind =
+  | "markdown"
+  | "html"
+  | "image"
+  | "video"
+  | "audio"
+  | "pdf"
+  | "text"
+  | "other"
+
+export type ArchiveStorageBackend = "db" | "local" | "s3"
+
+export type ArchiveFileOrigin =
+  | "upload"
+  | "ingest_upload"
+  | "ingest_text"
+  | "ingest_conversation"
+  | "ingest_session"
+
+export interface ArchiveFolder {
+  path: string
+  display_name: string
+  description: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+  direct_count: number
+  total_count: number
+}
+
+export interface ArchiveFile {
+  id: string
+  folder_path: string
+  filename: string
+  relative_path: string
+  media_type: string
+  kind: ArchiveFileKind
+  size: number
+  sha256: string
+  storage_backend: ArchiveStorageBackend
+  storage_key: string
+  origin: ArchiveFileOrigin
+  source_ref: string
+  ingest_job_id: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ArchiveLinkedDocument {
+  document_id: string
+  title: string
+  relative_path: string
+  page_type: string
+  relation: string
+  created_at: string
+}
+
+export interface ArchiveFileDetail extends ArchiveFile {
+  wiki_documents: ArchiveLinkedDocument[]
+}
+
+export interface ArchiveSourceSummary {
+  id: string
+  filename: string
+  folder_path: string
+  relative_path: string
+  kind: ArchiveFileKind
+  media_type: string
+  size: number
+  origin: ArchiveFileOrigin
+  relation: string
+  created_at: string
+}
+
+export interface ArchiveTreeResponse {
+  folders: ArchiveFolder[]
+  files: ArchiveFile[]
+}
+
+export interface ArchiveStorageCheckResult {
+  ok: boolean
+  backend: "local" | "s3"
+  target: string
+  message: string
 }
 
 export interface ApiKey {

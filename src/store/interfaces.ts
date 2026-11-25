@@ -2,9 +2,17 @@ import type {
   ActivityLog,
   ActivityLogListFilter,
   ApiKeyRecord,
+  ArchiveFile,
+  ArchiveFileKind,
+  ArchiveFolder,
+  ArchiveFolderWithCounts,
+  ArchiveLinkedDocument,
+  ArchiveSourceSummary,
+  ArchiveStorageBackend,
   ChangeSet,
   Chunk,
   ChunkEmbedding,
+  DeleteArchiveFolderResult,
   DeleteFolderResult,
   Document,
   FolderDeleteMode,
@@ -20,6 +28,7 @@ import type {
   IngestSessionReference,
   ListDocumentsFilter,
   ModelInfo,
+  MoveArchiveFolderResult,
   MoveDocumentResult,
   MoveFolderResult,
   PageRevision,
@@ -295,9 +304,62 @@ export interface ApiKeyStore {
   deleteApiKey(id: string): Promise<boolean>;
 }
 
+export interface ArchiveStore {
+  listArchiveFolders(): Promise<ArchiveFolderWithCounts[]>;
+  getArchiveFolder(folderPath: string): Promise<ArchiveFolder | null>;
+  ensureArchiveFolders(folderPaths: string[]): Promise<void>;
+  createArchiveFolder(input: {
+    path: string;
+    display_name?: string;
+    description?: string;
+    sort_order?: number;
+  }): Promise<ArchiveFolder>;
+  updateArchiveFolder(
+    folderPath: string,
+    patch: { display_name?: string; description?: string; sort_order?: number },
+  ): Promise<ArchiveFolder | null>;
+  moveArchiveFolder(fromPath: string, toPath: string): Promise<MoveArchiveFolderResult>;
+  deleteArchiveFolder(
+    folderPath: string,
+    mode: FolderDeleteMode,
+    targetFolder?: string,
+  ): Promise<DeleteArchiveFolderResult>;
+
+  listArchiveFiles(filter?: { folder_path?: string; kind?: string; q?: string }): Promise<ArchiveFile[]>;
+  getArchiveFile(id: string): Promise<ArchiveFile | null>;
+  getArchiveFileByRelativePath(relativePath: string): Promise<ArchiveFile | null>;
+  getArchiveFileInlineBytes(id: string): Promise<Uint8Array | null>;
+  createArchiveFile(file: ArchiveFile, inlineBytes: Uint8Array | null): Promise<ArchiveFile>;
+  updateArchiveFileLocation(id: string, folderPath: string, filename: string): Promise<ArchiveFile>;
+  updateArchiveFileContentMeta(
+    id: string,
+    patch: {
+      size: number;
+      sha256: string;
+      storage_backend: ArchiveStorageBackend;
+      storage_key: string;
+      inline_bytes: Uint8Array | null;
+      media_type?: string;
+      kind?: ArchiveFileKind;
+    },
+  ): Promise<ArchiveFile>;
+  deleteArchiveFile(id: string): Promise<ArchiveFile | null>;
+
+  linkDocumentArchiveSource(
+    documentId: string,
+    archiveFileId: string,
+    changeSetId?: string,
+    relation?: string,
+  ): Promise<void>;
+  unlinkDocumentArchiveSource(documentId: string, archiveFileId: string): Promise<boolean>;
+  listDocumentArchiveSources(documentId: string): Promise<ArchiveSourceSummary[]>;
+  listArchiveFileDocuments(archiveFileId: string): Promise<ArchiveLinkedDocument[]>;
+}
+
 export interface Store
   extends DocumentStore,
     FolderStore,
+    ArchiveStore,
     IndexStore,
     RevisionStore,
     SourceStore,

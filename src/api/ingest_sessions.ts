@@ -2,6 +2,7 @@ import path from "node:path";
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { logSession, record } from "../activity/index.js";
+import { ArchiveStorageService, ingestAutoFolder } from "../archive/storage.js";
 import { parseConfig as parseAcpConfig, getAgent } from "../acp/config.js";
 import { availability } from "../acp/check.js";
 import {
@@ -748,7 +749,8 @@ export function ingestSessionsApi(ctx: ApiContext) {
         if (existing) return existing;
 
         logSession(ctx.db, "archive_started", session.id, `会话 ${session.id} 开始归档`, "pending", "api");
-        const req = (await readJsonBody<{ title?: string; deep_organize?: boolean }>(c)) ?? {};
+        const req =
+          (await readJsonBody<{ title?: string; deep_organize?: boolean; archive_folder?: string }>(c)) ?? {};
         const title = (req.title ?? "").trim() || session.title || "ingest-session";
         const messages = await ctx.db.listIngestSessionMessages(session.id);
         const archiveMessages = messages
@@ -783,12 +785,24 @@ export function ingestSessionsApi(ctx: ApiContext) {
           `session:${session.id}`,
           now,
         );
-        await writeFileBytesFirst(ctx, normalized.canonicalPath, normalized.content);
+        const storage = new ArchiveStorageService(ctx.db, ctx.workspace);
+        const archiveFolder =
+          (req.archive_folder ?? "").trim() || ingestAutoFolder("ingest_session", now);
+        const archiveFile = await storage.storeNewFile({
+          folderPath: archiveFolder,
+          filename: normalized.originalName,
+          bytes: normalized.content,
+          mediaType: "text/markdown; charset=utf-8",
+          origin: "ingest_session",
+          sourceRef: `session:${session.id}`,
+          autoRename: true,
+        });
 
         const review: IngestReview = {
           id: "",
           session_id: session.id,
-          archive_source_path: normalized.canonicalPath,
+          archive_source_path: archiveFile.relative_path,
+          archive_file_id: archiveFile.id,
           status: "planning",
           current_plan_version: 0,
           approved_plan_version: 0,
@@ -809,18 +823,23 @@ export function ingestSessionsApi(ctx: ApiContext) {
             resourceId: review.id,
             status: "pending",
             source: "api",
-            details: { session_id: session.id, plan_job_id: planJob.id },
+            details: {
+              session_id: session.id,
+              plan_job_id: planJob.id,
+              archive_file_id: archiveFile.id,
+            },
           });
           if (ctx.acpMgr) ctx.acpMgr.closeSession(session.id);
           return writeJson(c, 201, {
             review_id: review.id,
             status: review.status,
-            source_path: normalized.canonicalPath,
+            source_path: archiveFile.relative_path,
+            archive_file_id: archiveFile.id,
             session_id: session.id,
             plan_job_id: planJob.id,
           });
         } catch (error) {
-          await removeWorkspaceFile(ctx, normalized.canonicalPath);
+          await storage.deleteFile(archiveFile.id).catch(() => undefined);
           logSession(ctx.db, "archive_failed", session.id, errorMessage(error), "failure", "api");
           return writeError(c, 500, errorMessage(error));
         }

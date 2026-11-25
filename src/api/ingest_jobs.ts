@@ -2,15 +2,15 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Context } from "hono";
 import { logIngestJob } from "../activity/index.js";
+import { ArchiveStorageService, ingestAutoFolder } from "../archive/storage.js";
 import { normalizeConversation, normalizeText, normalizeUpload } from "../ingest/normalize.js";
 import { recordRulesSnapshot } from "../ingest/processor.js";
-import type { IngestJob } from "../store/types.js";
+import type { ArchiveFileOrigin, IngestJob } from "../store/types.js";
 import {
   getID,
   parseQueryInt,
   readJsonBody,
   writeError,
-  writeFileBytesFirst,
   writeJson,
   type ApiContext,
 } from "./context.js";
@@ -26,7 +26,7 @@ const IMAGE_SOURCE_EXTENSIONS: Record<string, string> = {
 
 const TEXT_SOURCE_EXTENSIONS = new Set([".md", ".txt"]);
 
-const SUPPORTED_INGEST_EXTENSIONS = new Set([
+export const SUPPORTED_INGEST_EXTENSIONS = new Set([
   ".md", ".txt", ".pdf",
   ".doc", ".docx",
   ".ppt", ".pptx",
@@ -38,13 +38,19 @@ const SUPPORTED_INGEST_EXTENSIONS = new Set([
   ".zip", ".rar", ".7z",
 ]);
 
-function newJob(inputType: string, sourcePath: string, sourceRef: string): IngestJob {
+function newJob(
+  inputType: string,
+  sourcePath: string,
+  sourceRef: string,
+  archiveFileId = "",
+): IngestJob {
   return {
     id: "",
     parent_job_id: "",
     input_type: inputType,
     source_path: sourcePath,
     source_ref: sourceRef,
+    archive_file_id: archiveFileId,
     status: "queued",
     retries: 0,
     max_retries: 3,
@@ -65,8 +71,34 @@ export function ingestJobsApi(ctx: ApiContext) {
     return null;
   }
 
-  async function createQueuedJob(inputType: string, sourcePath: string, sourceRef: string): Promise<IngestJob> {
-    const job = newJob(inputType, sourcePath, sourceRef);
+  async function persistArchiveSource(
+    origin: ArchiveFileOrigin,
+    filename: string,
+    bytes: Uint8Array,
+    sourceRef: string,
+    archiveFolder?: string,
+    mediaType?: string,
+  ) {
+    const svc = new ArchiveStorageService(ctx.db, ctx.workspace);
+    const folderPath = (archiveFolder ?? "").trim() || ingestAutoFolder(origin, new Date());
+    return svc.storeNewFile({
+      folderPath,
+      filename,
+      bytes,
+      mediaType,
+      origin,
+      sourceRef,
+      autoRename: true,
+    });
+  }
+
+  async function createQueuedJob(
+    inputType: string,
+    sourcePath: string,
+    sourceRef: string,
+    archiveFileId = "",
+  ): Promise<IngestJob> {
+    const job = newJob(inputType, sourcePath, sourceRef, archiveFileId);
     await ctx.db.createIngestJob(job);
     await recordRulesSnapshot(ctx.db, job.id, ctx.workspace);
     logIngestJob(ctx.db, job, "queued", "api");
@@ -77,14 +109,31 @@ export function ingestJobsApi(ctx: ApiContext) {
     async createConversationIngestJob(c: Context): Promise<Response> {
       const denied = requireWorkspace(c);
       if (denied) return denied;
-      const req = await readJsonBody<{ content?: string; title?: string; source_ref?: string }>(c);
+      const req = await readJsonBody<{
+        content?: string;
+        title?: string;
+        source_ref?: string;
+        archive_folder?: string;
+      }>(c);
       if (!req) return writeError(c, 400, "invalid request body");
       if (!(req.content ?? "").trim()) return writeError(c, 400, "content is required");
       try {
         const normalized = normalizeConversation(req.title ?? "", req.content ?? "", req.source_ref ?? "", new Date());
-        await writeFileBytesFirst(ctx, normalized.canonicalPath, normalized.content);
-        const job = await createQueuedJob(normalized.kind, normalized.canonicalPath, normalized.sourceRef);
-        return writeJson(c, 201, { job });
+        const archiveFile = await persistArchiveSource(
+          "ingest_conversation",
+          normalized.originalName,
+          normalized.content,
+          normalized.sourceRef,
+          req.archive_folder,
+          "text/markdown; charset=utf-8",
+        );
+        const job = await createQueuedJob(
+          normalized.kind,
+          archiveFile.relative_path,
+          normalized.sourceRef,
+          archiveFile.id,
+        );
+        return writeJson(c, 201, { job, archive_file: archiveFile });
       } catch (error) {
         return writeError(c, 500, `persist source failed: ${errorMessage(error)}`);
       }
@@ -98,6 +147,7 @@ export function ingestJobsApi(ctx: ApiContext) {
         filename?: string;
         title?: string;
         source_ref?: string;
+        archive_folder?: string;
       }>(c);
       if (!req) return writeError(c, 400, "invalid request body");
       if (!(req.content ?? "").trim()) return writeError(c, 400, "content is required");
@@ -109,9 +159,20 @@ export function ingestJobsApi(ctx: ApiContext) {
           req.source_ref ?? "",
           new Date(),
         );
-        await writeFileBytesFirst(ctx, normalized.canonicalPath, normalized.content);
-        const job = await createQueuedJob(normalized.kind, normalized.canonicalPath, normalized.sourceRef);
-        return writeJson(c, 201, { job });
+        const archiveFile = await persistArchiveSource(
+          "ingest_text",
+          normalized.originalName,
+          normalized.content,
+          normalized.sourceRef,
+          req.archive_folder,
+        );
+        const job = await createQueuedJob(
+          normalized.kind,
+          archiveFile.relative_path,
+          normalized.sourceRef,
+          archiveFile.id,
+        );
+        return writeJson(c, 201, { job, archive_file: archiveFile });
       } catch (error) {
         return writeError(c, 500, `persist source failed: ${errorMessage(error)}`);
       }
@@ -131,8 +192,15 @@ export function ingestJobsApi(ctx: ApiContext) {
       );
       if (files.length === 0) return writeError(c, 400, "no files provided");
       const sourceRef = String(form.get("source_ref") ?? "").trim() || "upload";
+      const archiveFolder = String(form.get("archive_folder") ?? "").trim();
 
-      const accepted: Array<{ filename: string; job_id: string; status: string; source_path: string }> = [];
+      const accepted: Array<{
+        filename: string;
+        job_id: string;
+        status: string;
+        source_path: string;
+        archive_file_id: string;
+      }> = [];
       const rejected: Array<{ filename: string; error_code: string; message: string; remediation?: string }> = [];
 
       for (const file of files) {
@@ -161,8 +229,16 @@ export function ingestJobsApi(ctx: ApiContext) {
           rejected.push({ filename: name, error_code: "invalid_upload_input", message: errorMessage(error) });
           continue;
         }
+        let archiveFile;
         try {
-          await writeFileBytesFirst(ctx, normalized.canonicalPath, normalized.content);
+          archiveFile = await persistArchiveSource(
+            "ingest_upload",
+            normalized.originalName,
+            normalized.content,
+            normalized.sourceRef,
+            archiveFolder,
+            file.type || undefined,
+          );
         } catch (error) {
           rejected.push({
             filename: name,
@@ -173,12 +249,18 @@ export function ingestJobsApi(ctx: ApiContext) {
           continue;
         }
         try {
-          const job = await createQueuedJob(normalized.kind, normalized.canonicalPath, normalized.sourceRef);
+          const job = await createQueuedJob(
+            normalized.kind,
+            archiveFile.relative_path,
+            normalized.sourceRef,
+            archiveFile.id,
+          );
           accepted.push({
             filename: name,
             job_id: job.id,
             status: job.status,
-            source_path: normalized.canonicalPath,
+            source_path: archiveFile.relative_path,
+            archive_file_id: archiveFile.id,
           });
         } catch (error) {
           rejected.push({ filename: name, error_code: "enqueue_failed", message: errorMessage(error) });
@@ -296,6 +378,29 @@ export function ingestJobsApi(ctx: ApiContext) {
         return writeError(c, 500, errorMessage(error));
       }
       if (!job) return writeError(c, 404, "job not found");
+      if (job.archive_file_id) {
+        try {
+          const file = await ctx.db.getArchiveFile(job.archive_file_id);
+          if (file) {
+            const bytes = await new ArchiveStorageService(ctx.db, ctx.workspace).readFullBytes(file);
+            const ext = path.extname(file.filename).toLowerCase();
+            const imgType = IMAGE_SOURCE_EXTENSIONS[ext];
+            if (imgType) {
+              return c.body(new Uint8Array(bytes), 200, { "Content-Type": imgType });
+            }
+            if (TEXT_SOURCE_EXTENSIONS.has(ext) || file.kind === "markdown" || file.kind === "text") {
+              return writeJson(c, 200, {
+                content: new TextDecoder().decode(bytes),
+                filename: file.filename,
+                archive_file_id: file.id,
+              });
+            }
+            return writeError(c, 400, "unsupported source file type for preview");
+          }
+        } catch (error) {
+          return writeError(c, 500, errorMessage(error));
+        }
+      }
       const sourcePath = job.source_path.trim();
       if (!sourcePath) return writeError(c, 400, "job has no source path");
       if (sourcePath.includes("..")) {

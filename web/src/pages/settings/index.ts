@@ -1,6 +1,7 @@
 export { SettingsLayout } from "./layout"
 export { ModelsSection } from "./models"
 export { IngestSection } from "./ingest"
+export { StorageSection } from "./storage"
 export { AccessSection } from "./access"
 export { IntegrationsSection } from "./integrations"
 export { RulesSection } from "./rules"

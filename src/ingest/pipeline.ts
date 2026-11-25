@@ -50,6 +50,7 @@ export class Pipeline {
   private changeSetKind = "";
   private changeSetJobId = "";
   private changeSetReviewId = "";
+  private archiveFileId = "";
   private sourceFilename = "";
   private normalizedContent = "";
   private lastChangeSetID = "";
@@ -85,12 +86,14 @@ export class Pipeline {
     reviewId: string,
     sourceFilename: string,
     normalizedContent: string,
+    archiveFileId = "",
   ): void {
     this.changeSetKind = kind;
     this.changeSetJobId = jobId;
     this.changeSetReviewId = reviewId;
     this.sourceFilename = sourceFilename;
     this.normalizedContent = normalizedContent;
+    this.archiveFileId = archiveFileId;
   }
 
   setLLMClient(client: Client | null): void {
@@ -428,6 +431,7 @@ ${content}
       changeSetKind: this.changeSetKind,
       changeSetJobId: this.changeSetJobId,
       changeSetReviewId: this.changeSetReviewId,
+      archiveFileId: this.archiveFileId,
       sourceFilename: this.sourceFilename,
       normalizedContent: this.normalizedContent,
       recorder: this.recorder,

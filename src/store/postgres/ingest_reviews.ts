@@ -14,7 +14,7 @@ const REVIEW_COLUMNS = `
   COALESCE(approved_plan_version, 0), COALESCE(final_job_id, ''),
   COALESCE(change_set_id, ''),
   COALESCE(created_at, ''), COALESCE(updated_at, ''),
-  COALESCE(deep_organize, FALSE)`;
+  COALESCE(deep_organize, FALSE), COALESCE(archive_file_id, '')`;
 
 const REVIEW_MESSAGE_COLUMNS = `
   COALESCE(id, ''), COALESCE(review_id, ''), COALESCE(role, ''),
@@ -67,6 +67,7 @@ function scanReview(row: unknown[]): IngestReview {
     created_at: asString(row[8]),
     updated_at: asString(row[9]),
     deep_organize: asBoolean(row[10]),
+    archive_file_id: asString(row[11]),
   };
 }
 
@@ -102,15 +103,16 @@ export function ingestReviewsRepo(pool: Pool): ReviewStore {
       const row = await queryOne(
         pool,
         `INSERT INTO ingest_reviews (
-          id, session_id, archive_source_path, status,
+          id, session_id, archive_source_path, archive_file_id, status,
           current_plan_version, approved_plan_version, final_job_id,
           deep_organize, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, ${NOW_TEXT}, ${NOW_TEXT})
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, ${NOW_TEXT}, ${NOW_TEXT})
         RETURNING ${REVIEW_COLUMNS}`,
         [
           randomUUID(),
           review.session_id,
           review.archive_source_path,
+          (review.archive_file_id ?? "").trim(),
           review.status,
           review.current_plan_version,
           review.approved_plan_version,

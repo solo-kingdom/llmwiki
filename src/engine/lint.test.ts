@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { extractLinkTargets, resolveWikiTarget } from "./lint.js";
 
-const index = new Set([
-  "wiki/entities/adam_foroughi.md",
-  "wiki/entities/adam_foroughi",
-  "adam_foroughi",
-  "wiki/concepts/a_player文化.md",
-  "wiki/concepts/a_player文化",
-  "a_player文化",
+const index = new Map<string, string>([
+  ["wiki/entities/adam_foroughi.md", "wiki/entities/Adam_Foroughi.md"],
+  ["wiki/entities/adam_foroughi", "wiki/entities/Adam_Foroughi.md"],
+  ["adam_foroughi", "wiki/entities/Adam_Foroughi.md"],
+  ["wiki/concepts/a_player文化.md", "wiki/concepts/A_Player文化.md"],
+  ["wiki/concepts/a_player文化", "wiki/concepts/A_Player文化.md"],
+  ["a_player文化", "wiki/concepts/A_Player文化.md"],
 ]);
 
 describe("lint link targets", () => {
@@ -17,9 +17,9 @@ describe("lint link targets", () => {
     ).toEqual(["entities/Adam_Foroughi"]);
   });
 
-  it("resolves space/underscore variants", () => {
-    expect(resolveWikiTarget(index, "Adam Foroughi")).not.toBe("");
-    expect(resolveWikiTarget(index, "entities/Adam Foroughi")).not.toBe("");
-    expect(resolveWikiTarget(index, "concepts/A Player文化")).not.toBe("");
+  it("resolves space/underscore variants to the canonical page path", () => {
+    expect(resolveWikiTarget(index, "Adam Foroughi")).toBe("wiki/entities/Adam_Foroughi.md");
+    expect(resolveWikiTarget(index, "entities/Adam Foroughi")).toBe("wiki/entities/Adam_Foroughi.md");
+    expect(resolveWikiTarget(index, "concepts/A Player文化")).toBe("wiki/concepts/A_Player文化.md");
   });
 });

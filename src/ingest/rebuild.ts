@@ -66,7 +66,7 @@ async function rebuildIndexPage(db: Store, docs: Document[]): Promise<void> {
   await db.applyChangeSet(
     {
       id: randomUUID(),
-      kind: "reindex",
+      kind: "manual",
       summary: "rebuild wiki/index.md",
       page_count: 1,
       created_at: "",

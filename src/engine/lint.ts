@@ -147,15 +147,17 @@ export async function collectWikiPages(workspace: string): Promise<WikiPage[]> {
   return pages;
 }
 
-export function buildWikiPathIndex(pages: WikiPage[]): Set<string> {
-  const index = new Set<string>();
+/** Map every accepted alias (full path, path without .md, basename) to the
+ * canonical page path, so orphan checks compare against `page.relPath`. */
+export function buildWikiPathIndex(pages: WikiPage[]): Map<string, string> {
+  const index = new Map<string, string>();
   for (const page of pages) {
-    index.add(page.relPath.toLowerCase());
+    index.set(page.relPath.toLowerCase(), page.relPath);
     const base = path.posix.basename(page.relPath).toLowerCase();
     const stem = base.endsWith(".md") ? base.slice(0, -3) : base;
     const dir = path.posix.dirname(page.relPath);
-    if (dir !== ".") index.add(`${dir}/${stem}`.toLowerCase());
-    index.add(stem.toLowerCase());
+    if (dir !== ".") index.set(`${dir}/${stem}`.toLowerCase(), page.relPath);
+    index.set(stem.toLowerCase(), page.relPath);
   }
   return index;
 }
@@ -216,11 +218,11 @@ function normalizeWikiPath(value: string): string {
   return clean.join("/");
 }
 
-function wikiTargetExists(index: Set<string>, target: string): boolean {
+function wikiTargetExists(index: Map<string, string>, target: string): boolean {
   return resolveWikiTarget(index, target) !== "";
 }
 
-export function resolveWikiTarget(index: Set<string>, target: string): string {
+export function resolveWikiTarget(index: Map<string, string>, target: string): string {
   const trimmed = target.trim().replace(/^\/+|\/+$/g, "");
   if (!trimmed) return "";
   // Links often write spaces where filenames/titles use underscores
@@ -230,7 +232,8 @@ export function resolveWikiTarget(index: Set<string>, target: string): string {
     const lower = variant.toLowerCase();
     const candidates = [`wiki/${lower}`, `wiki/${lower}.md`, lower, `${lower}.md`];
     for (const candidate of candidates) {
-      if (index.has(candidate)) return candidate;
+      const resolved = index.get(candidate);
+      if (resolved) return resolved;
     }
   }
   return "";

@@ -44,7 +44,7 @@ export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
   return {
     allowWriteTools: allowWrite,
     readonlyTools: new Set(["guide", "search", "read", "references", "lint", "ping"]),
-    writeTools: new Set(["write", "delete"]),
+    writeTools: new Set(["write", "delete", "archive", "reopen"]),
   };
 }
 

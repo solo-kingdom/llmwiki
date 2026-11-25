@@ -1,11 +1,15 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { buildArchivedDocument, buildReopenedDocument } from "../engine/archive.js";
 import { WorkspaceFileIndexer } from "../engine/file_indexer.js";
 import { parseFrontmatter } from "../engine/frontmatter.js";
+import { lintDocuments, lintWorkspace } from "../engine/lint.js";
 import { resolvePageType, validateWikiWritePath } from "../engine/wiki_org.js";
 import { workspaceLayoutSummary } from "../engine/workspace_layout.js";
+import { buildPageChunks } from "../ingest/dbapply.js";
 import type { Store } from "../store/interfaces.js";
-import type { Document } from "../store/types.js";
+import type { ArchiveFilter, Document, SearchOptions } from "../store/types.js";
 import { formatLintMcp } from "./local_tools.js";
 import type { AuditDb } from "./server.js";
 import { McpServer } from "./server.js";
@@ -97,6 +101,11 @@ export function registerTools(
           query: { type: "string", default: "" },
           path: { type: "string", default: "*" },
           limit: { type: "integer", default: 10 },
+          types: { type: "array", items: { type: "string" } },
+          kinds: { type: "array", items: { type: "string" } },
+          statuses: { type: "array", items: { type: "string" } },
+          confidences: { type: "array", items: { type: "string" } },
+          archived: { type: "string", enum: ["exclude", "include", "only"], default: "exclude" },
         },
         required: [],
       },
@@ -207,6 +216,44 @@ export function registerTools(
 
   register(
     {
+      name: "archive",
+      description:
+        "Archive a wiki page in-place (sets archived_at/archive_reason in frontmatter, preserves path and history, excludes from default search).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Document ID, relative_path, or title" },
+          reason: { type: "string", description: "Reason for archiving" },
+          superseded_by: { type: "string", description: "Optional replacement page wikilink" },
+        },
+        required: ["id", "reason"],
+      },
+    },
+    async (args) => archiveToolHandler(db, args, activity),
+  );
+
+  register(
+    {
+      name: "reopen",
+      description:
+        "Reopen an archived wiki page in-place (clears archived_at/archive_reason, optionally updates confidence/last_verified/review_after).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Document ID, relative_path, or title" },
+          reason: { type: "string" },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          last_verified: { type: "string" },
+          review_after: { type: "string" },
+        },
+        required: ["id"],
+      },
+    },
+    async (args) => reopenToolHandler(db, args, activity),
+  );
+
+  register(
+    {
       name: "ping",
       description: "Test connectivity",
       inputSchema: { type: "object", properties: {}, required: [] },
@@ -268,25 +315,54 @@ async function searchToolHandler(
   if (rawPath === "wiki" || rawPath === "wiki/") pathFilter = "wiki";
   else if (rawPath === "sources" || rawPath === "raw/sources") pathFilter = "sources";
 
+  const strArray = (key: string): string[] =>
+    Array.isArray(args[key])
+      ? (args[key] as unknown[]).filter((v): v is string => typeof v === "string" && v.trim() !== "")
+      : [];
+  const rawArchived = typeof args["archived"] === "string" ? args["archived"].trim().toLowerCase() : "";
+  const archived: ArchiveFilter =
+    rawArchived === "include" || rawArchived === "only" || rawArchived === "exclude"
+      ? rawArchived
+      : "exclude";
+  const searchOptions: SearchOptions = {
+    page_types: strArray("types"),
+    experience_kinds: strArray("kinds"),
+    statuses: strArray("statuses"),
+    confidences: strArray("confidences"),
+    archived,
+  };
+
   switch (mode) {
     case "list": {
-      const docs = await db.listDocuments();
+      const docs = await db.listDocumentsFiltered({
+        page_types: searchOptions.page_types,
+        experience_kinds: searchOptions.experience_kinds,
+        statuses: searchOptions.statuses,
+        confidences: searchOptions.confidences,
+        archived,
+      });
       if (docs.length === 0) return "No documents found.";
       let output = `Found ${docs.length} documents:\n\n`;
       for (const doc of docs) {
-        output += `- **${doc.title || doc.filename}** — \`${doc.relative_path}\` [${doc.file_type}]\n`;
+        const meta = [doc.page_type, doc.experience_kind, doc.page_status, doc.confidence]
+          .filter(Boolean)
+          .join("/");
+        output += `- **${doc.title || doc.filename}** — \`${doc.relative_path}\` [${meta || doc.file_type}]\n`;
       }
       return output;
     }
     case "search": {
       const query = typeof args["query"] === "string" ? args["query"] : "";
       if (!query) return "Error: query is required for search mode";
-      const results = await db.searchChunks(query, limit, pathFilter);
+      const results = await db.searchChunks(query, limit, pathFilter, searchOptions);
       if (results.length === 0) return `No results found for: ${query}`;
       let output = `Found ${results.length} results for "${query}":\n\n`;
       for (const result of results) {
         output += `### ${result.title || result.filename} (${result.path}) [score: ${result.score.toFixed(2)}]\n`;
         if (result.header_breadcrumb) output += `Section: ${result.header_breadcrumb}\n`;
+        if (result.symptoms && result.symptoms.length > 0) {
+          output += `Symptoms: ${result.symptoms.join(", ")}\n`;
+        }
         output += `${result.content}\n\n---\n\n`;
       }
       return output;
@@ -303,9 +379,13 @@ async function searchToolHandler(
       return output;
     }
     case "lint": {
-      if (!workspace) return "Error: workspace not configured";
-      const { lintWorkspace } = await import("../engine/lint.js");
-      return formatLintMcp(await lintWorkspace(workspace));
+      const report = db
+        ? await lintDocuments(db, { workspace })
+        : workspace
+          ? await lintWorkspace(workspace)
+          : null;
+      if (!report) return "Error: workspace not configured";
+      return formatLintMcp(report);
     }
     default:
       return `Unknown mode: ${mode}`;
@@ -501,6 +581,66 @@ async function folderToolHandler(
       default:
         return `Unknown folder action: ${action}`;
     }
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+async function resolveDocByRef(db: Store, ref: string): Promise<Document | null> {
+  let doc = await db.getDocument(ref);
+  if (!doc) doc = await db.getDocumentByRelativePath(ref.replace(/^\/+/, ""));
+  if (!doc) doc = await db.findDocumentByName(ref);
+  return doc;
+}
+
+async function archiveToolHandler(
+  db: Store,
+  args: Record<string, unknown>,
+  activity?: McpActivity,
+): Promise<string> {
+  if (!db) return "Error: database not connected";
+  const idOrPath = typeof args["id"] === "string" ? args["id"].trim() : "";
+  const reason = typeof args["reason"] === "string" ? args["reason"].trim() : "";
+  const supersededBy = typeof args["superseded_by"] === "string" ? args["superseded_by"].trim() : undefined;
+  if (!idOrPath || !reason) return "Error: id and reason are required";
+  const doc = await resolveDocByRef(db, idOrPath);
+  if (!doc) return `Document not found: ${idOrPath}`;
+  try {
+    const archived = buildArchivedDocument(doc, { reason, supersededBy });
+    await db.applyChangeSet(
+      { id: randomUUID(), kind: "manual", summary: `archive page: ${reason}`, page_count: 1, created_at: "" },
+      [{ relative_path: archived.relative_path, document: archived, operation: "archive", chunks: buildPageChunks(archived.id, archived.content), refs: [] }],
+    );
+    await activity?.logDocument(db, "archived", archived.id, archived.relative_path, "mcp");
+    return `Archived: ${archived.relative_path} (archived_at=${archived.archived_at})`;
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+async function reopenToolHandler(
+  db: Store,
+  args: Record<string, unknown>,
+  activity?: McpActivity,
+): Promise<string> {
+  if (!db) return "Error: database not connected";
+  const idOrPath = typeof args["id"] === "string" ? args["id"].trim() : "";
+  if (!idOrPath) return "Error: id is required";
+  const doc = await resolveDocByRef(db, idOrPath);
+  if (!doc) return `Document not found: ${idOrPath}`;
+  try {
+    const reopened = buildReopenedDocument(doc, {
+      reason: typeof args["reason"] === "string" ? args["reason"] : undefined,
+      confidence: typeof args["confidence"] === "string" ? args["confidence"] : undefined,
+      lastVerified: typeof args["last_verified"] === "string" ? args["last_verified"] : undefined,
+      reviewAfter: typeof args["review_after"] === "string" ? args["review_after"] : undefined,
+    });
+    await db.applyChangeSet(
+      { id: randomUUID(), kind: "manual", summary: "reopen page", page_count: 1, created_at: "" },
+      [{ relative_path: reopened.relative_path, document: reopened, operation: "reopen", chunks: buildPageChunks(reopened.id, reopened.content), refs: [] }],
+    );
+    await activity?.logDocument(db, "reopened", reopened.id, reopened.relative_path, "mcp");
+    return `Reopened: ${reopened.relative_path}`;
   } catch (error) {
     return `Error: ${error instanceof Error ? error.message : String(error)}`;
   }

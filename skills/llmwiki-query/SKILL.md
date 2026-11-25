@@ -25,8 +25,9 @@ curl -fsS -G "${AUTH[@]}" "$LLMWIKI_URL/api/v1/search" \
 - `filter=wiki` (default) searches wiki pages only and skips hidden dirs (`wiki/sources/`, `wiki/templates/`).
 - `filter=sources` searches source material (`raw/…`, ingested originals).
 - `filter` with any other value searches everything.
-- `types` is repeatable (`types=concept&types=entity`) and narrows by page type.
-- Results are chunks: `{document_id, content, header_breadcrumb, chunk_index, filename, title, path, file_type, score}`.
+- `types` is repeatable (`types=concept&types=entity&types=experience`) and narrows by page type; also supports `kinds` (`practice|pitfall|pattern`), `statuses` (`draft|validated|deprecated`), `confidences` (`high|medium|low`), `archived` (`exclude|include|only`, default `exclude`), and `review_overdue=true`.
+- Search also matches `aliases` and `symptoms`. For troubleshooting or pre-task checks, query `types=experience` by error/symptom text first and surface shortest discrimination and known misconceptions.
+- Results are chunks: `{document_id, content, header_breadcrumb, chunk_index, filename, title, path, file_type, score, page_type, confidence, page_status, experience_kind, last_verified, review_after, symptoms}`.
 - `path` is the **directory** with leading and trailing slash (`/wiki/concepts/`). The page path you cite is `path + filename` → `wiki/concepts/attention.md`.
 
 Search behaviour that matters:

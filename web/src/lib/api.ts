@@ -1,4 +1,5 @@
 import type {
+  ArchiveFilter,
   Document,
   DocumentListItem,
   SearchResponse,
@@ -72,11 +73,21 @@ export function listDocuments(params?: {
   source_kind?: string
   types?: string[]
   exclude_hidden?: boolean
+  archived?: ArchiveFilter
+  kinds?: string[]
+  statuses?: string[]
+  confidences?: string[]
+  review_overdue?: boolean
 }): Promise<DocumentListItem[]> {
   const q = new URLSearchParams()
   if (params?.source_kind) q.set("source_kind", params.source_kind)
   for (const t of params?.types ?? []) q.append("types", t)
   if (params?.exclude_hidden) q.set("exclude_hidden", "true")
+  if (params?.archived) q.set("archived", params.archived)
+  for (const k of params?.kinds ?? []) q.append("kinds", k)
+  for (const s of params?.statuses ?? []) q.append("statuses", s)
+  for (const c of params?.confidences ?? []) q.append("confidences", c)
+  if (params?.review_overdue) q.set("review_overdue", "true")
   const qs = q.toString()
   return request<DocumentListItem[]>(
     `/api/v1/documents${qs ? `?${qs}` : ""}`,
@@ -90,10 +101,20 @@ export function getDocument(id: string): Promise<Document> {
 export function getWikiTree(params?: {
   exclude_hidden?: boolean
   types?: string[]
+  archived?: ArchiveFilter
+  kinds?: string[]
+  statuses?: string[]
+  confidences?: string[]
+  review_overdue?: boolean
 }): Promise<WikiTreeResponse> {
   const q = new URLSearchParams()
   if (params?.exclude_hidden === false) q.set("exclude_hidden", "false")
   for (const t of params?.types ?? []) q.append("types", t)
+  if (params?.archived) q.set("archived", params.archived)
+  for (const k of params?.kinds ?? []) q.append("kinds", k)
+  for (const s of params?.statuses ?? []) q.append("statuses", s)
+  for (const c of params?.confidences ?? []) q.append("confidences", c)
+  if (params?.review_overdue) q.set("review_overdue", "true")
   const qs = q.toString()
   return request<WikiTreeResponse>(`/api/v1/tree${qs ? `?${qs}` : ""}`)
 }
@@ -184,11 +205,44 @@ export function deleteDocument(id: string): Promise<{ status: string; path: stri
   })
 }
 
+export function archiveDocument(
+  id: string,
+  payload: { reason: string; superseded_by?: string; date?: string },
+): Promise<Document> {
+  return request<Document>(`/api/v1/documents/${encodeURIComponent(id)}/archive`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function reopenDocument(
+  id: string,
+  payload?: {
+    reason?: string
+    confidence?: string
+    last_verified?: string
+    review_after?: string
+    date?: string
+  },
+): Promise<Document> {
+  return request<Document>(`/api/v1/documents/${encodeURIComponent(id)}/reopen`, {
+    method: "POST",
+    body: JSON.stringify(payload ?? {}),
+  })
+}
+
 export function searchDocuments(
   q: string,
   limit = 10,
   types?: string[],
   mode?: SearchMode,
+  opts?: {
+    archived?: ArchiveFilter
+    kinds?: string[]
+    statuses?: string[]
+    confidences?: string[]
+    review_overdue?: boolean
+  },
 ): Promise<SearchResponse> {
   const params = new URLSearchParams({
     q,
@@ -196,6 +250,11 @@ export function searchDocuments(
   })
   for (const t of types ?? []) params.append("types", t)
   if (mode) params.set("mode", mode)
+  if (opts?.archived) params.set("archived", opts.archived)
+  for (const k of opts?.kinds ?? []) params.append("kinds", k)
+  for (const s of opts?.statuses ?? []) params.append("statuses", s)
+  for (const c of opts?.confidences ?? []) params.append("confidences", c)
+  if (opts?.review_overdue) params.set("review_overdue", "true")
   return request<SearchResponse>(`/api/v1/search?${params.toString()}`)
 }
 

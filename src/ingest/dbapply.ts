@@ -146,6 +146,16 @@ export async function pageDocument(db: Store, rel: string, data: Uint8Array): Pr
     created_at: "",
     updated_at: "",
     page_type: pageType,
+    confidence: frontmatter.confidence ?? "",
+    page_status: frontmatter.status ?? "",
+    experience_kind: frontmatter.kind ?? "",
+    last_verified: frontmatter.last_verified ?? "",
+    review_after: frontmatter.review_after ?? "",
+    archived_at: frontmatter.archived_at ?? "",
+    archive_reason: frontmatter.archive_reason ?? "",
+    superseded_by: frontmatter.superseded_by ?? "",
+    aliases: frontmatter.aliases ?? [],
+    symptoms: frontmatter.symptoms ?? [],
   };
   const existing = await db.getDocumentByRelativePath(rel);
   if (existing) {
@@ -172,13 +182,14 @@ export function pageChunks(docId: string, content: string): Chunk[] {
 
 export async function rebuildReferences(db: Store, relPaths: string[]): Promise<void> {
   if (relPaths.length === 0) return;
-  const docs = await db.listDocuments();
+  const docs = await db.listDocumentsFiltered({ archived: "include" });
   const parser = new ReferenceParser(
     docs.map((doc) => ({
       id: doc.id,
       filename: doc.filename,
       title: doc.title,
       path: doc.path,
+      aliases: doc.aliases ?? [],
     })),
   );
   for (const rel of relPaths) {
@@ -218,13 +229,14 @@ export async function storeReferenceEntries(
   extracted: Map<string, ExtractedReferenceEntry[]>,
 ): Promise<void> {
   if (extracted.size === 0) return;
-  const docs = await db.listDocuments();
+  const docs = await db.listDocumentsFiltered({ archived: "include" });
   const parser = new ReferenceParser(
     docs.map((doc) => ({
       id: doc.id,
       filename: doc.filename,
       title: doc.title,
       path: doc.path,
+      aliases: doc.aliases ?? [],
     })),
   );
   for (const [rel, entries] of extracted) {

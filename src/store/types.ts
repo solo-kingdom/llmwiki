@@ -39,12 +39,40 @@ export interface Document {
   updated_at: string;
   deleted_at?: string;
   page_type?: string;
+  confidence?: string;
+  page_status?: string;
+  experience_kind?: string;
+  last_verified?: string;
+  review_after?: string;
+  archived_at?: string;
+  archive_reason?: string;
+  superseded_by?: string;
+  aliases?: string[];
+  symptoms?: string[];
 }
+
+export type ArchiveFilter = "exclude" | "include" | "only";
 
 export interface ListDocumentsFilter {
   source_kind?: string;
   page_types?: string[];
   exclude_hidden?: boolean;
+  experience_kinds?: string[];
+  statuses?: string[];
+  confidences?: string[];
+  archived?: ArchiveFilter;
+  review_overdue?: boolean;
+  today?: string;
+}
+
+export interface SearchOptions {
+  page_types?: string[];
+  experience_kinds?: string[];
+  statuses?: string[];
+  confidences?: string[];
+  archived?: ArchiveFilter;
+  review_overdue?: boolean;
+  today?: string;
 }
 
 export interface Chunk {
@@ -71,6 +99,13 @@ export interface SearchChunk {
   page_type?: string;
   score: number;
   match_type?: string;
+  confidence?: string;
+  page_status?: string;
+  experience_kind?: string;
+  last_verified?: string;
+  review_after?: string;
+  archived_at?: string;
+  symptoms?: string[];
 }
 
 export interface Reference {
@@ -354,7 +389,7 @@ export interface ChangeSet {
   created_at: string;
 }
 
-export type RevisionOperation = "create" | "update" | "delete" | "restore" | "move";
+export type RevisionOperation = "create" | "update" | "delete" | "restore" | "move" | "archive" | "reopen";
 
 export interface WikiFolder {
   path: string;

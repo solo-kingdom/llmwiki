@@ -42,8 +42,12 @@ describe("wiki_org tree paths", () => {
 
   it("resolves page_type from frontmatter, explicit type, or legacy directory", () => {
     expect(resolvePageType("concept", "", "wiki/AI工程/harness.md")).toBe("concept");
+    expect(resolvePageType("experience", "", "wiki/AI工程/pitfall.md")).toBe("experience");
+    expect(resolvePageType("", "ledger", "wiki/Ops/accounts.md")).toBe("ledger");
     expect(resolvePageType("", "entity", "wiki/AI工程/openai.md")).toBe("entity");
     expect(resolvePageType("", "", "wiki/concepts/legacy.md")).toBe("concept");
+    expect(resolvePageType("", "", "wiki/experiences/exp.md")).toBe("experience");
+    expect(resolvePageType("", "", "wiki/ledgers/l1.md")).toBe("ledger");
     expect(resolvePageType("", "", "wiki/sources/src.md")).toBe("source");
     expect(resolvePageType("", "", "wiki/AI工程/note.md")).toBe("page");
   });

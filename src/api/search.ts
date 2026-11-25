@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { embeddingClient } from "../llm/embeddings.js";
-import type { SearchChunk } from "../store/types.js";
+import type { ArchiveFilter, SearchChunk, SearchOptions } from "../store/types.js";
 import { writeError, writeJson, type ApiContext } from "./context.js";
 
 export function normalizeSearchMode(raw: string): string {
@@ -50,10 +50,10 @@ export async function hybridSearch(
   query: string,
   limit: number,
   pathFilter: string,
-  pageTypes: string[],
+  options: string[] | SearchOptions,
   mode: string,
 ): Promise<SearchChunk[]> {
-  const keyword = await ctx.db.searchChunks(query, limit, pathFilter, pageTypes);
+  const keyword = await ctx.db.searchChunks(query, limit, pathFilter, options);
   if (mode === "keyword") return keyword;
 
   let vectors: number[][] = [];
@@ -69,7 +69,7 @@ export async function hybridSearch(
 
   let semantic: SearchChunk[];
   try {
-    semantic = await ctx.db.searchVector(vectors[0] ?? [], model, limit, pathFilter, pageTypes);
+    semantic = await ctx.db.searchVector(vectors[0] ?? [], model, limit, pathFilter, options);
   } catch {
     return keyword;
   }
@@ -84,11 +84,30 @@ export function searchApi(ctx: ApiContext) {
       if (!query) return writeError(c, 400, "query parameter 'q' is required");
       const limit = parseLimit(c.req.query("limit"), 10);
       const filter = c.req.query("filter") || "wiki";
-      const pageTypes = c.req.queries("types") ?? [];
+      const pageTypes = c.req.queries("types") ?? c.req.queries("type") ?? [];
+      const experienceKinds = c.req.queries("kinds") ?? c.req.queries("kind") ?? [];
+      const statuses = c.req.queries("statuses") ?? c.req.queries("status") ?? [];
+      const confidences = c.req.queries("confidences") ?? c.req.queries("confidence") ?? [];
+      const rawArchived = (c.req.query("archived") ?? "").trim().toLowerCase();
+      const archived: ArchiveFilter =
+        rawArchived === "include" || rawArchived === "only" || rawArchived === "exclude"
+          ? rawArchived
+          : c.req.query("include_archived") === "true"
+            ? "include"
+            : "exclude";
+      const reviewOverdue = c.req.query("review_overdue") === "true";
+      const searchOptions: SearchOptions = {
+        page_types: pageTypes,
+        experience_kinds: experienceKinds,
+        statuses,
+        confidences,
+        archived,
+        review_overdue: reviewOverdue,
+      };
       let mode = normalizeSearchMode(c.req.query("mode") ?? "");
       if (mode === "auto") mode = "hybrid";
       try {
-        const results = await hybridSearch(ctx, query, limit, filter, pageTypes, mode);
+        const results = await hybridSearch(ctx, query, limit, filter, searchOptions, mode);
         return writeJson(c, 200, { query, mode, results });
       } catch (error) {
         return writeError(c, 500, errorMessage(error));

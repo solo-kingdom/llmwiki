@@ -296,9 +296,15 @@ export async function buildReferencesPayload(
   doc: Document,
 ): Promise<{ reference_entries: ReferenceEntryPayload[]; wikilinks: WikilinkPayload[] }> {
   const entries = await db.listReferenceEntries(doc.id);
-  const docs = await db.listDocuments();
+  const docs = await db.listDocumentsFiltered({ archived: "include" });
   const parser = new ReferenceParser(
-    docs.map((d) => ({ id: d.id, filename: d.filename, title: d.title, path: d.path })),
+    docs.map((d) => ({
+      id: d.id,
+      filename: d.filename,
+      title: d.title,
+      path: d.path,
+      aliases: d.aliases ?? [],
+    })),
   );
   const docPath = `${doc.path}${doc.filename}`;
   const byText = new Map<string, WikilinkPayload>();

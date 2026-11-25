@@ -1,8 +1,20 @@
 import path from "node:path";
 import type { Context } from "hono";
 import { record, logDocument } from "../activity/index.js";
-import { parseFrontmatter, upsertFrontmatterType } from "../engine/frontmatter.js";
 import {
+  ArchiveValidationError,
+  buildArchivedDocument,
+  buildReopenedDocument,
+} from "../engine/archive.js";
+import {
+  isValidIsoDate,
+  parseFrontmatter,
+  upsertFrontmatterFields,
+} from "../engine/frontmatter.js";
+import {
+  isValidConfidence,
+  isValidExperienceKind,
+  isValidExperienceStatus,
   isValidPageType,
   resolvePageType,
   validateWikiWritePath,
@@ -13,7 +25,8 @@ import {
   FolderNotFoundError,
   FolderValidationError,
 } from "../store/postgres/folders.js";
-import type { Document } from "../store/types.js";
+import { syncDocumentMetaFromContent } from "../store/postgres/doc_meta.js";
+import type { ArchiveFilter, Document } from "../store/types.js";
 import {
   applyPageDelete,
   applyPageDeletes,
@@ -47,6 +60,27 @@ interface UpdateMetadataRequest {
   date?: string;
   metadata?: string;
   page_type?: string;
+  confidence?: string;
+  page_status?: string;
+  experience_kind?: string;
+  last_verified?: string;
+  review_after?: string;
+  aliases?: string[];
+  symptoms?: string[];
+}
+
+interface ArchiveDocumentRequest {
+  reason?: string;
+  superseded_by?: string;
+  date?: string;
+}
+
+interface ReopenDocumentRequest {
+  reason?: string;
+  confidence?: string;
+  last_verified?: string;
+  review_after?: string;
+  date?: string;
 }
 
 interface MoveDocumentRequest {
@@ -71,10 +105,22 @@ async function withPageLock<T>(ctx: ApiContext, relPath: string, fn: () => Promi
 export function documentsApi(ctx: ApiContext) {
   return {
     async listDocuments(c: Context): Promise<Response> {
+      const rawArchived = (c.req.query("archived") ?? "").trim().toLowerCase();
+      const archived: ArchiveFilter =
+        rawArchived === "include" || rawArchived === "only" || rawArchived === "exclude"
+          ? rawArchived
+          : c.req.query("include_archived") === "true"
+            ? "include"
+            : "exclude";
       const filter = {
         source_kind: c.req.query("source_kind") ?? "",
         page_types: c.req.queries("types") ?? c.req.queries("type") ?? [],
         exclude_hidden: c.req.query("exclude_hidden") === "true",
+        experience_kinds: c.req.queries("kinds") ?? c.req.queries("kind") ?? [],
+        statuses: c.req.queries("statuses") ?? c.req.queries("status") ?? [],
+        confidences: c.req.queries("confidences") ?? c.req.queries("confidence") ?? [],
+        archived,
+        review_overdue: c.req.query("review_overdue") === "true",
       };
       try {
         const docs = await ctx.db.listDocumentsFiltered(filter);
@@ -136,7 +182,7 @@ export function documentsApi(ctx: ApiContext) {
           : "";
       const initialContent =
         sourceKind === "wiki" && req.page_type && !fm.type
-          ? upsertFrontmatterType(req.content ?? "", resolvedPageType)
+          ? upsertFrontmatterFields(req.content ?? "", { type: resolvedPageType })
           : (req.content ?? "");
 
       const doc: Document = {
@@ -217,25 +263,140 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const existing = await ctx.db.getDocument(id);
         if (!existing) return writeError(c, 404, "document not found");
+
+        const fmUpdates: Record<string, string | string[] | undefined> = {};
         if (req.page_type !== undefined) {
           if (!isValidPageType(req.page_type)) {
             return writeError(c, 400, `invalid page_type: ${req.page_type}`);
           }
           const cleanType = req.page_type.trim().toLowerCase();
           existing.page_type = cleanType;
-          if (existing.source_kind === "wiki") {
-            existing.content = upsertFrontmatterType(existing.content ?? "", cleanType);
-          }
+          fmUpdates.type = cleanType;
         }
-        existing.title = req.title || existing.title;
-        existing.tags = req.tags ?? existing.tags;
-        existing.date = req.date || existing.date;
-        existing.metadata = req.metadata || existing.metadata;
-        await applyPageWrite(ctx, "manual", "update page metadata", existing, "update");
+        if (req.confidence !== undefined) {
+          const conf = req.confidence.trim().toLowerCase();
+          if (conf && !isValidConfidence(conf)) {
+            return writeError(c, 400, `invalid confidence: ${req.confidence}`);
+          }
+          existing.confidence = conf;
+          fmUpdates.confidence = conf;
+        }
+        if (req.experience_kind !== undefined) {
+          const kind = req.experience_kind.trim().toLowerCase();
+          if (kind && !isValidExperienceKind(kind)) {
+            return writeError(c, 400, `invalid experience_kind: ${req.experience_kind}`);
+          }
+          existing.experience_kind = kind;
+          fmUpdates.kind = kind;
+        }
+        if (req.page_status !== undefined) {
+          const status = req.page_status.trim().toLowerCase();
+          if (existing.page_type === "experience" && status && !isValidExperienceStatus(status)) {
+            return writeError(c, 400, `invalid experience status: ${req.page_status}`);
+          }
+          existing.page_status = status;
+          fmUpdates.status = status;
+        }
+        if (req.last_verified !== undefined) {
+          const lv = req.last_verified.trim();
+          if (lv && !isValidIsoDate(lv)) {
+            return writeError(c, 400, `invalid last_verified date: ${req.last_verified}`);
+          }
+          existing.last_verified = lv;
+          fmUpdates.last_verified = lv;
+        }
+        if (req.review_after !== undefined) {
+          const ra = req.review_after.trim();
+          if (ra && !isValidIsoDate(ra)) {
+            return writeError(c, 400, `invalid review_after date: ${req.review_after}`);
+          }
+          existing.review_after = ra;
+          fmUpdates.review_after = ra;
+        }
+        if (req.aliases !== undefined) {
+          existing.aliases = req.aliases.map((a) => a.trim()).filter(Boolean);
+          fmUpdates.aliases = existing.aliases;
+        }
+        if (req.symptoms !== undefined) {
+          existing.symptoms = req.symptoms.map((s) => s.trim()).filter(Boolean);
+          fmUpdates.symptoms = existing.symptoms;
+        }
+        if (req.title) {
+          existing.title = req.title;
+          fmUpdates.title = req.title;
+        }
+        if (req.tags !== undefined) {
+          existing.tags = req.tags;
+          fmUpdates.tags = req.tags;
+        }
+        if (req.date) {
+          existing.date = req.date;
+          fmUpdates.date = req.date;
+        }
+        if (req.metadata) existing.metadata = req.metadata;
+
+        if (existing.source_kind === "wiki" && Object.keys(fmUpdates).length > 0) {
+          existing.content = upsertFrontmatterFields(existing.content ?? "", fmUpdates);
+          syncDocumentMetaFromContent(existing);
+        }
+        await withPageLock(ctx, existing.relative_path, () =>
+          applyPageWrite(ctx, "manual", "update page metadata", existing, "update"),
+        );
         const doc = await ctx.db.getDocument(id);
         logDocument(ctx.db, "updated", id, existing.relative_path, "api");
         return writeJson(c, 200, doc);
       } catch (error) {
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
+    async archiveDocument(c: Context): Promise<Response> {
+      const id = getID(c);
+      if (!id) return writeError(c, 400, "missing document id");
+      const req = await readJsonBody<ArchiveDocumentRequest>(c);
+      if (!req) return writeError(c, 400, "invalid request body");
+      try {
+        const existing = await ctx.db.getDocument(id);
+        if (!existing) return writeError(c, 404, "document not found");
+        const archived = buildArchivedDocument(existing, {
+          reason: req.reason ?? "",
+          supersededBy: req.superseded_by,
+          date: req.date,
+        });
+        await withPageLock(ctx, existing.relative_path, () =>
+          applyPageWrite(ctx, "manual", `archive page: ${archived.archive_reason}`, archived, "archive"),
+        );
+        const doc = await ctx.db.getDocument(id);
+        logDocument(ctx.db, "archived", id, existing.relative_path, "api");
+        return writeJson(c, 200, doc);
+      } catch (error) {
+        if (error instanceof ArchiveValidationError) return writeError(c, 400, error.message);
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
+    async reopenDocument(c: Context): Promise<Response> {
+      const id = getID(c);
+      if (!id) return writeError(c, 400, "missing document id");
+      const req = (await readJsonBody<ReopenDocumentRequest>(c)) ?? {};
+      try {
+        const existing = await ctx.db.getDocument(id);
+        if (!existing) return writeError(c, 404, "document not found");
+        const reopened = buildReopenedDocument(existing, {
+          reason: req.reason,
+          confidence: req.confidence,
+          lastVerified: req.last_verified,
+          reviewAfter: req.review_after,
+          date: req.date,
+        });
+        await withPageLock(ctx, existing.relative_path, () =>
+          applyPageWrite(ctx, "manual", "reopen page", reopened, "reopen"),
+        );
+        const doc = await ctx.db.getDocument(id);
+        logDocument(ctx.db, "reopened", id, existing.relative_path, "api");
+        return writeJson(c, 200, doc);
+      } catch (error) {
+        if (error instanceof ArchiveValidationError) return writeError(c, 400, error.message);
         return writeError(c, 500, errorMessage(error));
       }
     },

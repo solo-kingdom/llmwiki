@@ -23,6 +23,7 @@ import type {
   WikiFolderWithCounts,
 } from "../types.js";
 import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
+import { parseStringArrayJson } from "./doc_meta.js";
 
 export class FolderValidationError extends Error {
   constructor(message: string) {
@@ -269,6 +270,16 @@ function scanFullDocument(row: unknown[]): Document {
     updated_at: asString(row[23]),
     deleted_at: asString(row[24]),
     page_type: asString(row[25]),
+    confidence: asString(row[26]),
+    page_status: asString(row[27]),
+    experience_kind: asString(row[28]),
+    last_verified: asString(row[29]),
+    review_after: asString(row[30]),
+    archived_at: asString(row[31]),
+    archive_reason: asString(row[32]),
+    superseded_by: asString(row[33]),
+    aliases: parseStringArrayJson(asString(row[34])),
+    symptoms: parseStringArrayJson(asString(row[35])),
   };
 }
 
@@ -281,11 +292,15 @@ const FULL_DOC_COLS = `
   COALESCE(error_message, ''), COALESCE(version, 0), COALESCE(parser, ''),
   COALESCE(content_hash, ''), COALESCE(stale_since, ''), COALESCE(highlights, '[]'),
   COALESCE(created_at, ''), COALESCE(updated_at, ''), COALESCE(deleted_at, ''),
-  COALESCE(page_type, '')`;
+  COALESCE(page_type, ''),
+  COALESCE(confidence, ''), COALESCE(page_status, ''), COALESCE(experience_kind, ''),
+  COALESCE(last_verified, ''), COALESCE(review_after, ''), COALESCE(archived_at, ''),
+  COALESCE(archive_reason, ''), COALESCE(superseded_by, ''),
+  COALESCE(aliases, '[]'), COALESCE(symptoms, '[]')`;
 
 export function foldersRepo(pool: Pool): FolderStore {
   return {
-    async listFolders(excludeHidden = true): Promise<WikiFolderWithCounts[]> {
+    async listFolders(excludeHidden = true, includeArchived = false): Promise<WikiFolderWithCounts[]> {
       const folderRows = await queryRows(
         pool,
         `SELECT path, display_name, description, sort_order, created_at, updated_at
@@ -296,11 +311,12 @@ export function foldersRepo(pool: Pool): FolderStore {
         .map(scanFolder)
         .filter((f) => !excludeHidden || !isHiddenFolderPath(f.path));
 
+      const archiveCond = includeArchived ? "" : " AND COALESCE(archived_at, '') = ''";
       const docRows = await queryRows<[string]>(
         pool,
         `SELECT relative_path
          FROM documents
-         WHERE source_kind = 'wiki' AND status != 'failed' AND COALESCE(deleted_at, '') = ''`,
+         WHERE source_kind = 'wiki' AND status != 'failed' AND COALESCE(deleted_at, '') = ''${archiveCond}`,
       );
 
       const directCounts = new Map<string, number>();

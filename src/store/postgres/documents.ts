@@ -1,13 +1,21 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
+import { getMetadataJSON, parseFrontmatter } from "../../engine/frontmatter.js";
 import {
   folderPathFromWikiRelPath,
   resolvePageType,
+  VALID_PAGE_TYPES,
   wikiPageTypeFromPaths,
   WIKI_HIDDEN_SUBDIRS,
 } from "../../engine/wiki_org.js";
 import type { DocumentStore } from "../interfaces.js";
 import type { Chunk, Document, ListDocumentsFilter } from "../types.js";
+import {
+  parseStringArrayJson,
+  stringArrayJson,
+  syncDocumentMetaFromContent,
+  todayIsoDate,
+} from "./doc_meta.js";
 import { ensureFolderAncestorsTx } from "./folders.js";
 import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
@@ -20,7 +28,11 @@ const DOCUMENT_SELECT = `
   COALESCE(d.metadata, ''), COALESCE(d.error_message, ''), COALESCE(d.version, 0),
   COALESCE(d.parser, ''), COALESCE(d.content_hash, ''), COALESCE(d.stale_since, ''),
   COALESCE(d.highlights, '[]'), COALESCE(d.created_at, ''), COALESCE(d.updated_at, ''),
-  COALESCE(d.deleted_at, ''), COALESCE(d.page_type, '')`;
+  COALESCE(d.deleted_at, ''), COALESCE(d.page_type, ''),
+  COALESCE(d.confidence, ''), COALESCE(d.page_status, ''), COALESCE(d.experience_kind, ''),
+  COALESCE(d.last_verified, ''), COALESCE(d.review_after, ''), COALESCE(d.archived_at, ''),
+  COALESCE(d.archive_reason, ''), COALESCE(d.superseded_by, ''),
+  COALESCE(d.aliases, '[]'), COALESCE(d.symptoms, '[]')`;
 
 function scanDocument(row: unknown[]): Document {
   const tagsRaw = asString(row[13]);
@@ -41,7 +53,7 @@ function scanDocument(row: unknown[]): Document {
     status: asString(row[10]),
     page_count: asNumber(row[11]),
     content: asString(row[12]),
-    tags: parseTags(tagsRaw),
+    tags: parseStringArrayJson(tagsRaw),
     date: asString(row[14]),
     metadata: asString(row[15]),
     error_message: asString(row[16]),
@@ -54,21 +66,17 @@ function scanDocument(row: unknown[]): Document {
     updated_at: asString(row[23]),
     deleted_at: asString(row[24]),
     page_type: storedPageType || wikiPageTypeFromPaths(relPath, filePath),
+    confidence: asString(row[26]),
+    page_status: asString(row[27]),
+    experience_kind: asString(row[28]),
+    last_verified: asString(row[29]),
+    review_after: asString(row[30]),
+    archived_at: asString(row[31]),
+    archive_reason: asString(row[32]),
+    superseded_by: asString(row[33]),
+    aliases: parseStringArrayJson(asString(row[34])),
+    symptoms: parseStringArrayJson(asString(row[35])),
   };
-}
-
-function parseTags(raw: string): string[] {
-  if (!raw || raw === "[]") return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map(String) : [];
-  } catch {
-    return [];
-  }
-}
-
-function tagsJson(tags: string[]): string {
-  return tags.length > 0 ? JSON.stringify(tags) : "[]";
 }
 
 export function hiddenSubdirsWhere(column: string): string {
@@ -81,7 +89,8 @@ export function documentsRepo(pool: Pool): DocumentStore {
   return {
     async createDocument(doc: Document): Promise<void> {
       const id = doc.id || randomUUID();
-      const tags = tagsJson(doc.tags);
+      syncDocumentMetaFromContent(doc);
+      const tags = stringArrayJson(doc.tags);
       const pageType =
         doc.source_kind === "wiki"
           ? resolvePageType("", doc.page_type ?? "", doc.relative_path)
@@ -94,8 +103,13 @@ export function documentsRepo(pool: Pool): DocumentStore {
           `INSERT INTO documents (
             id, user_id, filename, title, path, relative_path, source_kind,
             file_type, file_size, document_number, status, content, tags, date,
-            metadata, version, parser, content_hash, highlights, page_type
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+            metadata, version, parser, content_hash, highlights, page_type,
+            confidence, page_status, experience_kind, last_verified, review_after,
+            archived_at, archive_reason, superseded_by, aliases, symptoms
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30
+          )`,
           [
             id,
             doc.user_id,
@@ -117,6 +131,16 @@ export function documentsRepo(pool: Pool): DocumentStore {
             doc.content_hash,
             doc.highlights,
             pageType,
+            doc.confidence ?? "",
+            doc.page_status ?? "",
+            doc.experience_kind ?? "",
+            doc.last_verified ?? "",
+            doc.review_after ?? "",
+            doc.archived_at ?? "",
+            doc.archive_reason ?? "",
+            doc.superseded_by ?? "",
+            stringArrayJson(doc.aliases),
+            stringArrayJson(doc.symptoms),
           ],
         );
         if (doc.source_kind === "wiki") {
@@ -186,6 +210,11 @@ export function documentsRepo(pool: Pool): DocumentStore {
       date: string,
       metadata: string,
     ): Promise<void> {
+      const fm = parseFrontmatter(content);
+      const fmMetaJson = getMetadataJSON(fm);
+      const effectiveMeta = metadata || (fmMetaJson !== "{}" ? fmMetaJson : "");
+      const pageTypeFromFm =
+        fm.type && (VALID_PAGE_TYPES as readonly string[]).includes(fm.type) ? fm.type : "";
       await exec(
         pool,
         `UPDATE documents SET
@@ -194,10 +223,39 @@ export function documentsRepo(pool: Pool): DocumentStore {
           tags = $3,
           date = COALESCE(NULLIF($4, ''), date),
           metadata = COALESCE(NULLIF($5, ''), metadata),
+          confidence = CASE WHEN source_kind = 'wiki' THEN $7 ELSE confidence END,
+          page_status = CASE WHEN source_kind = 'wiki' THEN $8 ELSE page_status END,
+          experience_kind = CASE WHEN source_kind = 'wiki' THEN $9 ELSE experience_kind END,
+          last_verified = CASE WHEN source_kind = 'wiki' THEN $10 ELSE last_verified END,
+          review_after = CASE WHEN source_kind = 'wiki' THEN $11 ELSE review_after END,
+          archived_at = CASE WHEN source_kind = 'wiki' THEN $12 ELSE archived_at END,
+          archive_reason = CASE WHEN source_kind = 'wiki' THEN $13 ELSE archive_reason END,
+          superseded_by = CASE WHEN source_kind = 'wiki' THEN $14 ELSE superseded_by END,
+          aliases = CASE WHEN source_kind = 'wiki' THEN $15 ELSE aliases END,
+          symptoms = CASE WHEN source_kind = 'wiki' THEN $16 ELSE symptoms END,
+          page_type = CASE WHEN source_kind = 'wiki' AND $17 != '' THEN $17 ELSE page_type END,
           version = COALESCE(version, 0) + 1,
           updated_at = ${NOW_TEXT}
         WHERE id = $6`,
-        [content, title, tagsJson(tags), date, metadata, id],
+        [
+          content,
+          title,
+          stringArrayJson(tags),
+          date,
+          effectiveMeta,
+          id,
+          fm.confidence ?? "",
+          fm.status ?? "",
+          fm.kind ?? "",
+          fm.last_verified ?? "",
+          fm.review_after ?? "",
+          fm.archived_at ?? "",
+          fm.archive_reason ?? "",
+          fm.superseded_by ?? "",
+          stringArrayJson(fm.aliases),
+          stringArrayJson(fm.symptoms),
+          pageTypeFromFm,
+        ],
       );
     },
 
@@ -228,15 +286,43 @@ export function documentsRepo(pool: Pool): DocumentStore {
     async listDocumentsFiltered(filter: ListDocumentsFilter): Promise<Document[]> {
       let sql = `
         SELECT id, filename, title, path, file_type, COALESCE(page_count, 0), COALESCE(updated_at, ''),
-          COALESCE(relative_path, ''), COALESCE(source_kind, ''), COALESCE(page_type, '')
+          COALESCE(relative_path, ''), COALESCE(source_kind, ''), COALESCE(page_type, ''),
+          COALESCE(confidence, ''), COALESCE(page_status, ''), COALESCE(experience_kind, ''),
+          COALESCE(last_verified, ''), COALESCE(review_after, ''), COALESCE(archived_at, ''),
+          COALESCE(archive_reason, ''), COALESCE(superseded_by, ''),
+          COALESCE(aliases, '[]'), COALESCE(symptoms, '[]')
         FROM documents WHERE status != 'failed' AND COALESCE(deleted_at, '') = '' `;
       const args: unknown[] = [];
+
+      const archivedMode = filter.archived ?? "exclude";
+      if (archivedMode === "exclude") {
+        sql += "AND COALESCE(archived_at, '') = '' ";
+      } else if (archivedMode === "only") {
+        sql += "AND COALESCE(archived_at, '') != '' ";
+      }
+
       if (filter.source_kind) {
         args.push(filter.source_kind);
         sql += `AND source_kind = $${args.length} `;
       }
       if (filter.exclude_hidden) {
         sql += `AND NOT (${hiddenSubdirsWhere("relative_path")}) `;
+      }
+      if (filter.experience_kinds?.length) {
+        args.push(filter.experience_kinds);
+        sql += `AND experience_kind = ANY($${args.length}::text[]) `;
+      }
+      if (filter.statuses?.length) {
+        args.push(filter.statuses);
+        sql += `AND page_status = ANY($${args.length}::text[]) `;
+      }
+      if (filter.confidences?.length) {
+        args.push(filter.confidences);
+        sql += `AND confidence = ANY($${args.length}::text[]) `;
+      }
+      if (filter.review_overdue) {
+        args.push(filter.today || todayIsoDate());
+        sql += `AND COALESCE(archived_at, '') = '' AND COALESCE(review_after, '') != '' AND review_after < $${args.length} `;
       }
       sql += "ORDER BY path, filename";
 
@@ -269,6 +355,16 @@ export function documentsRepo(pool: Pool): DocumentStore {
           stale_since: "",
           highlights: "",
           created_at: "",
+          confidence: asString(row[10]),
+          page_status: asString(row[11]),
+          experience_kind: asString(row[12]),
+          last_verified: asString(row[13]),
+          review_after: asString(row[14]),
+          archived_at: asString(row[15]),
+          archive_reason: asString(row[16]),
+          superseded_by: asString(row[17]),
+          aliases: parseStringArrayJson(asString(row[18])),
+          symptoms: parseStringArrayJson(asString(row[19])),
         };
         doc.page_type = storedType || wikiPageTypeFromPaths(doc.relative_path, doc.path);
         if (filter.page_types?.length && !filter.page_types.includes(doc.page_type)) continue;
@@ -284,7 +380,11 @@ export function documentsRepo(pool: Pool): DocumentStore {
           COALESCE(page_count, 0), COALESCE(status, ''), COALESCE(source_kind, ''),
           COALESCE(relative_path, ''), COALESCE(tags, '[]'), COALESCE(date, ''),
           COALESCE(metadata, ''), COALESCE(stale_since, ''), COALESCE(highlights, '[]'),
-          COALESCE(version, 0), COALESCE(page_type, '')
+          COALESCE(version, 0), COALESCE(page_type, ''),
+          COALESCE(confidence, ''), COALESCE(page_status, ''), COALESCE(experience_kind, ''),
+          COALESCE(last_verified, ''), COALESCE(review_after, ''), COALESCE(archived_at, ''),
+          COALESCE(archive_reason, ''), COALESCE(superseded_by, ''),
+          COALESCE(aliases, '[]'), COALESCE(symptoms, '[]')
         FROM documents WHERE status != 'failed' AND COALESCE(deleted_at, '') = '' ORDER BY path, filename`,
       );
       return rows.map((row) => {
@@ -302,13 +402,23 @@ export function documentsRepo(pool: Pool): DocumentStore {
           status: asString(row[7]),
           source_kind: asString(row[8]),
           relative_path: relPath,
-          tags: parseTags(asString(row[10])),
+          tags: parseStringArrayJson(asString(row[10])),
           date: asString(row[11]),
           metadata: asString(row[12]),
           stale_since: asString(row[13]),
           highlights: asString(row[14]),
           version: asNumber(row[15]),
           page_type: storedType || wikiPageTypeFromPaths(relPath, pathVal),
+          confidence: asString(row[17]),
+          page_status: asString(row[18]),
+          experience_kind: asString(row[19]),
+          last_verified: asString(row[20]),
+          review_after: asString(row[21]),
+          archived_at: asString(row[22]),
+          archive_reason: asString(row[23]),
+          superseded_by: asString(row[24]),
+          aliases: parseStringArrayJson(asString(row[25])),
+          symptoms: parseStringArrayJson(asString(row[26])),
           user_id: "",
           document_number: 0,
           file_size: 0,

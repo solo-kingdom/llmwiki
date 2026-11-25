@@ -52,7 +52,7 @@ raw/sources/…         原始材料（上传、抓取），agent 只读
 wiki/overview.md      顶层概览页
 wiki/index.md         reindex 生成的目录，永远不要手写
 wiki/log.md           追加式日志：`## [YYYY-MM-DD] action | description`
-wiki/<主题>/…          多级主题目录（页面类型由 frontmatter \`type:\` 标注：entity|concept|synthesis|comparison|query|page）
+wiki/<主题>/…          多级主题目录（页面类型由 frontmatter \`type:\` 标注：entity|concept|synthesis|comparison|query|experience|ledger|page）
 wiki/sources/         源摘要页（默认在列表/搜索/图谱中隐藏）
 wiki/templates/       系统模板目录
 PostgreSQL            页面、目录树、版本、搜索、图谱、lint — 唯一真源
@@ -80,8 +80,8 @@ PostgreSQL            页面、目录树、版本、搜索、图谱、lint — �
 
 1. **先读后写。** 用 `GET /api/v1/documents?source_kind=wiki` 和搜索接口确认现状，不要新建与已有页面重复的内容。
 2. **一个页面一个真相。** 正文改动走 `PUT /api/v1/documents/{id}/content`，提交完整 markdown（含 frontmatter）。文件为准，数据库元数据只是缓存。
-3. **frontmatter 必填**：`title`、`date`（`YYYY-MM-DD`）、`type`（与目录一致）。
-4. **不编造。** 知识库没有依据就明说，改为摄取来源，不要靠猜填空。
+3. **frontmatter 必填**：`title`、`date`（`YYYY-MM-DD`）、`type`；`experience`/`ledger` 必填 `status`；建议填 `confidence`（`high|medium|low`）与 `sources`。
+4. **不编造。** 知识库没有依据就明说，改为摄取来源，不要靠猜填空；`draft` / `deprecated` / 已归档页不作为现行真理。
 5. **每批改动后跑 lint**；`GET /api/v1/lint` 还有你造成的 `severity: error` 时不许报成功。
 6. **不编辑 `wiki/index.md`、`.llmwiki/`、`raw/`。**
 7. **报证据不报动作**：列出改动的路径、lint 结果、执行过回滚就给出 change set id。

@@ -1,13 +1,41 @@
+import { createHash } from "node:crypto";
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { parseFrontmatter, validateFrontmatter } from "./frontmatter.js";
+import type { Store } from "../store/interfaces.js";
+import { todayIsoDate } from "../store/postgres/doc_meta.js";
+import type { ReferenceEntryView } from "../store/types.js";
 import { lintEntityConceptCoupling } from "./entity_concept_coupling.js";
 import {
+  isValidIsoDate,
+  parseFrontmatter,
+  titleFromFilename,
+  validateFrontmatter,
+  type Frontmatter,
+} from "./frontmatter.js";
+import {
+  LINT_CODE_AMBIGUOUS_LINK,
+  LINT_CODE_ARCHIVE_METADATA_INVALID,
+  LINT_CODE_ARCHIVED_REFERENCE,
+  LINT_CODE_CONFIDENCE_INVALID,
+  LINT_CODE_CONFIDENCE_MISSING,
+  LINT_CODE_DATE_INVALID,
   LINT_CODE_DEAD_LINK,
+  LINT_CODE_DESCRIPTION_MISSING,
   LINT_CODE_DUPLICATE_PAGE,
+  LINT_CODE_EXPERIENCE_STATUS_INVALID,
+  LINT_CODE_FRONTMATTER_INVALID,
   LINT_CODE_GHOST_INDEX_ENTRY,
+  LINT_CODE_KIND_INVALID,
   LINT_CODE_MISPLACED_WIKI_PAGE,
+  LINT_CODE_MISSING_FRONTMATTER,
   LINT_CODE_ORPHAN_PAGE,
+  LINT_CODE_PATTERN_INSTANCES_INSUFFICIENT,
+  LINT_CODE_REVIEW_OVERDUE,
+  LINT_CODE_SOURCE_INVALID,
+  LINT_CODE_SOURCE_METADATA_MISSING,
+  LINT_CODE_SOURCES_MISSING,
+  LINT_CODE_SYMPTOMS_MISSING,
+  LINT_CODE_VERIFICATION_MISSING,
   LINT_SEVERITY_ERROR,
   LINT_SEVERITY_WARNING,
   type LintIssue,
@@ -15,10 +43,13 @@ import {
   type LintStats,
 } from "./lint_types.js";
 import { validateLogMD } from "./log_validator.js";
-import { WIKI_DOUBLE_BRACKET_RE, WIKI_LINK_RE } from "./references.js";
+import { ReferenceParser, WIKI_DOUBLE_BRACKET_RE, WIKI_LINK_RE } from "./references.js";
 import type { EngineStore } from "./store_iface.js";
 import {
   classifyWikiPath,
+  isValidConfidence,
+  isValidExperienceKind,
+  isValidExperienceStatus,
   isWikiSystemPath,
   misplacedWikiPageMessage,
   wikiSubdirFromPath,
@@ -33,77 +64,646 @@ export interface WikiPage {
   isMisplaced: boolean;
 }
 
-export async function lintWorkspace(workspace: string): Promise<LintReport> {
-  const resolvedWorkspace = path.resolve(workspace);
-  const report: LintReport = {
-    issues: [],
-    stats: { page_count: 0, source_count: 0 },
-    checked_at: new Date().toISOString(),
-  };
+export interface LintPageInput extends WikiPage {
+  content: string;
+  referenceEntries?: ReferenceEntryView[];
+}
 
-  const pages = await collectWikiPages(resolvedWorkspace);
-  const pathIndex = buildWikiPathIndex(pages);
-  const incoming = new Map<string, number>();
+export interface LintOptions {
+  today?: string;
+  rawSources?: Set<string>;
+  workspaceRoot?: string;
+  logContent?: string;
+  sourceCount?: number;
+}
+
+interface ParsedLintPage {
+  page: LintPageInput;
+  fm: Frontmatter;
+  archived: boolean;
+  dirPath: string;
+  docId: string;
+}
+
+const SHA256_HEX_RE = /^[0-9a-fA-F]{64}$/;
+
+export function lintPages(pages: LintPageInput[], options: LintOptions = {}): LintReport {
+  const today = options.today || todayIsoDate();
+  const issues: LintIssue[] = [];
   const pageContents = new Map<string, string>();
+  const parsedPages: ParsedLintPage[] = [];
+  const byRelPath = new Map<string, ParsedLintPage>();
+  const rawSources = options.rawSources ?? new Set<string>();
 
   for (const page of pages) {
-    const text = await readFile(page.absPath, "utf8");
-    pageContents.set(page.relPath, text);
+    pageContents.set(page.relPath, page.content);
+    const fm = parseFrontmatter(page.content);
+    const archived = Boolean(fm.archived_at);
+    const dir = path.posix.dirname(`/${page.relPath}`);
+    const dirPath = dir === "/" ? "/" : `${dir}/`;
+    const parsed: ParsedLintPage = {
+      page,
+      fm,
+      archived,
+      dirPath,
+      docId: page.relPath,
+    };
+    parsedPages.push(parsed);
+    byRelPath.set(page.relPath, parsed);
+  }
 
+  const refParser = new ReferenceParser(
+    parsedPages
+      .filter((item) => !item.page.isSystem)
+      .map((item) => ({
+        id: item.docId,
+        filename: path.posix.basename(item.page.relPath),
+        title: item.fm.title || titleFromFilename(path.posix.basename(item.page.relPath)),
+        path: item.dirPath,
+        aliases: item.fm.aliases ?? [],
+      })),
+  );
+
+  const incoming = new Map<string, number>();
+
+  for (const item of parsedPages) {
+    const { page, fm, archived } = item;
     if (page.isSystem) continue;
 
-    if (page.inTypedSubdir) {
-      const frontmatter = parseFrontmatter(text);
-      report.issues.push(...validateFrontmatter(page.relPath, frontmatter, page.subdir));
-    }
     if (page.isMisplaced) {
-      const frontmatter = parseFrontmatter(text);
-      report.issues.push({
+      issues.push({
         severity: LINT_SEVERITY_WARNING,
         code: LINT_CODE_MISPLACED_WIKI_PAGE,
         path: page.relPath,
-        message: misplacedWikiPageMessage(page.relPath, frontmatter.type),
+        message: misplacedWikiPageMessage(page.relPath, fm.type),
       });
     }
 
-    for (const target of extractLinkTargets(text, page.relPath)) {
-      if (!wikiTargetExists(pathIndex, target)) {
-        report.issues.push({
+    if (page.inTypedSubdir) {
+      for (const err of fm.parse_errors ?? []) {
+        issues.push({
           severity: LINT_SEVERITY_ERROR,
-          code: LINT_CODE_DEAD_LINK,
+          code: LINT_CODE_FRONTMATTER_INVALID,
           path: page.relPath,
-          message: `死链：目标不存在 "${target}"`,
+          message: err,
         });
+      }
+
+      issues.push(...validateFrontmatter(page.relPath, fm, page.subdir));
+
+      if ((fm.type === "experience" || fm.type === "ledger") && !fm.status) {
+        issues.push({
+          severity: LINT_SEVERITY_ERROR,
+          code: LINT_CODE_MISSING_FRONTMATTER,
+          path: page.relPath,
+          message: `${fm.type} 页面缺少必需 frontmatter 字段：status`,
+        });
+      }
+
+      if (fm.confidence) {
+        if (!isValidConfidence(fm.confidence)) {
+          issues.push({
+            severity: LINT_SEVERITY_ERROR,
+            code: LINT_CODE_CONFIDENCE_INVALID,
+            path: page.relPath,
+            message: `confidence 必须是 high / medium / low，当前为 "${fm.confidence}"`,
+          });
+        }
+      } else if (!archived) {
+        issues.push({
+          severity: LINT_SEVERITY_WARNING,
+          code: LINT_CODE_CONFIDENCE_MISSING,
+          path: page.relPath,
+          message: "活跃业务页缺少 confidence",
+        });
+      }
+
+      if (fm.kind) {
+        if (fm.type !== "experience" || !isValidExperienceKind(fm.kind)) {
+          issues.push({
+            severity: LINT_SEVERITY_ERROR,
+            code: LINT_CODE_KIND_INVALID,
+            path: page.relPath,
+            message: `kind 只用于 experience，取值 practice / pitfall / pattern，当前 type="${fm.type}" kind="${fm.kind}"`,
+          });
+        }
+      }
+
+      if (fm.type === "experience" && fm.status && !isValidExperienceStatus(fm.status)) {
+        issues.push({
+          severity: LINT_SEVERITY_ERROR,
+          code: LINT_CODE_EXPERIENCE_STATUS_INVALID,
+          path: page.relPath,
+          message: `experience 的 status 必须是 draft / validated / deprecated，当前为 "${fm.status}"`,
+        });
+      }
+
+      for (const [field, val] of [
+        ["date", fm.date],
+        ["created", fm.created ?? ""],
+        ["last_verified", fm.last_verified ?? ""],
+        ["review_after", fm.review_after ?? ""],
+        ["archived_at", fm.archived_at ?? ""],
+        ["captured_at", fm.captured_at ?? ""],
+      ] as const) {
+        if (val && !isValidIsoDate(val)) {
+          issues.push({
+            severity: LINT_SEVERITY_ERROR,
+            code: LINT_CODE_DATE_INVALID,
+            path: page.relPath,
+            message: `${field} 必须是有效的 YYYY-MM-DD，当前为 "${val}"`,
+          });
+        }
+      }
+
+      if (fm.confidence === "high" && !fm.last_verified) {
+        issues.push({
+          severity: LINT_SEVERITY_ERROR,
+          code: LINT_CODE_VERIFICATION_MISSING,
+          path: page.relPath,
+          message: "high confidence 页面缺少 last_verified",
+        });
+      }
+
+      if (fm.type === "experience" && fm.status === "validated") {
+        const missingFields = [
+          ...(!fm.last_verified ? ["last_verified"] : []),
+          ...(!fm.review_after ? ["review_after"] : []),
+        ];
+        if (missingFields.length > 0) {
+          issues.push({
+            severity: LINT_SEVERITY_ERROR,
+            code: LINT_CODE_VERIFICATION_MISSING,
+            path: page.relPath,
+            message: `validated 经验缺少: ${missingFields.join(", ")}`,
+          });
+        }
+      }
+
+      if (fm.archived_at && !fm.archive_reason) {
+        issues.push({
+          severity: LINT_SEVERITY_ERROR,
+          code: LINT_CODE_ARCHIVE_METADATA_INVALID,
+          path: page.relPath,
+          message: "已归档页缺少 archive_reason",
+        });
+      }
+      if (!fm.archived_at && (fm.archive_reason || fm.superseded_by)) {
+        issues.push({
+          severity: LINT_SEVERITY_ERROR,
+          code: LINT_CODE_ARCHIVE_METADATA_INVALID,
+          path: page.relPath,
+          message: "archive_reason / superseded_by 需要与 archived_at 同时存在",
+        });
+      }
+
+      if (!archived && fm.type === "source") {
+        if (!fm.origin || !fm.captured_at) {
+          const missingSrc = [
+            ...(!fm.origin ? ["origin"] : []),
+            ...(!fm.captured_at ? ["captured_at"] : []),
+          ];
+          issues.push({
+            severity: LINT_SEVERITY_WARNING,
+            code: LINT_CODE_SOURCE_METADATA_MISSING,
+            path: page.relPath,
+            message: `活跃 source 页缺少: ${missingSrc.join(", ")}`,
+          });
+        }
+      }
+
+      if (fm.content_hash && !SHA256_HEX_RE.test(fm.content_hash)) {
+        issues.push({
+          severity: LINT_SEVERITY_ERROR,
+          code: LINT_CODE_SOURCE_INVALID,
+          path: page.relPath,
+          message: "content_hash 必须是 64 位 SHA-256 十六进制摘要",
+        });
+      }
+
+      const dbSourceEntries = (page.referenceEntries ?? []).filter((e) => e.kind === "source");
+      const fmSources = fm.sources ?? [];
+      const originIsConversation =
+        fm.type === "source" && (fm.origin === "user-input" || fm.origin === "conversation");
+      if (!archived && !originIsConversation && fmSources.length === 0 && dbSourceEntries.length === 0) {
+        issues.push({
+          severity: LINT_SEVERITY_WARNING,
+          code: LINT_CODE_SOURCES_MISSING,
+          path: page.relPath,
+          message: "活跃业务页缺少来源（sources）",
+        });
+      }
+
+      for (const srcRef of fmSources) {
+        const err = validateSourceRef(srcRef, item.dirPath, refParser, byRelPath, rawSources);
+        if (err) {
+          issues.push({
+            severity: LINT_SEVERITY_ERROR,
+            code: LINT_CODE_SOURCE_INVALID,
+            path: page.relPath,
+            message: err,
+          });
+        }
+      }
+
+      if (!archived && !fm.description) {
+        issues.push({
+          severity: LINT_SEVERITY_WARNING,
+          code: LINT_CODE_DESCRIPTION_MISSING,
+          path: page.relPath,
+          message: "活跃业务页缺少 description",
+        });
+      }
+
+      const expKind = fm.kind || (fm.type === "experience" ? "practice" : "");
+      if (!archived && fm.type === "experience" && (expKind === "pitfall" || expKind === "pattern")) {
+        if ((fm.symptoms ?? []).length === 0) {
+          issues.push({
+            severity: LINT_SEVERITY_WARNING,
+            code: LINT_CODE_SYMPTOMS_MISSING,
+            path: page.relPath,
+            message: `${expKind} 经验缺少 symptoms（现象检索词）`,
+          });
+        }
+        if (expKind === "pattern") {
+          const instances = countActivePitfallInstances(
+            item,
+            refParser,
+            byRelPath,
+          );
+          if (instances < 2) {
+            issues.push({
+              severity: LINT_SEVERITY_WARNING,
+              code: LINT_CODE_PATTERN_INSTANCES_INSUFFICIENT,
+              path: page.relPath,
+              message: `related 中的活跃 pitfall 实例为 ${instances} 个，至少需要 2 个`,
+            });
+          }
+        }
+      }
+
+      if (!archived && fm.review_after && isValidIsoDate(fm.review_after) && fm.review_after < today) {
+        issues.push({
+          severity: LINT_SEVERITY_WARNING,
+          code: LINT_CODE_REVIEW_OVERDUE,
+          path: page.relPath,
+          message: `复审日期已过: ${fm.review_after}`,
+        });
+      }
+    }
+
+    // Link resolution (both body links and DB reference entries)
+    const archivedRefs = new Set<string>();
+    const seenIncomingFromThisPage = new Set<string>();
+    const targets = extractRawLinkTargets(page.content, page.relPath);
+    for (const rawTarget of targets) {
+      if (rawTarget.isDoubleBracket) {
+        const res = refParser.resolveLinkDetailed(rawTarget.target, item.dirPath);
+        if (res.ambiguous) {
+          issues.push({
+            severity: LINT_SEVERITY_ERROR,
+            code: LINT_CODE_AMBIGUOUS_LINK,
+            path: page.relPath,
+            message: `链接有歧义 [[${rawTarget.raw}]]，请使用路径限定`,
+          });
+          continue;
+        }
+        if (!res.targetId) {
+          issues.push({
+            severity: LINT_SEVERITY_ERROR,
+            code: LINT_CODE_DEAD_LINK,
+            path: page.relPath,
+            message: `死链：目标不存在 "${rawTarget.raw}"`,
+          });
+          continue;
+        }
+        recordTargetLink(res.targetId, item, byRelPath, archivedRefs, seenIncomingFromThisPage, incoming, issues, `[[${rawTarget.raw}]]`);
       } else {
-        const resolved = resolveWikiTarget(pathIndex, target);
-        if (resolved) incoming.set(resolved, (incoming.get(resolved) ?? 0) + 1);
+        const res = refParser.resolveLinkDetailed(rawTarget.target, item.dirPath);
+        if (!res.targetId) {
+          issues.push({
+            severity: LINT_SEVERITY_ERROR,
+            code: LINT_CODE_DEAD_LINK,
+            path: page.relPath,
+            message: `死链：目标不存在 "${rawTarget.raw}"`,
+          });
+          continue;
+        }
+        recordTargetLink(res.targetId, item, byRelPath, archivedRefs, seenIncomingFromThisPage, incoming, issues, `(${rawTarget.raw})`);
+      }
+    }
+
+    for (const entry of page.referenceEntries ?? []) {
+      const linkText = entry.rawText.trim();
+      if (!linkText) continue;
+      const res = refParser.resolveLinkDetailed(linkText, item.dirPath);
+      if (res.targetId) {
+        recordTargetLink(res.targetId, item, byRelPath, archivedRefs, seenIncomingFromThisPage, incoming, issues, `[[${linkText}]]`);
       }
     }
   }
 
-  report.issues.push(...lintEntityConceptCoupling(pages, pageContents));
-  report.issues.push(...lintDuplicatePages(pages));
+  issues.push(...lintEntityConceptCoupling(pages, pageContents));
+  issues.push(...lintDuplicatePages(pages));
 
-  for (const page of pages) {
-    if (isOrphanExcluded(page.relPath)) continue;
-    if ((incoming.get(page.relPath) ?? 0) === 0) {
-      report.issues.push({
+  for (const item of parsedPages) {
+    if (item.archived || isOrphanExcluded(item.page.relPath)) continue;
+    if ((incoming.get(item.page.relPath) ?? 0) === 0) {
+      issues.push({
         severity: LINT_SEVERITY_WARNING,
         code: LINT_CODE_ORPHAN_PAGE,
-        path: page.relPath,
-        message: "孤立页面：无其他 wiki 页面链接到此页",
+        path: item.page.relPath,
+        message: "孤立页面：无其他活跃 wiki 页面链接到此页",
       });
     }
   }
 
-  const logPath = path.join(resolvedWorkspace, "wiki", "log.md");
+  if (options.logContent !== undefined) {
+    issues.push(...validateLogMD(options.logContent));
+  }
+
+  const stats = computeStatsFromParsed(parsedPages, issues, options.sourceCount ?? rawSources.size);
+  return {
+    issues,
+    stats,
+    checked_at: new Date().toISOString(),
+  };
+}
+
+function recordTargetLink(
+  targetRelPath: string,
+  sourceItem: ParsedLintPage,
+  byRelPath: Map<string, ParsedLintPage>,
+  archivedRefs: Set<string>,
+  seenIncoming: Set<string>,
+  incoming: Map<string, number>,
+  issues: LintIssue[],
+  displayLink: string,
+): void {
+  const target = byRelPath.get(targetRelPath);
+  if (!target) return;
+  if (!sourceItem.archived && target.archived && targetRelPath !== sourceItem.page.relPath && !archivedRefs.has(targetRelPath)) {
+    archivedRefs.add(targetRelPath);
+    issues.push({
+      severity: LINT_SEVERITY_WARNING,
+      code: LINT_CODE_ARCHIVED_REFERENCE,
+      path: sourceItem.page.relPath,
+      message: `活跃页引用了归档页 ${displayLink}`,
+    });
+  }
+  // Archived pages do not count toward keeping active pages non-orphaned.
+  if (!sourceItem.archived && targetRelPath !== sourceItem.page.relPath && !seenIncoming.has(targetRelPath)) {
+    seenIncoming.add(targetRelPath);
+    incoming.set(targetRelPath, (incoming.get(targetRelPath) ?? 0) + 1);
+  }
+}
+
+function validateSourceRef(
+  reference: string,
+  docDirPath: string,
+  refParser: ReferenceParser,
+  byRelPath: Map<string, ParsedLintPage>,
+  rawSources: Set<string>,
+): string | null {
+  const value = reference.trim();
+  if (!value) return "空来源";
+  const isWikilink = value.startsWith("[[") && value.endsWith("]]");
+  const target = isWikilink ? value.slice(2, -2).split("|")[0]?.split("#")[0]?.trim() ?? "" : value;
+  const res = refParser.resolveLinkDetailed(target, docDirPath);
+  if (res.ambiguous) return `来源有歧义: ${value}`;
+  if (res.targetId) {
+    const targetPage = byRelPath.get(res.targetId);
+    if (targetPage && targetPage.fm.type === "source") return null;
+    if (targetPage && targetPage.page.subdir === "sources") return null;
+    return `来源不是 wiki/sources 页面: ${value}`;
+  }
+  if (isWikilink) return `来源页不存在: ${value}`;
+
+  const normalized = value.replace(/^\/+/, "");
+  if (
+    rawSources.has(normalized) ||
+    rawSources.has(`raw/sources/${normalized}`) ||
+    rawSources.has(path.posix.basename(normalized))
+  ) {
+    return null;
+  }
+  return `raw 来源不存在: ${value}`;
+}
+
+function countActivePitfallInstances(
+  patternItem: ParsedLintPage,
+  refParser: ReferenceParser,
+  byRelPath: Map<string, ParsedLintPage>,
+): number {
+  const found = new Set<string>();
+  const candidates = [
+    ...(patternItem.fm.related ?? []),
+    ...(patternItem.page.referenceEntries ?? [])
+      .filter((e) => e.kind === "related")
+      .map((e) => e.rawText),
+  ];
+  for (const raw of candidates) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const target = trimmed.startsWith("[[") && trimmed.endsWith("]]")
+      ? trimmed.slice(2, -2).split("|")[0]?.split("#")[0]?.trim() ?? ""
+      : trimmed;
+    if (!target) continue;
+    const res = refParser.resolveLinkDetailed(target, patternItem.dirPath);
+    if (res.ambiguous || !res.targetId || res.targetId === patternItem.page.relPath) continue;
+    const targetPage = byRelPath.get(res.targetId);
+    if (
+      targetPage &&
+      !targetPage.archived &&
+      targetPage.fm.type === "experience" &&
+      targetPage.fm.kind === "pitfall"
+    ) {
+      found.add(res.targetId);
+    }
+  }
+  return found.size;
+}
+
+function computeStatsFromParsed(
+  parsedPages: ParsedLintPage[],
+  issues: LintIssue[],
+  sourceCount: number,
+): LintStats {
+  const business = parsedPages.filter((p) => !p.page.isSystem);
+  const overduePaths = new Set(
+    issues.filter((i) => i.code === LINT_CODE_REVIEW_OVERDUE).map((i) => i.path),
+  );
+  let lastUpdated = "";
+  let active = 0;
+  let archived = 0;
+  let draft = 0;
+  let validated = 0;
+  let deprecated = 0;
+
+  for (const item of business) {
+    if (item.archived) archived += 1;
+    else active += 1;
+    if (item.fm.status === "draft") draft += 1;
+    else if (item.fm.status === "validated") validated += 1;
+    else if (item.fm.status === "deprecated") deprecated += 1;
+    if (item.fm.date && (!lastUpdated || item.fm.date > lastUpdated)) {
+      lastUpdated = item.fm.date;
+    }
+  }
+
+  return {
+    page_count: business.length,
+    source_count: sourceCount,
+    ...(lastUpdated ? { last_updated: lastUpdated } : {}),
+    active,
+    archived,
+    draft,
+    validated,
+    deprecated,
+    review_overdue: overduePaths.size,
+  };
+}
+
+/** Lint directly against PostgreSQL SSOT documents + structured reference entries. */
+export async function lintDocuments(
+  store: Store,
+  options: { workspace?: string; today?: string } = {},
+): Promise<LintReport> {
+  const docs = await store.listDocumentsWithContent();
+  const rawSources = new Set<string>();
+  const pages: LintPageInput[] = [];
+  let sourceCount = 0;
+  let logContent: string | undefined;
+
+  for (const doc of docs) {
+    if (doc.source_kind !== "wiki") {
+      sourceCount += 1;
+      if (doc.relative_path) rawSources.add(doc.relative_path);
+      if (doc.filename) rawSources.add(doc.filename);
+      continue;
+    }
+    const relPath = doc.relative_path;
+    if (!relPath) continue;
+    if (relPath === "wiki/log.md") {
+      logContent = doc.content;
+    }
+    const kind = classifyWikiPath(relPath);
+    const referenceEntries =
+      typeof store.listReferenceEntries === "function"
+        ? await store.listReferenceEntries(doc.id).catch(() => [])
+        : [];
+    pages.push({
+      relPath,
+      absPath: options.workspace ? path.join(options.workspace, relPath) : relPath,
+      subdir: wikiSubdirFromPath(relPath),
+      inTypedSubdir: kind === "typed_content",
+      isSystem: kind === "system" || kind === "reserved_top_level",
+      isMisplaced: kind === "misplaced",
+      content: doc.content ?? "",
+      referenceEntries,
+    });
+  }
+
+  if (typeof store.listSourceBlobs === "function") {
+    const blobs = await store.listSourceBlobs().catch(() => []);
+    for (const blob of blobs) {
+      if (blob.filename) rawSources.add(blob.filename);
+    }
+  }
+
+  return lintPages(pages, {
+    today: options.today,
+    rawSources,
+    workspaceRoot: options.workspace,
+    logContent,
+    sourceCount,
+  });
+}
+
+export async function lintWorkspace(workspace: string): Promise<LintReport> {
+  const resolvedWorkspace = path.resolve(workspace);
+  const diskPages = await collectWikiPages(resolvedWorkspace);
+  const pages: LintPageInput[] = [];
+  for (const page of diskPages) {
+    const content = await readFile(page.absPath, "utf8");
+    pages.push({ ...page, content });
+  }
+
+  const rawSources = new Set<string>();
+  let sourceCount = 0;
+  const sourcesDir = path.join(resolvedWorkspace, "raw", "sources");
   try {
-    report.issues.push(...validateLogMD(await readFile(logPath, "utf8")));
+    for (const entry of await readdir(sourcesDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() && entry.name !== ".gitkeep") {
+        sourceCount += 1;
+        rawSources.add(entry.name);
+        rawSources.add(`raw/sources/${entry.name}`);
+      }
+    }
   } catch (error) {
     if (!isNotFound(error)) throw error;
   }
 
-  report.stats = await computeLintStats(resolvedWorkspace, pages);
+  let logContent: string | undefined;
+  const logPath = path.join(resolvedWorkspace, "wiki", "log.md");
+  try {
+    logContent = await readFile(logPath, "utf8");
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
+
+  const report = lintPages(pages, {
+    rawSources,
+    workspaceRoot: resolvedWorkspace,
+    logContent,
+    sourceCount,
+  });
+
+  // Disk-only check: verify source content_hash against actual raw file bytes.
+  for (const page of pages) {
+    if (page.isSystem) continue;
+    const fm = parseFrontmatter(page.content);
+    if (
+      fm.type === "source" &&
+      fm.origin &&
+      fm.origin !== "user-input" &&
+      fm.origin !== "conversation" &&
+      fm.content_hash &&
+      SHA256_HEX_RE.test(fm.content_hash)
+    ) {
+      const originPath = path.resolve(resolvedWorkspace, fm.origin);
+      const rawRoot = path.resolve(resolvedWorkspace, "raw");
+      if (!originPath.startsWith(rawRoot + path.sep)) {
+        report.issues.push({
+          severity: LINT_SEVERITY_ERROR,
+          code: LINT_CODE_SOURCE_INVALID,
+          path: page.relPath,
+          message: `origin 必须位于 raw 内: ${fm.origin}`,
+        });
+        continue;
+      }
+      try {
+        const bytes = await readFile(originPath);
+        const actual = createHash("sha256").update(bytes).digest("hex");
+        if (actual !== fm.content_hash.toLowerCase()) {
+          report.issues.push({
+            severity: LINT_SEVERITY_ERROR,
+            code: LINT_CODE_SOURCE_INVALID,
+            path: page.relPath,
+            message: "content_hash 与 origin 文件内容不匹配",
+          });
+        }
+      } catch {
+        report.issues.push({
+          severity: LINT_SEVERITY_ERROR,
+          code: LINT_CODE_SOURCE_INVALID,
+          path: page.relPath,
+          message: `origin 文件不存在: ${fm.origin}`,
+        });
+      }
+    }
+  }
+
   return report;
 }
 
@@ -137,7 +737,7 @@ export async function collectWikiPages(workspace: string): Promise<WikiPage[]> {
         absPath: fullPath,
         subdir: wikiSubdirFromPath(relPath),
         inTypedSubdir: kind === "typed_content",
-        isSystem: kind === "system",
+        isSystem: kind === "system" || kind === "reserved_top_level",
         isMisplaced: kind === "misplaced",
       });
     }
@@ -162,28 +762,39 @@ export function buildWikiPathIndex(pages: WikiPage[]): Map<string, string> {
   return index;
 }
 
-export function extractLinkTargets(content: string, sourceRelPath: string): string[] {
-  const targets: string[] = [];
+interface RawLinkTarget {
+  raw: string;
+  target: string;
+  isDoubleBracket: boolean;
+}
+
+function extractRawLinkTargets(content: string, sourceRelPath: string): RawLinkTarget[] {
+  const targets: RawLinkTarget[] = [];
   const seen = new Set<string>();
-  const add = (value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed || seen.has(trimmed)) return;
-    seen.add(trimmed);
-    targets.push(trimmed);
+  const add = (raw: string, target: string, isDoubleBracket: boolean) => {
+    const key = `${isDoubleBracket ? "w" : "m"}:${target}`;
+    if (!target || seen.has(key)) return;
+    seen.add(key);
+    targets.push({ raw, target, isDoubleBracket });
   };
 
   for (const match of content.matchAll(WIKI_DOUBLE_BRACKET_RE)) {
-    add(match[1] ?? "");
+    const raw = (match[1] ?? "").trim();
+    if (raw) add(raw, raw, true);
   }
 
   const wikiRel = wikiRelDir(sourceRelPath);
   for (const match of content.matchAll(WIKI_LINK_RE)) {
     if (match[1] === "!") continue;
-    const href = match[3] ?? "";
-    if (isExternalOrAssetLink(href)) continue;
-    add(resolveHrefToWikiTarget(href, wikiRel));
+    const href = (match[3] ?? "").trim();
+    if (!href || isExternalOrAssetLink(href)) continue;
+    add(href, resolveHrefToWikiTarget(href, wikiRel), false);
   }
   return targets;
+}
+
+export function extractLinkTargets(content: string, sourceRelPath: string): string[] {
+  return extractRawLinkTargets(content, sourceRelPath).map((t) => t.target);
 }
 
 function wikiRelDir(relPath: string): string {
@@ -218,10 +829,6 @@ function normalizeWikiPath(value: string): string {
   return clean.join("/");
 }
 
-function wikiTargetExists(index: Map<string, string>, target: string): boolean {
-  return resolveWikiTarget(index, target) !== "";
-}
-
 export function resolveWikiTarget(index: Map<string, string>, target: string): string {
   const trimmed = target.trim().replace(/^\/+|\/+$/g, "");
   if (!trimmed) return "";
@@ -238,7 +845,6 @@ export function resolveWikiTarget(index: Map<string, string>, target: string): s
   }
   return "";
 }
-
 function isExternalOrAssetLink(href: string): boolean {
   if (
     href.startsWith("http://") ||
@@ -335,37 +941,6 @@ export async function lintGhostIndexEntries(
 
 export function docRelativePath(doc: { path: string; filename: string }): string {
   return `${doc.path.replace(/^\/+/, "")}${doc.filename}`;
-}
-
-async function computeLintStats(workspace: string, pages: WikiPage[]): Promise<LintStats> {
-  const stats: LintStats = { page_count: 0, source_count: 0 };
-  for (const page of pages) {
-    if (!page.isSystem) stats.page_count += 1;
-  }
-
-  const sourcesDir = path.join(workspace, "raw", "sources");
-  try {
-    for (const entry of await readdir(sourcesDir, { withFileTypes: true })) {
-      if (!entry.isDirectory() && entry.name !== ".gitkeep") stats.source_count += 1;
-    }
-  } catch (error) {
-    if (!isNotFound(error)) throw error;
-  }
-
-  let lastDate = "";
-  for (const page of pages) {
-    if (page.isSystem) continue;
-    try {
-      const frontmatter = parseFrontmatter(await readFile(page.absPath, "utf8"));
-      if (frontmatter.date && (!lastDate || frontmatter.date > lastDate)) {
-        lastDate = frontmatter.date;
-      }
-    } catch {
-      continue;
-    }
-  }
-  if (lastDate) stats.last_updated = lastDate;
-  return stats;
 }
 
 function isNotFound(error: unknown): boolean {

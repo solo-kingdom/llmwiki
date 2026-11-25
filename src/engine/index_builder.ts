@@ -14,6 +14,8 @@ const WIKI_SUBDIRS: WikiSubdir[] = [
   { dir: "concepts", heading: "概念 (concepts)" },
   { dir: "sources", heading: "源摘要 (sources)" },
   { dir: "synthesis", heading: "综合分析 (synthesis)" },
+  { dir: "experiences", heading: "经验 (experiences)" },
+  { dir: "ledgers", heading: "业务台账 (ledgers)" },
   { dir: "comparisons", heading: "对比分析 (comparisons)" },
   { dir: "queries", heading: "查询归档 (queries)" },
 ];
@@ -22,8 +24,16 @@ export interface IndexEntry {
   subdir: string;
   slug: string;
   title: string;
+  type: string;
   description: string;
   date: string;
+  confidence: string;
+  status: string;
+  last_verified: string;
+  review_after: string;
+  archived_at: string;
+  archive_reason: string;
+  superseded_by: string;
 }
 
 const SYSTEM_WIKI_PATHS = new Set(["wiki/index.md", "wiki/log.md", "wiki/overview.md"]);
@@ -35,6 +45,14 @@ export interface IndexSourceDocument {
   updated_at?: string;
   content?: string;
   source_kind?: string;
+  page_type?: string;
+  confidence?: string;
+  page_status?: string;
+  last_verified?: string;
+  review_after?: string;
+  archived_at?: string;
+  archive_reason?: string;
+  superseded_by?: string;
 }
 
 /**
@@ -66,7 +84,21 @@ export function indexEntriesFromDocuments(
     else if (date.length > 10) date = date.slice(0, 10);
 
     const list = result.get(subdir) ?? [];
-    list.push({ subdir, slug, title, description, date });
+    list.push({
+      subdir,
+      slug,
+      title,
+      type: doc.page_type || frontmatter.type || "",
+      description,
+      date,
+      confidence: doc.confidence || frontmatter.confidence || "",
+      status: doc.page_status || frontmatter.status || "",
+      last_verified: doc.last_verified || frontmatter.last_verified || "",
+      review_after: doc.review_after || frontmatter.review_after || "",
+      archived_at: doc.archived_at || frontmatter.archived_at || "",
+      archive_reason: doc.archive_reason || frontmatter.archive_reason || "",
+      superseded_by: doc.superseded_by || frontmatter.superseded_by || "",
+    });
     result.set(subdir, list);
   }
   for (const entries of result.values()) {
@@ -102,15 +134,33 @@ export class IndexBuilder {
       if (!orderedDirs.includes(dir)) orderedDirs.push(dir);
     }
 
+    const archived: IndexEntry[] = [];
     for (const dir of orderedDirs) {
       const heading = headings.get(dir) ?? dir;
+      const entries = (entriesBySubdir?.get(dir) ?? []).filter((entry) => {
+        if (entry.archived_at) {
+          archived.push(entry);
+          return false;
+        }
+        return true;
+      });
       output += `## ${heading}\n\n`;
-      output += "| 页面 | 标题 | 摘要 | 更新日期 |\n";
-      output += "|------|------|------|----------|\n";
-      const entries = entriesBySubdir?.get(dir) ?? [];
+      output += "| 页面 | 标题 | 摘要 | 更新日期 | 置信度 | 状态 | 核实日期 | 复审日期 |\n";
+      output += "|------|------|------|----------|--------|------|----------|----------|\n";
       for (const entry of entries) {
         const link = `[[${entry.subdir}/${entry.slug}\\|${escapeGFMTableCell(entry.title)}]]`;
-        output += `| ${link} | ${escapeGFMTableCell(entry.title)} | ${escapeGFMTableCell(entry.description)} | ${escapeGFMTableCell(entry.date)} |\n`;
+        output += `| ${link} | ${escapeGFMTableCell(entry.title)} | ${escapeGFMTableCell(entry.description)} | ${escapeGFMTableCell(entry.date)} | ${escapeGFMTableCell(entry.confidence || "-")} | ${escapeGFMTableCell(entry.status || "-")} | ${escapeGFMTableCell(entry.last_verified || "-")} | ${escapeGFMTableCell(entry.review_after || "-")} |\n`;
+      }
+      output += "\n";
+    }
+
+    if (archived.length > 0) {
+      output += "## 已归档 (archived)\n\n";
+      output += "| 页面 | 类型 | 标题 | 摘要 | 归档日期 | 归档原因 | 替代页 |\n";
+      output += "|------|------|------|------|----------|----------|--------|\n";
+      for (const entry of archived) {
+        const link = `[[${entry.subdir}/${entry.slug}\\|${escapeGFMTableCell(entry.title)}]]`;
+        output += `| ${link} | ${escapeGFMTableCell(entry.type || "-")} | ${escapeGFMTableCell(entry.title)} | ${escapeGFMTableCell(entry.description)} | ${escapeGFMTableCell(entry.archived_at)} | ${escapeGFMTableCell(entry.archive_reason || "-")} | ${escapeGFMTableCell(entry.superseded_by || "-")} |\n`;
       }
       output += "\n";
     }
@@ -163,7 +213,17 @@ export class IndexBuilder {
     const data = await readFile(fullPath, "utf8");
     const frontmatter = parseFrontmatter(data);
     const title = frontmatter.title || titleFromFilename(filename);
-    const description = truncateRunes(frontmatter.description, 80);
+    let summary = frontmatter.description;
+    const expKind = frontmatter.kind ?? "";
+    if (frontmatter.type === "experience" && (expKind === "pitfall" || expKind === "pattern")) {
+      const parts = [`[${expKind}]`];
+      if (summary) parts.push(summary);
+      if (frontmatter.symptoms && frontmatter.symptoms.length > 0) {
+        parts.push(`现象：${frontmatter.symptoms.join("、")}`);
+      }
+      summary = parts.join(" ");
+    }
+    const description = truncateRunes(summary, 80);
     let date = frontmatter.date;
     if (!date) {
       const info = await stat(fullPath);
@@ -171,7 +231,21 @@ export class IndexBuilder {
     } else if (date.length > 10) {
       date = date.slice(0, 10);
     }
-    return { subdir, slug, title, description, date };
+    return {
+      subdir,
+      slug,
+      title,
+      type: frontmatter.type,
+      description,
+      date,
+      confidence: frontmatter.confidence ?? "",
+      status: frontmatter.status ?? "",
+      last_verified: frontmatter.last_verified ?? "",
+      review_after: frontmatter.review_after ?? "",
+      archived_at: frontmatter.archived_at ?? "",
+      archive_reason: frontmatter.archive_reason ?? "",
+      superseded_by: frontmatter.superseded_by ?? "",
+    };
   }
 
   async writeIndex(): Promise<void> {

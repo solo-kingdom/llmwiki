@@ -30,6 +30,7 @@ import type {
   ReferenceEntryInput,
   ReferenceEntryView,
   SearchChunk,
+  SearchOptions,
   SessionMessageEvent,
   SourceBlob,
   StalePage,
@@ -67,7 +68,7 @@ export interface IndexStore {
     query: string,
     limit: number,
     pathFilter: string,
-    pageTypes?: string[],
+    options?: string[] | SearchOptions,
   ): Promise<SearchChunk[]>;
 
   deleteReferences(sourceDocID: string): Promise<void>;
@@ -89,7 +90,7 @@ export interface IndexStore {
     model: string,
     limit: number,
     pathFilter: string,
-    pageTypes?: string[],
+    options?: string[] | SearchOptions,
   ): Promise<SearchChunk[]>;
   chunksMissingEmbedding(model: string, limit: number): Promise<Chunk[]>;
 }
@@ -256,7 +257,7 @@ export interface WorkspaceStore {
 }
 
 export interface FolderStore {
-  listFolders(excludeHidden?: boolean): Promise<WikiFolderWithCounts[]>;
+  listFolders(excludeHidden?: boolean, includeArchived?: boolean): Promise<WikiFolderWithCounts[]>;
   getFolder(folderPath: string): Promise<WikiFolder | null>;
   ensureFolders(folderPaths: string[]): Promise<void>;
   createFolder(input: {

@@ -43,6 +43,14 @@ Severities: `error` (breaks navigation, indexing or the page contract), `warning
 | `entity_concept_coupling` | warning | a concept page's title is bound to one entity | rename/generalize the concept and link the entity case as `[[entities/…]]` |
 | `log_format_invalid` | error | `wiki/log.md` entry breaks `## [YYYY-MM-DD] action \| description` | rewrite that one entry; never reorder the log |
 | `log_date_decreasing` | warning | log entries out of chronological order | reorder entries, keep every one |
+| `confidence_invalid` / `confidence_missing` | error / warning | invalid or missing `confidence` on active page | set `high`/`medium`/`low` |
+| `verification_missing` | error | `high` missing `last_verified` or `validated` experience missing dates | add `last_verified` / `review_after` |
+| `date_invalid` | error | non-ISO or invalid calendar date | fix to `YYYY-MM-DD` |
+| `archive_metadata_invalid` | error | unpaired `archived_at` / `archive_reason` / `superseded_by` | use `/archive` or `/reopen` |
+| `kind_invalid` / `experience_status_invalid` | error | invalid `kind` or `experience.status` | fix enum value |
+| `ambiguous_link` | error | short link matches multiple pages | use path-qualified `[[folder/slug]]` |
+| `symptoms_missing` / `pattern_instances_insufficient` | warning | `pitfall`/`pattern` missing `symptoms`, or `pattern` has `< 2` active pitfalls | add `symptoms` or link instances |
+| `review_overdue` / `archived_reference` | warning | past `review_after` / active page links to archived page | re-verify or update link |
 
 `wiki/templates/` is scaffolding and is skipped by every check — a freshly initialised vault lints clean. If it does not, the vault itself is broken.
 

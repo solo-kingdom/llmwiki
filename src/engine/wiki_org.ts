@@ -7,12 +7,26 @@ export const VALID_PAGE_TYPES = [
   "synthesis",
   "comparison",
   "query",
+  "experience",
+  "ledger",
   "page",
 ] as const;
 
 export type WikiPageType = (typeof VALID_PAGE_TYPES)[number];
 
 const VALID_PAGE_TYPE_SET = new Set<string>(VALID_PAGE_TYPES);
+
+export const CONFIDENCE_LEVELS = ["high", "medium", "low"] as const;
+export type ConfidenceLevel = (typeof CONFIDENCE_LEVELS)[number];
+const CONFIDENCE_LEVEL_SET = new Set<string>(CONFIDENCE_LEVELS);
+
+export const EXPERIENCE_KINDS = ["practice", "pitfall", "pattern"] as const;
+export type ExperienceKind = (typeof EXPERIENCE_KINDS)[number];
+const EXPERIENCE_KIND_SET = new Set<string>(EXPERIENCE_KINDS);
+
+export const EXPERIENCE_STATUSES = ["draft", "validated", "deprecated"] as const;
+export type ExperienceStatus = (typeof EXPERIENCE_STATUSES)[number];
+const EXPERIENCE_STATUS_SET = new Set<string>(EXPERIENCE_STATUSES);
 
 export const WIKI_SUBDIR_PAGE_TYPES: Record<string, string> = {
   entities: "entity",
@@ -21,6 +35,8 @@ export const WIKI_SUBDIR_PAGE_TYPES: Record<string, string> = {
   synthesis: "synthesis",
   comparisons: "comparison",
   queries: "query",
+  experiences: "experience",
+  ledgers: "ledger",
 };
 
 export const PAGE_TYPE_TO_WIKI_SUBDIR: Record<string, string> = {
@@ -30,6 +46,8 @@ export const PAGE_TYPE_TO_WIKI_SUBDIR: Record<string, string> = {
   synthesis: "synthesis",
   comparison: "comparisons",
   query: "queries",
+  experience: "experiences",
+  ledger: "ledgers",
 };
 
 export const RESERVED_TOP_LEVEL_WIKI_PAGES = new Set([
@@ -53,6 +71,8 @@ export const TYPED_WIKI_SUBDIRS = [
   "synthesis",
   "comparisons",
   "queries",
+  "experiences",
+  "ledgers",
 ];
 
 export type WikiPathKind =
@@ -64,6 +84,18 @@ export type WikiPathKind =
 
 export function isValidPageType(value: string): boolean {
   return VALID_PAGE_TYPE_SET.has(value.trim().toLowerCase());
+}
+
+export function isValidConfidence(value: string): boolean {
+  return CONFIDENCE_LEVEL_SET.has(value.trim().toLowerCase());
+}
+
+export function isValidExperienceKind(value: string): boolean {
+  return EXPERIENCE_KIND_SET.has(value.trim().toLowerCase());
+}
+
+export function isValidExperienceStatus(value: string): boolean {
+  return EXPERIENCE_STATUS_SET.has(value.trim().toLowerCase());
 }
 
 export function normalizeWikiRelPath(relPath: string): string {

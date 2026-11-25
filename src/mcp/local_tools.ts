@@ -4,9 +4,10 @@ import {
   LINT_SEVERITY_WARNING,
   type LintReport,
 } from "../engine/lint_types.js";
-import { lintWorkspace } from "../engine/lint.js";
+import { lintDocuments, lintWorkspace } from "../engine/lint.js";
 import type { ToolLoopConfig } from "../llm/types.js";
 import type { Store } from "../store/interfaces.js";
+import type { ArchiveFilter, SearchOptions } from "../store/types.js";
 import type { Tool } from "./types.js";
 import {
   executeLocalAudit,
@@ -30,6 +31,11 @@ export const searchTool: Tool = {
       query: { type: "string", default: "" },
       path: { type: "string", default: "*" },
       limit: { type: "integer", default: 10 },
+      types: { type: "array", items: { type: "string" } },
+      kinds: { type: "array", items: { type: "string" } },
+      statuses: { type: "array", items: { type: "string" } },
+      confidences: { type: "array", items: { type: "string" } },
+      archived: { type: "string", enum: ["exclude", "include", "only"], default: "exclude" },
     },
     required: [],
   },
@@ -153,25 +159,58 @@ export async function executeLocalSearch(
   if (rawPath === "wiki" || rawPath === "wiki/") pathFilter = "wiki";
   else if (rawPath === "sources" || rawPath === "raw/sources") pathFilter = "sources";
 
+  const strArray = (key: string): string[] =>
+    Array.isArray(args[key])
+      ? (args[key] as unknown[]).filter((v): v is string => typeof v === "string" && v.trim() !== "")
+      : [];
+  const rawArchived = typeof args["archived"] === "string" ? args["archived"].trim().toLowerCase() : "";
+  const archived: ArchiveFilter =
+    rawArchived === "include" || rawArchived === "only" || rawArchived === "exclude"
+      ? rawArchived
+      : "exclude";
+  const searchOptions: SearchOptions = {
+    page_types: strArray("types"),
+    experience_kinds: strArray("kinds"),
+    statuses: strArray("statuses"),
+    confidences: strArray("confidences"),
+    archived,
+  };
+
   switch (mode) {
     case "list": {
-      const docs = await db.listDocuments();
+      const docs = await db.listDocumentsFiltered({
+        page_types: searchOptions.page_types,
+        experience_kinds: searchOptions.experience_kinds,
+        statuses: searchOptions.statuses,
+        confidences: searchOptions.confidences,
+        archived,
+      });
       if (docs.length === 0) return "No documents found.";
       let output = `Found ${docs.length} documents:\n\n`;
       for (const doc of docs) {
-        output += `- **${doc.title || doc.filename}** — \`${doc.relative_path}\` [${doc.file_type}]\n`;
+        const meta = [doc.page_type, doc.experience_kind, doc.page_status, doc.confidence]
+          .filter(Boolean)
+          .join("/");
+        const archivedTag = doc.archived_at ? ` [archived:${doc.archived_at}]` : "";
+        output += `- **${doc.title || doc.filename}** — \`${doc.relative_path}\` [${meta || doc.file_type}]${archivedTag}\n`;
       }
       return output;
     }
     case "search": {
       const query = typeof args["query"] === "string" ? args["query"] : "";
       if (!query.trim()) return "Error: query is required for search mode";
-      const results = await db.searchChunks(query, limit, pathFilter);
+      const results = await db.searchChunks(query, limit, pathFilter, searchOptions);
       if (results.length === 0) return `No results found for: ${query}`;
       let output = `Found ${results.length} results for "${query}":\n\n`;
       for (const result of results) {
-        output += `### ${result.title || result.filename} (${result.path}) [score: ${result.score.toFixed(2)}]\n`;
+        const meta = [result.page_type, result.experience_kind, result.page_status, result.confidence]
+          .filter(Boolean)
+          .join("/");
+        output += `### ${result.title || result.filename} (${result.path}) [${meta ? `${meta} · ` : ""}score: ${result.score.toFixed(2)}]\n`;
         if (result.header_breadcrumb) output += `Section: ${result.header_breadcrumb}\n`;
+        if (result.symptoms && result.symptoms.length > 0) {
+          output += `Symptoms: ${result.symptoms.join(", ")}\n`;
+        }
         output += `${result.content}\n\n---\n\n`;
       }
       return output;
@@ -179,8 +218,12 @@ export async function executeLocalSearch(
     case "references":
       return executeLocalReferences(db, args);
     case "lint": {
-      if (!workspace) return "Error: workspace not configured";
-      const report = await lintWorkspace(workspace);
+      const report = db
+        ? await lintDocuments(db, { workspace })
+        : workspace
+          ? await lintWorkspace(workspace)
+          : null;
+      if (!report) return "Error: workspace not configured";
       return formatLintMcp(report);
     }
     default:
@@ -229,7 +272,8 @@ export function formatLintMcp(report: LintReport): string {
     else if (issue.severity === LINT_SEVERITY_WARNING) warnings += 1;
   }
   let output = `# Wiki Lint\n\n${errors} 错误, ${warnings} 警告\n\n`;
-  output += `统计：${report.stats.page_count} 页, ${report.stats.source_count} 源文件`;
+  output += `统计：${report.stats.page_count} 页（活跃 ${report.stats.active} / 已归档 ${report.stats.archived}）, ${report.stats.source_count} 源文件`;
+  if (report.stats.review_overdue > 0) output += `, 待复审 ${report.stats.review_overdue} 页`;
   if (report.stats.last_updated) output += `, 最后更新 ${report.stats.last_updated}`;
   output += "\n\n";
 

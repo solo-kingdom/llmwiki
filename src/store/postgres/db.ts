@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type { Store } from "../interfaces.js";
 import { activityRepo } from "./activity_logs.js";
 import { apiKeysRepo } from "./api_keys.js";
+import { archivesRepo } from "./archives.js";
 import { chunksRepo } from "./chunks.js";
 import { configRepo } from "./config.js";
 import { documentsRepo } from "./documents.js";
@@ -21,6 +22,7 @@ export function createStore(pool: Pool): Store {
   const store = {
     ...documentsRepo(pool),
     ...foldersRepo(pool),
+    ...archivesRepo(pool),
     ...chunksRepo(pool),
     ...graphRepo(pool),
     ...referenceEntriesRepo(pool),

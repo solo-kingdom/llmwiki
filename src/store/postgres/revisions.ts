@@ -14,7 +14,7 @@ const REVISION_COLUMNS = `
   r.source_kind, r.file_type, r.actor, r.created_at`;
 
 const CHANGE_SET_COLUMNS = `
-  cs.id, cs.kind, cs.job_id, cs.review_id, cs.source_blob_id, cs.source_filename,
+  cs.id, cs.kind, cs.job_id, cs.review_id, cs.source_blob_id, cs.archive_file_id, cs.source_filename,
   cs.normalized_content, cs.summary, cs.rollback_of, cs.created_at,
   (SELECT COUNT(*) FROM page_revisions pr WHERE pr.change_set_id = cs.id)`;
 
@@ -60,12 +60,13 @@ function scanChangeSet(row: unknown[]): ChangeSet {
     job_id: asString(row[2]),
     review_id: asString(row[3]),
     source_blob_id: asString(row[4]),
-    source_filename: asString(row[5]),
-    normalized_content: asString(row[6]),
-    summary: asString(row[7]),
-    rollback_of: asString(row[8]),
-    created_at: asString(row[9]),
-    page_count: asNumber(row[10]),
+    archive_file_id: asString(row[5]),
+    source_filename: asString(row[6]),
+    normalized_content: asString(row[7]),
+    summary: asString(row[8]),
+    rollback_of: asString(row[9]),
+    created_at: asString(row[10]),
+    page_count: asNumber(row[11]),
   };
 }
 
@@ -151,15 +152,16 @@ async function lockWorkspace(client: PoolClient): Promise<void> {
 
 async function insertChangeSet(client: PoolClient, changeSet: ChangeSet): Promise<void> {
   await client.query(
-    `INSERT INTO change_sets (id, kind, job_id, review_id, source_blob_id, source_filename,
+    `INSERT INTO change_sets (id, kind, job_id, review_id, source_blob_id, archive_file_id, source_filename,
       normalized_content, summary, rollback_of)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [
       changeSet.id,
       changeSet.kind,
       changeSet.job_id ?? "",
       changeSet.review_id ?? "",
       changeSet.source_blob_id ?? "",
+      changeSet.archive_file_id ?? "",
       changeSet.source_filename ?? "",
       changeSet.normalized_content ?? "",
       changeSet.summary ?? "",

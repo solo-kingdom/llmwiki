@@ -18,6 +18,7 @@ const JOB_COLUMNS = `
   COALESCE(error_code, ''), COALESCE(error_message, ''),
   COALESCE(missing_dependency, ''), COALESCE(remediation, ''),
   COALESCE(result_summary, ''), COALESCE(runner_id, ''), COALESCE(heartbeat_at, ''),
+  COALESCE(archive_file_id, ''),
   COALESCE(created_at, ''), COALESCE(updated_at, '')`;
 
 const STALE_CUTOFF = `to_char((now() AT TIME ZONE 'utc') - interval '${STALE_HEARTBEAT_SECONDS} seconds', 'YYYY-MM-DD HH24:MI:SS')`;
@@ -71,8 +72,9 @@ function scanJob(row: unknown[]): IngestJob {
     result_summary: asString(row[13]),
     runner_id: asString(row[14]),
     heartbeat_at: asString(row[15]),
-    created_at: asString(row[16]),
-    updated_at: asString(row[17]),
+    archive_file_id: asString(row[16]),
+    created_at: asString(row[17]),
+    updated_at: asString(row[18]),
   };
 }
 
@@ -143,8 +145,8 @@ export function ingestJobsRepo(pool: Pool): JobStore {
         `INSERT INTO ingest_jobs (
           id, parent_job_id, input_type, source_path, source_ref, status,
           retries, max_retries, error, error_code, error_message,
-          missing_dependency, remediation, result_summary, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, ${NOW_TEXT}, ${NOW_TEXT})
+          missing_dependency, remediation, result_summary, archive_file_id, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ${NOW_TEXT}, ${NOW_TEXT})
         RETURNING ${JOB_COLUMNS}`,
         [
           randomUUID(),
@@ -161,6 +163,7 @@ export function ingestJobsRepo(pool: Pool): JobStore {
           job.missing_dependency,
           job.remediation,
           job.result_summary,
+          (job.archive_file_id ?? "").trim(),
         ],
       );
       if (!row) throw new Error("create ingest job: no row returned");

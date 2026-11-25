@@ -201,6 +201,7 @@ export interface IngestJob {
   result_summary: string;
   runner_id?: string;
   heartbeat_at?: string;
+  archive_file_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -266,6 +267,7 @@ export interface IngestReview {
   id: string;
   session_id: string;
   archive_source_path: string;
+  archive_file_id?: string;
   status: string;
   current_plan_version: number;
   approved_plan_version: number;
@@ -381,6 +383,7 @@ export interface ChangeSet {
   job_id?: string;
   review_id?: string;
   source_blob_id?: string;
+  archive_file_id?: string;
   source_filename?: string;
   normalized_content?: string;
   summary?: string;
@@ -467,6 +470,107 @@ export interface PageWrite {
 }
 
 export const CONFIG_API_TOKEN = "api_token";
+
+export const DEFAULT_ARCHIVE_INLINE_MAX_BYTES = 131072; // 128 KB
+export const CONFIG_ARCHIVE_INLINE_MAX_BYTES = "archive_inline_max_bytes";
+export const CONFIG_ARCHIVE_STORAGE_BACKEND = "archive_storage_backend";
+export const CONFIG_ARCHIVE_LOCAL_DIR = "archive_local_dir";
+export const CONFIG_ARCHIVE_S3_ENDPOINT = "archive_s3_endpoint";
+export const CONFIG_ARCHIVE_S3_REGION = "archive_s3_region";
+export const CONFIG_ARCHIVE_S3_BUCKET = "archive_s3_bucket";
+export const CONFIG_ARCHIVE_S3_PREFIX = "archive_s3_prefix";
+export const CONFIG_ARCHIVE_S3_ACCESS_KEY_ID = "archive_s3_access_key_id";
+export const CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY = "archive_s3_secret_access_key";
+export const CONFIG_ARCHIVE_S3_FORCE_PATH_STYLE = "archive_s3_force_path_style";
+
+export type ArchiveFileKind =
+  | "markdown"
+  | "html"
+  | "image"
+  | "video"
+  | "audio"
+  | "pdf"
+  | "text"
+  | "other";
+
+export type ArchiveStorageBackend = "db" | "local" | "s3";
+
+export type ArchiveFileOrigin =
+  | "upload"
+  | "ingest_upload"
+  | "ingest_text"
+  | "ingest_conversation"
+  | "ingest_session";
+
+export interface ArchiveFolder {
+  path: string;
+  display_name: string;
+  description: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ArchiveFolderWithCounts extends ArchiveFolder {
+  direct_count: number;
+  total_count: number;
+}
+
+export interface ArchiveFile {
+  id: string;
+  folder_path: string;
+  filename: string;
+  relative_path: string;
+  media_type: string;
+  kind: ArchiveFileKind;
+  size: number;
+  sha256: string;
+  storage_backend: ArchiveStorageBackend;
+  storage_key: string;
+  origin: ArchiveFileOrigin;
+  source_ref: string;
+  ingest_job_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ArchiveLinkedDocument {
+  document_id: string;
+  title: string;
+  relative_path: string;
+  page_type: string;
+  relation: string;
+  created_at: string;
+}
+
+export interface ArchiveSourceSummary {
+  id: string;
+  filename: string;
+  folder_path: string;
+  relative_path: string;
+  kind: ArchiveFileKind;
+  media_type: string;
+  size: number;
+  origin: ArchiveFileOrigin;
+  relation: string;
+  created_at: string;
+}
+
+export interface MoveArchiveFolderResult {
+  from_path: string;
+  to_path: string;
+  moved_folders: number;
+  moved_files: number;
+}
+
+export interface DeleteArchiveFolderResult {
+  path: string;
+  mode: FolderDeleteMode;
+  deleted_folders: number;
+  moved_files: number;
+  deleted_files: number;
+  removed_storage_refs: Array<{ storage_backend: ArchiveStorageBackend; storage_key: string }>;
+}
 
 export const API_KEY_PREFIX = "llmwiki_sk_";
 export const MAX_API_KEYS = 20;

@@ -8,7 +8,7 @@ import type {
   ReferenceSummary,
   StalePage,
   KnowledgeGraphResponse,
-  IngestJob,
+  IngestJobList,
   IngestJobResponse,
   IngestJobEventsResponse,
   UploadIngestResponse,
@@ -423,8 +423,20 @@ export function uploadIngestJobs(
   })
 }
 
-export function listIngestJobs(limit = 50): Promise<IngestJob[]> {
-  return request<IngestJob[]>(`/api/v1/ingest/jobs?limit=${limit}`)
+export function listIngestJobs(params: {
+  status?: string
+  inputType?: string
+  q?: string
+  limit?: number
+  offset?: number
+} = {}): Promise<IngestJobList> {
+  const search = new URLSearchParams()
+  search.set("limit", String(params.limit ?? 50))
+  search.set("offset", String(params.offset ?? 0))
+  if (params.status) search.set("status", params.status)
+  if (params.inputType) search.set("input_type", params.inputType)
+  if (params.q) search.set("q", params.q)
+  return request<IngestJobList>(`/api/v1/ingest/jobs?${search.toString()}`)
 }
 
 export function getIngestJob(id: string): Promise<IngestJobResponse> {

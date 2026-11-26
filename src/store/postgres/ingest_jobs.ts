@@ -1,6 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { JobStore } from "../interfaces.js";
+import {
+  buildIngestJobListWhere,
+  clampJobListLimit,
+  clampJobListOffset,
+  emptyIngestJobStatusCounts,
+  type IngestJobListFilter,
+  type IngestJobListResult,
+  type IngestJobStatusCounts,
+} from "../job_list.js";
 import type { IngestJob } from "../types.js";
 import {
   DEFAULT_JOB_EVENTS_MAX_COUNT,
@@ -34,6 +43,10 @@ const RECOVER_STALE_SQL = `
   AND (heartbeat_at = '' OR heartbeat_at < ${STALE_CUTOFF})`;
 
 const VALID_STATUS = new Set(["queued", "running", "succeeded", "failed", "cancelled"]);
+
+function isListedJobStatus(status: string): status is keyof IngestJobStatusCounts {
+  return status === "queued" || status === "running" || status === "succeeded" || status === "failed" || status === "cancelled";
+}
 
 function normalizeJobStatus(status: string): string {
   switch (status.trim().toLowerCase()) {
@@ -190,16 +203,30 @@ export function ingestJobsRepo(pool: Pool): JobStore {
       return row ? scanJob(row) : null;
     },
 
-    async listIngestJobs(limit: number): Promise<IngestJob[]> {
-      const effectiveLimit = limit <= 0 || limit > 500 ? 50 : limit;
-      const rows = await queryRows(
-        pool,
-        `SELECT ${JOB_COLUMNS} FROM ingest_jobs
-         ORDER BY created_at DESC, id DESC
-         LIMIT $1`,
-        [effectiveLimit],
-      );
-      return rows.map(scanJob);
+    async listIngestJobs(filter: IngestJobListFilter): Promise<IngestJobListResult> {
+      const limit = clampJobListLimit(filter.limit);
+      const offset = clampJobListOffset(filter.offset);
+      const { clause, params } = buildIngestJobListWhere(filter);
+      const limitParam = params.length + 1;
+      const offsetParam = params.length + 2;
+      const [rows, totalRow, countRows] = await Promise.all([
+        queryRows(
+          pool,
+          `SELECT ${JOB_COLUMNS} FROM ingest_jobs ${clause}
+           ORDER BY created_at DESC, id DESC
+           LIMIT $${limitParam} OFFSET $${offsetParam}`,
+          [...params, limit, offset],
+        ),
+        queryOne<[number | string]>(pool, `SELECT COUNT(*)::int FROM ingest_jobs ${clause}`, params),
+        queryRows<[string, number | string]>(pool, "SELECT status, COUNT(*)::int FROM ingest_jobs GROUP BY status"),
+      ]);
+      const counts = emptyIngestJobStatusCounts();
+      for (const row of countRows) {
+        const status = normalizeJobStatus(asString(row[0]));
+        if (!isListedJobStatus(status)) continue;
+        counts[status] = asNumber(row[1]);
+      }
+      return { jobs: rows.map(scanJob), total: asNumber(totalRow?.[0]), counts };
     },
 
     async updateIngestJobStatus(id: string, status: string): Promise<void> {

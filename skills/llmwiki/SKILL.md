@@ -111,4 +111,5 @@ Read the stage skill before starting its task; each one lists the exact payloads
 - Errors are `{"error": "message"}` with a 4xx/5xx status. `503` on `/api/v1/workspace` or ingest endpoints means the server has no vault configured — stop and report, do not retry in a loop.
 - Lists return `[]`, never `null`.
 - Ingest jobs return an id immediately; poll `GET /api/v1/ingest/jobs/{id}` (statuses `queued → running → succeeded|failed`) instead of assuming completion.
+- `GET /api/v1/ingest/jobs` returns `{ jobs, total, counts }`, not a bare array. Filter with `status` (comma-separated `queued`, `running`, `succeeded`, `failed`, `cancelled`), `input_type`, and `q` (matches id, source path, and source ref). `limit` defaults to 50 and caps at 100; `offset` pages through `total`. `counts` is the unfiltered tally of every status.
 - Every non-streaming request is cut off after 60s by the server's timeout middleware. A long `POST /api/v1/reindex` on a big vault can hit it — treat a timeout as "maybe still running", re-read state, and do not fire a second reindex blindly.

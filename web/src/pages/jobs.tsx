@@ -1,11 +1,13 @@
-import { useMemo, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import type { ColumnDef } from "@tanstack/react-table"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  BanIcon,
   CheckCircle2Icon,
   FileTextIcon,
   FileUpIcon,
   GlobeIcon,
+  ListIcon,
   Loader2Icon,
   MessageSquareIcon,
   RotateCcwIcon,
@@ -21,9 +23,44 @@ import { AppLink } from "@/components/blocks/router"
 import { EmptyState } from "@/components/blocks/state-boundary"
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { cancelIngestJob, getIngestJob, getIngestJobEvents, listIngestJobs, retryIngestJob } from "@/lib/api"
-import type { IngestJob } from "@/types"
+import type { IngestJob, IngestJobStatusCounts } from "@/types"
+import { cn } from "cn"
+
+const PAGE_SIZE = 50
+
+const EMPTY_COUNTS: IngestJobStatusCounts = {
+  queued: 0,
+  running: 0,
+  succeeded: 0,
+  failed: 0,
+  cancelled: 0,
+}
+
+type StatusFilter = "" | "queued,running" | "succeeded" | "failed" | "cancelled"
+
+const INPUT_TYPES = [
+  { value: "all", label: "全部类型" },
+  { value: "text", label: "文本" },
+  { value: "upload", label: "上传" },
+  { value: "file", label: "文件" },
+  { value: "conversation", label: "对话" },
+  { value: "session_archive", label: "会话归档" },
+  { value: "review_plan", label: "审阅计划" },
+  { value: "review_apply", label: "审阅应用" },
+  { value: "rollback", label: "回滚" },
+] as const
+
+function useDebounced(value: string, delay: number): string {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay)
+    return () => window.clearTimeout(timer)
+  }, [value, delay])
+  return debounced
+}
 
 function JobSourceIcon({ inputType }: { inputType: string }) {
   const kind = inputType.toLowerCase()
@@ -154,39 +191,84 @@ function JobDetail({ jobId, onClose }: { jobId: string; onClose: () => void }) {
   )
 }
 
+function StatusFilterButton({
+  label,
+  count,
+  tone,
+  pressed,
+  onClick,
+  children,
+}: {
+  label: string
+  count: number
+  tone: "muted" | "sky" | "emerald" | "rose" | "amber"
+  pressed: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      className={cn("llmwiki-stat-pill", `llmwiki-stat-pill--${tone}`, pressed && "llmwiki-stat-pill--pressed")}
+      aria-pressed={pressed}
+      onClick={onClick}
+    >
+      {children}
+      {label} {count}
+    </button>
+  )
+}
+
 export function JobsPage() {
   const [selectedId, setSelectedId] = useState("")
   const [search, setSearch] = useState("")
+  const [status, setStatus] = useState<StatusFilter>("")
+  const [inputType, setInputType] = useState("all")
+  const [page, setPage] = useState(1)
+  const debounced = useDebounced(search.trim(), 300)
+  const filterKey = `${status}\0${inputType}\0${debounced}`
+  const [pageFilter, setPageFilter] = useState(filterKey)
+  if (pageFilter !== filterKey) {
+    setPageFilter(filterKey)
+    setPage(1)
+  }
+  const effectivePage = pageFilter === filterKey ? page : 1
+
   const jobsQuery = useQuery({
-    queryKey: ["ingest-jobs"],
-    queryFn: () => listIngestJobs(50),
+    queryKey: ["ingest-jobs", status, inputType, debounced, effectivePage],
+    queryFn: () => listIngestJobs({
+      limit: PAGE_SIZE,
+      offset: (effectivePage - 1) * PAGE_SIZE,
+      ...(status !== "" ? { status } : {}),
+      ...(inputType !== "all" ? { inputType } : {}),
+      ...(debounced !== "" ? { q: debounced } : {}),
+    }),
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => {
-      const jobs = query.state.data ?? []
-      return jobs.some((job) => job.status === "running" || job.status === "queued") ? 3000 : false
+      const counts = query.state.data?.counts
+      if (counts === undefined) return false
+      return counts.queued + counts.running > 0 ? 3000 : false
     },
   })
-  const allJobs = useMemo(() => jobsQuery.data ?? [], [jobsQuery.data])
-  const stats = useMemo(() => {
-    let running = 0
-    let succeeded = 0
-    let failed = 0
-    for (const job of allJobs) {
-      if (job.status === "running" || job.status === "queued") running += 1
-      else if (job.status === "succeeded") succeeded += 1
-      else if (job.status === "failed") failed += 1
-    }
-    return { running, succeeded, failed }
-  }, [allJobs])
 
-  const rows = useMemo(() => {
-    const needle = search.trim().toLowerCase()
-    if (needle === "") return allJobs
-    return allJobs.filter((job) =>
-      job.id.toLowerCase().includes(needle)
-      || job.source_path.toLowerCase().includes(needle)
-      || job.source_ref.toLowerCase().includes(needle),
-    )
-  }, [allJobs, search])
+  const counts = jobsQuery.data?.counts ?? EMPTY_COUNTS
+  const jobs = jobsQuery.data?.jobs ?? []
+  const total = jobsQuery.data?.total ?? 0
+  const knownTotal = counts.queued + counts.running + counts.succeeded + counts.failed + counts.cancelled
+  const activeCount = counts.queued + counts.running
+  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  if (
+    jobsQuery.data !== undefined
+    && !jobsQuery.isPlaceholderData
+    && pageFilter === filterKey
+    && effectivePage > lastPage
+  ) {
+    setPage(lastPage)
+  }
+
+  const chooseStatus = (next: StatusFilter) => {
+    setStatus((current) => (current === next ? "" : next))
+  }
 
   return (
     <Page
@@ -195,23 +277,23 @@ export function JobsPage() {
     >
       <Toolbar
         end={
-          allJobs.length > 0 ? (
-            <span className="llmwiki-stat-pills" aria-label="任务状态汇总">
-              {stats.running > 0 ? (
-                <span className="llmwiki-stat-pill llmwiki-stat-pill--sky">
-                  <Loader2Icon className="animate-spin" aria-hidden="true" />运行中 {stats.running}
-                </span>
-              ) : null}
-              {stats.succeeded > 0 ? (
-                <span className="llmwiki-stat-pill llmwiki-stat-pill--emerald">
-                  <CheckCircle2Icon aria-hidden="true" />成功 {stats.succeeded}
-                </span>
-              ) : null}
-              {stats.failed > 0 ? (
-                <span className="llmwiki-stat-pill llmwiki-stat-pill--rose">
-                  <XCircleIcon aria-hidden="true" />失败 {stats.failed}
-                </span>
-              ) : null}
+          jobsQuery.data !== undefined ? (
+            <span className="llmwiki-stat-pills" role="group" aria-label="按状态筛选">
+              <StatusFilterButton label="全部" count={knownTotal} tone="muted" pressed={status === ""} onClick={() => setStatus("")}>
+                <ListIcon aria-hidden="true" />
+              </StatusFilterButton>
+              <StatusFilterButton label="运行中" count={activeCount} tone="sky" pressed={status === "queued,running"} onClick={() => chooseStatus("queued,running")}>
+                <Loader2Icon className={counts.running > 0 ? "animate-spin" : undefined} aria-hidden="true" />
+              </StatusFilterButton>
+              <StatusFilterButton label="成功" count={counts.succeeded} tone="emerald" pressed={status === "succeeded"} onClick={() => chooseStatus("succeeded")}>
+                <CheckCircle2Icon aria-hidden="true" />
+              </StatusFilterButton>
+              <StatusFilterButton label="失败" count={counts.failed} tone="rose" pressed={status === "failed"} onClick={() => chooseStatus("failed")}>
+                <XCircleIcon aria-hidden="true" />
+              </StatusFilterButton>
+              <StatusFilterButton label="已取消" count={counts.cancelled} tone="amber" pressed={status === "cancelled"} onClick={() => chooseStatus("cancelled")}>
+                <BanIcon aria-hidden="true" />
+              </StatusFilterButton>
             </span>
           ) : undefined
         }
@@ -225,25 +307,40 @@ export function JobsPage() {
             onChange={(event) => setSearch(event.target.value)}
           />
         </InputGroup>
+        <Select value={inputType} onValueChange={setInputType}>
+          <SelectTrigger size="sm" aria-label="按类型筛选"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {INPUT_TYPES.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </Toolbar>
       {jobsQuery.error !== null ? <p className="text-sm text-destructive">{jobsQuery.error.message}</p> : null}
-      {!jobsQuery.isLoading && rows.length === 0 ? (
+      {jobsQuery.isLoading ? <p className="text-sm text-muted-foreground">加载中…</p> : null}
+      {jobsQuery.error === null && !jobsQuery.isLoading && jobs.length === 0 ? (
         <EmptyState
-          title={search.trim() === "" ? "还没有摄入任务" : "没有匹配的任务"}
-          description={search.trim() === "" ? "从对话或文本创建摄入后，任务会显示在这里。" : `没有匹配“${search}”的来源或 Job ID。`}
-          action={search.trim() === "" ? <Button variant="outline" asChild><AppLink to="/">去创建摄入</AppLink></Button> : undefined}
+          title={knownTotal === 0 ? "还没有摄入任务" : "没有匹配的任务"}
+          description={knownTotal === 0 ? "从对话或文本创建摄入后，任务会显示在这里。" : "没有符合当前状态、类型或关键词的任务。"}
+          action={knownTotal === 0 ? <Button variant="outline" asChild><AppLink to="/">去创建摄入</AppLink></Button> : undefined}
         />
-      ) : (
+      ) : null}
+      {jobs.length > 0 ? (
         <DataTable
           label="摄入任务"
           columns={columns}
-          data={rows}
+          data={jobs}
           getRowId={(job) => job.id}
           onSelect={(job) => setSelectedId(job.id)}
           selectedId={selectedId === "" ? undefined : selectedId}
-          paging="complete"
+          paging={{
+            mode: "pages",
+            page: effectivePage,
+            pageSize: PAGE_SIZE,
+            total,
+            onPage: setPage,
+            loading: jobsQuery.isFetching,
+          }}
         />
-      )}
+      ) : null}
       {selectedId !== "" ? <JobDetail jobId={selectedId} onClose={() => setSelectedId("")} /> : null}
     </Page>
   )

@@ -38,8 +38,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   deleteDocument,
   getBacklinks,
@@ -167,7 +166,8 @@ function buildTree(folders: WikiFolder[], documents: DocumentListItem[], typeFil
     return { level, chain }
   }
 
-  // Only show empty folders when no type filter is active
+  // Empty folders only in the unfiltered view. System pages are a separate filter,
+  // hidden from "全部类型" and every page-type filter.
   if (typeFilter === "all") {
     for (const folder of folders) {
       ensureFolderChain(folder.path)
@@ -175,7 +175,12 @@ function buildTree(folders: WikiFolder[], documents: DocumentListItem[], typeFil
   }
 
   for (const doc of documents) {
-    if (typeFilter !== "all" && pageTypeOf(doc) !== typeFilter) continue
+    const system = isSystemPage(doc)
+    if (typeFilter === "system") {
+      if (!system) continue
+    } else if (system || (typeFilter !== "all" && pageTypeOf(doc) !== typeFilter)) {
+      continue
+    }
     const folderPath = folderPathOfDoc(doc)
     const { level, chain } = ensureFolderChain(folderPath)
     level.push({ key: `doc:${doc.id}`, segment: doc.title || doc.filename, doc })
@@ -185,12 +190,9 @@ function buildTree(folders: WikiFolder[], documents: DocumentListItem[], typeFil
   return { nodes, folderKeys, ancestors }
 }
 
-/** System pages first (stable), then folders (by sort_order then label), then documents. */
+/** Folders (by sort_order then label), then documents. */
 function sortNodes(nodes: TreeNode[], lang: "zh" | "en"): TreeNode[] {
   return [...nodes].sort((a, b) => {
-    const systemA = a.doc !== undefined && isSystemPage(a.doc) ? 0 : 1
-    const systemB = b.doc !== undefined && isSystemPage(b.doc) ? 0 : 1
-    if (systemA !== systemB) return systemA - systemB
     const folderA = a.children === undefined ? 1 : 0
     const folderB = b.children === undefined ? 1 : 0
     if (folderA !== folderB) return folderA - folderB
@@ -232,17 +234,9 @@ function TreeRows({
 }) {
   const clampedDepth = Math.min(3, depth)
   const sorted = sortNodes(nodes, lang)
-  const systemCount = depth === 0
-    ? sorted.filter((node) => node.doc !== undefined && isSystemPage(node.doc)).length
-    : 0
   return (
     <>
-      {systemCount > 0 ? (
-        <li role="presentation" className="text-xs font-medium tracking-wide text-muted-foreground">
-          系统
-        </li>
-      ) : null}
-      {sorted.map((node, index) => {
+      {sorted.map((node) => {
         if (node.children !== undefined && node.folderPath !== undefined) {
           const folderPath = node.folderPath
           const folderObj: WikiFolder = node.folder ?? {
@@ -382,7 +376,6 @@ function TreeRows({
         }
         const doc = node.doc as DocumentListItem
         const system = isSystemPage(doc)
-        const lastSystem = depth === 0 && systemCount > 0 && index === systemCount - 1
         return (
           <React.Fragment key={node.key}>
             <ContextMenu>
@@ -480,11 +473,6 @@ function TreeRows({
                 )}
               </ContextMenuContent>
             </ContextMenu>
-            {lastSystem ? (
-              <li role="presentation" aria-hidden>
-                <Separator />
-              </li>
-            ) : null}
           </React.Fragment>
         )
       })}
@@ -534,7 +522,7 @@ function useWikiPane({
   const search = useQuery({
     queryKey: ["wiki-search", debounced, typeFilter, showArchived],
     queryFn: () =>
-      searchDocuments(debounced, 20, typeFilter === "all" ? undefined : [typeFilter], undefined, {
+      searchDocuments(debounced, 20, typeFilter === "all" || typeFilter === "system" ? undefined : [typeFilter], undefined, {
         archived: showArchived ? "include" : "exclude",
       }),
     enabled: debounced.trim().length > 0,
@@ -548,7 +536,8 @@ function useWikiPane({
     return (search.data?.results ?? [])
       .map((hit) => byId.get(hit.document_id))
       .filter((doc): doc is DocumentListItem => doc !== undefined)
-  }, [documents, search.data, searching])
+      .filter((doc) => (typeFilter === "system" ? isSystemPage(doc) : !isSystemPage(doc)))
+  }, [documents, search.data, searching, typeFilter])
 
   const invalidateTree = React.useCallback(async (docId?: string) => {
     await Promise.all([
@@ -699,6 +688,8 @@ function useWikiPane({
             <SelectItem value="comparison"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="comparison" />对比</span></SelectItem>
             <SelectItem value="query"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="query" />问题</span></SelectItem>
             <SelectItem value="page"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="page" />普通页面</span></SelectItem>
+            <SelectSeparator />
+            <SelectItem value="system">系统</SelectItem>
           </SelectContent>
         </Select>
       </Toolbar>
@@ -710,7 +701,7 @@ function useWikiPane({
       {search.isError ? <ErrorState error={search.error} onRetry={() => void search.refetch()} /> : null}
       {!search.isError && (searching ? results.length === 0 : tree.nodes.length === 0) ? (
         <EmptyState
-          title={searching ? "没有匹配的页面" : "工作区还没有 wiki 页面"}
+          title={searching ? "没有匹配的页面" : typeFilter === "all" ? "工作区还没有 wiki 页面" : "没有符合筛选的页面"}
           description={searching ? `没有匹配“${debounced}”的结果` : undefined}
         />
       ) : null}

@@ -4,8 +4,6 @@ import {
   BookMarkedIcon,
   BookTextIcon,
   BoxIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   CircleHelpIcon,
   FileArchiveIcon,
   FileBracesIcon,
@@ -104,19 +102,13 @@ export function WikiPageTypeIcon({ pageType }: { pageType: string }) {
 }
 
 export function WikiFolderIcon({ open }: { open: boolean }) {
+  const Icon = open ? FolderOpenIcon : FolderClosedIcon
   return (
-    <span className="wiki-tree-folder-lead" data-state={open ? "open" : "closed"}>
-      {open ? (
-        <ChevronDownIcon className="wiki-tree-chevron" aria-hidden="true" />
-      ) : (
-        <ChevronRightIcon className="wiki-tree-chevron" aria-hidden="true" />
-      )}
-      {open ? (
-        <FolderOpenIcon className="wiki-icon-folder-open" aria-hidden="true" />
-      ) : (
-        <FolderClosedIcon className="wiki-icon-folder" aria-hidden="true" />
-      )}
-    </span>
+    <Icon
+      className={open ? "wiki-icon-folder-open" : "wiki-icon-folder"}
+      data-state={open ? "open" : "closed"}
+      aria-hidden="true"
+    />
   )
 }
 

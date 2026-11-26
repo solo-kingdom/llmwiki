@@ -5,15 +5,9 @@ import {
   CodeIcon,
   DownloadIcon,
   ExternalLinkIcon,
-  FileAudioIcon,
-  FileCodeIcon,
-  FileIcon,
-  FileImageIcon,
-  FileTextIcon,
-  FileVideoIcon,
   FoldVerticalIcon,
   FolderIcon,
-  FolderOpenIcon,
+  FolderInputIcon,
   FolderPlusIcon,
   InfoIcon,
   LocateFixedIcon,
@@ -36,6 +30,7 @@ import { Actions, Body, Inline, NavItem, NavList, Page, Panel, Row, Rows, Split,
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -51,8 +46,9 @@ import {
   updateArchiveFileLocation,
   uploadArchiveFiles,
 } from "@/lib/api"
+import { WikiFileIcon, WikiFolderIcon } from "@/lib/file-icons"
 import { ArchiveTreeDialogs, type ArchiveDialogState } from "@/pages/archive-dialogs"
-import type { ArchiveFile, ArchiveFileKind, ArchiveFolder } from "@/types"
+import type { ArchiveFile, ArchiveFolder } from "@/types"
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -67,25 +63,20 @@ function backendLabel(backend: ArchiveFile["storage_backend"]): string {
   return "本地目录"
 }
 
-function ArchiveKindIcon({ kind }: { kind: ArchiveFileKind }) {
-  switch (kind) {
-    case "markdown":
-    case "text":
-      return <FileTextIcon className="llmwiki-tone-indigo" />
-    case "html":
-      return <FileCodeIcon className="llmwiki-tone-amber" />
-    case "image":
-      return <FileImageIcon className="llmwiki-tone-emerald" />
-    case "video":
-      return <FileVideoIcon className="llmwiki-tone-rose" />
-    case "audio":
-      return <FileAudioIcon className="llmwiki-tone-cyan" />
-    case "pdf":
-      return <FileTextIcon className="llmwiki-tone-violet" />
-    default:
-      return <FileIcon className="llmwiki-tone-slate" />
-  }
-}
+const ARCHIVE_TREE_OVERRIDES_KEY = "llmwiki:archive:tree-overrides"
+
+const ARCHIVE_KIND_OPTIONS: { value: string; label: string; filename: string }[] = [
+  { value: "markdown", label: "Markdown", filename: "file.md" },
+  { value: "html", label: "HTML", filename: "file.html" },
+  { value: "image", label: "图片", filename: "file.png" },
+  { value: "video", label: "视频", filename: "file.mp4" },
+  { value: "audio", label: "音频", filename: "file.mp3" },
+  { value: "pdf", label: "PDF", filename: "file.pdf" },
+  { value: "text", label: "文本/代码", filename: "file.txt" },
+  { value: "other", label: "其他", filename: "file.bin" },
+]
+
+type ArchiveDragPayload = { kind: "file"; id: string; folder: string } | { kind: "folder"; path: string }
 
 type TreeNode = {
   key: string
@@ -96,66 +87,325 @@ type TreeNode = {
   children?: TreeNode[] | undefined
 }
 
-function buildArchiveTree(folders: ArchiveFolder[], files: ArchiveFile[]) {
-  const folderMap = new Map<string, ArchiveFolder>()
-  for (const f of folders) folderMap.set(f.path, f)
-
-  const rootChildren: TreeNode[] = []
-  const nodeMap = new Map<string, TreeNode>()
-
-  function ensureFolderNode(folderPath: string): TreeNode {
-    const existing = nodeMap.get(`dir:${folderPath}`)
-    if (existing) return existing
-    const parts = folderPath.split("/")
-    const segment = parts[parts.length - 1] ?? folderPath
-    const node: TreeNode = {
-      key: `dir:${folderPath}`,
-      segment,
-      folderPath,
-      folder: folderMap.get(folderPath),
-      children: [],
-    }
-    nodeMap.set(node.key, node)
-    if (parts.length === 1) {
-      rootChildren.push(node)
-    } else {
-      const parent = ensureFolderNode(parts.slice(0, -1).join("/"))
-      parent.children!.push(node)
-    }
-    return node
+function countTreeFiles(nodes: TreeNode[]): number {
+  let count = 0
+  for (const node of nodes) {
+    if (node.file !== undefined) count += 1
+    if (node.children !== undefined) count += countTreeFiles(node.children)
   }
-
-  for (const f of folders) ensureFolderNode(f.path)
-  for (const file of files) {
-    const fileNode: TreeNode = {
-      key: `file:${file.id}`,
-      segment: file.filename,
-      file,
-    }
-    if (!file.folder_path) {
-      rootChildren.push(fileNode)
-    } else {
-      const parent = ensureFolderNode(file.folder_path)
-      parent.children!.push(fileNode)
-    }
-  }
-
-  const sortNodes = (list: TreeNode[]) => {
-    list.sort((a, b) => {
-      const aDir = a.folderPath !== undefined
-      const bDir = b.folderPath !== undefined
-      if (aDir !== bDir) return aDir ? -1 : 1
-      return a.segment.localeCompare(b.segment, "zh-Hans-CN")
-    })
-    for (const item of list) {
-      if (item.children) sortNodes(item.children)
-    }
-  }
-  sortNodes(rootChildren)
-  return rootChildren
+  return count
 }
 
-function ArchivePane({
+function buildArchiveTree(folders: ArchiveFolder[], files: ArchiveFile[], showEmptyFolders: boolean) {
+  const folderMap = new Map<string, ArchiveFolder>()
+  for (const folder of folders) folderMap.set(folder.path, folder)
+
+  const nodes: TreeNode[] = []
+  const folderKeys: string[] = []
+  const index = new Map<string, TreeNode>()
+
+  const ensureFolderChain = (folderPath: string): TreeNode[] => {
+    if (!folderPath) return nodes
+    const parts = folderPath.split("/").filter(Boolean)
+    let level = nodes
+    let prefix = ""
+    for (const part of parts) {
+      prefix = prefix === "" ? part : `${prefix}/${part}`
+      let folderNode = index.get(prefix)
+      if (folderNode === undefined) {
+        const meta = folderMap.get(prefix)
+        folderNode = {
+          key: `folder:${prefix}`,
+          segment: part,
+          folderPath: prefix,
+          ...(meta ? { folder: meta } : {}),
+          children: [],
+        }
+        index.set(prefix, folderNode)
+        folderKeys.push(folderNode.key)
+        level.push(folderNode)
+      }
+      level = folderNode.children ?? (folderNode.children = [])
+    }
+    return level
+  }
+
+  if (showEmptyFolders) {
+    for (const folder of folders) ensureFolderChain(folder.path)
+  }
+  for (const file of files) {
+    const level = ensureFolderChain(file.folder_path)
+    level.push({ key: `file:${file.id}`, segment: file.filename, file })
+  }
+  return { nodes, folderKeys }
+}
+
+function sortArchiveNodes(nodes: TreeNode[]): TreeNode[] {
+  return [...nodes].sort((a, b) => {
+    const folderA = a.children === undefined ? 1 : 0
+    const folderB = b.children === undefined ? 1 : 0
+    if (folderA !== folderB) return folderA - folderB
+    if (folderA === 0) {
+      const sa = a.folder?.sort_order ?? 0
+      const sb = b.folder?.sort_order ?? 0
+      if (sa !== sb) return sa - sb
+    }
+    const nameA = a.children === undefined ? a.segment : (a.folder?.display_name || a.segment)
+    const nameB = b.children === undefined ? b.segment : (b.folder?.display_name || b.segment)
+    return nameA.localeCompare(nameB, "zh-Hans-CN")
+  })
+}
+
+function ArchiveTreeRows({
+  nodes,
+  depth,
+  isOpen,
+  toggle,
+  currentId,
+  dragOverKey,
+  setDragOverKey,
+  onDropOnFolder,
+  onUpload,
+  onOpenDialog,
+  onTriggerUpload,
+  onDeleteFile,
+}: {
+  nodes: TreeNode[]
+  depth: number
+  isOpen: (key: string) => boolean
+  toggle: (key: string) => void
+  currentId?: string | undefined
+  dragOverKey: string | null
+  setDragOverKey: (key: string | null) => void
+  onDropOnFolder: (targetFolder: string, payload: ArchiveDragPayload) => void
+  onUpload: (folderPath: string, picked: File[]) => void
+  onOpenDialog: (state: ArchiveDialogState) => void
+  onTriggerUpload: (folderPath: string) => void
+  onDeleteFile: (file: ArchiveFile) => void
+}) {
+  const clampedDepth = Math.min(3, depth)
+  const sorted = sortArchiveNodes(nodes)
+  return (
+    <>
+      {sorted.map((node) => {
+        if (node.children !== undefined && node.folderPath !== undefined) {
+          const folderPath = node.folderPath
+          const open = isOpen(node.key)
+          const label = node.folder?.display_name || node.segment
+          const count = countTreeFiles(node.children ?? [])
+          const isDropTarget = dragOverKey === node.key
+          const menuItems = (
+            <>
+              <DropdownMenuItem onSelect={() => onTriggerUpload(folderPath)}>
+                <UploadIcon />上传到此目录
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "new-folder", parentPath: folderPath })}>
+                <FolderPlusIcon />新建子目录
+              </DropdownMenuItem>
+              {node.folder ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "rename-folder", folder: node.folder! })}>
+                    <PencilIcon />重命名显示名
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "move-folder", folder: node.folder! })}>
+                    <FolderIcon />移动目录路径
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onSelect={() => onOpenDialog({ kind: "delete-folder", folder: node.folder! })}>
+                    <Trash2Icon />删除目录
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </>
+          )
+          const ctxItems = (
+            <>
+              <ContextMenuItem onSelect={() => onTriggerUpload(folderPath)}>
+                <UploadIcon />上传到此目录
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => onOpenDialog({ kind: "new-folder", parentPath: folderPath })}>
+                <FolderPlusIcon />新建子目录
+              </ContextMenuItem>
+              {node.folder ? (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => onOpenDialog({ kind: "rename-folder", folder: node.folder! })}>
+                    <PencilIcon />重命名显示名
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => onOpenDialog({ kind: "move-folder", folder: node.folder! })}>
+                    <FolderIcon />移动目录路径
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem variant="destructive" onSelect={() => onOpenDialog({ kind: "delete-folder", folder: node.folder! })}>
+                    <Trash2Icon />删除目录
+                  </ContextMenuItem>
+                </>
+              ) : null}
+            </>
+          )
+          return (
+            <React.Fragment key={node.key}>
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <div
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("application/x-llmwiki-archive", JSON.stringify({ kind: "folder", path: folderPath } satisfies ArchiveDragPayload))
+                      e.dataTransfer.effectAllowed = "move"
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      if (dragOverKey !== node.key) setDragOverKey(node.key)
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverKey === node.key) setDragOverKey(null)
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setDragOverKey(null)
+                      if (e.dataTransfer.files.length > 0) {
+                        onUpload(folderPath, [...e.dataTransfer.files])
+                        return
+                      }
+                      const raw = e.dataTransfer.getData("application/x-llmwiki-archive")
+                      if (!raw) return
+                      try {
+                        onDropOnFolder(folderPath, JSON.parse(raw) as ArchiveDragPayload)
+                      } catch {
+                        // ignore invalid drag payload
+                      }
+                    }}
+                    className={isDropTarget ? "wiki-tree-row bg-accent/50" : "wiki-tree-row"}
+                  >
+                    <NavItem
+                      depth={clampedDepth}
+                      icon={<WikiFolderIcon open={open} />}
+                      onSelect={() => toggle(node.key)}
+                      trailing={
+                        <Inline gap="xs">
+                          <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
+                          <span className="wiki-tree-row-actions">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  aria-label={`操作目录 ${label}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreHorizontalIcon />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>{menuItems}</DropdownMenuContent>
+                            </DropdownMenu>
+                          </span>
+                        </Inline>
+                      }
+                    >
+                      <span className="wiki-tree-folder-label">{label}</span>
+                    </NavItem>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent onClick={(event) => event.stopPropagation()}>{ctxItems}</ContextMenuContent>
+              </ContextMenu>
+              {open ? (
+                <ArchiveTreeRows
+                  nodes={node.children}
+                  depth={depth + 1}
+                  isOpen={isOpen}
+                  toggle={toggle}
+                  currentId={currentId}
+                  dragOverKey={dragOverKey}
+                  setDragOverKey={setDragOverKey}
+                  onDropOnFolder={onDropOnFolder}
+                  onUpload={onUpload}
+                  onOpenDialog={onOpenDialog}
+                  onTriggerUpload={onTriggerUpload}
+                  onDeleteFile={onDeleteFile}
+                />
+              ) : null}
+            </React.Fragment>
+          )
+        }
+
+        const file = node.file as ArchiveFile
+        return (
+          <React.Fragment key={node.key}>
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <div
+                  draggable
+                  className="wiki-tree-row"
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData(
+                      "application/x-llmwiki-archive",
+                      JSON.stringify({ kind: "file", id: file.id, folder: file.folder_path } satisfies ArchiveDragPayload),
+                    )
+                    e.dataTransfer.effectAllowed = "move"
+                  }}
+                >
+                  <NavItem
+                    depth={clampedDepth}
+                    to={`/archives/${encodeURIComponent(file.id)}`}
+                    active={file.id === currentId}
+                    icon={<WikiFileIcon doc={file} treeAligned />}
+                    trailing={
+                      <Inline gap="xs">
+                        <span className="text-xs tabular-nums text-muted-foreground">{formatBytes(file.size)}</span>
+                        <span className="wiki-tree-row-actions">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                size="icon-xs"
+                                variant="ghost"
+                                aria-label={`操作文件 ${file.filename}`}
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                }}
+                              >
+                                <MoreHorizontalIcon />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+                              <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "move-file", file })}>
+                                <FolderInputIcon />移动 / 重命名
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem variant="destructive" onSelect={() => onDeleteFile(file)}>
+                                <Trash2Icon />删除文件
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </span>
+                      </Inline>
+                    }
+                  >
+                    {file.filename}
+                  </NavItem>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent onClick={(event) => event.stopPropagation()}>
+                <ContextMenuItem onSelect={() => onOpenDialog({ kind: "move-file", file })}>
+                  <FolderInputIcon />移动 / 重命名
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem variant="destructive" onSelect={() => onDeleteFile(file)}>
+                  <Trash2Icon />删除文件
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+          </React.Fragment>
+        )
+      })}
+    </>
+  )
+}
+
+function useArchivePane({
   folders,
   files,
   currentId,
@@ -168,7 +418,7 @@ function ArchivePane({
 }: {
   folders: ArchiveFolder[]
   files: ArchiveFile[]
-  currentId?: string
+  currentId?: string | undefined
   kindFilter: string
   onKindFilterChange: (v: string) => void
   query: string
@@ -178,29 +428,50 @@ function ArchivePane({
 }) {
   const navigate = useAppNavigate()
   const queryClient = useQueryClient()
-  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set())
+  const confirm = useConfirm()
+  const [dragOverKey, setDragOverKey] = React.useState<string | null>(null)
+  const [overrides, setOverrides] = React.useState<ReadonlyMap<string, boolean>>(() => {
+    try {
+      const raw = window.localStorage.getItem(ARCHIVE_TREE_OVERRIDES_KEY)
+      if (raw === null) return new Map()
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return new Map()
+      return new Map(Object.entries(parsed).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"))
+    } catch {
+      return new Map()
+    }
+  })
+  React.useEffect(() => {
+    window.localStorage.setItem(ARCHIVE_TREE_OVERRIDES_KEY, JSON.stringify(Object.fromEntries(overrides)))
+  }, [overrides])
 
+  const searching = query.trim() !== ""
   const filteredFiles = React.useMemo(() => {
     const q = query.trim().toLowerCase()
-    return files.filter((f) => {
-      if (kindFilter !== "all" && f.kind !== kindFilter) return false
-      if (q && !f.relative_path.toLowerCase().includes(q) && !f.filename.toLowerCase().includes(q)) return false
+    return files.filter((file) => {
+      if (kindFilter !== "all" && file.kind !== kindFilter) return false
+      if (q && !file.relative_path.toLowerCase().includes(q) && !file.filename.toLowerCase().includes(q)) return false
       return true
     })
   }, [files, kindFilter, query])
 
-  const treeNodes = React.useMemo(() => buildArchiveTree(folders, filteredFiles), [folders, filteredFiles])
+  const tree = React.useMemo(
+    () => buildArchiveTree(folders, searching ? [] : filteredFiles, kindFilter === "all" && !searching),
+    [folders, filteredFiles, kindFilter, searching],
+  )
 
-  const ancestorFolders = React.useMemo(() => {
-    const out = new Set<string>()
-    if (!currentId) return out
-    const current = files.find((f) => f.id === currentId)
-    if (!current?.folder_path) return out
-    const parts = current.folder_path.split("/")
-    for (let i = 1; i <= parts.length; i += 1) {
-      out.add(parts.slice(0, i).join("/"))
+  const currentAncestors = React.useMemo(() => {
+    if (currentId === undefined) return []
+    const current = files.find((file) => file.id === currentId)
+    if (!current?.folder_path) return []
+    const parts = current.folder_path.split("/").filter(Boolean)
+    const keys: string[] = []
+    let prefix = ""
+    for (const part of parts) {
+      prefix = prefix === "" ? part : `${prefix}/${part}`
+      keys.push(`folder:${prefix}`)
     }
-    return out
+    return keys
   }, [currentId, files])
 
   const moveDropFileMut = useMutation({
@@ -222,251 +493,218 @@ function ArchivePane({
     onError: (err: Error) => notify.error(err, "移动目录失败"),
   })
 
-  function toggleFolder(folderPath: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(folderPath)) next.delete(folderPath)
-      else next.add(folderPath)
+  const deleteFileMut = useMutation({
+    mutationFn: (id: string) => deleteArchiveFile(id),
+    onSuccess: async (_res, id) => {
+      notify.success("文件已删除")
+      await queryClient.invalidateQueries({ queryKey: ["archive-tree"] })
+      if (id === currentId) navigate("/archives", { replace: true })
+    },
+    onError: (err: Error) => notify.error(err, "删除文件失败"),
+  })
+
+  const handleDeleteFile = async (file: ArchiveFile) => {
+    const ok = await confirm({
+      title: `删除档案文件「${file.filename}」？`,
+      description: "删除后将同时清理对应存储实体，不可撤销。",
+      confirmLabel: "删除",
+      destructive: true,
+    })
+    if (ok) deleteFileMut.mutate(file.id)
+  }
+
+  const handleUpload = async (folderPath: string, picked: File[]) => {
+    if (picked.length === 0) return
+    try {
+      await uploadArchiveFiles(picked, folderPath)
+      notify.success(folderPath ? `已上传到 ${folderPath}` : "已上传")
+      await queryClient.invalidateQueries({ queryKey: ["archive-tree"] })
+    } catch (err) {
+      notify.error(err, "上传失败")
+    }
+  }
+
+  const handleDropOnFolder = (targetFolder: string, payload: ArchiveDragPayload) => {
+    if (payload.kind === "file") {
+      if (payload.folder === targetFolder) return
+      moveDropFileMut.mutate({ id: payload.id, folder: targetFolder })
+      return
+    }
+    if (payload.path === targetFolder || targetFolder.startsWith(`${payload.path}/`)) return
+    const seg = payload.path.includes("/") ? payload.path.slice(payload.path.lastIndexOf("/") + 1) : payload.path
+    const toPath = targetFolder ? `${targetFolder}/${seg}` : seg
+    if (toPath === payload.path) return
+    moveDropFolderMut.mutate({ from: payload.path, to: toPath })
+  }
+
+  const isOpen = (key: string) => overrides.get(key) ?? currentAncestors.includes(key)
+  const toggle = (key: string) => {
+    setOverrides((previous) => new Map(previous).set(key, !isOpen(key)))
+  }
+  const expandAll = () => setOverrides(new Map(tree.folderKeys.map((key) => [key, true])))
+  const collapseAll = () => setOverrides(new Map(tree.folderKeys.map((key) => [key, false])))
+  const allOpen = tree.folderKeys.length > 0 && tree.folderKeys.every((key) => isOpen(key))
+  const locateCurrent = () => {
+    setOverrides((previous) => {
+      const next = new Map(previous)
+      for (const key of currentAncestors) next.set(key, true)
       return next
     })
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      document.querySelector('ul[aria-label="档案文件"] [aria-current="page"]')?.scrollIntoView({ block: "center", behavior: "smooth" })
+    }))
   }
 
-  function renderNode(node: TreeNode, depth: number): React.ReactNode {
-    if (node.folderPath !== undefined) {
-      const fp = node.folderPath
-      const isOpen = expanded.has(fp) || ancestorFolders.has(fp) || query.trim() !== ""
-      const label = node.folder?.display_name || node.segment
-      return (
-        <div
-          key={node.key}
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData("application/x-llmwiki-archive", JSON.stringify({ kind: "folder", path: fp }))
-          }}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            if (e.dataTransfer.files.length > 0) {
-              void uploadArchiveFiles([...e.dataTransfer.files], fp).then(async () => {
-                notify.success(`已上传到 ${fp}`)
-                await queryClient.invalidateQueries({ queryKey: ["archive-tree"] })
-              })
-              return
-            }
-            const raw = e.dataTransfer.getData("application/x-llmwiki-archive")
-            if (!raw) return
-            const payload = JSON.parse(raw) as { kind: "file" | "folder"; id?: string; path?: string }
-            if (payload.kind === "file" && payload.id) {
-              moveDropFileMut.mutate({ id: payload.id, folder: fp })
-            } else if (payload.kind === "folder" && payload.path && payload.path !== fp) {
-              const base = payload.path.split("/").pop() ?? payload.path
-              moveDropFolderMut.mutate({ from: payload.path, to: `${fp}/${base}` })
-            }
-          }}
-        >
-          <NavItem
-            active={false}
-            depth={depth}
-            icon={isOpen ? <FolderOpenIcon className="llmwiki-tone-amber" /> : <FolderIcon className="llmwiki-tone-amber" />}
-            onSelect={() => toggleFolder(fp)}
-            trailing={
-              <Actions align="end">
-                {node.folder?.total_count ? (
-                  <span className="text-xs text-muted-foreground">{node.folder.total_count}</span>
-                ) : null}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`目录操作 ${fp}`}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <MoreHorizontalIcon />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onSelect={() => onTriggerUpload(fp)}>
-                      <UploadIcon />上传到此目录
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "new-folder", parentPath: fp })}>
-                      <FolderPlusIcon />新建子目录
-                    </DropdownMenuItem>
-                    {node.folder && (
-                      <>
-                        <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "rename-folder", folder: node.folder! })}>
-                          <PencilIcon />重命名显示名
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "move-folder", folder: node.folder! })}>
-                          <FolderIcon />移动目录路径
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "delete-folder", folder: node.folder! })}>
-                          <Trash2Icon />删除目录
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </Actions>
-            }
-          >
-            {label}
-          </NavItem>
-          {isOpen && node.children?.map((child) => renderNode(child, depth + 1))}
-        </div>
-      )
-    }
-
-    const file = node.file!
-    return (
-      <div
-        key={node.key}
-        draggable
-        onDragStart={(e) => {
-          e.dataTransfer.setData("application/x-llmwiki-archive", JSON.stringify({ kind: "file", id: file.id }))
-        }}
-      >
-        <NavItem
-          active={file.id === currentId}
-          depth={depth}
-          icon={<ArchiveKindIcon kind={file.kind} />}
-          trailing={formatBytes(file.size)}
-          onSelect={() => navigate(`/archives/${encodeURIComponent(file.id)}`)}
-        >
-          {file.filename}
-        </NavItem>
-      </div>
-    )
-  }
-
-  return (
+  const sideHeader = (
     <Stack gap="sm">
       <InputGroup>
-        <InputGroupAddon align="inline-start">
-          <SearchIcon />
-        </InputGroupAddon>
+        <InputGroupAddon><SearchIcon /></InputGroupAddon>
         <InputGroupInput
-          placeholder="搜索档案文件名或路径…"
+          aria-label="搜索档案"
+          placeholder="搜索文件名或路径"
           value={query}
-          onChange={(e) => onQueryChange(e.target.value)}
+          onChange={(event) => onQueryChange(event.target.value)}
         />
-        {query && (
+        {query ? (
           <InputGroupAddon align="inline-end">
             <Button size="icon-sm" variant="ghost" aria-label="清除搜索" onClick={() => onQueryChange("")}>
               <XIcon />
             </Button>
           </InputGroupAddon>
-        )}
+        ) : null}
       </InputGroup>
-
       <Toolbar
         end={
           <>
-            <Button size="icon-sm" variant="ghost" title="上传文件" aria-label="上传文件" onClick={() => onTriggerUpload("")}>
+            <Button size="icon-sm" variant="ghost" aria-label="上传文件" title="上传文件" onClick={() => onTriggerUpload("")}>
               <UploadIcon />
             </Button>
             <Button
               size="icon-sm"
               variant="ghost"
-              title="新建目录"
               aria-label="新建目录"
+              title="新建目录"
               onClick={() => onOpenDialog({ kind: "new-folder", parentPath: "" })}
             >
               <FolderPlusIcon />
             </Button>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              title="全部展开"
-              aria-label="全部展开"
-              onClick={() => setExpanded(new Set(folders.map((f) => f.path)))}
-            >
-              <UnfoldVerticalIcon />
-            </Button>
-            <Button size="icon-sm" variant="ghost" title="全部折叠" aria-label="全部折叠" onClick={() => setExpanded(new Set())}>
-              <FoldVerticalIcon />
-            </Button>
-            {currentId && (
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                title="定位当前文件"
-                aria-label="定位当前文件"
-                onClick={() => {
-                  const cur = files.find((f) => f.id === currentId)
-                  if (!cur?.folder_path) return
-                  const parts = cur.folder_path.split("/")
-                  setExpanded((prev) => {
-                    const next = new Set(prev)
-                    for (let i = 1; i <= parts.length; i += 1) next.add(parts.slice(0, i).join("/"))
-                    return next
-                  })
-                }}
-              >
-                <LocateFixedIcon />
-              </Button>
+            {searching ? null : (
+              <>
+                <Button size="icon-sm" variant="ghost" aria-label="定位当前文件" title="定位当前文件" onClick={locateCurrent}>
+                  <LocateFixedIcon />
+                </Button>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={allOpen ? "全部折叠" : "全部展开"}
+                  title={allOpen ? "全部折叠" : "全部展开"}
+                  onClick={allOpen ? collapseAll : expandAll}
+                >
+                  {allOpen ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
+                </Button>
+              </>
             )}
           </>
         }
       >
         <Select value={kindFilter} onValueChange={onKindFilterChange}>
-          <SelectTrigger aria-label="按类型筛选" className="w-28">
-            <SelectValue />
+          <SelectTrigger aria-label="按类型筛选" className="w-36 shrink-0">
+            <SelectValue placeholder="全部类型" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部类型</SelectItem>
-            <SelectItem value="markdown">Markdown</SelectItem>
-            <SelectItem value="html">HTML</SelectItem>
-            <SelectItem value="image">图片</SelectItem>
-            <SelectItem value="video">视频</SelectItem>
-            <SelectItem value="audio">音频</SelectItem>
-            <SelectItem value="pdf">PDF</SelectItem>
-            <SelectItem value="text">文本/代码</SelectItem>
-            <SelectItem value="other">其他</SelectItem>
+            {ARCHIVE_KIND_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                <span className="llmwiki-select-option"><WikiFileIcon doc={{ filename: option.filename }} />{option.label}</span>
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </Toolbar>
+    </Stack>
+  )
 
-      {treeNodes.length === 0 ? (
+  const empty = searching ? filteredFiles.length === 0 : tree.nodes.length === 0
+  const side = (
+    <Stack gap="sm">
+      {empty ? (
         <EmptyState
-          title="暂无档案文件"
-          description="点击上方上传按钮或直接拖入文件即可开始。"
-          action={
+          title={searching ? "没有匹配的档案文件" : kindFilter === "all" ? "暂无档案文件" : "没有符合筛选的档案文件"}
+          description={searching ? `没有匹配“${query.trim()}”的结果` : kindFilter === "all" ? "点击上方上传按钮或直接拖入文件即可开始。" : undefined}
+          action={searching ? undefined : (
             <Button size="sm" variant="outline" onClick={() => onTriggerUpload("")}>
               <UploadIcon />上传文件
             </Button>
-          }
+          )}
         />
-      ) : (
-        <NavList label="档案文件树">
-          {treeNodes.map((n) => renderNode(n, 0))}
+      ) : null}
+      <div
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          const raw = e.dataTransfer.getData("application/x-llmwiki-archive")
+          if (!raw) return
+          try {
+            const payload = JSON.parse(raw) as ArchiveDragPayload
+            if (payload.kind === "file" && payload.folder !== "") {
+              e.preventDefault()
+              setDragOverKey(null)
+              handleDropOnFolder("", payload)
+            } else if (payload.kind === "folder" && payload.path.includes("/")) {
+              e.preventDefault()
+              setDragOverKey(null)
+              handleDropOnFolder("", payload)
+            }
+          } catch {
+            // ignore
+          }
+        }}
+      >
+        <NavList label="档案文件">
+          {searching ? (
+            filteredFiles.map((file) => (
+              <NavItem
+                key={file.id}
+                to={`/archives/${encodeURIComponent(file.id)}`}
+                active={file.id === currentId}
+                icon={<WikiFileIcon doc={file} />}
+                trailing={<span className="text-xs tabular-nums text-muted-foreground">{formatBytes(file.size)}</span>}
+              >
+                {file.filename}
+              </NavItem>
+            ))
+          ) : (
+            <ArchiveTreeRows
+              nodes={tree.nodes}
+              depth={0}
+              isOpen={isOpen}
+              toggle={toggle}
+              currentId={currentId}
+              dragOverKey={dragOverKey}
+              setDragOverKey={setDragOverKey}
+              onDropOnFolder={handleDropOnFolder}
+              onUpload={(folderPath, picked) => { void handleUpload(folderPath, picked) }}
+              onOpenDialog={onOpenDialog}
+              onTriggerUpload={onTriggerUpload}
+              onDeleteFile={(file) => { void handleDeleteFile(file) }}
+            />
+          )}
         </NavList>
-      )}
+      </div>
     </Stack>
   )
+
+  return { sideHeader, side }
 }
 
 function ArchiveFileReader({
   fileId,
-  folders,
-  files,
-  kindFilter,
-  onKindFilterChange,
-  query,
-  onQueryChange,
-  onTriggerUpload,
+  sideHeader,
+  side,
   onOpenDialog,
 }: {
   fileId: string
-  folders: ArchiveFolder[]
-  files: ArchiveFile[]
-  kindFilter: string
-  onKindFilterChange: (v: string) => void
-  query: string
-  onQueryChange: (v: string) => void
-  onTriggerUpload: (folderPath: string) => void
+  sideHeader: React.ReactNode
+  side: React.ReactNode
   onOpenDialog: (state: ArchiveDialogState) => void
 }) {
   const navigate = useAppNavigate()
@@ -518,24 +756,10 @@ function ArchiveFileReader({
     onError: (err: Error) => notify.error(err, "删除文件失败"),
   })
 
-  const pane = (
-    <ArchivePane
-      folders={folders}
-      files={files}
-      currentId={fileId}
-      kindFilter={kindFilter}
-      onKindFilterChange={onKindFilterChange}
-      query={query}
-      onQueryChange={onQueryChange}
-      onTriggerUpload={onTriggerUpload}
-      onOpenDialog={onOpenDialog}
-    />
-  )
-
   if (detailQuery.isLoading) {
     return (
       <Page title="档案" layout="fill">
-        <Split sideLabel="档案文件树" sideWidth="lg" collapseBelow={900} side={pane}>
+        <Split sideLabel="档案文件树" sideWidth="lg" collapseBelow={900} sideHeader={sideHeader} side={side}>
           <RowsSkeleton rows={8} />
         </Split>
       </Page>
@@ -545,7 +769,7 @@ function ArchiveFileReader({
   if (detailQuery.isError || !file) {
     return (
       <Page title="档案" layout="fill">
-        <Split sideLabel="档案文件树" sideWidth="lg" collapseBelow={900} side={pane}>
+        <Split sideLabel="档案文件树" sideWidth="lg" collapseBelow={900} sideHeader={sideHeader} side={side}>
           <ErrorState
             error={detailQuery.error ?? new Error("档案文件不存在")}
             onRetry={() => void detailQuery.refetch()}
@@ -631,7 +855,7 @@ function ArchiveFileReader({
         },
       ]}
     >
-      <Split sideLabel="档案文件树" sideWidth="lg" collapseBelow={900} side={pane}>
+      <Split sideLabel="档案文件树" sideWidth="lg" collapseBelow={900} sideHeader={sideHeader} side={side}>
         <Body width="full" align="start">
           <Stack gap="md">
             <Actions align="between">
@@ -796,6 +1020,18 @@ export function ArchivesPage() {
     fileInputRef.current?.click()
   }
 
+  const pane = useArchivePane({
+    folders,
+    files,
+    currentId: id,
+    kindFilter,
+    onKindFilterChange: setKindFilter,
+    query,
+    onQueryChange: setQuery,
+    onTriggerUpload: triggerUpload,
+    onOpenDialog: setDialogState,
+  })
+
   if (treeQuery.isLoading) {
     return (
       <Page title="档案">
@@ -838,13 +1074,8 @@ export function ArchivesPage() {
         <ArchiveFileReader
           key={id}
           fileId={id}
-          folders={folders}
-          files={files}
-          kindFilter={kindFilter}
-          onKindFilterChange={setKindFilter}
-          query={query}
-          onQueryChange={setQuery}
-          onTriggerUpload={triggerUpload}
+          sideHeader={pane.sideHeader}
+          side={pane.side}
           onOpenDialog={setDialogState}
         />
       ) : (
@@ -864,18 +1095,8 @@ export function ArchivesPage() {
             sideLabel="档案文件树"
             sideWidth="lg"
             collapseBelow={900}
-            side={
-              <ArchivePane
-                folders={folders}
-                files={files}
-                kindFilter={kindFilter}
-                onKindFilterChange={setKindFilter}
-                query={query}
-                onQueryChange={setQuery}
-                onTriggerUpload={triggerUpload}
-                onOpenDialog={setDialogState}
-              />
-            }
+            sideHeader={pane.sideHeader}
+            side={pane.side}
           >
             <Body width="full" align="start">
               <EmptyState

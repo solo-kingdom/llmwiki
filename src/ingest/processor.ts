@@ -18,6 +18,7 @@ import {
 import { NoWikiFilesWrittenError } from "./fileblocks.js";
 import { computeRulesHash, resolveRulesSupplement } from "./prompts.js";
 import { normalizeJobSource } from "./normalize.js";
+import { PageLockManager } from "./lock.js";
 import { Pipeline } from "./pipeline.js";
 import { formatFeedbackForPlan, parseReviewIdFromRef, reviewSourceRef } from "./review.js";
 import { createJobRecorder, StoreJobRecorder } from "./job_events.js";
@@ -26,18 +27,30 @@ import type { ApplyWikiResult } from "./types.js";
 
 const STALE_HEARTBEAT_SECONDS = 120;
 
+export interface JobProcessorOptions {
+  /** Share the HTTP API's page lock manager so edits and job writes exclude each other. */
+  lockManager?: PageLockManager;
+  /** Replaces the per-job pipeline; tests use it to run jobs without a model. */
+  createPipeline?: (lockManager: PageLockManager) => Pipeline;
+}
+
 export class JobProcessor {
-  private readonly pipeline: Pipeline;
+  private readonly lockManager: PageLockManager;
+  private readonly createPipeline: (lockManager: PageLockManager) => Pipeline;
   private readonly runnerId: string;
   private running = false;
   private timer: NodeJS.Timeout | null = null;
-  private active = false;
+  private readonly inFlight = new Set<Promise<void>>();
+  private dispatchTask: Promise<void> | null = null;
 
   constructor(
     private readonly db: Store,
     private readonly workspace: string,
+    options: JobProcessorOptions = {},
   ) {
-    this.pipeline = new Pipeline(workspace, db, null);
+    this.lockManager = options.lockManager ?? new PageLockManager();
+    this.createPipeline =
+      options.createPipeline ?? ((lockManager) => new Pipeline(workspace, db, null, lockManager));
     this.runnerId = `${hostname() || "local"}-${process.pid}-${randomUUID().slice(0, 8)}`;
   }
 
@@ -45,25 +58,22 @@ export class JobProcessor {
     if (this.running) return;
     this.running = true;
     void this.recoverStaleJobs();
-    this.timer = setInterval(() => {
-      if (this.active) return;
-      this.active = true;
-      void this.processNext()
-        .catch((error) => {
-          if (!errorMessage(error).includes("no queued jobs")) {
-            logger.error({ error }, "ingest processor");
-          }
-        })
-        .finally(() => {
-          this.active = false;
-        });
-    }, pollIntervalMs > 0 ? pollIntervalMs : 3000);
+    // The timer only tops up idle worker slots; a finished job triggers the next claim itself.
+    this.timer = setInterval(() => void this.dispatch(), pollIntervalMs > 0 ? pollIntervalMs : 3000);
+    void this.dispatch();
   }
 
   stop(): void {
     this.running = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  /** Resolves once no job or claim loop started by this processor is still running. */
+  async idle(): Promise<void> {
+    while (this.inFlight.size > 0 || this.dispatchTask) {
+      await Promise.allSettled([...this.inFlight, this.dispatchTask].filter(Boolean));
+    }
   }
 
   async processAll(): Promise<void> {
@@ -77,16 +87,65 @@ export class JobProcessor {
     }
   }
 
+  /** Claims and runs the next job on the caller's path; `start` goes through `dispatch` instead. */
   async processNext(): Promise<void> {
     const job = await this.db.claimNextIngestJob(this.runnerId);
     if (!job) throw new Error("no queued jobs");
+    await this.processJob(job);
+  }
+
+  /**
+   * Claims jobs while a worker slot is free. Single-flight, so two triggers cannot both decide
+   * the same slot is free; the store's concurrency cap still guards against other runners.
+   */
+  private dispatch(): Promise<void> {
+    if (this.dispatchTask) return this.dispatchTask;
+    const task = this.claimLoop().finally(() => {
+      this.dispatchTask = null;
+    });
+    this.dispatchTask = task;
+    return task;
+  }
+
+  private async claimLoop(): Promise<void> {
+    try {
+      while (this.running) {
+        if (this.inFlight.size >= (await this.workerLimit())) return;
+        const job = await this.db.claimNextIngestJob(this.runnerId);
+        if (!job) return;
+        const task = this.processJob(job)
+          .catch((error) => logger.error({ error, jobId: job.id }, "ingest processor: job failed outside the pipeline"))
+          .finally(() => {
+            this.inFlight.delete(task);
+            void this.dispatch();
+          });
+        this.inFlight.add(task);
+      }
+    } catch (error) {
+      logger.error({ error }, "ingest processor: dispatch");
+    }
+  }
+
+  /** Parallel processing is opt-in; anything unexpected falls back to one job at a time. */
+  private async workerLimit(): Promise<number> {
+    try {
+      if (!(await this.db.parallelEnabled())) return 1;
+      return Math.max(1, await this.db.maxConcurrentJobs());
+    } catch {
+      return 1;
+    }
+  }
+
+  private async processJob(job: IngestJob): Promise<void> {
+    // One pipeline per job: it holds per-job state (recorder, model, change set) and cannot be shared.
+    const pipeline = this.createPipeline(this.lockManager);
     logIngestJob(this.db, job, "running", "processor");
 
     const recorder = await createJobRecorder(this.db, job.id);
-    this.pipeline.setJobRecorder(recorder);
+    pipeline.setJobRecorder(recorder);
     // Ingest steps previously always fell back to built-in round defaults (4/5/8),
     // ignoring session_tool_loop_max_rounds_ingest; reasoning providers need the configured budget.
-    this.pipeline.setToolLoopConfig(await toolLoopConfigForModeFromStore("", this.db));
+    pipeline.setToolLoopConfig(await toolLoopConfigForModeFromStore("", this.db));
     const stopHeartbeat = this.startHeartbeat(job.id);
     try {
       if (job.input_type === "rollback") {
@@ -94,11 +153,11 @@ export class JobProcessor {
         return;
       }
       if (job.input_type === "review_plan") {
-        await this.processReviewPlanJob(job);
+        await this.processReviewPlanJob(pipeline, job);
         return;
       }
       if (job.input_type === "review_apply") {
-        await this.processReviewApplyJob(job);
+        await this.processReviewApplyJob(pipeline, job);
         return;
       }
 
@@ -110,8 +169,8 @@ export class JobProcessor {
         return;
       }
 
-      if (!(await this.preparePipelineForJob(job))) return;
-      this.pipeline.setChangeSetMeta(
+      if (!(await this.preparePipelineForJob(pipeline, job))) return;
+      pipeline.setChangeSetMeta(
         "ingest",
         job.id,
         "",
@@ -119,11 +178,11 @@ export class JobProcessor {
         new TextDecoder().decode(normalized.content),
         job.archive_file_id ?? "",
       );
-      this.pipeline.setMcpRouter(null);
-      await this.checkRulesDrift(job.id);
+      pipeline.setMcpRouter(null);
+      await this.checkRulesDrift(pipeline, job.id);
 
       try {
-        const files = await this.pipeline.ingestNormalized(normalized);
+        const files = await pipeline.ingestNormalized(normalized);
         this.finalizeWikiApply(job.id, job.source_path, "", { written: files, deleted: [] });
         await this.markJobSucceeded(job.id, files);
       } catch (error) {
@@ -133,7 +192,7 @@ export class JobProcessor {
     } finally {
       stopHeartbeat();
       await this.db.clearIngestJobLease(job.id).catch(() => undefined);
-      this.pipeline.setJobRecorder(null);
+      pipeline.setJobRecorder(null);
     }
   }
 
@@ -249,36 +308,40 @@ export class JobProcessor {
     });
   }
 
-  private async preparePipelineForJob(job: IngestJob): Promise<boolean> {
+  private async preparePipelineForJob(pipeline: Pipeline, job: IngestJob): Promise<boolean> {
     try {
       const client = await this.resolveLLMClientForJob(job);
-      this.pipeline.setLLMClient(client);
+      pipeline.setLLMClient(client);
     } catch (error) {
       await this.failJob(job.id, "llm_config_invalid", errorMessage(error), "", remediationForCode("llm_config_invalid"));
       return false;
     }
-    await this.attachMCPRouter();
-    this.pipeline.setDocLanguage(await resolveDocLang(this.db));
-    this.pipeline.setRulesSupplement(await resolveRulesSupplement(this.db));
+    await this.attachMCPRouter(pipeline);
+    pipeline.setDocLanguage(await resolveDocLang(this.db));
+    pipeline.setRulesSupplement(await resolveRulesSupplement(this.db));
     return true;
   }
 
-  private async preparePipelineForReviewJob(job: IngestJob, review: IngestReview): Promise<boolean> {
+  private async preparePipelineForReviewJob(
+    pipeline: Pipeline,
+    job: IngestJob,
+    review: IngestReview,
+  ): Promise<boolean> {
     try {
       const client = await this.resolveLLMClientForReview(review);
-      this.pipeline.setLLMClient(client);
+      pipeline.setLLMClient(client);
     } catch (error) {
       await this.failJob(job.id, "llm_config_invalid", errorMessage(error), "", remediationForCode("llm_config_invalid"));
       return false;
     }
-    await this.attachMCPRouter();
-    this.pipeline.setDocLanguage(await resolveDocLang(this.db));
-    this.pipeline.setRulesSupplement(await resolveRulesSupplement(this.db));
+    await this.attachMCPRouter(pipeline);
+    pipeline.setDocLanguage(await resolveDocLang(this.db));
+    pipeline.setRulesSupplement(await resolveRulesSupplement(this.db));
     return true;
   }
 
-  async checkRulesDrift(jobId: string): Promise<void> {
-    const recorder = this.pipeline.currentRecorder();
+  async checkRulesDrift(pipeline: Pipeline, jobId: string): Promise<void> {
+    const recorder = pipeline.currentRecorder();
     if (!recorder) return;
     const current = computeRulesHash(this.workspace, await resolveRulesSupplement(this.db));
     const snapshot = await queuedRulesHash(this.db, jobId);
@@ -290,18 +353,18 @@ export class JobProcessor {
     }
   }
 
-  private async attachMCPRouter(): Promise<void> {
+  private async attachMCPRouter(pipeline: Pipeline): Promise<void> {
     try {
       const raw = await this.db.getConfig("mcp_servers_json");
       const registry = new McpRegistry(raw);
       const router = new McpRouter(registry, {
         recordMCP: (step, phase, message, payload) => {
-          this.pipeline.currentRecorder()?.record(step, phase, message, payload);
+          pipeline.currentRecorder()?.record(step, phase, message, payload);
         },
       });
-      this.pipeline.setMcpRouter(router);
+      pipeline.setMcpRouter(router);
     } catch {
-      this.pipeline.setMcpRouter(null);
+      pipeline.setMcpRouter(null);
     }
   }
 
@@ -408,7 +471,7 @@ export class JobProcessor {
     });
   }
 
-  private async processReviewPlanJob(job: IngestJob): Promise<void> {
+  private async processReviewPlanJob(pipeline: Pipeline, job: IngestJob): Promise<void> {
     const reviewId = parseReviewIdFromRef(job.source_ref);
     if (!reviewId) {
       await this.failJob(job.id, "pipeline_error", "invalid review source_ref", "", "");
@@ -419,9 +482,9 @@ export class JobProcessor {
       await this.failJob(job.id, "pipeline_error", "review not found", "", "");
       return;
     }
-    if (!(await this.preparePipelineForReviewJob(job, review))) return;
-    this.pipeline.setMcpRouter(null);
-    await this.checkRulesDrift(job.id);
+    if (!(await this.preparePipelineForReviewJob(pipeline, job, review))) return;
+    pipeline.setMcpRouter(null);
+    await this.checkRulesDrift(pipeline, job.id);
 
     let normalized;
     try {
@@ -439,7 +502,7 @@ export class JobProcessor {
 
     let plan;
     try {
-      plan = await this.pipeline.planOnly(normalized, feedback);
+      plan = await pipeline.planOnly(normalized, feedback);
     } catch (error) {
       await this.failReviewPlanFailed(reviewId, job.id, classifyPipelineError(error), error);
       return;
@@ -474,7 +537,7 @@ export class JobProcessor {
     }
   }
 
-  private async processReviewApplyJob(job: IngestJob): Promise<void> {
+  private async processReviewApplyJob(pipeline: Pipeline, job: IngestJob): Promise<void> {
     const reviewId = parseReviewIdFromRef(job.source_ref);
     if (!reviewId) {
       await this.failJob(job.id, "pipeline_error", "invalid review source_ref", "", "");
@@ -493,9 +556,9 @@ export class JobProcessor {
     await this.db.updateIngestReviewStatus(reviewId, "applying");
     this.logReviewEvent(reviewId, review.session_id, "review_applying", "apply started", "pending");
 
-    if (!(await this.preparePipelineForReviewJob(job, review))) return;
-    this.pipeline.setMcpRouter(null);
-    await this.checkRulesDrift(job.id);
+    if (!(await this.preparePipelineForReviewJob(pipeline, job, review))) return;
+    pipeline.setMcpRouter(null);
+    await this.checkRulesDrift(pipeline, job.id);
 
     const plan = await this.db.getIngestReviewPlan(reviewId, review.approved_plan_version);
     if (!plan) {
@@ -511,7 +574,7 @@ export class JobProcessor {
     }
 
     const archiveFileId = job.archive_file_id || review.archive_file_id || "";
-    this.pipeline.setChangeSetMeta(
+    pipeline.setChangeSetMeta(
       "review_apply",
       job.id,
       reviewId,
@@ -522,7 +585,7 @@ export class JobProcessor {
 
     let result;
     try {
-      result = await this.pipeline.applyFromPlan(normalized, plan.plan_json);
+      result = await pipeline.applyFromPlan(normalized, plan.plan_json);
     } catch (error) {
       await this.failReviewApplyFailed(reviewId, job.id, classifyPipelineError(error), error);
       return;
@@ -534,7 +597,7 @@ export class JobProcessor {
 
     this.finalizeWikiApply(job.id, job.source_path, plan.plan_json, result);
     await this.db.setIngestReviewFinalJob(reviewId, job.id);
-    const changeSetId = this.pipeline.lastChangeSetId();
+    const changeSetId = pipeline.lastChangeSetId();
     if (changeSetId) await this.db.setIngestReviewChangeSet(reviewId, changeSetId);
 
     const summary = `applied ${result.written.length} wiki page(s) from approved plan v${review.approved_plan_version}`;

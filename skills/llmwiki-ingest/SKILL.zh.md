@@ -44,6 +44,20 @@ curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/ingest/jobs/{id}/source"   # 落盘�
 
 `POST /api/v1/ingest/jobs/conversation` 是旧的一次性路径（粘贴即作业）。用户想先讨论、修改、审阅再落地时，用下面的会话流程。
 
+## 大批量：并行处理
+
+作业默认串行。大批量摄入时打开并行并调大并发：
+
+```bash
+curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
+  -H 'Content-Type: application/json' \
+  -d '{"job_parallel_enabled":true,"job_max_concurrent":8}'
+```
+
+- 改动对新认领的作业即时生效，不用重启；`job_parallel_enabled:false` 即回到串行。
+- 同一 wiki 页面的写入会排队合并，并发作业不会互相覆盖内容。但并发作业看到的是开跑时的知识库快照，同批相关文档仍可能产出重叠页面——大批次跑完建议做一次整理复查。
+- 限流（429）与瞬时错误（5xx、网络、流空闲）按有界退避自动重试，在作业事件里记为 `llm request retry`。供应商的每分钟请求上限会让高并发表现为「重试变多」而不是「失败变多」；重试占主导时调低 `job_max_concurrent`。
+
 ## 审核路径：会话 → 归档 → 计划 → 批准
 
 ```

@@ -4,7 +4,7 @@ import type { Client } from "../llm/client.js";
 import { diffMergeBody } from "./diff_merge.js";
 import { composeSystemPrompt } from "./prompts.js";
 import type { MergeContext } from "./types.js";
-import { recordLLMRequest, recordLLMResponse } from "./job_events.js";
+import { recordLLMRequest, recordLLMResponse, traceRetries } from "./job_events.js";
 
 const MERGE_MIN_BODY_RATIO = 0.7;
 const WIKI_FRONTMATTER_RE = /^---[ \t]*\n([\s\S]+?\n)---[ \t]*\n([\s\S]*)$/;
@@ -143,13 +143,19 @@ export async function mergeBodyLLM(
   const temperature = 0.1;
   const maxTokens = 8192;
   recordLLMRequest(recorder, "merge_body", llmClient.model, messages, temperature, maxTokens);
+  const stopTrace = traceRetries(llmClient, recorder, "merge_body");
 
-  const chunks: string[] = [];
-  for await (const event of llmClient.streamChat(messages, temperature, maxTokens)) {
-    if (event.type === "token") chunks.push(event.content ?? "");
-    if (event.type === "error" && event.error) throw event.error;
+  let result = "";
+  try {
+    const chunks: string[] = [];
+    for await (const event of llmClient.streamChat(messages, temperature, maxTokens)) {
+      if (event.type === "token") chunks.push(event.content ?? "");
+      if (event.type === "error" && event.error) throw event.error;
+    }
+    result = chunks.join("").trim();
+  } finally {
+    stopTrace();
   }
-  const result = chunks.join("").trim();
   recordLLMResponse(recorder, "merge_body", result, 0);
 
   if (oldLen > 0) {

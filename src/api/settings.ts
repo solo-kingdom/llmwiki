@@ -38,7 +38,10 @@ import {
   CONFIG_ARCHIVE_STORAGE_BACKEND,
   DEFAULT_ARCHIVE_INLINE_MAX_BYTES,
   DEFAULT_JOB_EVENTS_MAX_COUNT,
+  DEFAULT_MAX_CONCURRENT_JOBS,
   DEFAULT_SESSION_MSG_EVENTS_MAX_COUNT,
+  MAX_CONCURRENT_JOBS,
+  MIN_CONCURRENT_JOBS,
   parseJobEventsMaxCount,
   parseSessionMsgEventsMaxCount,
 } from "../store/types.js";
@@ -113,6 +116,15 @@ function acpMaxConcurrentAgentsForResponse(stored: string): string {
   return stored.trim() ? stored : String(acpConfig.DEFAULT_MAX_CONCURRENT_AGENTS);
 }
 
+function jobParallelEnabledForResponse(stored: string): string {
+  const value = stored.trim().toLowerCase();
+  return value === "true" || value === "1" ? "true" : "false";
+}
+
+function jobMaxConcurrentForResponse(stored: string): string {
+  return stored.trim() || String(DEFAULT_MAX_CONCURRENT_JOBS);
+}
+
 function languageForResponse(stored: string): string {
   return stored === "zh" || stored === "en" ? stored : "zh";
 }
@@ -177,6 +189,8 @@ const ALLOWED_KEYS = new Set([
   "watch_sources",
   "job_instance_id",
   "job_model",
+  "job_parallel_enabled",
+  "job_max_concurrent",
   "activity_logs_max_count",
   "ingest_job_events_max_count",
   "session_message_events_max_count",
@@ -222,6 +236,8 @@ export function settingsApi(ctx: ApiContext) {
       last_model: value("last_model"),
       job_instance_id: value("job_instance_id"),
       job_model: value("job_model"),
+      job_parallel_enabled: jobParallelEnabledForResponse(value("job_parallel_enabled")),
+      job_max_concurrent: jobMaxConcurrentForResponse(value("job_max_concurrent")),
       temperature: value("temperature"),
       max_tokens: value("max_tokens"),
       chunk_size: value("chunk_size"),
@@ -384,6 +400,22 @@ export function settingsApi(ctx: ApiContext) {
           }
           if (key === CONFIG_ARCHIVE_S3_FORCE_PATH_STYLE) {
             value = value.trim().toLowerCase() === "true" || value.trim() === "1" ? "true" : "false";
+          }
+          if (key === "job_parallel_enabled") {
+            const flag = value.trim().toLowerCase();
+            if (flag !== "true" && flag !== "false" && flag !== "1" && flag !== "0") {
+              throw new Error("job_parallel_enabled must be true or false");
+            }
+            value = flag === "true" || flag === "1" ? "true" : "false";
+          }
+          if (key === "job_max_concurrent") {
+            const parsed = Number(value);
+            if (!Number.isInteger(parsed) || parsed < MIN_CONCURRENT_JOBS || parsed > MAX_CONCURRENT_JOBS) {
+              throw new Error(
+                `job_max_concurrent must be an integer between ${MIN_CONCURRENT_JOBS} and ${MAX_CONCURRENT_JOBS}`,
+              );
+            }
+            value = String(parsed);
           }
           if (
             (key === CONFIG_ARCHIVE_S3_ACCESS_KEY_ID || key === CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY) &&

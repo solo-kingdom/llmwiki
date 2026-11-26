@@ -60,6 +60,27 @@ export class PageLockManager {
     };
   }
 
+  /**
+   * Takes every lock in a stable order, so two jobs that overlap on several pages wait for each
+   * other instead of deadlocking. The returned function releases all of them exactly once.
+   */
+  async lockAll(paths: string[]): Promise<() => void> {
+    const releases: Array<() => void> = [];
+    const unique = [...new Set(paths.map(normalizePath))].sort();
+    try {
+      for (const normalized of unique) releases.push(await this.lock(normalized));
+    } catch (error) {
+      for (const release of releases.reverse()) release();
+      throw error;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      for (const release of releases.reverse()) release();
+    };
+  }
+
   activeLocks(): string[] {
     return [...this.locks.keys()];
   }
@@ -79,3 +100,17 @@ function normalizePath(value: string): string {
 }
 
 export { normalizePath };
+
+/** Runs `critical` while holding every lock in `paths`. */
+export async function withPageLocks<T>(
+  manager: PageLockManager,
+  paths: string[],
+  critical: () => Promise<T>,
+): Promise<T> {
+  const release = await manager.lockAll(paths);
+  try {
+    return await critical();
+  } finally {
+    release();
+  }
+}

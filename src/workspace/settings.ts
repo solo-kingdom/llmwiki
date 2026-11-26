@@ -16,6 +16,8 @@ const EXPORT_KEYS = [
   "last_model",
   "job_instance_id",
   "job_model",
+  "job_parallel_enabled",
+  "job_max_concurrent",
   "temperature",
   "max_tokens",
   "chunk_size",

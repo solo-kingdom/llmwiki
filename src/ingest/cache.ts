@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { CacheEntry, CacheFile, NormalizedSource } from "./types.js";
+
+// Concurrent jobs read-modify-write the same cache file; queue the writes per file so none is lost.
+const pendingWrites = new Map<string, Promise<void>>();
 
 export function contentSHA256(content: Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
@@ -30,7 +33,8 @@ export class IngestCache {
       const parsed = JSON.parse(data) as CacheFile;
       return { entries: parsed.entries ?? {} };
     } catch (error) {
-      if (isNotFound(error)) return { entries: {} };
+      // A missing or unreadable cache only costs a cache hit; it must not fail the job.
+      if (isNotFound(error) || error instanceof SyntaxError) return { entries: {} };
       throw error;
     }
   }
@@ -58,8 +62,16 @@ export class IngestCache {
 
   async save(key: string, entry: CacheEntry): Promise<void> {
     if (!key || !entry) return;
-    const dir = path.join(this.workspace, ".llmwiki");
-    await mkdir(dir, { recursive: true });
+    const filePath = this.cachePath();
+    await mkdir(path.dirname(filePath), { recursive: true });
+    const write = (pendingWrites.get(filePath) ?? Promise.resolve()).then(() =>
+      this.writeEntry(filePath, key, entry),
+    );
+    pendingWrites.set(filePath, write.catch(() => undefined));
+    await write;
+  }
+
+  private async writeEntry(filePath: string, key: string, entry: CacheEntry): Promise<void> {
     let file: CacheFile;
     try {
       file = await this.load();
@@ -67,7 +79,10 @@ export class IngestCache {
       file = { entries: {} };
     }
     file.entries[key] = entry;
-    await writeFile(this.cachePath(), JSON.stringify(file, null, 2), "utf8");
+    // Rename into place so a concurrent reader never sees a half-written file.
+    const temp = `${filePath}.${process.pid}.tmp`;
+    await writeFile(temp, JSON.stringify(file, null, 2), "utf8");
+    await rename(temp, filePath);
   }
 
   async saveForSource(source: NormalizedSource | null, files: string[]): Promise<void> {

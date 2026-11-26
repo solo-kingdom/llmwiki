@@ -278,6 +278,9 @@ export interface Settings {
   last_model: string
   job_instance_id: string
   job_model: string
+  // Stored as strings ("true"/"false", "1".."32"); the API keeps the historical text form.
+  job_parallel_enabled?: boolean | string
+  job_max_concurrent?: number | string
   max_tokens: number
   api_key: string
   temperature: number

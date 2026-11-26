@@ -23,8 +23,8 @@ function Entry({ item, vertical, keepSearch }: { item: SectionNavItem; vertical:
   const to = keepSearch && search !== "" && !item.to.includes("?") ? `${item.to}${search}` : item.to
   return (
     <AppLink to={to} aria-current={active ? "page" : undefined}
-      className={cn("flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none [&_svg]:size-4 [&_svg]:shrink-0",
-        active ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground", vertical && "w-full")}>
+      className={cn("flex h-[var(--sidebar-row-height,30px)] shrink-0 items-center gap-2 rounded-md px-2 text-sm whitespace-nowrap transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none [&_svg]:size-4 [&_svg]:shrink-0",
+        active ? "bg-menu-active font-semibold text-menu-active-foreground hover:bg-menu-active hover:text-menu-active-foreground [&_svg]:text-primary" : "text-muted-foreground", vertical && "w-full")}>
       {item.icon}
       {item.label}
     </AppLink>

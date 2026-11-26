@@ -340,9 +340,9 @@ export function Row({ children }: { children: React.ReactNode }) {
 }
 
 /** NavList — a compact in-page navigation list (help contents, document outline, section menus).
- *  Rows read as table rows (dividers, 40px); navigation reads as menu items: no dividers, 28px rows,
- *  a leading 16px icon and hover/active surfaces — the same rhythm as the app sidebar (one level
- *  of navigation, one look). */
+ *  Rows read as table rows (dividers, 40px); navigation reads as menu items: no dividers, 30px rows,
+ *  a leading 16px icon and hover/active surfaces — the same row height as the app sidebar.
+ *  Active state is the tinted menu color without the sidebar's left bar. */
 export function NavList({ label, children }: { label?: string | undefined; children: React.ReactNode }) {
   return <ul aria-label={label} className="flex min-w-0 flex-col gap-0.5">{children}</ul>
 }
@@ -367,10 +367,10 @@ export function NavItem({ to, active = false, onSelect, icon, indent = false, de
     ? (indent ? "pl-7" : undefined)
     : ["", "pl-7", "pl-11", "pl-14"][Math.max(0, Math.min(3, depth))]
   const classes = cn(
-    "flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground transition-colors [&_svg]:size-4 [&_svg]:shrink-0",
+    "flex h-[var(--sidebar-row-height,30px)] w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground transition-colors [&_svg]:size-4 [&_svg]:shrink-0",
     depthClass,
-    active && "bg-accent font-medium text-accent-foreground",
     interactive && "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+    active && "bg-menu-active font-semibold text-menu-active-foreground hover:bg-menu-active hover:text-menu-active-foreground [&_svg]:text-primary",
   )
   const body = (
     <>

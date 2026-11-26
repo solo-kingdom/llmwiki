@@ -1,7 +1,8 @@
 /*
  * ui-template package theme: quiet-inset 0.6.1
  * Near-neutral three-surface workbench: sidebar sits on the shell, content is an inset panel, cards and inputs are white.
- * One indigo accent for primary actions, switches, focus and links. Compact density.
+ * Product accent is willow-office teal (hue 158) for primary actions, switches, focus and links.
+ * Neutrals stay quiet-inset. Selected menus use --menu-active, not the neutral --accent. Compact density.
  * Light values measured from the reference product via computed-style export (2026-11-20, browser console dump:
  * vars.resolved + freq + picks; see tasks/ongoing/ui-kit/subtasks/p2-polish). Neutrals carry the reference's faint
  * lavender cast (oklch chroma 0.001, hue ~284) instead of the 0.1.0 draft's pure gray.
@@ -13,8 +14,9 @@
  *   the reference. Reference compensates with 1px shadow rings (see --surface-shadow) instead of borders.
  * - faint-foreground: reference quaternary text is oklch(0.695 0.003 283) (#9c9d9f, 2.59 vs panel), below ≥3.0.
  *   Token keeps oklch(0.648 0.003 283) (#8e8e90, 3.10).
- * - primary: reference brand indigo #5e6ad2 measures 4.47 vs panel; token darkens to oklch(0.563 0.159 275.2)
- *   (#5d69d1, 4.55 vs panel, 4.79 white-on-primary). The lighter interactive indigo #6d78d5 is kept as --ring.
+ * - primary: quiet-inset indigo was replaced by willow-office teal. Light oklch(0.49 0.14 158)
+ *   (#007740, white text 5.68). Dark oklch(0.69 0.13 158) (#46b37c); white text is 2.62, so
+ *   dark primary text is oklch(0.18 0.004 150) (7.18). Ring uses the same teal.
  * - floating-shadow: captured 2026-11-21 from the command palette panel (0.08 / 48px + 0.1 / 6px layer;
  *   the second blur carried a truncated read, 24px taken from the same family). The 0.4.0 estimate was lighter.
  * - controls measure 28px tall, 8px radius, pill buttons, 30x20 switches, 46px/15px command items (2026-11-21
@@ -69,6 +71,8 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-menu-active: var(--menu-active);
+  --color-menu-active-foreground: var(--menu-active-foreground);
 
   /* Measured corner radii: 4px small controls, 8px controls/rows/inputs, 10px input cards/tabs, 12px panels. */
   --radius-sm: calc(var(--radius) * 0.5);
@@ -112,7 +116,7 @@
   --card-foreground: oklch(0.222 0 285.4);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.222 0 285.4);
-  --primary: oklch(0.563 0.159 275.2);
+  --primary: oklch(0.49 0.14 158);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.935 0.001 284.2);
   --secondary-foreground: oklch(0.222 0 285.4);
@@ -126,35 +130,36 @@
   --warning: oklch(0.76 0.15 75);
   --warning-foreground: oklch(0.5 0.11 65);
   --info: oklch(0.53 0.13 240);
-  --brand: oklch(0.563 0.159 275.2);
+  --brand: oklch(0.49 0.14 158);
   --brand-foreground: oklch(1 0 0);
   --border: oklch(0.902 0 285.4);
   --input: oklch(0.902 0 285.4);
-  --ring: oklch(0.608 0.14 276.3);
-  --chart-1: oklch(0.563 0.159 275.2);
-  --chart-2: oklch(0.65 0.12 275.2);
-  --chart-3: oklch(0.75 0.09 275.2);
-  --chart-4: oklch(0.84 0.055 275.2);
-  --chart-5: oklch(0.91 0.03 275.2);
+  --ring: oklch(0.49 0.14 158);
+  --chart-1: oklch(0.49 0.14 158);
+  --chart-2: oklch(0.65 0.12 158);
+  --chart-3: oklch(0.75 0.09 158);
+  --chart-4: oklch(0.84 0.055 158);
+  --chart-5: oklch(0.91 0.03 158);
   --sidebar: oklch(0.952 0.001 285.4);
   --sidebar-foreground: oklch(0.222 0 285.4);
-  --sidebar-primary: oklch(0.563 0.159 275.2);
+  --sidebar-primary: oklch(0.49 0.14 158);
   --sidebar-primary-foreground: oklch(1 0 0);
   --sidebar-accent: oklch(0.91 0.001 284.2);
   --sidebar-accent-foreground: oklch(0.222 0 285.4);
   --sidebar-border: oklch(0.902 0 285.4);
-  --sidebar-ring: oklch(0.608 0.14 276.3);
+  --sidebar-ring: oklch(0.49 0.14 158);
+  /* Selected menu fill follows willow-office accent-tint / accent-ink. Hover stays on --sidebar-hover. */
+  --menu-active: oklch(0.95 0.025 158);
+  --menu-active-foreground: oklch(0.38 0.12 158);
   /* F-2 (revised 2026-11-20): sidebar item text measures 13px/500 for BOTH normal and active
    * states, group labels 12px/500 (inner text spans, direct read). The 0.4.0 "measured 400" came
    * from container-level picks (<a>/<button> inheriting the 16px/400 body value) and is revoked.
-   * ui/sidebar reads these vars; its built-in default is 500. */
-  --sidebar-active-weight: 500;
+   * ui/sidebar reads these vars; its built-in default is 500.
+   * Active weight is 600 so the current item matches willow-office font-semibold. */
+  --sidebar-active-weight: 600;
   --sidebar-group-weight: 500;
-  /* Sidebar row height: reference sidebar rows measure 28px (meta.yaml "sidebar rows 28px");
-   * the library default (--sidebar-row-height, 2rem = 32px) follows the workbench-shell reference.
-   * Sidebar items read as secondary gray (lch(37.776 1.25 282)); selected items flip to
-   * --sidebar-accent-foreground via data-active. */
-  --sidebar-row-height: 28px;
+  /* Sidebar row height matches willow-office nav rows (30px). */
+  --sidebar-row-height: 30px;
   --sidebar-item-foreground: oklch(0.378 0.013 284);
   /* Normal items are 500 too (only selected-state weight lives in --sidebar-active-weight). */
   --sidebar-item-weight: 500;
@@ -187,8 +192,8 @@
   --card-foreground: oklch(0.95 0 0);
   --popover: oklch(0.235 0 0);
   --popover-foreground: oklch(0.95 0 0);
-  --primary: oklch(0.55 0.155 277);
-  --primary-foreground: oklch(1 0 0);
+  --primary: oklch(0.69 0.13 158);
+  --primary-foreground: oklch(0.18 0.004 150);
   --secondary: oklch(0.25 0 0);
   --secondary-foreground: oklch(0.95 0 0);
   --muted: oklch(0.25 0 0);
@@ -201,24 +206,26 @@
   --warning: oklch(0.78 0.14 80);
   --warning-foreground: oklch(0.82 0.13 85);
   --info: oklch(0.7 0.12 240);
-  --brand: oklch(0.72 0.12 277);
-  --brand-foreground: oklch(0.18 0 0);
+  --brand: oklch(0.69 0.13 158);
+  --brand-foreground: oklch(0.18 0.004 150);
   --border: oklch(1 0 0 / 9%);
   --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.65 0.13 277);
-  --chart-1: oklch(0.72 0.12 277);
-  --chart-2: oklch(0.62 0.13 277);
-  --chart-3: oklch(0.52 0.12 277);
-  --chart-4: oklch(0.42 0.09 277);
-  --chart-5: oklch(0.32 0.05 277);
+  --ring: oklch(0.69 0.13 158);
+  --chart-1: oklch(0.69 0.13 158);
+  --chart-2: oklch(0.62 0.13 158);
+  --chart-3: oklch(0.52 0.12 158);
+  --chart-4: oklch(0.42 0.09 158);
+  --chart-5: oklch(0.32 0.05 158);
   --sidebar: oklch(0.155 0 0);
   --sidebar-foreground: oklch(0.88 0 0);
-  --sidebar-primary: oklch(0.55 0.155 277);
-  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-primary: oklch(0.69 0.13 158);
+  --sidebar-primary-foreground: oklch(0.18 0.004 150);
   --sidebar-accent: oklch(0.25 0 0);
   --sidebar-accent-foreground: oklch(0.95 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.65 0.13 277);
+  --sidebar-ring: oklch(0.69 0.13 158);
+  --menu-active: oklch(0.69 0.13 158 / 0.16);
+  --menu-active-foreground: oklch(0.79 0.1 158);
   /* Dark has no reference capture yet; secondary item gray follows the dark muted tier. */
   --sidebar-item-foreground: oklch(0.7 0.004 284);
   /* Hover sits between the 0.155 sidebar and the 0.25 selected fill. */

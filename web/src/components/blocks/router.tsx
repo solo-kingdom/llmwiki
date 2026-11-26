@@ -49,6 +49,11 @@ export function useAppPathname(): string {
   return useLocation().pathname
 }
 
+/** Current query string, including the leading `?` when present. */
+export function useAppSearch(): string {
+  return useLocation().search
+}
+
 /** True when `pathname` is `to` itself or one of its descendants ("/" only matches itself). */
 export function isActivePath(pathname: string, to: string): boolean {
   return to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(to.endsWith("/") ? to : to + "/")

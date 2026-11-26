@@ -11,7 +11,7 @@ import { AppProvider } from "@/context/app-context"
 import { ArchivesPage } from "./pages/archives"
 import { ChatPage } from "./pages/chat"
 import { GraphPage } from "./pages/graph"
-import { HelpPage } from "./pages/help"
+import { HelpLayout, HelpSection } from "./pages/help"
 import { JobsPage } from "./pages/jobs"
 import { LogsPage } from "./pages/logs"
 import { SettingsLayout, ModelsSection, IngestSection, StorageSection, AccessSection, IntegrationsSection, RulesSection } from "./pages/settings"
@@ -38,7 +38,10 @@ const router = createBrowserRouter([{
       { path: "integrations", element: <IntegrationsSection /> },
       { path: "rules", element: <RulesSection /> },
     ] },
-    { path: "help", element: <HelpPage /> },
+    { path: "help", element: <HelpLayout />, children: [
+      { index: true, element: <Navigate to="start" replace /> },
+      { path: ":section", element: <HelpSection /> },
+    ] },
     { path: "wiki", element: <WikiReaderPage /> },
     { path: "wiki/graph", element: <GraphPage /> },
     { path: "wiki/:id", element: <WikiReaderPage /> },

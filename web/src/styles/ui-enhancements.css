@@ -46,6 +46,13 @@
   --llmwiki-tone-slate-soft: oklch(0.72 0.04 260 / 0.20);
 }
 
+/* The inset content card stacks a 1px border on shadow-sm (another 1px ring plus a drop).
+   Drop the shadow so the edge stays a single hairline. */
+[data-surface="frame"] {
+  box-shadow: none;
+  border-color: color-mix(in oklch, var(--border) 65%, transparent);
+}
+
 /* ---------- Semantic icon tones (nav, settings, help, tables) ---------- */
 .llmwiki-tone-indigo { color: var(--llmwiki-tone-indigo); }
 .llmwiki-tone-violet { color: var(--llmwiki-tone-violet); }

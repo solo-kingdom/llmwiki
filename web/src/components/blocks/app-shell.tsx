@@ -8,7 +8,7 @@ import * as React from "react"
 import type { LucideIcon } from "lucide-react"
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
-  SidebarInset, SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail,
+  SidebarInset, SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarProvider,
 } from "@/components/ui/sidebar"
 import { AppLink, pickActive, useAppPathname } from "@/components/blocks/router"
 
@@ -53,7 +53,6 @@ export function AppShell({ brand, nav, footer, children }: {
           ))}
         </SidebarContent>
         {footer !== undefined ? <SidebarFooter>{footer}</SidebarFooter> : null}
-        <SidebarRail />
       </Sidebar>
       <SidebarInset data-surface="frame" className="min-h-0 min-w-0 overflow-hidden md:border">{children}</SidebarInset>
     </SidebarProvider>

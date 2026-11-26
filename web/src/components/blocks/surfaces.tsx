@@ -369,8 +369,8 @@ export function NavItem({ to, active = false, onSelect, icon, indent = false, de
   const classes = cn(
     "flex h-[var(--sidebar-row-height,30px)] w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground transition-colors [&_svg]:size-4 [&_svg]:shrink-0",
     depthClass,
-    interactive && "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-    active && "bg-menu-active font-semibold text-menu-active-foreground hover:bg-menu-active hover:text-menu-active-foreground [&_svg]:text-primary",
+    interactive && "hover:bg-menu-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+    active && "bg-menu-active font-semibold text-menu-active-foreground shadow-[inset_0_0_0_1px_var(--menu-active-border)] hover:bg-menu-active hover:text-menu-active-foreground [&_svg]:text-primary",
   )
   const body = (
     <>

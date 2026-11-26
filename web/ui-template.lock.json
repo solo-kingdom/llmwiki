@@ -98,7 +98,7 @@
     "src/components/blocks/surfaces.tsx": "22cd3c3418c7493acc522107a02516f0039d8587302e6072dbbd751b99882fe7",
     "src/components/blocks/theme-menu.tsx": "bb3a75f2331904fc9adfc3abc02be22d37ff75aa9a903480f7a5d5b977c33fe4",
     "src/components/blocks/theme.tsx": "68e5c67c2c6999cd36ccaf413f211135ba299abf3697bf0c20db419c8ba4b877",
-    "src/components/blocks/use-container-width.ts": "505198e51f4f049ed6ecf2d7777feffd8bef3355454c6cc8f4ce348db9d8137b",
+    "src/components/blocks/use-container-width.ts": "1c28c8362ddef957cbbdaf29f8d087456211cea17f2c63d6896ce30943cff3d3",
     "src/components/page-templates/settings-page.tsx": "245242a92af29f762621b928acad7a6dc1469daac1853ae7abbe54b2e4f42236",
     "src/components/ui/alert-dialog.tsx": "d57a96557b5dc52d245d8f5f53250055ac1b6ca39ec28715ec9e3eb29a223472",
     "src/components/ui/alert.tsx": "f253568242c1c69b343f12474002fdbe229f603158171c59e21c491ab79f2e6e",

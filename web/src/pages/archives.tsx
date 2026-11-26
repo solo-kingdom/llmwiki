@@ -361,9 +361,58 @@ function ArchivePane({
         )}
       </InputGroup>
 
-      <Toolbar>
+      <Toolbar
+        end={
+          <>
+            <Button size="icon-sm" variant="ghost" title="上传文件" aria-label="上传文件" onClick={() => onTriggerUpload("")}>
+              <UploadIcon />
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              title="新建目录"
+              aria-label="新建目录"
+              onClick={() => onOpenDialog({ kind: "new-folder", parentPath: "" })}
+            >
+              <FolderPlusIcon />
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              title="全部展开"
+              aria-label="全部展开"
+              onClick={() => setExpanded(new Set(folders.map((f) => f.path)))}
+            >
+              <UnfoldVerticalIcon />
+            </Button>
+            <Button size="icon-sm" variant="ghost" title="全部折叠" aria-label="全部折叠" onClick={() => setExpanded(new Set())}>
+              <FoldVerticalIcon />
+            </Button>
+            {currentId && (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                title="定位当前文件"
+                aria-label="定位当前文件"
+                onClick={() => {
+                  const cur = files.find((f) => f.id === currentId)
+                  if (!cur?.folder_path) return
+                  const parts = cur.folder_path.split("/")
+                  setExpanded((prev) => {
+                    const next = new Set(prev)
+                    for (let i = 1; i <= parts.length; i += 1) next.add(parts.slice(0, i).join("/"))
+                    return next
+                  })
+                }}
+              >
+                <LocateFixedIcon />
+              </Button>
+            )}
+          </>
+        }
+      >
         <Select value={kindFilter} onValueChange={onKindFilterChange}>
-          <SelectTrigger aria-label="按类型筛选" className="w-32">
+          <SelectTrigger aria-label="按类型筛选" className="w-28">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -378,49 +427,6 @@ function ArchivePane({
             <SelectItem value="other">其他</SelectItem>
           </SelectContent>
         </Select>
-        <Actions align="end">
-          <Button size="icon-sm" variant="ghost" title="上传文件" onClick={() => onTriggerUpload("")}>
-            <UploadIcon />
-          </Button>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            title="新建目录"
-            onClick={() => onOpenDialog({ kind: "new-folder", parentPath: "" })}
-          >
-            <FolderPlusIcon />
-          </Button>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            title="全部展开"
-            onClick={() => setExpanded(new Set(folders.map((f) => f.path)))}
-          >
-            <UnfoldVerticalIcon />
-          </Button>
-          <Button size="icon-sm" variant="ghost" title="全部折叠" onClick={() => setExpanded(new Set())}>
-            <FoldVerticalIcon />
-          </Button>
-          {currentId && (
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              title="定位当前文件"
-              onClick={() => {
-                const cur = files.find((f) => f.id === currentId)
-                if (!cur?.folder_path) return
-                const parts = cur.folder_path.split("/")
-                setExpanded((prev) => {
-                  const next = new Set(prev)
-                  for (let i = 1; i <= parts.length; i += 1) next.add(parts.slice(0, i).join("/"))
-                  return next
-                })
-              }}
-            >
-              <LocateFixedIcon />
-            </Button>
-          )}
-        </Actions>
       </Toolbar>
 
       {treeNodes.length === 0 ? (
@@ -790,11 +796,24 @@ export function ArchivesPage() {
     fileInputRef.current?.click()
   }
 
-  if (treeQuery.isLoading) return <RowsSkeleton rows={8} />
-  if (treeQuery.isError) return <ErrorState error={treeQuery.error} onRetry={() => void treeQuery.refetch()} />
+  if (treeQuery.isLoading) {
+    return (
+      <Page title="档案">
+        <RowsSkeleton rows={8} />
+      </Page>
+    )
+  }
+  if (treeQuery.isError) {
+    return (
+      <Page title="档案">
+        <ErrorState error={treeQuery.error} onRetry={() => void treeQuery.refetch()} />
+      </Page>
+    )
+  }
 
   return (
     <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         if (e.dataTransfer.files.length > 0) {

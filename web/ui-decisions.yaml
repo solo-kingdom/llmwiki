@@ -17,4 +17,5 @@ pages:
   /wiki/graph: { pattern: canvas, states: [dense, dark, hover, detail] }
 local_edits:
   src/lib/vocab.ts: "补充领域状态词（job/review/revision/page type），统一由 StatusBadge 使用。"
+  src/components/blocks/use-container-width.ts: "回调 ref 修复首帧不测量：布局在数据加载后才挂载时 width 恒为 0，Split/PageHeader 的断点判定失效；已同步回 ui-template skill 库并 resolve lock。"
 feedback: []

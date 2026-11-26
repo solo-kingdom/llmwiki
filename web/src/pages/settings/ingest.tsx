@@ -29,6 +29,24 @@ export function IngestSection() {
             control={<Switch aria-label="监控来源目录" checked={settings.watch_sources} onCheckedChange={(value) => save.mutate({ watch_sources: value })} />}
           />
           <SettingRow
+            label="并行处理摄入任务"
+            description="多个任务同时调用模型；写同一页面时会自动排队"
+            control={
+              <Switch
+                aria-label="并行处理摄入任务"
+                checked={settings.job_parallel_enabled === true || settings.job_parallel_enabled === "true"}
+                onCheckedChange={(value) => save.mutate({ job_parallel_enabled: value })}
+              />
+            }
+          />
+          <NumberSetting
+            label="最大并发数"
+            description="并行处理时同时在跑的任务数（1–32），改动即时生效"
+            value={Number(settings.job_max_concurrent) || undefined}
+            defaultValue={3}
+            onSave={(value) => save.mutate({ job_max_concurrent: value })}
+          />
+          <SettingRow
             label="Embedding 实例"
             description="用于 chunk 向量化"
             control={<Input aria-label="Embedding 实例" className="w-52 max-sm:w-full" defaultValue={settings.embedding_instance_id ?? ""} onBlur={(event) => save.mutate({ embedding_instance_id: event.target.value })} />}

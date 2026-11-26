@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import type { ConfigStore } from "../interfaces.js";
-import { DEFAULT_MAX_CONCURRENT_JOBS } from "../types.js";
+import { DEFAULT_MAX_CONCURRENT_JOBS, MAX_CONCURRENT_JOBS } from "../types.js";
 import { NOW_TEXT, asString, exec, queryOne, queryRows } from "./sql.js";
 
 export function configRepo(pool: Pool): ConfigStore {
@@ -37,7 +37,7 @@ export function configRepo(pool: Pool): ConfigStore {
       if (!value) return DEFAULT_MAX_CONCURRENT_JOBS;
       const parsed = Number.parseInt(value, 10);
       if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_MAX_CONCURRENT_JOBS;
-      return parsed;
+      return Math.min(MAX_CONCURRENT_JOBS, parsed);
     },
 
     async parallelEnabled(): Promise<boolean> {

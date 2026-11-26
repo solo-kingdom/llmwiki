@@ -43,6 +43,20 @@ Do not poll in a tight loop. Check once, then wait ~10–30s between checks, and
 
 `POST /api/v1/ingest/jobs/conversation` is the legacy one-shot path (paste → job). Prefer the session flow below when the user wants to discuss, refine, or review before committing.
 
+## Large batches: parallel processing
+
+Jobs run one at a time by default. For a large batch, enable parallel processing and raise the limit:
+
+```bash
+curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
+  -H 'Content-Type: application/json' \
+  -d '{"job_parallel_enabled":true,"job_max_concurrent":8}'
+```
+
+- Applies to new claims immediately, no restart needed; `job_parallel_enabled:false` returns to serial.
+- Writes to the same wiki page are serialized and merged, so concurrent jobs do not overwrite each other's pages. Concurrent jobs do see a snapshot of the vault, so related sources in one batch can still create overlapping pages — a review pass after the batch is worthwhile.
+- Rate-limited (429) and transient (5xx, network, idle stream) requests are retried with bounded backoff and show up as `llm request retry` in the job events. A provider's per-minute request cap turns high concurrency into more retries rather than more failures; lower `job_max_concurrent` if retries dominate.
+
 ## Reviewed path: session → archive → plan → approve
 
 ```

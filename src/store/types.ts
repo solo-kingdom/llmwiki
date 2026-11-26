@@ -10,6 +10,8 @@ export const MIN_SESSION_MSG_EVENTS_MAX_COUNT = 10;
 export const MAX_SESSION_MSG_EVENTS_MAX_COUNT = 500;
 
 export const DEFAULT_MAX_CONCURRENT_JOBS = 3;
+export const MIN_CONCURRENT_JOBS = 1;
+export const MAX_CONCURRENT_JOBS = 32;
 export const STALE_HEARTBEAT_SECONDS = 120;
 
 export interface Document {

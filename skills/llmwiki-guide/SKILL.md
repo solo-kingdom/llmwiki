@@ -59,7 +59,7 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
   -d '{"job_instance_id":"<instance_id>","job_model":"<model id>"}'
 ```
 
-`PUT /api/v1/settings` is a partial update: send only the keys you change. Accepted keys include `job_instance_id`, `job_model`, `temperature`, `max_tokens`, `chunk_size`, `chunk_overlap`, `auto_reindex`, `watch_sources`, `doc_language` (`zh`/`en`), `ui_language`, `rules_supplement`, `embedding_instance_id`, `embedding_model`, `embedding_dim`, `default_agent_kind`, `default_acp_agent_id`. Unknown keys are ignored — verify by re-reading settings.
+`PUT /api/v1/settings` is a partial update: send only the keys you change. Accepted keys include `job_instance_id`, `job_model`, `job_parallel_enabled`, `job_max_concurrent`, `temperature`, `max_tokens`, `chunk_size`, `chunk_overlap`, `auto_reindex`, `watch_sources`, `doc_language` (`zh`/`en`), `ui_language`, `rules_supplement`, `embedding_instance_id`, `embedding_model`, `embedding_dim`, `default_agent_kind`, `default_acp_agent_id`. Unknown keys are ignored — verify by re-reading settings.
 
 `GET` on provider instances returns `api_key_masked` only, never the key. `PUT /api/v1/provider-instances/{id}` replaces fields, including the key.
 

@@ -58,7 +58,7 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
   -d '{"job_instance_id":"<instance_id>","job_model":"<model id>"}'
 ```
 
-`PUT /api/v1/settings` 是部分更新，只发要改的键。可用键包括 `job_instance_id`、`job_model`、`temperature`、`max_tokens`、`chunk_size`、`chunk_overlap`、`auto_reindex`、`watch_sources`、`doc_language`（`zh`/`en`）、`ui_language`、`rules_supplement`、`embedding_instance_id`、`embedding_model`、`embedding_dim`、`default_agent_kind`、`default_acp_agent_id`。未知键会被忽略，改完重新读 settings 确认。
+`PUT /api/v1/settings` 是部分更新，只发要改的键。可用键包括 `job_instance_id`、`job_model`、`job_parallel_enabled`、`job_max_concurrent`、`temperature`、`max_tokens`、`chunk_size`、`chunk_overlap`、`auto_reindex`、`watch_sources`、`doc_language`（`zh`/`en`）、`ui_language`、`rules_supplement`、`embedding_instance_id`、`embedding_model`、`embedding_dim`、`default_agent_kind`、`default_acp_agent_id`。未知键会被忽略，改完重新读 settings 确认。
 
 查 provider 实例时只返回 `api_key_masked`，不会回传密钥；`PUT /api/v1/provider-instances/{id}` 可换字段，包括 key。
 

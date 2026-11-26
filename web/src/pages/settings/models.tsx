@@ -14,13 +14,13 @@ import {
   checkProviderInstance,
   deleteProviderInstance,
   getProviderCatalogStatus,
-  listProviderModels,
   syncProviderCatalog,
 } from "@/lib/api"
 import { resolveLinkedModelSelection } from "@/lib/instance-models"
 import type { ProviderCheckResult, ProviderInstance } from "@/types"
+import { HarnessRuntimeSection } from "./harness"
 import { ProviderDialog } from "./provider-dialog"
-import { SettingRow, useSettingsSave } from "./shared"
+import { SettingRow, useCatalogModelNames, useSettingsSave } from "./shared"
 
 const INHERIT_JOB_INSTANCE = "__inherit__"
 
@@ -95,12 +95,12 @@ function ProviderInstances({ onSaved }: { onSaved: () => Promise<void> }) {
             return (
               <Row key={instance.id}>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <Inline gap="sm">
                     <span className="truncate text-sm font-medium">{instance.name}</span>
                     {models.length === 0 ? (
                       <Badge variant="outline">未选模型</Badge>
                     ) : null}
-                  </div>
+                  </Inline>
                   <div
                     className="truncate text-xs text-muted-foreground"
                     title={models.length > 0 ? models.join(", ") : undefined}
@@ -163,7 +163,7 @@ function ProviderInstances({ onSaved }: { onSaved: () => Promise<void> }) {
         </Rows>
       </Panel>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <Stack direction="row" gap="sm" justify="between" align="center">
         {instances.length > 0 ? (
           <Button
             size="sm"
@@ -195,7 +195,7 @@ function ProviderInstances({ onSaved }: { onSaved: () => Promise<void> }) {
             {syncCatalog.isPending ? "同步中…" : "同步 models.dev"}
           </Button>
         </Inline>
-      </div>
+      </Stack>
 
       <ProviderDialog
         open={dialogState.open}
@@ -212,18 +212,6 @@ function ProviderInstances({ onSaved }: { onSaved: () => Promise<void> }) {
   )
 }
 
-function useCatalogModelNames(catalogId: string | undefined) {
-  const query = useQuery({
-    queryKey: ["provider-models", catalogId],
-    queryFn: () => listProviderModels(catalogId ?? ""),
-    enabled: Boolean(catalogId) && catalogId !== "custom",
-  })
-  return React.useMemo(
-    () => new Map((query.data ?? []).map((m) => [m.model_id, m.name])),
-    [query.data],
-  )
-}
-
 export function ModelsSection() {
   const { settings, instances, refresh } = useApp()
   const save = useSettingsSave()
@@ -233,13 +221,11 @@ export function ModelsSection() {
   const jobInstance =
     instances.find((item) => item.id === settings?.job_instance_id) ?? undefined
 
-  const defaultCatalogNames = useCatalogModelNames(defaultInstance?.catalog_id)
   const jobCatalogNames = useCatalogModelNames(jobInstance?.catalog_id)
 
   if (settings === undefined) return <RowsSkeleton rows={6} />
 
   const defaultModels = defaultInstance?.models ?? []
-  const selectedDefaultInstanceId = defaultInstance ? defaultInstance.id : ""
   const selectedDefaultModel = defaultModels.includes(settings.last_model)
     ? settings.last_model
     : ""
@@ -253,77 +239,18 @@ export function ModelsSection() {
 
   return (
     <>
-      <Section size="lg" gap="lg" title="Provider 实例" description="从 models.dev 或自定义端点配置，并选择要使用的模型。">
+      <Section size="lg" gap="lg" title="Provider 实例" description="从 models.dev 或自定义端点配置，并选择要使用的模型；下方对话 Harness 与后台任务共用此实例池。">
         <ProviderInstances onSaved={refresh} />
       </Section>
 
-      <Section size="lg" gap="lg" title="默认模型" description="未在会话或任务中单独指定时使用，仅从对应实例已选模型中选取。">
+      <HarnessRuntimeSection />
+
+      <Section size="lg" gap="lg" title="后台摄入任务模型" description="异步摄入与知识整理任务使用的模型，不受对话侧 ACP 选择影响。">
         <Panel padding="none">
-          <Rows label="默认模型">
-            <SettingRow
-              label="默认 Provider 实例"
-              description="新建会话默认使用的实例"
-              control={
-                <Select
-                  value={selectedDefaultInstanceId}
-                  disabled={instances.length === 0}
-                  onValueChange={(nextId) => {
-                    const nextModel = resolveLinkedModelSelection(
-                      instances,
-                      nextId,
-                      settings.last_model,
-                    )
-                    save.mutate({ last_instance_id: nextId, last_model: nextModel })
-                  }}
-                >
-                  <SelectTrigger aria-label="默认 Provider 实例" className="w-56 max-sm:w-full">
-                    <SelectValue placeholder="选择实例" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {instances.map((instance) => (
-                      <SelectItem key={instance.id} value={instance.id}>
-                        {instance.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              }
-            />
-            <SettingRow
-              label="默认模型"
-              description={
-                defaultInstance && defaultModels.length === 0
-                  ? "当前实例尚未选择模型，请先编辑该实例"
-                  : "可在对话中临时切换"
-              }
-              control={
-                <Select
-                  value={selectedDefaultModel}
-                  disabled={!defaultInstance || defaultModels.length === 0}
-                  onValueChange={(value) => {
-                    if (!defaultInstance) return
-                    save.mutate({ last_instance_id: defaultInstance.id, last_model: value })
-                  }}
-                >
-                  <SelectTrigger aria-label="默认模型" className="w-56 max-sm:w-full">
-                    <SelectValue placeholder={defaultInstance && defaultModels.length === 0 ? "实例未选模型" : "选择模型"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {defaultModels.map((modelId) => {
-                      const label = defaultCatalogNames.get(modelId)
-                      return (
-                        <SelectItem key={modelId} value={modelId}>
-                          {label && label !== modelId ? `${label} (${modelId})` : modelId}
-                        </SelectItem>
-                      )
-                    })}
-                  </SelectContent>
-                </Select>
-              }
-            />
+          <Rows label="后台摄入任务模型">
             <SettingRow
               label="摄入任务 Provider 实例"
-              description="后台整理任务使用的实例；默认沿用上方默认实例"
+              description="后台整理任务使用的实例；默认沿用当前对话默认模型"
               control={
                 <Select
                   value={selectedJobInstanceValue}

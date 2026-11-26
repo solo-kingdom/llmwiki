@@ -8,6 +8,7 @@ import {
   KIND_ACP,
   KIND_NATIVE,
   loadHarnixSettings,
+  resolveHarnessDefaultModel,
   VALID_AGENT_KINDS,
   type WikiRefInput,
 } from "../harness/index.js";
@@ -170,7 +171,7 @@ export function ingestSessionsApi(ctx: ApiContext) {
       throw new Error("agent_kind must be native, pi, or acp");
     }
     if (kind !== KIND_ACP) return;
-    if (!acpAgentId.trim()) throw new Error("请先在 Settings → Harness 配置并选择 ACP Agent");
+    if (!acpAgentId.trim()) throw new Error("请先在「设置 → 模型与 Harness」配置并选择 ACP Agent");
     const settings = await loadHarnixSettings(ctx.db);
     const agent = settings.acp.agents[acpAgentId];
     if (!agent) throw new Error(`ACP Agent "${acpAgentId}" 不存在`);
@@ -397,16 +398,6 @@ export function ingestSessionsApi(ctx: ApiContext) {
         acp_agent_id?: string;
       }>(c)) ?? {};
 
-      let instanceId = req.instance_id ?? "";
-      let model = req.model ?? "";
-      if (!instanceId) instanceId = await ctx.db.getConfig("last_instance_id");
-      if (!model) model = await ctx.db.getConfig("last_model");
-
-      let title = (req.title ?? "").trim();
-      if (!title) {
-        const count = await ctx.db.countIngestSessions();
-        title = defaultIngestSessionTitle(count + 1, new Date());
-      }
       const mode = req.mode || "ingest";
       const harnixSettings = await loadHarnixSettings(ctx.db);
       let agentKind = req.agent_kind ?? "";
@@ -414,6 +405,21 @@ export function ingestSessionsApi(ctx: ApiContext) {
       let acpAgentId = req.acp_agent_id ?? "";
       if (!acpAgentId && agentKind === KIND_ACP) {
         acpAgentId = harnixSettings.acp.defaultAgentId;
+      }
+
+      let instanceId = req.instance_id ?? "";
+      let model = req.model ?? "";
+      if ((!instanceId || !model) && agentKind !== KIND_ACP) {
+        const kindForDefault = agentKind === "pi" ? "pi" : "native";
+        const resolved = await resolveHarnessDefaultModel(ctx.db, harnixSettings, kindForDefault);
+        if (!instanceId) instanceId = resolved.instanceId;
+        if (!model) model = resolved.model;
+      }
+
+      let title = (req.title ?? "").trim();
+      if (!title) {
+        const count = await ctx.db.countIngestSessions();
+        title = defaultIngestSessionTitle(count + 1, new Date());
       }
       try {
         await validateSessionAgent(agentKind, acpAgentId);

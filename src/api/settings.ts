@@ -446,6 +446,40 @@ export function settingsApi(ctx: ApiContext) {
       if (pendingHarnessSettings) {
         try {
           await saveHarnixSettings(ctx.db, pendingHarnessSettings);
+          if (pendingHarnessSettings.defaultKind === "native" || pendingHarnessSettings.defaultKind === "pi") {
+            const bound = pendingHarnessSettings[pendingHarnessSettings.defaultKind];
+            if (!("last_instance_id" in req) && bound.providerInstanceId) {
+              await ctx.db.setConfig("last_instance_id", bound.providerInstanceId);
+            }
+            if (!("last_model" in req) && bound.model) {
+              await ctx.db.setConfig("last_model", bound.model);
+            }
+          }
+        } catch (error) {
+          return writeError(c, 500, errorMessage(error));
+        }
+      } else if ("last_instance_id" in req || "last_model" in req) {
+        try {
+          const current = await loadHarnixSettings(ctx.db);
+          if (current.defaultKind === "native" || current.defaultKind === "pi") {
+            const nextInstanceId =
+              "last_instance_id" in req
+                ? parseSettingsValue(req.last_instance_id).trim()
+                : current[current.defaultKind].providerInstanceId;
+            const nextModel =
+              "last_model" in req
+                ? parseSettingsValue(req.last_model).trim()
+                : current[current.defaultKind].model;
+            const updatedKind = {
+              ...current[current.defaultKind],
+              ...(nextInstanceId ? { providerInstanceId: nextInstanceId } : {}),
+              ...(nextModel ? { model: nextModel } : {}),
+            };
+            await saveHarnixSettings(ctx.db, {
+              ...current,
+              [current.defaultKind]: updatedKind,
+            });
+          }
         } catch (error) {
           return writeError(c, 500, errorMessage(error));
         }
@@ -583,8 +617,17 @@ export function settingsApi(ctx: ApiContext) {
       }
 
       if (kind === "native" || kind === "pi") {
-        const instanceId = (body.instance_id ?? (await ctx.db.getConfig("last_instance_id"))).trim();
-        const model = (body.model ?? (await ctx.db.getConfig("last_model"))).trim();
+        const bound = kind === "pi" ? settings.pi : settings.native;
+        const instanceId = (
+          body.instance_id ??
+          bound.providerInstanceId ??
+          (await ctx.db.getConfig("last_instance_id"))
+        ).trim();
+        const model = (
+          body.model ??
+          bound.model ??
+          (await ctx.db.getConfig("last_model"))
+        ).trim();
         let provider;
         try {
           provider = await resolveProviderCredentials(ctx.db, instanceId, model);

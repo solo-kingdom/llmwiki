@@ -226,6 +226,8 @@ export type AgentKind = "native" | "pi" | "acp"
 export type HarnessPermissionMode = "allow_all" | "readonly" | "deny_all"
 
 export interface NativeHarnessSettings {
+  providerInstanceId?: string
+  model?: string
   temperature?: number
   maxTokens?: number
   maxTurns: number
@@ -237,6 +239,8 @@ export interface NativeHarnessSettings {
 }
 
 export interface PiHarnessSettings {
+  providerInstanceId?: string
+  model?: string
   reasoning: boolean
   contextWindow: number
   maxTokens: number

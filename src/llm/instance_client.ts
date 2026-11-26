@@ -22,19 +22,17 @@ export async function clientFromInstance(
       `provider instance "${instance}" not found; configure it in Settings under Provider instances`,
     );
   }
-  if (!providerInstance.api_key.trim()) {
+  const providerInfo = await db.getProviderInfo(providerInstance.catalog_id);
+  const apiFormat =
+    providerInstance.api_format.trim() || providerInfo?.api_format || "openai";
+  const baseUrl =
+    providerInstance.base_url.trim() || providerInfo?.api_base || "";
+
+  if (apiFormat !== "ollama" && !providerInstance.api_key.trim()) {
     const name = providerInstance.name || instance;
     throw new Error(
       `API key is not configured for provider instance "${name}"; set it in Settings under Provider instances`,
     );
-  }
-
-  let apiFormat = "openai";
-  let baseUrl = providerInstance.base_url;
-  const providerInfo = await db.getProviderInfo(providerInstance.catalog_id);
-  if (providerInfo) {
-    if (providerInfo.api_format) apiFormat = providerInfo.api_format;
-    if (!baseUrl) baseUrl = providerInfo.api_base;
   }
 
   return newValidatedClient({

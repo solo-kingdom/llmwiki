@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "react-router"
 import {
@@ -213,16 +213,27 @@ function ModelPicker({ session }: { session: IngestSession }) {
   const { instances } = useApp()
   const queryClient = useQueryClient()
   const [instanceId, setInstanceId] = useState(session.llm_instance_id || instances[0]?.id || "")
+  useEffect(() => {
+    setInstanceId(session.llm_instance_id || instances[0]?.id || "")
+  }, [session.id, session.llm_instance_id, instances])
   const instance = instances.find((item) => item.id === instanceId)
+  const configuredModels = instance?.models ?? []
   const catalogId = instance?.catalog_id ?? ""
   const modelsQuery = useQuery({
     queryKey: ["provider-models", catalogId],
     queryFn: () => listProviderModels(catalogId),
-    enabled: catalogId !== "",
+    enabled: catalogId !== "" && catalogId !== "custom" && configuredModels.length === 0,
   })
-  const models = modelsQuery.data ?? []
+  const fallbackModels = (modelsQuery.data ?? []).map((m) => ({
+    id: m.model_id,
+    label: m.name || m.model_id,
+  }))
+  const modelOptions =
+    configuredModels.length > 0
+      ? configuredModels.map((id) => ({ id, label: id }))
+      : fallbackModels
   const selectedInstanceId = instance === undefined ? "" : instanceId
-  const selectedModel = models.some((model) => model.model_id === session.llm_model) ? session.llm_model : ""
+  const selectedModel = modelOptions.some((model) => model.id === session.llm_model) ? session.llm_model : ""
   const update = useMutation({
     mutationFn: ({ nextInstanceId, model }: { nextInstanceId: string; model: string }) =>
       updateIngestSession(session.id, { instance_id: nextInstanceId, model }),
@@ -247,8 +258,13 @@ function ModelPicker({ session }: { session: IngestSession }) {
             value={selectedInstanceId}
             onValueChange={(value) => {
               setInstanceId(value)
-              if (value === session.llm_instance_id && session.llm_model !== "") {
-                update.mutate({ nextInstanceId: value, model: session.llm_model })
+              const nextInst = instances.find((item) => item.id === value)
+              const nextModels = nextInst?.models ?? []
+              const nextModel = nextModels.includes(session.llm_model)
+                ? session.llm_model
+                : (nextModels[0] ?? "")
+              if (nextModel !== "") {
+                update.mutate({ nextInstanceId: value, model: nextModel })
               }
             }}
           >
@@ -259,12 +275,12 @@ function ModelPicker({ session }: { session: IngestSession }) {
           </Select>
           <Select
             value={selectedModel}
-            disabled={models.length === 0}
+            disabled={modelOptions.length === 0}
             onValueChange={(model) => update.mutate({ nextInstanceId: instanceId, model })}
           >
             <SelectTrigger aria-label="对话模型" size="sm" className="w-full"><SelectValue placeholder="选择模型" /></SelectTrigger>
             <SelectContent>
-              {models.map((model) => <SelectItem key={model.model_id} value={model.model_id}>{model.name || model.model_id}</SelectItem>)}
+              {modelOptions.map((model) => <SelectItem key={model.id} value={model.id}>{model.label}</SelectItem>)}
             </SelectContent>
           </Select>
         </Stack>

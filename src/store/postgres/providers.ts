@@ -1,17 +1,30 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type { ProviderStore } from "../interfaces.js";
-import type { ModelInfo, ProviderInfo, ProviderInstance } from "../types.js";
+import type { ModelInfo, ProviderInfo, ProviderInstance, ProviderInstanceUpdatePatch } from "../types.js";
 import { NOW_TEXT, asBoolean, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
 const INSTANCE_COLUMNS = `
   COALESCE(id,''), COALESCE(name,''), COALESCE(catalog_id,''),
   COALESCE(api_key,''), COALESCE(base_url,''),
-  COALESCE(created_at,''), COALESCE(updated_at,'')`;
+  COALESCE(created_at,''), COALESCE(updated_at,''),
+  COALESCE(api_format,''), COALESCE(models,'[]')`;
 
 const PROVIDER_COLUMNS = `
   COALESCE(id,''), COALESCE(name,''), COALESCE(api_base,''),
-  COALESCE(api_format,'openai'), COALESCE(env_key,''), COALESCE(doc_url,'')`;
+  COALESCE(api_format,'openai'), COALESCE(env_key,''), COALESCE(doc_url,''),
+  COALESCE(npm,'')`;
+
+function parseModelsJson(raw: string): string[] {
+  if (!raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+  } catch {
+    return [];
+  }
+}
 
 function scanInstance(row: unknown[]): ProviderInstance {
   return {
@@ -22,6 +35,8 @@ function scanInstance(row: unknown[]): ProviderInstance {
     base_url: asString(row[4]),
     created_at: asString(row[5]),
     updated_at: asString(row[6]),
+    api_format: asString(row[7]),
+    models: parseModelsJson(asString(row[8])),
   };
 }
 
@@ -33,6 +48,7 @@ function scanProvider(row: unknown[]): ProviderInfo {
     api_format: asString(row[3]),
     env_key: asString(row[4]),
     doc_url: asString(row[5]),
+    npm: asString(row[6]),
   };
 }
 
@@ -61,19 +77,22 @@ export function providersRepo(pool: Pool): ProviderStore {
       if (!instance.catalog_id) throw new Error("catalog_id is required");
       const row = await queryOne<[string, string]>(
         pool,
-        `INSERT INTO provider_instances (id, name, catalog_id, api_key, base_url, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, ${NOW_TEXT}, ${NOW_TEXT})
+        `INSERT INTO provider_instances (id, name, catalog_id, api_format, api_key, base_url, models, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, ${NOW_TEXT}, ${NOW_TEXT})
          ON CONFLICT (id) DO UPDATE SET
            name = EXCLUDED.name, catalog_id = EXCLUDED.catalog_id,
-           api_key = EXCLUDED.api_key, base_url = EXCLUDED.base_url,
+           api_format = EXCLUDED.api_format, api_key = EXCLUDED.api_key,
+           base_url = EXCLUDED.base_url, models = EXCLUDED.models,
            updated_at = EXCLUDED.updated_at
          RETURNING created_at, updated_at`,
         [
           instance.id,
           instance.name.trim(),
           instance.catalog_id,
+          instance.api_format ?? "",
           instance.api_key,
           instance.base_url,
+          JSON.stringify(instance.models ?? []),
         ],
       );
       if (!row) throw new Error("create provider instance: no row returned");
@@ -98,41 +117,27 @@ export function providersRepo(pool: Pool): ProviderStore {
       return rows.map(scanInstance);
     },
 
-    async updateProviderInstance(
-      id: string,
-      name: string,
-      catalogID: string,
-      apiKey: string,
-      baseURL: string,
-    ): Promise<void> {
-      if (name) {
-        await exec(
-          pool,
-          `UPDATE provider_instances SET name = $1, updated_at = ${NOW_TEXT} WHERE id = $2`,
-          [name.trim(), id],
-        );
-      }
-      if (catalogID) {
-        await exec(
-          pool,
-          `UPDATE provider_instances SET catalog_id = $1, updated_at = ${NOW_TEXT} WHERE id = $2`,
-          [catalogID, id],
-        );
-      }
-      if (apiKey) {
-        await exec(
-          pool,
-          `UPDATE provider_instances SET api_key = $1, updated_at = ${NOW_TEXT} WHERE id = $2`,
-          [apiKey, id],
-        );
-      }
-      if (baseURL) {
-        await exec(
-          pool,
-          `UPDATE provider_instances SET base_url = $1, updated_at = ${NOW_TEXT} WHERE id = $2`,
-          [baseURL, id],
-        );
-      }
+    async updateProviderInstance(id: string, patch: ProviderInstanceUpdatePatch): Promise<void> {
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      const push = (column: string, value: unknown) => {
+        params.push(value);
+        sets.push(`${column} = $${params.length}`);
+      };
+      if (patch.name !== undefined) push("name", patch.name.trim());
+      if (patch.catalog_id !== undefined) push("catalog_id", patch.catalog_id.trim());
+      if (patch.api_format !== undefined) push("api_format", patch.api_format.trim());
+      if (patch.api_key !== undefined && patch.api_key.trim() !== "") push("api_key", patch.api_key);
+      if (patch.base_url !== undefined) push("base_url", patch.base_url.trim());
+      if (patch.models !== undefined) push("models", JSON.stringify(patch.models));
+      if (sets.length === 0) return;
+      sets.push(`updated_at = ${NOW_TEXT}`);
+      params.push(id);
+      await exec(
+        pool,
+        `UPDATE provider_instances SET ${sets.join(", ")} WHERE id = $${params.length}`,
+        params,
+      );
     },
 
     async deleteProviderInstance(id: string): Promise<void> {
@@ -145,8 +150,8 @@ export function providersRepo(pool: Pool): ProviderStore {
         await client.query("DELETE FROM provider_info_cache");
         for (const provider of providers) {
           await client.query(
-            `INSERT INTO provider_info_cache (id, name, api_base, api_format, env_key, doc_url)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
+            `INSERT INTO provider_info_cache (id, name, api_base, api_format, env_key, doc_url, npm)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
             [
               provider.id,
               provider.name,
@@ -154,6 +159,7 @@ export function providersRepo(pool: Pool): ProviderStore {
               provider.api_format,
               provider.env_key,
               provider.doc_url,
+              provider.npm ?? "",
             ],
           );
         }
@@ -168,6 +174,9 @@ export function providersRepo(pool: Pool): ProviderStore {
             providerID,
           ]);
         }
+        await client.query(
+          "DELETE FROM provider_models_cache WHERE provider_id NOT IN (SELECT id FROM provider_info_cache)",
+        );
         for (const model of models) {
           await client.query(
             `INSERT INTO provider_models_cache
@@ -228,6 +237,17 @@ export function providersRepo(pool: Pool): ProviderStore {
         "SELECT COUNT(*) FROM provider_info_cache",
       );
       return (row ? asNumber(row[0]) : 0) === 0;
+    },
+
+    async countCatalog(): Promise<{ provider_count: number; model_count: number }> {
+      const row = await queryOne<[number, number]>(
+        pool,
+        "SELECT (SELECT COUNT(*)::int FROM provider_info_cache), (SELECT COUNT(*)::int FROM provider_models_cache)",
+      );
+      return {
+        provider_count: row ? asNumber(row[0]) : 0,
+        model_count: row ? asNumber(row[1]) : 0,
+      };
     },
   };
 }

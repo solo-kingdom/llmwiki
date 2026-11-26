@@ -545,6 +545,14 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_archive_files_text_trgm ON archive_files USING gin (COALESCE(searchable_text, '') gin_trgm_ops)`,
     ],
   },
+  {
+    version: 9,
+    statements: [
+      `ALTER TABLE provider_instances ADD COLUMN IF NOT EXISTS api_format TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE provider_instances ADD COLUMN IF NOT EXISTS models TEXT NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE provider_info_cache ADD COLUMN IF NOT EXISTS npm TEXT NOT NULL DEFAULT ''`,
+    ],
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

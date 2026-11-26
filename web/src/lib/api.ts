@@ -26,6 +26,7 @@ import type {
   ModelInfo,
   PublicWikiDocument,
   SessionListItem,
+  CatalogStatus,
   ChangeSet,
   PageRevision,
   HistoryListResponse,
@@ -34,6 +35,8 @@ import type {
   RollbackResponse,
   SearchMode,
   ProviderCheckResult,
+  ProviderDraftTestResult,
+  ProviderModelsDiscoveryResult,
   MCPServerCheckResult,
   ActivityLog,
   SessionMessageEventsResponse,
@@ -739,6 +742,14 @@ export function listProviders(): Promise<Provider[]> {
   return request<Provider[]>("/api/v1/providers")
 }
 
+export function getProviderCatalogStatus(): Promise<CatalogStatus> {
+  return request<CatalogStatus>("/api/v1/providers/catalog-status")
+}
+
+export function syncProviderCatalog(): Promise<CatalogStatus> {
+  return request<CatalogStatus>("/api/v1/providers/sync", { method: "POST" })
+}
+
 export function listProviderModels(providerId: string): Promise<ModelInfo[]> {
   return request<ModelInfo[]>(
     `/api/v1/providers/${encodeURIComponent(providerId)}/models`,
@@ -758,8 +769,10 @@ export function updateLastModel(
 export function createProviderInstance(payload: {
   name: string
   catalog_id: string
-  api_key: string
+  api_format?: string
+  api_key?: string
   base_url?: string
+  models?: string[]
 }): Promise<{ instance: ProviderInstance }> {
   return request<{ instance: ProviderInstance }>("/api/v1/provider-instances", {
     method: "POST",
@@ -784,8 +797,10 @@ export function updateProviderInstance(
   payload: {
     name?: string
     catalog_id?: string
+    api_format?: string
     api_key?: string
     base_url?: string
+    models?: string[]
   },
 ): Promise<{ instance: ProviderInstance }> {
   return request<{ instance: ProviderInstance }>(
@@ -795,6 +810,33 @@ export function updateProviderInstance(
       body: JSON.stringify(payload),
     },
   )
+}
+
+export function discoverProviderModels(payload: {
+  instance_id?: string
+  catalog_id?: string
+  api_format?: string
+  base_url?: string
+  api_key?: string
+}): Promise<ProviderModelsDiscoveryResult> {
+  return request<ProviderModelsDiscoveryResult>("/api/v1/provider-instances/models", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function testProviderDraft(payload: {
+  instance_id?: string
+  catalog_id?: string
+  api_format?: string
+  base_url?: string
+  api_key?: string
+  model_id?: string
+}): Promise<ProviderDraftTestResult> {
+  return request<ProviderDraftTestResult>("/api/v1/provider-instances/test", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
 }
 
 export function deleteProviderInstance(

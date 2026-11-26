@@ -306,19 +306,13 @@ export class JobProcessor {
   }
 
   private async resolveLLMClientForJob(job: IngestJob): Promise<Client> {
-    let instanceId = "";
-    let model = "";
     if (job.input_type === "session_archive" && job.source_ref.startsWith("session:")) {
       const session = await this.db.getIngestSession(job.source_ref.slice("session:".length));
-      if (session) {
-        instanceId = session.llm_instance_id;
-        model = session.llm_model;
+      if (session?.llm_instance_id && session.llm_model) {
+        return clientFromInstance(this.db, session.llm_instance_id, session.llm_model);
       }
     }
-    if (!instanceId) instanceId = await this.db.getConfig("job_instance_id");
-    if (!model) model = await this.db.getConfig("job_model");
-    if (!instanceId) instanceId = await this.db.getConfig("last_instance_id");
-    if (!model) model = await this.db.getConfig("last_model");
+    const { instanceId, model } = await this.resolveJobInstanceAndModel();
     if (instanceId && model) return clientFromInstance(this.db, instanceId, model);
     return clientFromWorkspace(this.workspace);
   }
@@ -330,12 +324,25 @@ export class JobProcessor {
         return clientFromInstance(this.db, session.llm_instance_id, session.llm_model);
       }
     }
-    let instanceId = await this.db.getConfig("job_instance_id");
-    let model = await this.db.getConfig("job_model");
-    if (!instanceId) instanceId = await this.db.getConfig("last_instance_id");
-    if (!model) model = await this.db.getConfig("last_model");
+    const { instanceId, model } = await this.resolveJobInstanceAndModel();
     if (instanceId && model) return clientFromInstance(this.db, instanceId, model);
     return clientFromWorkspace(this.workspace);
+  }
+
+  private async resolveJobInstanceAndModel(): Promise<{ instanceId: string; model: string }> {
+    const jobInstanceId = (await this.db.getConfig("job_instance_id")).trim();
+    const jobModel = (await this.db.getConfig("job_model")).trim();
+    if (jobInstanceId) {
+      let model = jobModel;
+      if (!model) {
+        const inst = await this.db.getProviderInstance(jobInstanceId);
+        model = inst?.models[0] ?? "";
+      }
+      return { instanceId: jobInstanceId, model };
+    }
+    const lastInstanceId = (await this.db.getConfig("last_instance_id")).trim();
+    const lastModel = (await this.db.getConfig("last_model")).trim();
+    return { instanceId: lastInstanceId, model: jobModel || lastModel };
   }
 
   private finalizeWikiApply(

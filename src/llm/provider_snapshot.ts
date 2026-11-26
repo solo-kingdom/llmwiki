@@ -35,6 +35,7 @@ export function loadSnapshot(): { providers: ProviderInfo[]; models: ModelInfo[]
       api_format: apiFormat,
       env_key: envKey,
       doc_url: "",
+      npm: apiFormat === "anthropic" ? "@ai-sdk/anthropic" : "",
     });
     for (const model of Object.values(raw.models)) {
       models.push({

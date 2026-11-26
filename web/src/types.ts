@@ -165,6 +165,8 @@ export interface SearchResponse {
   results: SearchChunk[]
 }
 
+export type ProviderApiFormat = "openai" | "anthropic" | "ollama"
+
 export interface Provider {
   id: string
   name: string
@@ -172,16 +174,37 @@ export interface Provider {
   api_format: string
   env_key: string
   doc_url: string
+  npm?: string
 }
 
 export interface ProviderInstance {
   id: string
   name: string
   catalog_id: string
+  api_format: string
   api_key_masked: string
   base_url: string
+  models: string[]
   created_at: string
   updated_at: string
+}
+
+export interface CatalogStatus {
+  availability: "available" | "fallback" | "empty"
+  provider_count: number
+  model_count: number
+  synced_at: string
+  last_error: string
+}
+
+export interface ProviderModelsDiscoveryResult {
+  models: string[]
+  fetched_at: string
+}
+
+export interface ProviderDraftTestResult {
+  status: "ok" | "unauthorized" | "error"
+  message: string
 }
 
 export interface ModelInfo {

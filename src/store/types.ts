@@ -328,11 +328,22 @@ export interface ProviderInstance {
   id: string;
   name: string;
   catalog_id: string;
+  api_format: string;
   api_key: string;
   api_key_masked?: string;
   base_url: string;
+  models: string[];
   created_at: string;
   updated_at: string;
+}
+
+export interface ProviderInstanceUpdatePatch {
+  name?: string;
+  catalog_id?: string;
+  api_format?: string;
+  api_key?: string;
+  base_url?: string;
+  models?: string[];
 }
 
 export interface ProviderInfo {
@@ -342,6 +353,7 @@ export interface ProviderInfo {
   api_format: string;
   env_key: string;
   doc_url: string;
+  npm: string;
 }
 
 export interface ModelInfo {

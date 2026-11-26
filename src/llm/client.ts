@@ -149,6 +149,28 @@ export class Client {
     throw classifyError(response.status, body);
   }
 
+  async listModels(signal?: AbortSignal): Promise<string[]> {
+    this.validateRequest();
+    const { url, method } = this.probeRequest();
+    const response = await fetch(url, {
+      method,
+      headers: this.headers(),
+      signal: this.requestSignal(signal, DEFAULT_PROBE_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw classifyError(response.status, body);
+    }
+    const text = await response.text();
+    let payload: unknown;
+    try {
+      payload = JSON.parse(text) as unknown;
+    } catch {
+      throw new Error("provider models endpoint returned non-JSON body");
+    }
+    return extractModelIds(payload, this.provider);
+  }
+
   async embeddings(model: string, input: string[], signal?: AbortSignal): Promise<number[][]> {
     if (input.length === 0) return [];
     const effectiveModel = model || this.model;
@@ -186,7 +208,10 @@ export class Client {
     const base = this.baseUrl.replace(/\/+$/, "");
     switch (this.provider) {
       case "anthropic":
-        return { url: `${base}/models`, method: "GET" };
+        return {
+          url: /\/v\d+[^/]*$/.test(base) ? `${base}/models` : `${base}/v1/models`,
+          method: "GET",
+        };
       case "ollama":
         return { url: `${base}/api/tags`, method: "GET" };
       default:
@@ -604,4 +629,36 @@ function normalizeError(error: unknown): Error {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function extractModelIds(payload: unknown, provider: string): string[] {
+  if (payload === null || typeof payload !== "object") return [];
+  const record = payload as { data?: unknown; models?: unknown };
+  const rawList =
+    provider === "ollama"
+      ? Array.isArray(record.models)
+        ? record.models
+        : Array.isArray(record.data)
+          ? record.data
+          : []
+      : Array.isArray(record.data)
+        ? record.data
+        : Array.isArray(record.models)
+          ? record.models
+          : [];
+  const ids: string[] = [];
+  for (const item of rawList) {
+    let rawId: unknown;
+    if (typeof item === "string") {
+      rawId = item;
+    } else if (item !== null && typeof item === "object") {
+      const obj = item as { id?: unknown; name?: unknown; model?: unknown };
+      rawId = provider === "ollama" ? (obj.name ?? obj.model ?? obj.id) : obj.id;
+    }
+    if (typeof rawId !== "string") continue;
+    const id = rawId.trim();
+    if (id && !ids.includes(id)) ids.push(id);
+    if (ids.length >= 500) break;
+  }
+  return ids;
 }

@@ -167,6 +167,8 @@ function validateAndCanonicalizeAcpJson(value: string): string {
 }
 
 const ALLOWED_KEYS = new Set([
+  "last_instance_id",
+  "last_model",
   "temperature",
   "max_tokens",
   "chunk_size",

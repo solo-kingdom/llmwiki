@@ -36,6 +36,7 @@ import type {
   PageWrite,
   ProviderInfo,
   ProviderInstance,
+  ProviderInstanceUpdatePatch,
   RefEdge,
   ReferenceSummary,
   ReferenceEntryInput,
@@ -242,7 +243,7 @@ export interface ProviderStore {
   createProviderInstance(inst: ProviderInstance): Promise<void>;
   getProviderInstance(id: string): Promise<ProviderInstance | null>;
   listProviderInstances(): Promise<ProviderInstance[]>;
-  updateProviderInstance(id: string, name: string, catalogID: string, apiKey: string, baseURL: string): Promise<void>;
+  updateProviderInstance(id: string, patch: ProviderInstanceUpdatePatch): Promise<void>;
   deleteProviderInstance(id: string): Promise<void>;
 
   upsertProviderInfo(providers: ProviderInfo[]): Promise<void>;
@@ -251,6 +252,7 @@ export interface ProviderStore {
   listModelsByProvider(providerID: string): Promise<ModelInfo[]>;
   getProviderInfo(providerID: string): Promise<ProviderInfo | null>;
   cacheIsEmpty(): Promise<boolean>;
+  countCatalog(): Promise<{ provider_count: number; model_count: number }>;
 }
 
 export interface ActivityStore {

@@ -19,6 +19,7 @@ import { defaultToolPolicy } from "../mcp/policy.js";
 import { createAuditAdapter, registerTools } from "../mcp/tools.js";
 import { openDatabase } from "../db/pool.js";
 import { loadSnapshot } from "../llm/provider_snapshot.js";
+import { CATALOG_SYNC_INTERVAL_MS, isCatalogStale, syncModelsDev } from "../llm/provider_sync.js";
 import { openStore } from "../store/postgres/db.js";
 import { importSettingsIfEmpty } from "../workspace/settings.js";
 import { createApp } from "../server/app.js";
@@ -110,6 +111,23 @@ export async function runServe(options: ServeOptions): Promise<void> {
       });
     }, 5 * 60 * 1000);
 
+    const runCatalogSyncIfStale = async () => {
+      try {
+        const syncedAt = await store.getConfig("models_synced_at");
+        if (!isCatalogStale(syncedAt)) return;
+        await syncModelsDev(store);
+      } catch (error) {
+        logger.warn(
+          `models.dev catalog sync failed (using cached/snapshot data): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    };
+    void runCatalogSyncIfStale();
+    const catalogSyncTimer = setInterval(() => {
+      void runCatalogSyncIfStale();
+    }, CATALOG_SYNC_INTERVAL_MS);
+    catalogSyncTimer.unref?.();
+
     const server = serve(
       {
         fetch: app.fetch,
@@ -129,6 +147,7 @@ export async function runServe(options: ServeOptions): Promise<void> {
       shuttingDown = true;
       logger.info(`received ${signal}, shutting down`);
       clearInterval(trimTimer);
+      clearInterval(catalogSyncTimer);
       processor.stop();
       acpManager.closeAll();
       server.close();

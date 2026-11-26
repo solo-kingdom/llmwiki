@@ -233,9 +233,13 @@ export function createApp(deps: AppDeps): Hono {
 
   // Providers and ACP
   app.get("/api/v1/providers", api.listProviders);
+  app.get("/api/v1/providers/catalog-status", api.getCatalogStatus);
+  app.post("/api/v1/providers/sync", api.syncProviders);
   app.get("/api/v1/providers/:id/models", api.listProviderModels);
   app.get("/api/v1/provider-instances", api.listProviderInstances);
   app.post("/api/v1/provider-instances", api.createProviderInstance);
+  app.post("/api/v1/provider-instances/models", api.discoverInstanceModels);
+  app.post("/api/v1/provider-instances/test", api.testProviderInstance);
   app.post("/api/v1/provider-instances/check", api.checkAllProviderInstances);
   app.get("/api/v1/provider-instances/:id", api.getProviderInstance);
   app.put("/api/v1/provider-instances/:id", api.updateProviderInstance);

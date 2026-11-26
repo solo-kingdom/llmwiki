@@ -286,6 +286,11 @@ export class Client {
       stream,
     };
     if (maxTokens > 0) request.max_tokens = maxTokens;
+    if (this.baseUrl.includes("minimaxi.com")) {
+      // MiniMax runs adaptive thinking by default and can spend the whole token
+      // budget on reasoning, leaving empty visible content; keep reasoning small.
+      request.reasoning_effort = "low";
+    }
     if (tools.length > 0) {
       request.tools = tools.map((tool) => ({
         type: "function",

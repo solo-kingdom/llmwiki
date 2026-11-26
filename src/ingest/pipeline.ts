@@ -264,7 +264,7 @@ export class Pipeline {
         { role: "user", content: userBody },
       ],
       0.1,
-      4096,
+      8192,
       { promptStep: "analysis" },
     );
   }
@@ -288,7 +288,7 @@ ${content}
         { role: "user", content: prompt },
       ],
       0.1,
-      8192,
+      32768,
       { promptStep: "generation" },
     );
 
@@ -363,7 +363,7 @@ ${content}
         { role: "user", content: prompt },
       ],
       0.1,
-      8192,
+      32768,
       { promptStep: "generation" },
     );
 

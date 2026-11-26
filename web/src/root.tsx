@@ -57,7 +57,7 @@ function Brand() {
   /* eslint-disable ui-template/no-layout-classes */
   return (
     <div className="flex min-w-0 items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-      <img src="/icon.png" alt="" width={20} height={20} className="size-5 shrink-0 rounded-[5px] object-contain" draggable={false} />
+      <img src="/icon.png" alt="" width={36} height={36} className="size-9 shrink-0 rounded-[9px] object-contain group-data-[collapsible=icon]:size-8" draggable={false} />
       <div className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
         <span className="truncate text-sm font-semibold">知林</span>
         <span className="truncate text-xs text-muted-foreground">知识库工作台</span>

@@ -177,14 +177,13 @@
    * light. Second layer's blur carried a truncated read (0 6px …); 24px taken from the same family. */
   --floating-shadow: rgb(0 0 0 / 0.08) 0px 9px 48px 0px, rgb(0 0 0 / 0.1) 0px 6px 24px 0px;
   /* Component calibration (2026-11-21): reference controls are 28px tall (search input 28,
-   * combobox 30, primary pill 28), 8px radius, pill-shaped buttons, 30x20 switches and 46px
-   * command items at 15px. Library defaults keep the workbench-shell values. */
+   * combobox 30, primary pill 28), 8px radius, pill-shaped buttons and 30x20 switches.
+   * Command items keep the library defaults (34px / 14px) so dialog comboboxes match
+   * Select/Input; the search palette sizes its own rows in ui-enhancements.css. */
   --control-height: 28px;
   --button-radius: 9999px;
   --switch-width: 30px;
   --switch-height: 20px;
-  --command-item-height: 46px;
-  --command-item-font-size: 15px;
 }
 
 .dark {

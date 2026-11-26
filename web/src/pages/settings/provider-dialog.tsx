@@ -45,6 +45,8 @@ import {
   adapterBaseUrl,
   adapterFromProvider,
   catalogBaseUrl,
+  endpointForFormat,
+  inferProtocolFromBaseUrl,
   isUsableBaseUrl,
   KNOWN_BASE_URLS,
 } from "@/lib/provider-autofill"
@@ -63,6 +65,12 @@ function useDebounced<T>(value: T, delay = 400): T {
     return () => clearTimeout(timer)
   }, [value, delay])
   return debounced
+}
+
+const API_FORMAT_LABELS: Record<ProviderApiFormat, string> = {
+  openai: "OpenAI 兼容",
+  anthropic: "Anthropic",
+  ollama: "Ollama",
 }
 
 export interface ProviderDialogProps {
@@ -165,10 +173,7 @@ function ProviderDialogForm({
   const [selectedModels, setSelectedModels] = React.useState<string[]>(() =>
     normalizeSelectedModels(seed?.models ?? []),
   )
-  const [touched, setTouched] = React.useState({
-    name: Boolean(seed?.name),
-    baseUrl: Boolean(seed?.base_url),
-  })
+  const [nameTouched, setNameTouched] = React.useState(Boolean(seed?.name))
   const [providerOpen, setProviderOpen] = React.useState(false)
   const [modelsOpen, setModelsOpen] = React.useState(false)
   const [modelQuery, setModelQuery] = React.useState("")
@@ -177,6 +182,13 @@ function ProviderDialogForm({
   const selectedProvider = providers.find((p) => p.id === catalogId)
   const autoBase = catalogBaseUrl(selectedProvider, apiFormat)
   const baseUrlValid = isUsableBaseUrl(baseUrl)
+  const inferredProtocol = inferProtocolFromBaseUrl(baseUrl)
+  const protocolMismatch =
+    baseUrlValid && inferredProtocol !== undefined && inferredProtocol !== apiFormat
+      ? inferredProtocol
+      : undefined
+  const protocolFixUrl =
+    protocolMismatch !== undefined ? endpointForFormat(baseUrl, apiFormat) : undefined
 
   const catalogModelsQuery = useQuery({
     queryKey: ["provider-models", catalogId],
@@ -184,11 +196,16 @@ function ProviderDialogForm({
     enabled: tab === "catalog" && catalogId !== "",
   })
 
+  const baseUrlFromCatalog = autoBase !== undefined && baseUrl.trim() === autoBase.url
+  // The stored key may follow a catalog endpoint of the same provider (protocol switch),
+  // but never an arbitrary URL or a different provider's endpoint.
+  const sameCatalogProvider =
+    seed !== undefined && tab === "catalog" && catalogId === seed.catalog_id
   const usingStoredCredential =
     editing &&
     seed !== undefined &&
-    baseUrl.trim() === seed.base_url.trim() &&
-    apiKey.trim() === ""
+    apiKey.trim() === "" &&
+    (baseUrl.trim() === seed.base_url.trim() || (sameCatalogProvider && baseUrlFromCatalog))
   const liveKey = useDebounced(
     `${apiFormat}\u0000${baseUrl.trim()}\u0000${apiKey.length}`,
     500,
@@ -200,11 +217,15 @@ function ProviderDialogForm({
     queryKey: [
       "provider-live-models",
       usingStoredCredential ? seed?.id : "draft",
-      usingStoredCredential ? apiFormat : liveKey,
+      usingStoredCredential ? `${apiFormat}\u0000${baseUrl.trim()}` : liveKey,
     ],
     queryFn: () =>
       usingStoredCredential && seed
-        ? discoverProviderModels({ instance_id: seed.id, api_format: apiFormat })
+        ? discoverProviderModels({
+            instance_id: seed.id,
+            api_format: apiFormat,
+            base_url: baseUrl.trim(),
+          })
         : discoverProviderModels({
             catalog_id: tab === "catalog" && catalogId ? catalogId : "custom",
             api_format: apiFormat,
@@ -274,8 +295,10 @@ function ProviderDialogForm({
     const changed = provider.id !== catalogId
     setCatalogId(provider.id)
     setApiFormat(nextFormat)
-    if (!touched.name) setName(provider.name)
-    if (!touched.baseUrl && nextAuto) setBaseUrl(nextAuto.url)
+    if (!nameTouched) setName(provider.name)
+    // Switching provider always adopts its catalog endpoint for the selected protocol,
+    // even in edit mode: an endpoint left over from another provider/format is wrong.
+    if (nextAuto) setBaseUrl(nextAuto.url)
     if (changed && !editing) {
       setSelectedModels([])
     }
@@ -285,12 +308,13 @@ function ProviderDialogForm({
 
   const changeFormat = (nextFormat: ProviderApiFormat) => {
     setApiFormat(nextFormat)
-    if (!touched.baseUrl) {
-      const nextUrl =
-        catalogBaseUrl(selectedProvider, nextFormat)?.url ??
-        adapterBaseUrl(nextFormat, catalogId || undefined, baseUrl)
-      if (nextUrl) setBaseUrl(nextUrl)
-    }
+    // The protocol decides the endpoint: always recompute it from the catalog. Previously
+    // a seeded base URL counted as "touched", so edit mode never followed a protocol change.
+    const nextUrl =
+      catalogBaseUrl(selectedProvider, nextFormat)?.url ??
+      endpointForFormat(baseUrl, nextFormat) ??
+      adapterBaseUrl(nextFormat, catalogId || undefined, baseUrl)
+    if (nextUrl) setBaseUrl(nextUrl)
     setTestResult(undefined)
   }
 
@@ -415,7 +439,6 @@ function ProviderDialogForm({
                 className="text-xs text-primary hover:underline"
                 onClick={() => {
                   setBaseUrl(autoBase.url)
-                  setTouched((cur) => ({ ...cur, baseUrl: false }))
                   setTestResult(undefined)
                 }}
               >
@@ -429,12 +452,30 @@ function ProviderDialogForm({
             value={baseUrl}
             onChange={(event) => {
               setBaseUrl(event.target.value)
-              setTouched((cur) => ({ ...cur, baseUrl: true }))
               setTestResult(undefined)
             }}
           />
           {baseUrl !== "" && !baseUrlValid ? (
             <span className="text-xs text-destructive">请输入有效的 http:// 或 https:// 地址</span>
+          ) : protocolMismatch ? (
+            <Inline gap="sm" wrap>
+              <span className="text-xs text-destructive">
+                该地址是 {API_FORMAT_LABELS[protocolMismatch]} 端点，与当前协议格式（
+                {API_FORMAT_LABELS[apiFormat]}）不匹配，请求可能返回 401。
+              </span>
+              {protocolFixUrl ? (
+                <button
+                  type="button"
+                  className="text-xs text-destructive underline underline-offset-2"
+                  onClick={() => {
+                    setBaseUrl(protocolFixUrl)
+                    setTestResult(undefined)
+                  }}
+                >
+                  改用 {protocolFixUrl}
+                </button>
+              ) : null}
+            </Inline>
           ) : autoBase ? (
             <span className="text-xs text-muted-foreground">
               {autoBase.source === "provider" ? "来自 models.dev 端点" : "来自已知默认端点"}
@@ -468,7 +509,7 @@ function ProviderDialogForm({
             value={name}
             onChange={(event) => {
               setName(event.target.value)
-              setTouched((cur) => ({ ...cur, name: true }))
+              setNameTouched(true)
             }}
           />
         </div>

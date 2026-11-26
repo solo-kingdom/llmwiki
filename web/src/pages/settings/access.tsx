@@ -229,7 +229,7 @@ function AgentApiKeysSection() {
 }
 
 export function AccessSection() {
-  const { settings, acpAgents } = useApp()
+  const { settings } = useApp()
   const save = useSettingsSave()
   const [token, setToken] = React.useState("")
   if (settings === undefined) return <RowsSkeleton rows={6} />
@@ -272,30 +272,6 @@ export function AccessSection() {
                   <Input aria-label="API Token" className="w-44 max-sm:w-full" type="password" placeholder="留空不修改" value={token} onChange={(event) => setToken(event.target.value)} />
                   <Button size="sm" variant="outline" onClick={() => { save.mutate({ api_token: token }); setToken("") }}>保存</Button>
                 </Inline>
-              }
-            />
-            <SettingRow
-              label="默认 Agent"
-              control={
-                <Select value={settings.default_agent_kind ?? "native"} onValueChange={(value) => save.mutate({ default_agent_kind: value as "native" | "acp" })}>
-                  <SelectTrigger aria-label="默认 Agent 类型" className="w-40"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="native">Native</SelectItem>
-                    <SelectItem value="acp">ACP</SelectItem>
-                  </SelectContent>
-                </Select>
-              }
-            />
-            <SettingRow
-              label="默认 ACP Agent"
-              description={`${acpAgents.filter((agent) => agent.enabled).length} 个已启用`}
-              control={
-                <Select value={settings.default_acp_agent_id ?? ""} onValueChange={(value) => save.mutate({ default_acp_agent_id: value })}>
-                  <SelectTrigger aria-label="默认 ACP Agent" className="w-44 max-sm:w-full"><SelectValue placeholder="未选择" /></SelectTrigger>
-                  <SelectContent>
-                    {acpAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
               }
             />
           </Rows>

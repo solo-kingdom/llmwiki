@@ -38,6 +38,9 @@ import type {
   ProviderDraftTestResult,
   ProviderModelsDiscoveryResult,
   MCPServerCheckResult,
+  HarnessDescriptor,
+  HarnessHealthCheckResult,
+  HarnixSettings,
   ActivityLog,
   SessionMessageEventsResponse,
   ACPAgent,
@@ -1131,5 +1134,22 @@ export function checkArchiveStorage(body?: Record<string, unknown>): Promise<Arc
   return request("/api/v1/settings/storage/check", {
     method: "POST",
     body: JSON.stringify(body ?? {}),
+  })
+}
+
+export function listHarnessDescriptors(): Promise<{ descriptors: HarnessDescriptor[] }> {
+  return request("/api/v1/harness/descriptors")
+}
+
+export function checkHarness(body: {
+  kind: AgentKind
+  harnix_settings?: HarnixSettings
+  instance_id?: string
+  model?: string
+  acp_agent_id?: string
+}): Promise<HarnessHealthCheckResult> {
+  return request("/api/v1/harness/check", {
+    method: "POST",
+    body: JSON.stringify(body),
   })
 }

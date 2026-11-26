@@ -553,6 +553,13 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE provider_info_cache ADD COLUMN IF NOT EXISTS npm TEXT NOT NULL DEFAULT ''`,
     ],
   },
+  {
+    version: 10,
+    statements: [
+      `ALTER TABLE ingest_sessions DROP CONSTRAINT IF EXISTS ingest_sessions_agent_kind_check`,
+      `ALTER TABLE ingest_sessions ADD CONSTRAINT ingest_sessions_agent_kind_check CHECK (agent_kind IN ('native','pi','acp'))`,
+    ],
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

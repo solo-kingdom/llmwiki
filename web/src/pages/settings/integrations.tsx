@@ -1,23 +1,21 @@
 import * as React from "react"
+import { AppLink } from "@/components/blocks/router"
 import { RowsSkeleton } from "@/components/blocks/state-boundary"
 import { notify } from "@/components/blocks/notify"
 import { StatusBadge } from "@/components/blocks/status-badge"
 import { Panel, Row, Rows, Section, Stack } from "@/components/blocks/surfaces"
+import { Button } from "@/components/ui/button"
 import { useApp } from "@/context/app-context"
-import { checkACPAgents, checkMCPStatus } from "@/lib/api"
-import type { ACPAgentCheckResult } from "@/types"
+import { checkMCPStatus } from "@/lib/api"
 import { JsonDialog, SettingRow, useSettingsSave } from "./shared"
 
 export function IntegrationsSection() {
   const { settings, acpAgents } = useApp()
   const save = useSettingsSave()
-  const [acpDraft, setAcpDraft] = React.useState<string | null>(null)
   const [mcpDraft, setMcpDraft] = React.useState<string | null>(null)
-  const [acpChecks, setAcpChecks] = React.useState<ACPAgentCheckResult[]>([])
   const [mcpChecks, setMcpChecks] = React.useState<{ id: string; name: string; status: string; message?: string }[]>([])
   if (settings === undefined) return <RowsSkeleton rows={6} />
 
-  const acpJson = acpDraft ?? settings.acp_agents_json ?? ""
   const mcpJson = mcpDraft ?? settings.mcp_servers_json ?? ""
 
   return (
@@ -55,34 +53,13 @@ export function IntegrationsSection() {
         </Panel>
       </Section>
 
-      <Section size="lg" gap="lg" title="ACP Agent" description="外部 coding agent，经 stdio JSON-RPC 接入。">
+      <Section size="lg" gap="lg" title="ACP Agent" description="外部 coding agent 已统一收口到 Harness 设置。">
         <Panel padding="none">
           <Rows label="ACP Agent">
             <SettingRow
-              label="ACP agents JSON"
-              description={`${acpAgents.length} 个已配置`}
-              control={
-                <JsonDialog
-                  title="ACP agents JSON"
-                  description="保存后新会话生效；检查会探测命令与协议版本。"
-                  value={acpJson}
-                  onChange={setAcpDraft}
-                  onSave={() => { save.mutate({ acp_agents_json: acpJson }); setAcpDraft(null) }}
-                  onCheck={() => void checkACPAgents(acpJson).then((result) => setAcpChecks(result.agents)).catch((error) => notify.error(error, "ACP 检查失败"))}
-                  checkResult={
-                    acpChecks.length === 0 ? null : (
-                      <Stack gap="sm">
-                        {acpChecks.map((agent) => (
-                          <Row key={agent.id}>
-                            <span className="min-w-0 flex-1 truncate text-sm">{agent.name || agent.id}</span>
-                            <StatusBadge status={agent.status} />
-                          </Row>
-                        ))}
-                      </Stack>
-                    )
-                  }
-                />
-              }
+              label="ACP 配置入口"
+              description={`${acpAgents.length} 个已配置；支持在 Harness 设置中管理与探测。`}
+              control={<Button size="sm" variant="outline" asChild><AppLink to="/settings/harness">前往 Harness 设置</AppLink></Button>}
             />
           </Rows>
         </Panel>

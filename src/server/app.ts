@@ -3,8 +3,7 @@ import path from "node:path";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { parseConfig, hasEnabledAgent } from "../acp/config.js";
-import type { AcpManager } from "../acp/manager.js";
+import { HarnessManager, hasEnabledAcpAgent, loadHarnixSettings } from "../harness/index.js";
 import { record } from "../activity/index.js";
 import { createApi, createApiContext } from "../api/index.js";
 import { writeError } from "../api/context.js";
@@ -26,7 +25,7 @@ export interface AppDeps {
   workspace: string;
   webRoot: string;
   skillsRoot: string;
-  acpManager?: AcpManager | null;
+  harnessManager?: HarnessManager | null;
   lockMgr?: PageLockManager | null;
   indexer?: WorkspaceFileIndexer | null;
   mcpServer?: McpServer | null;
@@ -34,6 +33,7 @@ export interface AppDeps {
 
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono({ strict: false });
+  const harnessMgr = deps.harnessManager === undefined ? new HarnessManager() : deps.harnessManager;
   const api = createApi(
     createApiContext({
       db: deps.db,
@@ -41,7 +41,7 @@ export function createApp(deps: AppDeps): Hono {
       lockMgr: deps.lockMgr ?? null,
       indexer: deps.indexer ?? null,
       publicWikiEnabled: deps.publicWiki,
-      acpMgr: deps.acpManager ?? null,
+      harnessMgr,
       flagToken: deps.token,
     }),
   );
@@ -57,7 +57,7 @@ export function createApp(deps: AppDeps): Hono {
 
   async function acpEnabled(): Promise<boolean> {
     try {
-      return hasEnabledAgent(parseConfig(await deps.db.getConfig("acp_agents_json")));
+      return hasEnabledAcpAgent(await loadHarnixSettings(deps.db));
     } catch {
       return false;
     }
@@ -247,6 +247,8 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/api/v1/provider-instances/:id/check", api.checkProviderInstance);
   app.get("/api/v1/acp-agents", api.listAcpAgents);
   app.post("/api/v1/acp-agents/check", api.checkAcpAgents);
+  app.get("/api/v1/harness/descriptors", api.listHarnessDescriptors);
+  app.post("/api/v1/harness/check", api.checkHarness);
 
   // Ingest: rollback, jobs, sessions, reviews
   app.post("/api/v1/ingest/rollback", api.ingestRollback);

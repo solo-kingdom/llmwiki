@@ -2,17 +2,18 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Context } from "hono";
-import type { AcpManager } from "../acp/manager.js";
-import { resolveDefaultRuntime } from "../agentruntime/index.js";
 import {
   AgentRuntimeError,
   ERR_ACP_AGENT_DISABLED,
   ERR_ACP_CLI_NOT_FOUND,
   ERR_ACP_CONFIG_INVALID,
+  ERR_INVALID_HARNESS_KIND,
   ERR_NO_ACP_AGENT,
   ERR_NO_PROVIDER_INSTANCE,
+  resolveSessionRuntime,
+  type HarnessManager,
   type Runtime,
-} from "../agentruntime/runtime.js";
+} from "../harness/index.js";
 import { buildPageChunks, rebuildReferences, storeReferenceEntries } from "../ingest/dbapply.js";
 import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
 import { ReferenceParser, WIKI_DOUBLE_BRACKET_RE } from "../engine/references.js";
@@ -37,7 +38,7 @@ export interface ApiContext {
   lockMgr: PageLockManager | null;
   indexer: WorkspaceFileIndexer | null;
   publicWikiEnabled: boolean;
-  acpMgr: AcpManager | null;
+  harnessMgr: HarnessManager | null;
   flagToken: string;
 }
 
@@ -47,7 +48,7 @@ export interface ApiDeps {
   lockMgr?: PageLockManager | null;
   indexer?: WorkspaceFileIndexer | null;
   publicWikiEnabled?: boolean;
-  acpMgr?: AcpManager | null;
+  harnessMgr?: HarnessManager | null;
   flagToken?: string;
 }
 
@@ -58,7 +59,7 @@ export function createApiContext(deps: ApiDeps): ApiContext {
     lockMgr: deps.lockMgr ?? null,
     indexer: deps.indexer ?? null,
     publicWikiEnabled: deps.publicWikiEnabled ?? false,
-    acpMgr: deps.acpMgr ?? null,
+    harnessMgr: deps.harnessMgr ?? null,
     flagToken: deps.flagToken ?? "",
   };
 }
@@ -241,7 +242,7 @@ export function indexDocumentContent(ctx: ApiContext, docId: string, content: st
 }
 
 export async function sessionAgentRuntime(ctx: ApiContext, session: IngestSession | null): Promise<Runtime> {
-  return resolveDefaultRuntime(ctx.db, ctx.workspace, ctx.acpMgr, session);
+  return resolveSessionRuntime(ctx.db, ctx.workspace, ctx.harnessMgr, session);
 }
 
 export function runtimeErrorMessage(error: unknown): string {
@@ -250,11 +251,13 @@ export function runtimeErrorMessage(error: unknown): string {
       case ERR_NO_PROVIDER_INSTANCE:
         return "请先选择 Provider 实例和 Model";
       case ERR_NO_ACP_AGENT:
-        return "请先在 Settings 配置并选择 ACP Agent";
+        return "请先在 Settings → Harness 配置并选择 ACP Agent";
       case ERR_ACP_AGENT_DISABLED:
         return "该 ACP Agent 已禁用";
       case ERR_ACP_CLI_NOT_FOUND:
         return "ACP Agent 命令未找到，请确认已安装并在 PATH 中";
+      case ERR_INVALID_HARNESS_KIND:
+        return error.message;
       case ERR_ACP_CONFIG_INVALID:
         return error.message;
       default:

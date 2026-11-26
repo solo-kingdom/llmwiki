@@ -221,7 +221,112 @@ export interface ModelInfo {
   attachment: boolean
 }
 
-export type AgentKind = "native" | "acp"
+export type AgentKind = "native" | "pi" | "acp"
+
+export type HarnessPermissionMode = "allow_all" | "readonly" | "deny_all"
+
+export interface NativeHarnessSettings {
+  temperature?: number
+  maxTokens?: number
+  maxTurns: number
+  maxToolCalls: number
+  maxToolCallsPerTurn: number
+  timeoutMs: number
+  includeUsage: boolean
+  permissionMode: HarnessPermissionMode
+}
+
+export interface PiHarnessSettings {
+  reasoning: boolean
+  contextWindow: number
+  maxTokens: number
+  maxTurns: number
+  maxToolCalls: number
+  maxToolCallsPerTurn: number
+  timeoutMs: number
+  permissionMode: HarnessPermissionMode
+}
+
+export interface AcpAgentPermissionSettings {
+  mode: "auto"
+  allowRead: boolean
+  allowSearch: boolean
+  allowFetch: boolean
+  allowWrite: boolean
+  allowExecute: boolean
+}
+
+export interface AcpAgentEntry {
+  id: string
+  name: string
+  enabled: boolean
+  command: string
+  args: string[]
+  envPassthrough: string[]
+  cwdPolicy: "workspace" | "session"
+  initTimeoutMs: number
+  promptTimeoutMs: number
+  idleTimeoutMs: number
+  permission: AcpAgentPermissionSettings
+}
+
+export interface AcpHarnessSettings {
+  defaultAgentId: string
+  maxConcurrentSessions: number
+  defaults: {
+    readonlyOnly: boolean
+    onUnavailable: "error"
+  }
+  agents: Record<string, AcpAgentEntry>
+}
+
+export interface HarnixSettings {
+  version: 1
+  defaultKind: AgentKind
+  native: NativeHarnessSettings
+  pi: PiHarnessSettings
+  acp: AcpHarnessSettings
+}
+
+export interface HarnessConfigFieldSpec {
+  key: string
+  label: string
+  description: string
+  type: "boolean" | "number" | "string" | "select" | "acp_agents"
+  defaultValue?: unknown
+  min?: number
+  max?: number
+  step?: number
+  options?: Array<{ value: string; label: string }>
+}
+
+export interface HarnessDescriptor {
+  id: AgentKind
+  name: string
+  summary: string
+  requiresProvider: boolean
+  capabilities: string[]
+  fields: HarnessConfigFieldSpec[]
+}
+
+export interface HarnessHealthCheckDetail {
+  id: string
+  name: string
+  status: "ok" | "error" | "disabled"
+  code?: string
+  message: string
+  agentName?: string
+  agentVersion?: string
+  protocolVersion?: number
+}
+
+export interface HarnessHealthCheckResult {
+  kind: AgentKind
+  ok: boolean
+  status: "ok" | "error" | "disabled"
+  message: string
+  details?: HarnessHealthCheckDetail[]
+}
 
 export interface ACPAgentEnvVar {
   name: string
@@ -303,6 +408,7 @@ export interface Settings {
   embedding_model?: string
   embedding_dim?: string | number
   embedding_configured?: boolean
+  harnix_settings?: HarnixSettings
   acp_agents_json?: string
   default_agent_kind?: AgentKind
   default_acp_agent_id?: string

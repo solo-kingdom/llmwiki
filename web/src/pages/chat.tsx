@@ -66,7 +66,7 @@ import {
   updateIngestSession,
   uploadIngestSessionAttachment,
 } from "@/lib/api"
-import type { ACPPlanEntry, IngestSession, IngestSessionMessage, SessionListItem } from "@/types"
+import type { ACPPlanEntry, AgentKind, IngestSession, IngestSessionMessage, SessionListItem } from "@/types"
 
 function payloadString(data: unknown, key: string): string {
   if (typeof data !== "object" || data === null) return ""
@@ -283,6 +283,73 @@ function ModelPicker({ session }: { session: IngestSession }) {
               {modelOptions.map((model) => <SelectItem key={model.id} value={model.id}>{model.label}</SelectItem>)}
             </SelectContent>
           </Select>
+        </Stack>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function HarnessPicker({ session }: { session: IngestSession }) {
+  const { acpAgents, settings } = useApp()
+  const queryClient = useQueryClient()
+  const enabledAgents = acpAgents.filter((a) => a.enabled)
+  const currentKind: AgentKind = session.agent_kind ?? settings?.harnix_settings?.defaultKind ?? "native"
+  const currentAcpId = session.acp_agent_id || settings?.harnix_settings?.acp.defaultAgentId || ""
+  const archived = session.status === "archived"
+
+  const update = useMutation({
+    mutationFn: ({ kind, acpAgentId }: { kind: AgentKind; acpAgentId?: string }) =>
+      updateIngestSession(session.id, {
+        agent_kind: kind,
+        ...(acpAgentId !== undefined ? { acp_agent_id: acpAgentId } : {}),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["ingest-session", session.id] })
+      notify.success("Harness 已更新")
+    },
+    onError: (error: Error) => notify.error(error),
+  })
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button size="icon-sm" variant="ghost" aria-label="Harness 设置" title={`Harness: ${currentKind}`} disabled={archived}>
+          <BotIcon className="llmwiki-tone-violet" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" side="top" className="w-64">
+        <Stack gap="sm">
+          <span className="text-xs text-muted-foreground">Harness 运行时</span>
+          <Select
+            value={currentKind}
+            disabled={archived || update.isPending}
+            onValueChange={(value) => {
+              const kind = value as AgentKind
+              const acpAgentId = kind === "acp" ? (currentAcpId || enabledAgents[0]?.id || "") : ""
+              update.mutate({ kind, acpAgentId })
+            }}
+          >
+            <SelectTrigger aria-label="对话 Harness 实现" size="sm" className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="native">Native</SelectItem>
+              <SelectItem value="pi">Pi AI</SelectItem>
+              <SelectItem value="acp">ACP</SelectItem>
+            </SelectContent>
+          </Select>
+          {currentKind === "acp" ? (
+            <Select
+              value={currentAcpId}
+              disabled={archived || enabledAgents.length === 0 || update.isPending}
+              onValueChange={(acpAgentId) => update.mutate({ kind: "acp", acpAgentId })}
+            >
+              <SelectTrigger aria-label="对话 ACP Agent" size="sm" className="w-full">
+                <SelectValue placeholder={enabledAgents.length === 0 ? "无已启用 Agent" : "选择 ACP Agent"} />
+              </SelectTrigger>
+              <SelectContent>
+                {enabledAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          ) : null}
         </Stack>
       </PopoverContent>
     </Popover>
@@ -624,6 +691,7 @@ function Conversation({ session }: { session: IngestSession }) {
           />
           <InputGroupAddon align="block-end">
             <ModelPicker session={session} />
+            <HarnessPicker session={session} />
             <Stack direction="row" gap="xs" grow justify="end">
               <Button size="icon-sm" variant="ghost" aria-label="上传附件" title="上传附件" disabled={upload.isPending} onClick={() => fileRef.current?.click()}>
                 <PaperclipIcon />

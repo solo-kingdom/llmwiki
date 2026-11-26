@@ -7,6 +7,7 @@ import { clientFromInstance, clientFromWorkspace } from "../llm/instance_client.
 import type { Client } from "../llm/client.js";
 import { logger } from "../logger.js";
 import { McpRegistry } from "../mcp/registry.js";
+import { toolLoopConfigForModeFromStore } from "../mcp/tool_loop_settings.js";
 import { McpRouter } from "../mcp/router.js";
 import type { Store } from "../store/interfaces.js";
 import {
@@ -83,6 +84,9 @@ export class JobProcessor {
 
     const recorder = await createJobRecorder(this.db, job.id);
     this.pipeline.setJobRecorder(recorder);
+    // Ingest steps previously always fell back to built-in round defaults (4/5/8),
+    // ignoring session_tool_loop_max_rounds_ingest; reasoning providers need the configured budget.
+    this.pipeline.setToolLoopConfig(await toolLoopConfigForModeFromStore("", this.db));
     const stopHeartbeat = this.startHeartbeat(job.id);
     try {
       if (job.input_type === "rollback") {

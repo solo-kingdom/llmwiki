@@ -3,6 +3,7 @@ import { Client } from "../llm/client.js";
 import { loadConfig, toClientConfig } from "../llm/config.js";
 import { Pipeline } from "../ingest/pipeline.js";
 import { openCliStore, resolveWorkspaceDir } from "./workspace.js";
+import { toolLoopConfigForModeFromStore } from "../mcp/tool_loop_settings.js";
 
 export async function runIngest(
   sourceFile: string,
@@ -16,6 +17,7 @@ export async function runIngest(
     const config = await loadConfig(workspace);
     const client = new Client(toClientConfig(config));
     const pipeline = new Pipeline(workspace, store, client);
+    pipeline.setToolLoopConfig(await toolLoopConfigForModeFromStore("", store));
     pipeline.setForceOverwrite(forceOverwrite);
     pipeline.setChangeSetMeta("ingest", "", "", path.basename(absoluteSource), "");
 

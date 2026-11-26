@@ -11,6 +11,35 @@ import type {
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_PROBE_TIMEOUT_MS = 15 * 1000;
+export const DEFAULT_MAX_RETRIES = 3;
+export const DEFAULT_MAX_RATE_LIMIT_RETRIES = 6;
+export const DEFAULT_RETRY_BASE_DELAY_MS = 2_000;
+export const DEFAULT_RETRY_CAP_DELAY_MS = 30_000;
+export const DEFAULT_RETRY_AFTER_CAP_MS = 120_000;
+
+export type LLMFailureKind = "rate_limit" | "transient" | "fatal";
+
+export interface LLMRetryInfo {
+  kind: LLMFailureKind;
+  status: number;
+  attempt: number;
+  delayMs: number;
+}
+
+/** A failed provider request. `kind` decides whether another attempt is worth waiting for. */
+export class LLMRequestError extends Error {
+  readonly kind: LLMFailureKind;
+  readonly status: number;
+  readonly retryAfterMs: number;
+
+  constructor(message: string, kind: LLMFailureKind, status = 0, retryAfterMs = 0) {
+    super(message);
+    this.name = "LLMRequestError";
+    this.kind = kind;
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
 
 export function defaultLLMConfig(): LLMConfig {
   return {
@@ -30,6 +59,13 @@ export class Client {
   readonly model: string;
   readonly timeoutMs: number;
   readonly streamIdleTimeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly maxRateLimitRetries: number;
+  private readonly retryBaseDelayMs: number;
+  private readonly retryCapDelayMs: number;
+  private readonly retryAfterCapMs: number;
+  /** Called before every retry; use it to make backoff visible in job events. */
+  onRetry: ((info: LLMRetryInfo) => void) | null = null;
 
   constructor(config: LLMConfig) {
     this.provider = config.provider || "openai";
@@ -39,6 +75,11 @@ export class Client {
     this.timeoutMs = config.timeoutMs > 0 ? config.timeoutMs : DEFAULT_TIMEOUT_MS;
     this.streamIdleTimeoutMs =
       config.streamIdleTimeoutMs > 0 ? config.streamIdleTimeoutMs : DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+    this.maxRetries = positiveOr(config.maxRetries, DEFAULT_MAX_RETRIES);
+    this.maxRateLimitRetries = positiveOr(config.maxRateLimitRetries, DEFAULT_MAX_RATE_LIMIT_RETRIES);
+    this.retryBaseDelayMs = positiveOr(config.retryBaseDelayMs, DEFAULT_RETRY_BASE_DELAY_MS);
+    this.retryCapDelayMs = positiveOr(config.retryCapDelayMs, DEFAULT_RETRY_CAP_DELAY_MS);
+    this.retryAfterCapMs = positiveOr(config.retryAfterCapMs, DEFAULT_RETRY_AFTER_CAP_MS);
   }
 
   validateRequest(): void {
@@ -81,15 +122,17 @@ export class Client {
       false,
       options.toolChoice ?? "",
     );
-    const response = await fetch(this.buildUrl(), {
-      method: "POST",
-      headers: this.headers(),
-      body,
-      signal: this.requestSignal(signal),
-    });
-    const data = await response.text();
-    if (!response.ok) throw classifyError(response.status, data);
-    return parseChatResponse(data, this.provider);
+    const response = await this.fetchWithRetry(
+      signal,
+      () =>
+        fetch(this.buildUrl(), {
+          method: "POST",
+          headers: this.headers(),
+          body,
+          signal: this.requestSignal(signal),
+        }),
+    );
+    return parseChatResponse(await response.text(), this.provider);
   }
 
   async *streamChat(
@@ -100,39 +143,49 @@ export class Client {
   ): AsyncGenerator<StreamEvent> {
     this.validateRequest();
     const body = this.buildChatBody(messages, [], temperature, maxTokens, true, "");
-    let response: Response;
-    try {
-      response = await fetch(this.buildUrl(), {
+    const send = (): Promise<Response> =>
+      fetch(this.buildUrl(), {
         method: "POST",
         headers: this.headers(),
         body,
         signal: this.requestSignal(signal),
       });
-    } catch (error) {
-      yield { type: "error", error: normalizeError(error) };
-      return;
-    }
 
-    if (!response.ok) {
-      const text = await response.text();
-      yield { type: "error", error: classifyError(response.status, text) };
-      return;
-    }
-    if (!response.body) {
-      yield { type: "done" };
-      return;
-    }
-
-    try {
-      if (this.provider === "anthropic") {
-        yield* this.readSSEAnthropic(response.body);
-      } else if (this.provider === "ollama") {
-        yield* this.readJSONLines(response.body);
-      } else {
-        yield* this.readSSEOpenAI(response.body);
+    for (let tries = 0; ; tries += 1) {
+      let response: Response;
+      try {
+        response = await this.fetchWithRetry(signal, send);
+      } catch (error) {
+        yield { type: "error", error: requestFailure(error, signal) };
+        return;
       }
-    } catch (error) {
-      yield { type: "error", error: new Error(`stream read error: ${errorMessage(error)}`) };
+      if (!response.body) {
+        yield { type: "done" };
+        return;
+      }
+
+      // Retrying after an event was delivered would duplicate output, so only a stream
+      // that fails before producing anything gets another attempt.
+      let delivered = false;
+      try {
+        for await (const event of this.readStream(response.body)) {
+          delivered = true;
+          yield event;
+        }
+        return;
+      } catch (error) {
+        const failure = requestFailure(error, signal);
+        if (delivered || tries >= this.retryBudget(failure.kind)) {
+          yield { type: "error", error: failure };
+          return;
+        }
+        try {
+          await this.backOff(failure, tries, signal);
+        } catch (abortError) {
+          yield { type: "error", error: requestFailure(abortError, signal) };
+          return;
+        }
+      }
     }
   }
 
@@ -222,6 +275,52 @@ export class Client {
   private requestSignal(signal: AbortSignal | undefined, timeoutMs?: number): AbortSignal {
     const timeout = AbortSignal.timeout(timeoutMs ?? this.timeoutMs);
     return signal ? AbortSignal.any([signal, timeout]) : timeout;
+  }
+
+  /** Sends `attempt` until a 2xx response arrives, the retry budget is spent, or the caller aborts. */
+  private async fetchWithRetry(
+    signal: AbortSignal | undefined,
+    attempt: () => Promise<Response>,
+  ): Promise<Response> {
+    for (let tries = 0; ; tries += 1) {
+      let failure: LLMRequestError;
+      try {
+        const response = await attempt();
+        if (response.ok) return response;
+        failure = classifyError(response.status, await response.text(), retryAfterMs(response));
+      } catch (error) {
+        failure = requestFailure(error, signal);
+      }
+      if (tries >= this.retryBudget(failure.kind)) throw failure;
+      await this.backOff(failure, tries, signal);
+    }
+  }
+
+  private retryBudget(kind: LLMFailureKind): number {
+    if (kind === "rate_limit") return this.maxRateLimitRetries;
+    return kind === "transient" ? this.maxRetries : 0;
+  }
+
+  private retryDelay(failure: LLMRequestError, tries: number): number {
+    if (failure.retryAfterMs > 0) return Math.min(this.retryAfterCapMs, failure.retryAfterMs);
+    const ceiling =
+      failure.kind === "rate_limit"
+        ? this.retryCapDelayMs
+        : Math.min(this.retryCapDelayMs, this.retryBaseDelayMs * 2 ** this.maxRetries);
+    const base = Math.min(ceiling, this.retryBaseDelayMs * 2 ** tries);
+    return Math.round(base * (0.5 + Math.random() / 2));
+  }
+
+  private async backOff(failure: LLMRequestError, tries: number, signal: AbortSignal | undefined): Promise<void> {
+    const delayMs = this.retryDelay(failure, tries);
+    this.onRetry?.({ kind: failure.kind, status: failure.status, attempt: tries + 1, delayMs });
+    await sleep(delayMs, signal);
+  }
+
+  private readStream(body: ReadableStream<Uint8Array>): AsyncGenerator<StreamEvent> {
+    if (this.provider === "anthropic") return this.readSSEAnthropic(body, this.streamIdleTimeoutMs);
+    if (this.provider === "ollama") return this.readJSONLines(body, this.streamIdleTimeoutMs);
+    return this.readSSEOpenAI(body, this.streamIdleTimeoutMs);
   }
 
   private buildUrl(): string {
@@ -330,8 +429,11 @@ export class Client {
     return JSON.stringify(request);
   }
 
-  private async *readSSEOpenAI(body: ReadableStream<Uint8Array>): AsyncGenerator<StreamEvent> {
-    for await (const rawLine of readLines(body)) {
+  private async *readSSEOpenAI(
+    body: ReadableStream<Uint8Array>,
+    idleTimeoutMs: number,
+  ): AsyncGenerator<StreamEvent> {
+    for await (const rawLine of readLines(body, idleTimeoutMs)) {
       const line = rawLine.trim();
       if (!line || !line.startsWith("data: ")) continue;
       const data = line.slice("data: ".length);
@@ -357,9 +459,12 @@ export class Client {
     yield { type: "done" };
   }
 
-  private async *readSSEAnthropic(body: ReadableStream<Uint8Array>): AsyncGenerator<StreamEvent> {
+  private async *readSSEAnthropic(
+    body: ReadableStream<Uint8Array>,
+    idleTimeoutMs: number,
+  ): AsyncGenerator<StreamEvent> {
     let eventData = "";
-    for await (const line of readLines(body)) {
+    for await (const line of readLines(body, idleTimeoutMs)) {
       if (line.startsWith("data: ")) {
         eventData = line.slice("data: ".length);
         continue;
@@ -387,8 +492,11 @@ export class Client {
     yield { type: "done" };
   }
 
-  private async *readJSONLines(body: ReadableStream<Uint8Array>): AsyncGenerator<StreamEvent> {
-    for await (const rawLine of readLines(body)) {
+  private async *readJSONLines(
+    body: ReadableStream<Uint8Array>,
+    idleTimeoutMs: number,
+  ): AsyncGenerator<StreamEvent> {
+    for await (const rawLine of readLines(body, idleTimeoutMs)) {
       const line = rawLine.trim();
       if (!line) continue;
       let chunk: OllamaStreamChunk;
@@ -571,13 +679,18 @@ export function convertToAnthropicMessages(messages: Message[]): Array<Record<st
   return result;
 }
 
-export function classifyError(statusCode: number, body: string): Error {
+export function classifyError(statusCode: number, body: string, retryAfterMs = 0): LLMRequestError {
   const detail = truncate(body, 200);
   if (statusCode === 401 || statusCode === 403) {
-    return new Error(`authentication error (HTTP ${statusCode}): ${detail}`);
+    return new LLMRequestError(`authentication error (HTTP ${statusCode}): ${detail}`, "fatal", statusCode);
   }
   if (statusCode === 429) {
-    return new Error(`rate limit exceeded (HTTP ${statusCode}): ${detail}`);
+    return new LLMRequestError(
+      `rate limit exceeded (HTTP ${statusCode}): ${detail}`,
+      "rate_limit",
+      statusCode,
+      retryAfterMs,
+    );
   }
   if (statusCode === 400) {
     if (
@@ -585,27 +698,97 @@ export function classifyError(statusCode: number, body: string): Error {
       body.includes("max_tokens") ||
       body.includes("token limit")
     ) {
-      return new Error(`context length exceeded (HTTP ${statusCode}): ${detail}`);
+      return new LLMRequestError(`context length exceeded (HTTP ${statusCode}): ${detail}`, "fatal", statusCode);
     }
-    return new Error(`bad request (HTTP ${statusCode}): ${detail}`);
+    return new LLMRequestError(`bad request (HTTP ${statusCode}): ${detail}`, "fatal", statusCode);
   }
   if (statusCode >= 500) {
-    return new Error(`server error (HTTP ${statusCode}): ${detail}`);
+    return new LLMRequestError(`server error (HTTP ${statusCode}): ${detail}`, "transient", statusCode);
   }
-  return new Error(`API error (HTTP ${statusCode}): ${detail}`);
+  if (statusCode === 408) {
+    return new LLMRequestError(`API error (HTTP ${statusCode}): ${detail}`, "transient", statusCode);
+  }
+  return new LLMRequestError(`API error (HTTP ${statusCode}): ${detail}`, "fatal", statusCode);
+}
+
+function requestFailure(error: unknown, signal?: AbortSignal): LLMRequestError {
+  if (error instanceof LLMRequestError) return error;
+  const cause = error instanceof Error ? error : new Error(String(error));
+  // A deadline or the caller's own abort is not worth another attempt.
+  const name = "name" in cause ? cause.name : "";
+  const stopped = signal?.aborted || name === "TimeoutError" || name === "AbortError";
+  return new LLMRequestError(cause.message, stopped ? "fatal" : "transient");
+}
+
+function retryAfterMs(response: Response): number {
+  const raw = (response.headers.get("retry-after") ?? "").trim();
+  if (!raw) return 0;
+  if (/^\d+$/.test(raw)) return Number(raw) * 1000;
+  const at = Date.parse(raw);
+  return Number.isNaN(at) ? 0 : Math.max(0, at - Date.now());
+}
+
+function positiveOr(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && value >= 0 ? value : fallback;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal?.reason instanceof Error ? signal.reason : new Error("aborted"));
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function idleGuard(timeoutMs: number, onStall: (error: Error) => void): { touch(): void; stop(): void } {
+  let timer: NodeJS.Timeout | null = null;
+  return {
+    touch() {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => onStall(new Error(`stream idle timeout: no data for ${timeoutMs} ms`)), timeoutMs);
+    },
+    stop() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    },
+  };
 }
 
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}...`;
 }
 
-async function* readLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+async function* readLines(body: ReadableStream<Uint8Array>, idleTimeoutMs: number): AsyncGenerator<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let stall: ((error: Error) => void) | null = null;
+  const guard = idleGuard(idleTimeoutMs, (error) => stall?.(error));
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      guard.touch();
+      let done: boolean;
+      let value: Uint8Array | undefined;
+      try {
+        ({ done, value } = await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => {
+            stall = reject;
+          }),
+        ]));
+      } catch (error) {
+        // A stalled body never reaches `done` on its own, so release the connection here.
+        await reader.cancel().catch(() => undefined);
+        const cause = requestFailure(error);
+        throw new LLMRequestError(`stream read error: ${cause.message}`, cause.kind);
+      }
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let newline = buffer.indexOf("\n");
@@ -619,12 +802,9 @@ async function* readLines(body: ReadableStream<Uint8Array>): AsyncGenerator<stri
     buffer += decoder.decode();
     if (buffer.length > 0) yield buffer.replace(/\r$/, "");
   } finally {
+    guard.stop();
     reader.releaseLock();
   }
-}
-
-function normalizeError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
 }
 
 function errorMessage(error: unknown): string {

@@ -44,6 +44,14 @@ export interface LLMConfig {
   model: string;
   timeoutMs: number;
   streamIdleTimeoutMs: number;
+  /** Retries for transient failures (5xx, network, idle timeout). Defaults to 3. */
+  maxRetries?: number;
+  /** Retries for HTTP 429; a rate-limited request usually recovers within a minute. Defaults to 6. */
+  maxRateLimitRetries?: number;
+  retryBaseDelayMs?: number;
+  retryCapDelayMs?: number;
+  /** Upper bound applied to a server-provided Retry-After. */
+  retryAfterCapMs?: number;
 }
 
 export interface WorkspaceConfig {

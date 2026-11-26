@@ -1,3 +1,4 @@
+import type { Client } from "../llm/client.js";
 import type { Message } from "../llm/types.js";
 import type { Store } from "../store/interfaces.js";
 import { DEFAULT_JOB_EVENTS_MAX_COUNT } from "../store/types.js";
@@ -86,6 +87,24 @@ export function recordLLMResponse(
     duration_ms: durationMs,
     char_count: [...content].length,
   });
+}
+
+/**
+ * Records provider backoff under `step`. Without it a rate-limited request only shows up as a
+ * slow step, which cannot be told apart from a slow model after the fact.
+ * Returns the function that stops the tracing.
+ */
+export function traceRetries(client: Client, recorder: JobRecorder | null, step: string): () => void {
+  client.onRetry = (info) =>
+    recorder?.record(step, "warn", "llm request retry", {
+      kind: info.kind,
+      status: info.status,
+      attempt: info.attempt,
+      delay_ms: info.delayMs,
+    });
+  return () => {
+    client.onRetry = null;
+  };
 }
 
 export function llmMessagesForRecord(messages: Message[]): Array<{ role: string; content: string }> {

@@ -10,8 +10,8 @@ import { formatFolderTreeForPrompt } from "../mcp/diagnostic_tools.js";
 import { IngestCache } from "./cache.js";
 import { applyBlocksToStore } from "./dbapply.js";
 import { applyWikiBlocks, NoWikiFilesWrittenError, normalizeWikiFileBlocks, normalizeWikiFilePath, parseFileBlocks, parseFileBlocksWithContent } from "./fileblocks.js";
-import { llmMessagesForRecord, recordLLMRequest, recordLLMResponse } from "./job_events.js";
-import { PageLockManager } from "./lock.js";
+import { llmMessagesForRecord, recordLLMRequest, recordLLMResponse, traceRetries } from "./job_events.js";
+import { PageLockManager, withPageLocks } from "./lock.js";
 import { normalizeUpload } from "./normalize.js";
 import { composeSystemPrompt } from "./prompts.js";
 import { formatFeedbackForPlan, parsePlanActions, parsePlanResult, sourcePathsToDelete } from "./review.js";
@@ -38,7 +38,7 @@ const EMPTY_MERGE: MergeContext = { llmClient: null, docLang: "zh", recorder: nu
 export class Pipeline {
   private db: Store | null;
   private llmClient: Client | null;
-  private lockMgr = new PageLockManager();
+  private readonly lockMgr: PageLockManager;
   private recorder: JobRecorder | null = null;
   private mcpExecutor: PipelineMcpExecutor | null = null;
   private toolLoopConfig: ToolLoopConfig | null = null;
@@ -60,11 +60,14 @@ export class Pipeline {
     private readonly workspace: string,
     db: Store | null,
     llmClient: Client | null,
+    // Pipelines that may write the same page (concurrent jobs, the HTTP API) must share one manager.
+    lockManager?: PageLockManager,
   ) {
     this.db = db;
     this.llmClient = llmClient;
     this.applyToDB = db !== null;
     this.cache = new IngestCache(workspace);
+    this.lockMgr = lockManager ?? new PageLockManager();
   }
 
   setDb(db: Store | null): void {
@@ -299,11 +302,7 @@ ${content}
         adjustments: normalized.adjustments,
       });
     }
-    for (const rel of normalized.blocks.keys()) {
-      const unlock = await this.lockMgr.lock(rel);
-      unlock();
-    }
-    const applied = await this.applyBlocks(normalized.blocks);
+    const applied = await this.applyBlocksLocked(normalized.blocks);
     return applied.written;
   }
 
@@ -414,11 +413,15 @@ ${content}
       }
     }
 
-    for (const rel of normalized.blocks.keys()) {
-      const unlock = await this.lockMgr.lock(rel);
-      unlock();
-    }
-    return this.applyBlocks(normalized.blocks);
+    return this.applyBlocksLocked(normalized.blocks);
+  }
+
+  /**
+   * Reading the current page, merging into it and committing happen as one critical section:
+   * a concurrent writer of the same page has to merge on top of this write, not on a stale copy.
+   */
+  private applyBlocksLocked(blocks: Map<string, string>): Promise<ApplyWikiResult> {
+    return withPageLocks(this.lockMgr, [...blocks.keys()], () => this.applyBlocks(blocks));
   }
 
   private async applyBlocks(blocks: Map<string, string>): Promise<ApplyWikiResult> {
@@ -441,6 +444,22 @@ ${content}
   }
 
   private async runLLMStep(
+    step: string,
+    messages: Message[],
+    temperature: number,
+    maxTokens: number,
+    options: { promptStep?: PromptStep; toolMode?: string } = {},
+  ): Promise<string> {
+    if (!this.llmClient) throw new Error("LLM client not configured");
+    const stopTrace = traceRetries(this.llmClient, this.recorder, step);
+    try {
+      return await this.runLLMStepTraced(step, messages, temperature, maxTokens, options);
+    } finally {
+      stopTrace();
+    }
+  }
+
+  private async runLLMStepTraced(
     step: string,
     messages: Message[],
     temperature: number,

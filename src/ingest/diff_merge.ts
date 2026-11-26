@@ -1,5 +1,5 @@
 import { composeSystemPrompt } from "./prompts.js";
-import { recordLLMRequest, recordLLMResponse } from "./job_events.js";
+import { recordLLMRequest, recordLLMResponse, traceRetries } from "./job_events.js";
 import type { MergeContext, Section, SectionDiff } from "./types.js";
 
 const MERGE_MIN_BODY_RATIO = 0.7;
@@ -231,12 +231,18 @@ async function mergeModifiedSection(
   const maxTokens = 4096;
   recordLLMRequest(context.recorder, "diff_merge_section", client.model, messages, temperature, maxTokens);
 
-  const chunks: string[] = [];
-  for await (const event of client.streamChat(messages, temperature, maxTokens)) {
-    if (event.type === "token") chunks.push(event.content ?? "");
-    if (event.type === "error" && event.error) throw event.error;
+  const stopTrace = traceRetries(client, context.recorder, "diff_merge_section");
+  let result = "";
+  try {
+    const chunks: string[] = [];
+    for await (const event of client.streamChat(messages, temperature, maxTokens)) {
+      if (event.type === "token") chunks.push(event.content ?? "");
+      if (event.type === "error" && event.error) throw event.error;
+    }
+    result = chunks.join("").trim();
+  } finally {
+    stopTrace();
   }
-  const result = chunks.join("").trim();
   recordLLMResponse(context.recorder, "diff_merge_section", result, 0);
   return result;
 }

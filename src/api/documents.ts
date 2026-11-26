@@ -16,6 +16,8 @@ import {
   isValidExperienceKind,
   isValidExperienceStatus,
   isValidPageType,
+  isWikiSystemPath,
+  RESERVED_TOP_LEVEL_WIKI_PAGES,
   resolvePageType,
   validateWikiWritePath,
 } from "../engine/wiki_org.js";
@@ -363,6 +365,9 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const existing = await ctx.db.getDocument(id);
         if (!existing) return writeError(c, 404, "document not found");
+        if (isSystemDocument(existing)) {
+          return writeError(c, 400, `system page cannot be archived: ${existing.relative_path}`);
+        }
         const archived = buildArchivedDocument(existing, {
           reason: req.reason ?? "",
           supersededBy: req.superseded_by,
@@ -410,8 +415,8 @@ export function documentsApi(ctx: ApiContext) {
       const id = getID(c);
       if (!id) return writeError(c, 400, "missing document id");
       const req = await readJsonBody<MoveDocumentRequest>(c);
-      if (!req || !req.target_folder) {
-        return writeError(c, 400, "target_folder is required");
+      if (!req || typeof req.target_folder !== "string") {
+        return writeError(c, 400, "target_folder is required (empty string for the wiki root)");
       }
       try {
         const result = await ctx.db.moveDocument(id, req.target_folder, req.filename, "api");
@@ -443,6 +448,9 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const doc = await ctx.db.getDocument(id);
         if (!doc) return writeError(c, 404, "document not found");
+        if (isSystemDocument(doc)) {
+          return writeError(c, 400, `system page cannot be deleted: ${doc.relative_path}`);
+        }
         const relPath = docRelativePath(doc);
         await applyPageDelete(ctx, "manual", "delete page", relPath);
         logDocument(ctx.db, "deleted", id, relPath, "api");
@@ -462,6 +470,9 @@ export function documentsApi(ctx: ApiContext) {
         try {
           const doc = await ctx.db.getDocument(id);
           if (!doc) continue;
+          if (isSystemDocument(doc)) {
+            return writeError(c, 400, `system page cannot be deleted: ${doc.relative_path}`);
+          }
           const rel = docRelativePath(doc);
           if (rel) relPaths.push(rel);
         } catch {
@@ -485,6 +496,10 @@ export function documentsApi(ctx: ApiContext) {
       }
     },
   };
+}
+
+function isSystemDocument(doc: Document): boolean {
+  return RESERVED_TOP_LEVEL_WIKI_PAGES.has(doc.relative_path) || isWikiSystemPath(doc.relative_path);
 }
 
 function errorMessage(error: unknown): string {

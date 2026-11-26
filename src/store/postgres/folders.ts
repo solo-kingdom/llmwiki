@@ -438,7 +438,7 @@ export function foldersRepo(pool: Pool): FolderStore {
     },
 
     async moveDocument(docId, targetFolder, newFilename, actor = "api"): Promise<MoveDocumentResult> {
-      const folder = validateFolderOrThrow(targetFolder);
+      const folder = validateOptionalFolderOrThrow(targetFolder);
       return withTransaction(pool, async (client) => {
         await client.query("SELECT pg_advisory_xact_lock(hashtext('llmwiki:workspace'))");
         const row = await queryOne(
@@ -462,7 +462,10 @@ export function foldersRepo(pool: Pool): FolderStore {
         }
         if (!filename.toLowerCase().endsWith(".md")) filename += ".md";
 
-        const newRelPath = `wiki/${folder}/${filename}`;
+        const newRelPath = folder ? `wiki/${folder}/${filename}` : `wiki/${filename}`;
+        if (!folder && RESERVED_TOP_LEVEL_WIKI_PAGES.has(newRelPath)) {
+          throw new FolderValidationError(`filename is reserved for a system page: ${newRelPath}`);
+        }
         if (newRelPath === oldRelPath) {
           return {
             document: doc,

@@ -11,6 +11,7 @@ export const vocab = {
   statuses: {
     active: { label: "启用", tone: "success" },
     archived: { label: "已归档", tone: "neutral" },
+    system: { label: "系统", tone: "neutral" },
     inactive: { label: "停用", tone: "neutral" },
     disabled: { label: "已禁用", tone: "neutral" },
     pending: { label: "等待中", tone: "neutral" },

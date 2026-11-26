@@ -217,6 +217,36 @@ describe("folders and tree API", () => {
     expect(res404.status).toBe(404);
   });
 
+  it("POST /api/v1/documents/:id/move accepts an empty target_folder for the wiki root", async () => {
+    const moveDocument = vi.fn().mockResolvedValue({
+      document: { id: "doc-1", relative_path: "wiki/harness.md" },
+      old_relative_path: "wiki/AI工程/harness.md",
+      change_set_id: "cs-3",
+      updated_link_paths: [],
+    });
+    const app = makeApp(makeMockStore({ moveDocument }));
+    const res = await app.request("/api/v1/documents/doc-1/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_folder: "", filename: "harness.md" }),
+    });
+    expect(res.status).toBe(200);
+    expect(moveDocument).toHaveBeenCalledWith("doc-1", "", "harness.md", "api");
+  });
+
+  it("rejects archiving and deleting system pages", async () => {
+    const systemDoc = { id: "doc-sys", relative_path: "wiki/index.md", source_kind: "wiki" };
+    const app = makeApp(makeMockStore({ getDocument: vi.fn().mockResolvedValue(systemDoc) }));
+    const archiveRes = await app.request("/api/v1/documents/doc-sys/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "test" }),
+    });
+    expect(archiveRes.status).toBe(400);
+    const deleteRes = await app.request("/api/v1/documents/doc-sys", { method: "DELETE" });
+    expect(deleteRes.status).toBe(400);
+  });
+
   it("POST /api/v1/documents/:id/archive and /reopen validate and apply changes", async () => {
     const sampleDoc = {
       id: "doc-exp",

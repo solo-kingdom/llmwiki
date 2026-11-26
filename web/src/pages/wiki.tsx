@@ -689,7 +689,7 @@ function useWikiPane({
             <SelectItem value="query"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="query" />问题</span></SelectItem>
             <SelectItem value="page"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="page" />普通页面</span></SelectItem>
             <SelectSeparator />
-            <SelectItem value="system">系统</SelectItem>
+            <SelectItem value="system"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="system" />系统</span></SelectItem>
           </SelectContent>
         </Select>
       </Toolbar>

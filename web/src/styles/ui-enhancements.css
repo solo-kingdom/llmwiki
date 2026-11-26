@@ -380,6 +380,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4375rem;
+  white-space: nowrap;
 }
 
 .llmwiki-select-option svg {

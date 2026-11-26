@@ -5,6 +5,7 @@ import {
   BookTextIcon,
   BoxIcon,
   CircleHelpIcon,
+  CogIcon,
   FileArchiveIcon,
   FileBracesIcon,
   FileCodeIcon,
@@ -38,6 +39,7 @@ export type WikiPageIconType =
   | "synthesis"
   | "comparison"
   | "query"
+  | "system"
 
 const FILE_KIND_ICON: Record<FileKind, IconComponent> = {
   markdown: FileTextIcon,
@@ -65,6 +67,7 @@ const PAGE_TYPE_ICON: Record<WikiPageIconType, { icon: IconComponent; className:
   synthesis: { icon: LayersIcon, className: "wiki-type-icon-synthesis" },
   comparison: { icon: ScaleIcon, className: "wiki-type-icon-comparison" },
   query: { icon: CircleHelpIcon, className: "wiki-type-icon-query" },
+  system: { icon: CogIcon, className: "wiki-type-icon-system" },
 }
 
 const SUBDIR_TO_PAGE_TYPE: Record<string, WikiPageIconType> = {

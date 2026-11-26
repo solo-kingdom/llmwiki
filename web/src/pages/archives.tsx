@@ -608,7 +608,7 @@ function useArchivePane({
         }
       >
         <Select value={kindFilter} onValueChange={onKindFilterChange}>
-          <SelectTrigger aria-label="按类型筛选" className="w-36 shrink-0">
+          <SelectTrigger aria-label="按类型筛选" className="w-28 shrink-0">
             <SelectValue placeholder="全部类型" />
           </SelectTrigger>
           <SelectContent>

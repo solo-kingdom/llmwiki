@@ -58,6 +58,8 @@
   --wiki-type-comparison-fill: oklch(0.57 0.22 10 / 0.18);
   --wiki-type-query: oklch(0.60 0.21 40);
   --wiki-type-query-fill: oklch(0.60 0.21 40 / 0.18);
+  --wiki-type-system: oklch(0.52 0.12 262);
+  --wiki-type-system-fill: oklch(0.52 0.12 262 / 0.18);
 }
 
 .dark {
@@ -113,6 +115,8 @@
   --wiki-type-comparison-fill: oklch(0.76 0.19 14 / 0.24);
   --wiki-type-query: oklch(0.80 0.18 46);
   --wiki-type-query-fill: oklch(0.80 0.18 46 / 0.24);
+  --wiki-type-system: oklch(0.78 0.10 262);
+  --wiki-type-system-fill: oklch(0.78 0.10 262 / 0.24);
 }
 
 .wiki-tree-file-lead {
@@ -155,7 +159,8 @@
 .wiki-type-icon-source,
 .wiki-type-icon-synthesis,
 .wiki-type-icon-comparison,
-.wiki-type-icon-query {
+.wiki-type-icon-query,
+.wiki-type-icon-system {
   stroke-width: 1.9;
 }
 
@@ -192,6 +197,7 @@
 .wiki-type-icon-synthesis { color: var(--wiki-type-synthesis); fill: var(--wiki-type-synthesis-fill); }
 .wiki-type-icon-comparison { color: var(--wiki-type-comparison); fill: var(--wiki-type-comparison-fill); }
 .wiki-type-icon-query { color: var(--wiki-type-query); fill: var(--wiki-type-query-fill); }
+.wiki-type-icon-system { color: var(--wiki-type-system); fill: var(--wiki-type-system-fill); }
 
 @media (hover: hover) {
   .wiki-tree-row .wiki-tree-row-actions {

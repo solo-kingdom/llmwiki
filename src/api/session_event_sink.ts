@@ -1,5 +1,5 @@
 import { recordSync, record } from "../activity/index.js";
-import type { EventSink, PermissionDecision, PlanEntry } from "../agentruntime/runtime.js";
+import type { EventSink, PermissionDecision, PlanEntry } from "../harness/runtime.js";
 import type { SessionMessageRecorderPort } from "../ingest/tools.js";
 import type { Store } from "../store/interfaces.js";
 

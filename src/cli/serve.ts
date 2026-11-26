@@ -1,11 +1,6 @@
 import path from "node:path";
 import { serve } from "@hono/node-server";
-import { AcpManager } from "../acp/manager.js";
-import {
-  DEFAULT_MAX_CONCURRENT_AGENTS,
-  MAX_CONCURRENT_AGENTS,
-  MIN_CONCURRENT_AGENTS,
-} from "../acp/config.js";
+import { HarnessManager } from "../harness/index.js";
 import { createApiContext, mcpActivity } from "../api/context.js";
 import { trimActivityLogs } from "../api/settings.js";
 import { ArchiveStorageService } from "../archive/storage.js";
@@ -45,17 +40,7 @@ export async function runServe(options: ServeOptions): Promise<void> {
       logger.error(`load provider snapshot failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    const rawMax = await store.getConfig("acp_max_concurrent_agents");
-    let maxConcurrent = DEFAULT_MAX_CONCURRENT_AGENTS;
-    const parsedMax = Number.parseInt(rawMax, 10);
-    if (
-      Number.isFinite(parsedMax) &&
-      parsedMax >= MIN_CONCURRENT_AGENTS &&
-      parsedMax <= MAX_CONCURRENT_AGENTS
-    ) {
-      maxConcurrent = parsedMax;
-    }
-    const acpManager = new AcpManager(maxConcurrent);
+    const harnessManager = new HarnessManager();
 
     if (!options.noMcp && !isLoopback(options.bindAddr) && !options.token) {
       throw new Error(
@@ -90,7 +75,7 @@ export async function runServe(options: ServeOptions): Promise<void> {
       workspace,
       webRoot: options.webRoot,
       skillsRoot: process.env.LLMWIKI_SKILLS_ROOT ?? path.resolve("skills"),
-      acpManager,
+      harnessManager,
       lockMgr,
       indexer,
       mcpServer,
@@ -150,7 +135,7 @@ export async function runServe(options: ServeOptions): Promise<void> {
       clearInterval(trimTimer);
       clearInterval(catalogSyncTimer);
       processor.stop();
-      acpManager.closeAll();
+      await harnessManager.closeAll();
       server.close();
       await pool.end();
       process.exit(0);

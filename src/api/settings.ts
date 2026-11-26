@@ -1,7 +1,23 @@
 import type { Context } from "hono";
+import {
+  listHarnessDescriptors as getBuiltInHarnessDescriptors,
+  lookPath,
+  normalizeHarnixSettings,
+  probeHarness,
+  redactAcpAgents,
+  type HarnixSettings,
+  type HarnessKind,
+} from "harnix";
 import { recordSync } from "../activity/index.js";
 import { isApiKeyRequest } from "../server/auth.js";
-import * as acpConfig from "../acp/config.js";
+import {
+  acpSettingsToLegacyAcpJson,
+  CONFIG_HARNIX_SETTINGS,
+  legacyAcpJsonToAcpSettings,
+  loadHarnixSettings,
+  resolveProviderCredentials,
+  saveHarnixSettings,
+} from "../harness/settings.js";
 import { validateRulesSupplement } from "../ingest/prompts.js";
 import * as mcpConfig from "../mcp/config.js";
 import {
@@ -112,40 +128,10 @@ function activityLogsMaxCountForResponse(stored: string): string {
   return stored.trim() ? stored : String(DEFAULT_ACTIVITY_MAX_COUNT);
 }
 
-function acpMaxConcurrentAgentsForResponse(stored: string): string {
-  return stored.trim() ? stored : String(acpConfig.DEFAULT_MAX_CONCURRENT_AGENTS);
-}
-
-function jobParallelEnabledForResponse(stored: string): string {
-  const value = stored.trim().toLowerCase();
-  return value === "true" || value === "1" ? "true" : "false";
-}
-
-function jobMaxConcurrentForResponse(stored: string): string {
-  return stored.trim() || String(DEFAULT_MAX_CONCURRENT_JOBS);
-}
-
-function languageForResponse(stored: string): string {
-  return stored === "zh" || stored === "en" ? stored : "zh";
-}
-
-function defaultAgentKindForResponse(stored: string): string {
-  return stored === acpConfig.KIND_ACP ? acpConfig.KIND_ACP : acpConfig.KIND_NATIVE;
-}
-
 function mcpServersJsonForResponse(stored: string): string {
   if (!stored.trim()) return mcpConfig.canonicalJson(mcpConfig.defaultConfig());
   try {
     return mcpConfig.canonicalJson(mcpConfig.parseConfig(stored));
-  } catch {
-    return stored;
-  }
-}
-
-function acpAgentsJsonForResponse(stored: string): string {
-  if (!stored.trim()) return acpConfig.canonicalJson(acpConfig.defaultConfig());
-  try {
-    return acpConfig.canonicalJson(acpConfig.parseConfig(stored));
   } catch {
     return stored;
   }
@@ -170,12 +156,21 @@ function validateApiToken(token: string): void {
   if (/[ \t\r\n"']/.test(token)) throw new Error("api_token must not contain whitespace or quotes");
 }
 
-function validateAndCanonicalizeMcpJson(value: string): string {
-  return mcpConfig.canonicalJson(mcpConfig.parseConfig(value));
+function jobParallelEnabledForResponse(stored: string): string {
+  const value = stored.trim().toLowerCase();
+  return value === "true" || value === "1" ? "true" : "false";
 }
 
-function validateAndCanonicalizeAcpJson(value: string): string {
-  return acpConfig.canonicalJson(acpConfig.parseConfig(value));
+function jobMaxConcurrentForResponse(stored: string): string {
+  return stored.trim() || String(DEFAULT_MAX_CONCURRENT_JOBS);
+}
+
+function languageForResponse(stored: string): string {
+  return stored === "zh" || stored === "en" ? stored : "zh";
+}
+
+function validateAndCanonicalizeMcpJson(value: string): string {
+  return mcpConfig.canonicalJson(mcpConfig.parseConfig(value));
 }
 
 const ALLOWED_KEYS = new Set([
@@ -202,10 +197,7 @@ const ALLOWED_KEYS = new Set([
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_QA,
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_ORGANIZE,
   CONFIG_SESSION_TOOL_LOOP_MAX_CALLS_PER_ROUND,
-  "acp_agents_json",
-  "default_agent_kind",
-  "default_acp_agent_id",
-  "acp_max_concurrent_agents",
+  CONFIG_HARNIX_SETTINGS,
   CONFIG_EMBEDDING_INSTANCE_ID,
   CONFIG_EMBEDDING_MODEL,
   CONFIG_EMBEDDING_DIM,
@@ -225,8 +217,10 @@ const ALLOWED_KEYS = new Set([
 export function settingsApi(ctx: ApiContext) {
   async function getSettings(c: Context): Promise<Response> {
     let all: Record<string, string>;
+    let harnixSettings: HarnixSettings;
     try {
       all = await ctx.db.getAllConfig();
+      harnixSettings = await loadHarnixSettings(ctx.db);
     } catch (error) {
       return writeError(c, 500, errorMessage(error));
     }
@@ -268,10 +262,11 @@ export function settingsApi(ctx: ApiContext) {
       session_tool_loop_max_calls_per_round: sessionToolLoopMaxCallsForResponse(
         value(CONFIG_SESSION_TOOL_LOOP_MAX_CALLS_PER_ROUND),
       ),
-      acp_agents_json: acpAgentsJsonForResponse(value("acp_agents_json")),
-      default_agent_kind: defaultAgentKindForResponse(value("default_agent_kind")),
-      default_acp_agent_id: value("default_acp_agent_id"),
-      acp_max_concurrent_agents: acpMaxConcurrentAgentsForResponse(value("acp_max_concurrent_agents")),
+      harnix_settings: harnixSettings,
+      acp_agents_json: acpSettingsToLegacyAcpJson(harnixSettings.acp),
+      default_agent_kind: harnixSettings.defaultKind,
+      default_acp_agent_id: harnixSettings.acp.defaultAgentId,
+      acp_max_concurrent_agents: String(harnixSettings.acp.maxConcurrentSessions),
       embedding_instance_id: value(CONFIG_EMBEDDING_INSTANCE_ID),
       embedding_model: value(CONFIG_EMBEDDING_MODEL),
       embedding_dim: value(CONFIG_EMBEDDING_DIM),
@@ -314,51 +309,66 @@ export function settingsApi(ctx: ApiContext) {
         return writeError(c, 403, "api key cannot manage credentials");
       }
 
-      let pendingAcpJson = "";
-      if ("acp_agents_json" in req) {
-        const value = parseSettingsValue(req.acp_agents_json);
+      const hasHarnessUpdates =
+        "harnix_settings" in req ||
+        CONFIG_HARNIX_SETTINGS in req ||
+        "acp_agents_json" in req ||
+        "default_agent_kind" in req ||
+        "default_acp_agent_id" in req ||
+        "acp_max_concurrent_agents" in req;
+
+      let pendingHarnessSettings: HarnixSettings | null = null;
+      if (hasHarnessUpdates) {
         try {
-          pendingAcpJson = validateAndCanonicalizeAcpJson(value);
+          let base = await loadHarnixSettings(ctx.db);
+          if ("harnix_settings" in req && req.harnix_settings !== undefined) {
+            base = normalizeHarnixSettings(req.harnix_settings);
+          } else if (CONFIG_HARNIX_SETTINGS in req && req[CONFIG_HARNIX_SETTINGS] !== undefined) {
+            base = normalizeHarnixSettings(req[CONFIG_HARNIX_SETTINGS]);
+          }
+          let nextDefaultKind = base.defaultKind;
+          let nextAcp = base.acp;
+          if ("acp_agents_json" in req) {
+            const rawAcp = parseSettingsValue(req.acp_agents_json);
+            nextAcp = legacyAcpJsonToAcpSettings(
+              rawAcp,
+              nextAcp.defaultAgentId,
+              nextAcp.maxConcurrentSessions,
+            );
+          }
+          if ("default_agent_kind" in req) {
+            const kind = parseSettingsValue(req.default_agent_kind).trim().toLowerCase();
+            if (kind !== "native" && kind !== "pi" && kind !== "acp") {
+              return writeError(c, 400, "default_agent_kind must be native, pi, or acp");
+            }
+            nextDefaultKind = kind as HarnessKind;
+          }
+          if ("acp_max_concurrent_agents" in req) {
+            const parsed = Number.parseInt(parseSettingsValue(req.acp_max_concurrent_agents), 10);
+            if (!Number.isFinite(parsed) || parsed < 1 || parsed > 16) {
+              return writeError(c, 400, "acp_max_concurrent_agents must be between 1 and 16");
+            }
+            nextAcp = { ...nextAcp, maxConcurrentSessions: parsed };
+          }
+          if ("default_acp_agent_id" in req) {
+            const agentId = parseSettingsValue(req.default_acp_agent_id).trim();
+            if (agentId && !nextAcp.agents[agentId]) {
+              return writeError(c, 400, "default_acp_agent_id references an unknown agent");
+            }
+            nextAcp = { ...nextAcp, defaultAgentId: agentId };
+          }
+          pendingHarnessSettings = normalizeHarnixSettings({
+            ...base,
+            defaultKind: nextDefaultKind,
+            acp: nextAcp,
+          });
         } catch (error) {
           return writeError(c, 400, errorMessage(error));
         }
       }
-      if ("default_agent_kind" in req) {
-        const value = parseSettingsValue(req.default_agent_kind);
-        if (value !== acpConfig.KIND_NATIVE && value !== acpConfig.KIND_ACP) {
-          return writeError(c, 400, "default_agent_kind must be native or acp");
-        }
-      }
-      if ("acp_max_concurrent_agents" in req) {
-        const value = parseSettingsValue(req.acp_max_concurrent_agents);
-        const parsed = Number.parseInt(value, 10);
-        if (
-          !Number.isFinite(parsed) ||
-          parsed < acpConfig.MIN_CONCURRENT_AGENTS ||
-          parsed > acpConfig.MAX_CONCURRENT_AGENTS
-        ) {
-          return writeError(c, 400, "acp_max_concurrent_agents must be between 1 and 16");
-        }
-      }
-      if ("default_acp_agent_id" in req) {
-        const value = parseSettingsValue(req.default_acp_agent_id);
-        if (value.trim()) {
-          const effectiveJson =
-            pendingAcpJson || (await ctx.db.getConfig("acp_agents_json"));
-          let cfg;
-          try {
-            cfg = acpConfig.parseConfig(effectiveJson);
-          } catch (error) {
-            return writeError(c, 400, errorMessage(error));
-          }
-          if (!acpConfig.getAgent(cfg, value)) {
-            return writeError(c, 400, "default_acp_agent_id references an unknown agent");
-          }
-        }
-      }
 
       for (const [key, raw] of Object.entries(req)) {
-        if (!ALLOWED_KEYS.has(key)) continue;
+        if (!ALLOWED_KEYS.has(key) || key === CONFIG_HARNIX_SETTINGS) continue;
         let value: string;
         try {
           value = parseSettingsValue(raw);
@@ -366,7 +376,6 @@ export function settingsApi(ctx: ApiContext) {
           if (key === "ingest_job_events_max_count") parseJobEventsMaxCount(value);
           if (key === "session_message_events_max_count") parseSessionMsgEventsMaxCount(value);
           if (key === "mcp_servers_json") value = validateAndCanonicalizeMcpJson(value);
-          if (key === "acp_agents_json") value = pendingAcpJson;
           if ((key === "ui_language" || key === "doc_language") && value !== "zh" && value !== "en") {
             throw new Error(`${key} must be 'zh' or 'en`);
           }
@@ -429,6 +438,14 @@ export function settingsApi(ctx: ApiContext) {
         }
         try {
           await ctx.db.setConfig(key, value);
+        } catch (error) {
+          return writeError(c, 500, errorMessage(error));
+        }
+      }
+
+      if (pendingHarnessSettings) {
+        try {
+          await saveHarnixSettings(ctx.db, pendingHarnessSettings);
         } catch (error) {
           return writeError(c, 500, errorMessage(error));
         }
@@ -536,51 +553,140 @@ export function settingsApi(ctx: ApiContext) {
       return writeJson(c, 200, { servers: await checkServers(cfg, c.req.raw.signal) });
     },
 
-    async listAcpAgents(c: Context): Promise<Response> {
-      let raw: string;
+    async listHarnessDescriptors(c: Context): Promise<Response> {
+      return writeJson(c, 200, { descriptors: getBuiltInHarnessDescriptors() });
+    },
+
+    async checkHarness(c: Context): Promise<Response> {
+      const body =
+        (await readJsonBody<{
+          kind?: HarnessKind;
+          harnix_settings?: unknown;
+          instance_id?: string;
+          model?: string;
+          acp_agent_id?: string;
+        }>(c)) ?? {};
+
+      let settings: HarnixSettings;
       try {
-        raw = await ctx.db.getConfig("acp_agents_json");
+        settings =
+          body.harnix_settings !== undefined
+            ? normalizeHarnixSettings(body.harnix_settings)
+            : await loadHarnixSettings(ctx.db);
       } catch (error) {
-        return writeError(c, 500, errorMessage(error));
+        return writeError(c, 400, errorMessage(error));
       }
-      let cfg;
+
+      const kind = body.kind ?? settings.defaultKind;
+      if (kind !== "native" && kind !== "pi" && kind !== "acp") {
+        return writeError(c, 400, "kind must be native, pi, or acp");
+      }
+
+      if (kind === "native" || kind === "pi") {
+        const instanceId = (body.instance_id ?? (await ctx.db.getConfig("last_instance_id"))).trim();
+        const model = (body.model ?? (await ctx.db.getConfig("last_model"))).trim();
+        let provider;
+        try {
+          provider = await resolveProviderCredentials(ctx.db, instanceId, model);
+        } catch (error) {
+          return writeJson(c, 200, {
+            kind,
+            ok: false,
+            status: "error",
+            message: errorMessage(error),
+          });
+        }
+        const result = await probeHarness({
+          kind,
+          settings,
+          provider,
+          signal: c.req.raw.signal,
+        });
+        return writeJson(c, 200, result);
+      }
+
+      const result = await probeHarness({
+        kind: "acp",
+        settings,
+        acpAgentId: body.acp_agent_id,
+        cwd: ctx.workspace || process.cwd(),
+        signal: c.req.raw.signal,
+      });
+      return writeJson(c, 200, result);
+    },
+
+    async listAcpAgents(c: Context): Promise<Response> {
+      let settings: HarnixSettings;
       try {
-        cfg = acpConfig.parseConfig(raw);
+        settings = await loadHarnixSettings(ctx.db);
       } catch (error) {
         return writeJson(c, 200, { agents: [], config_error: errorMessage(error) });
       }
-      const { availability } = await import("../acp/check.js");
-      const statuses = await availability(cfg);
-      const agents = acpConfig
-        .redactedAgents(cfg)
-        .sort((a, b) => a.id.localeCompare(b.id))
-        .map((agent) => ({
-          ...agent,
-          available: statuses[agent.id]?.available ?? false,
-          unavailable_reason: statuses[agent.id]?.reason ?? "",
-        }));
+      const redacted = redactAcpAgents(settings.acp);
+      const agents = await Promise.all(
+        redacted.map(async (agent) => {
+          const found = await lookPath(agent.command);
+          return {
+            id: agent.id,
+            name: agent.name,
+            enabled: agent.enabled,
+            command: agent.command,
+            args: [...agent.args],
+            env_passthrough: [...agent.envPassthrough],
+            cwd_policy: agent.cwdPolicy,
+            init_timeout_ms: agent.initTimeoutMs,
+            prompt_timeout_ms: agent.promptTimeoutMs,
+            idle_timeout_ms: agent.idleTimeoutMs,
+            permission: {
+              mode: agent.permission.mode,
+              allow_read: agent.permission.allowRead,
+              allow_search: agent.permission.allowSearch,
+              allow_fetch: agent.permission.allowFetch,
+              allow_write: agent.permission.allowWrite,
+              allow_execute: agent.permission.allowExecute,
+            },
+            available: Boolean(found),
+            unavailable_reason: found ? "" : `命令 ${agent.command} 未找到（PATH 中不可用）`,
+          };
+        }),
+      );
       return writeJson(c, 200, { agents });
     },
 
     async checkAcpAgents(c: Context): Promise<Response> {
-      let raw = "";
       const body = await readJsonBody<{ acp_agents_json?: string }>(c);
-      if (body) raw = body.acp_agents_json ?? "";
-      if (!raw.trim()) {
-        try {
-          raw = await ctx.db.getConfig("acp_agents_json");
-        } catch (error) {
-          return writeError(c, 500, errorMessage(error));
-        }
-      }
-      let cfg;
+      let settings: HarnixSettings;
       try {
-        cfg = acpConfig.parseConfig(raw);
+        settings = await loadHarnixSettings(ctx.db);
+        if (body?.acp_agents_json !== undefined) {
+          const acp = legacyAcpJsonToAcpSettings(
+            body.acp_agents_json,
+            settings.acp.defaultAgentId,
+            settings.acp.maxConcurrentSessions,
+          );
+          settings = normalizeHarnixSettings({ ...settings, acp });
+        }
       } catch (error) {
         return writeError(c, 400, errorMessage(error));
       }
-      const { checkAgents } = await import("../acp/check.js");
-      return writeJson(c, 200, { agents: await checkAgents(cfg, ctx.workspace) });
+      const probe = await probeHarness({
+        kind: "acp",
+        settings,
+        cwd: ctx.workspace || process.cwd(),
+        signal: c.req.raw.signal,
+      });
+      const agents = (probe.details ?? []).map((d) => ({
+        id: d.id,
+        name: d.name,
+        enabled: d.status !== "disabled",
+        status: d.status,
+        ...(d.code ? { code: d.code } : {}),
+        ...(d.message ? { message: d.message } : {}),
+        ...(d.agentName ? { agent_name: d.agentName } : {}),
+        ...(d.agentVersion ? { agent_version: d.agentVersion } : {}),
+        ...(d.protocolVersion !== undefined ? { protocol_version: d.protocolVersion } : {}),
+      }));
+      return writeJson(c, 200, { agents });
     },
 
     async checkArchiveStorage(c: Context): Promise<Response> {

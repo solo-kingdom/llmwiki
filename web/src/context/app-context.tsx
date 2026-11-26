@@ -5,12 +5,14 @@ import {
   getSettings,
   getWorkspace,
   listACPAgents,
+  listHarnessDescriptors,
   listProviderInstances,
   listProviders,
 } from "@/lib/api"
 import type {
   ACPAgent,
   CapabilitiesResponse,
+  HarnessDescriptor,
   Provider,
   ProviderInstance,
   Settings,
@@ -24,6 +26,7 @@ export interface AppContextValue {
   instances: ProviderInstance[]
   providers: Provider[]
   acpAgents: ACPAgent[]
+  harnessDescriptors: HarnessDescriptor[]
   isLoading: boolean
   error: Error | null
   refresh: () => Promise<void>
@@ -38,10 +41,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const instancesQuery = useQuery({ queryKey: ["provider-instances"], queryFn: listProviderInstances })
   const providersQuery = useQuery({ queryKey: ["providers"], queryFn: listProviders })
   const acpQuery = useQuery({ queryKey: ["acp-agents"], queryFn: listACPAgents })
+  const descriptorsQuery = useQuery({ queryKey: ["harness-descriptors"], queryFn: listHarnessDescriptors })
 
   const queries = React.useMemo(
-    () => [workspaceQuery, settingsQuery, capabilitiesQuery, instancesQuery, providersQuery, acpQuery],
-    [workspaceQuery, settingsQuery, capabilitiesQuery, instancesQuery, providersQuery, acpQuery],
+    () => [workspaceQuery, settingsQuery, capabilitiesQuery, instancesQuery, providersQuery, acpQuery, descriptorsQuery],
+    [workspaceQuery, settingsQuery, capabilitiesQuery, instancesQuery, providersQuery, acpQuery, descriptorsQuery],
   )
   const error = queries.find((query) => query.error !== null)?.error ?? null
   const isLoading = queries.some((query) => query.isLoading)
@@ -58,6 +62,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       instances: instancesQuery.data?.instances ?? [],
       providers: providersQuery.data ?? [],
       acpAgents: acpQuery.data?.agents ?? [],
+      harnessDescriptors: descriptorsQuery.data?.descriptors ?? [],
       isLoading,
       error: error instanceof Error ? error : null,
       refresh,
@@ -69,6 +74,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       instancesQuery.data,
       providersQuery.data,
       acpQuery.data,
+      descriptorsQuery.data,
       isLoading,
       error,
       refresh,

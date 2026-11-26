@@ -1,4 +1,4 @@
-import { CpuIcon, DatabaseIcon, HardDriveIcon, KeyRoundIcon, PlugIcon, ScrollTextIcon } from "lucide-react"
+import { BotIcon, CpuIcon, DatabaseIcon, HardDriveIcon, KeyRoundIcon, PlugIcon, ScrollTextIcon } from "lucide-react"
 import { Outlet } from "react-router"
 import { SectionLayout, type SectionNavItem } from "@/components/blocks/section-nav"
 import { ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
@@ -8,6 +8,7 @@ import { useApp } from "@/context/app-context"
 /** One route per section; `/settings` redirects to the first (see main.tsx). */
 export const SETTINGS_SECTIONS: SectionNavItem[] = [
   { label: "模型", to: "/settings/models", icon: <CpuIcon className="llmwiki-tone-indigo" /> },
+  { label: "Harness", to: "/settings/harness", icon: <BotIcon className="llmwiki-tone-violet" /> },
   { label: "摄入与检索", to: "/settings/ingest", icon: <DatabaseIcon className="llmwiki-tone-cyan" /> },
   { label: "存储", to: "/settings/storage", icon: <HardDriveIcon className="llmwiki-tone-teal" /> },
   { label: "访问控制", to: "/settings/access", icon: <KeyRoundIcon className="llmwiki-tone-amber" /> },

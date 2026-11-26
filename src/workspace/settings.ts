@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "../store/interfaces.js";
 import { logger } from "../logger.js";
+import { CONFIG_HARNIX_SETTINGS } from "../harness/settings.js";
 import {
   CONFIG_SESSION_TOOL_LOOP_MAX_CALLS_PER_ROUND,
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_INGEST,
@@ -35,6 +36,7 @@ const EXPORT_KEYS = [
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_QA,
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_ORGANIZE,
   CONFIG_SESSION_TOOL_LOOP_MAX_CALLS_PER_ROUND,
+  CONFIG_HARNIX_SETTINGS,
 ];
 
 interface SettingsFile {

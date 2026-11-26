@@ -1,15 +1,16 @@
 import path from "node:path";
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
+import { lookPath } from "harnix";
 import { logSession, record } from "../activity/index.js";
 import { ArchiveStorageService, ingestAutoFolder } from "../archive/storage.js";
-import { parseConfig as parseAcpConfig, getAgent } from "../acp/config.js";
-import { availability } from "../acp/check.js";
 import {
   KIND_ACP,
   KIND_NATIVE,
+  loadHarnixSettings,
+  VALID_AGENT_KINDS,
   type WikiRefInput,
-} from "../agentruntime/runtime.js";
+} from "../harness/index.js";
 import {
   injectWikiRefsIntoUserContent,
   loadWikiPageBodies,
@@ -165,12 +166,13 @@ export function ingestSessionsApi(ctx: ApiContext) {
   }
 
   async function validateSessionAgent(kind: string, acpAgentId: string): Promise<void> {
-    if (kind === KIND_NATIVE) return;
-    if (kind !== KIND_ACP) throw new Error("agent_kind must be native or acp");
-    if (!acpAgentId.trim()) throw new Error("请先在 Settings 配置并选择 ACP Agent");
-    const raw = await ctx.db.getConfig("acp_agents_json");
-    const cfg = parseAcpConfig(raw);
-    const agent = getAgent(cfg, acpAgentId);
+    if (!VALID_AGENT_KINDS.has(kind)) {
+      throw new Error("agent_kind must be native, pi, or acp");
+    }
+    if (kind !== KIND_ACP) return;
+    if (!acpAgentId.trim()) throw new Error("请先在 Settings → Harness 配置并选择 ACP Agent");
+    const settings = await loadHarnixSettings(ctx.db);
+    const agent = settings.acp.agents[acpAgentId];
     if (!agent) throw new Error(`ACP Agent "${acpAgentId}" 不存在`);
     if (!agent.enabled) throw new Error("该 ACP Agent 已禁用");
   }
@@ -295,7 +297,12 @@ export function ingestSessionsApi(ctx: ApiContext) {
       });
       return writeError(c, 400, runtimeErrorMessage(error));
     }
-    if (session.agent_kind === KIND_ACP && ctx.acpMgr && !ctx.acpMgr.hasCapacity(session.id)) {
+    const settings = await loadHarnixSettings(ctx.db);
+    if (
+      session.agent_kind === KIND_ACP &&
+      ctx.harnessMgr &&
+      !ctx.harnessMgr.hasCapacity(session.id, session.acp_agent_id, settings)
+    ) {
       c.header("Retry-After", "5");
       return writeError(c, 503, "ACP agent concurrency limit reached");
     }
@@ -401,12 +408,12 @@ export function ingestSessionsApi(ctx: ApiContext) {
         title = defaultIngestSessionTitle(count + 1, new Date());
       }
       const mode = req.mode || "ingest";
+      const harnixSettings = await loadHarnixSettings(ctx.db);
       let agentKind = req.agent_kind ?? "";
-      if (!agentKind) agentKind = await ctx.db.getConfig("default_agent_kind");
-      if (!agentKind) agentKind = KIND_NATIVE;
+      if (!agentKind) agentKind = harnixSettings.defaultKind || KIND_NATIVE;
       let acpAgentId = req.acp_agent_id ?? "";
       if (!acpAgentId && agentKind === KIND_ACP) {
-        acpAgentId = await ctx.db.getConfig("default_acp_agent_id");
+        acpAgentId = harnixSettings.acp.defaultAgentId;
       }
       try {
         await validateSessionAgent(agentKind, acpAgentId);
@@ -517,13 +524,11 @@ export function ingestSessionsApi(ctx: ApiContext) {
           updated = true;
         }
         if (req.agent_kind !== undefined) {
-          let kind = req.agent_kind.trim();
+          const kind = req.agent_kind.trim();
           let acpAgentId =
             req.acp_agent_id !== undefined ? req.acp_agent_id.trim() : session.acp_agent_id;
-          if (kind === KIND_NATIVE) acpAgentId = "";
+          if (kind !== KIND_ACP) acpAgentId = "";
           await ctx.db.updateIngestSessionAgent(session.id, kind, acpAgentId);
-          await ctx.db.setConfig("default_agent_kind", kind);
-          await ctx.db.setConfig("default_acp_agent_id", acpAgentId);
           updated = true;
         }
       } catch (error) {
@@ -539,7 +544,7 @@ export function ingestSessionsApi(ctx: ApiContext) {
       if (session instanceof Response) return session;
       try {
         await ctx.db.deleteIngestSession(session.id);
-        if (ctx.acpMgr) ctx.acpMgr.closeSession(session.id);
+        if (ctx.harnessMgr) await ctx.harnessMgr.closeSession(session.id);
         if (ctx.workspace) await removeSessionDir(ctx.workspace, session.id);
         return writeJson(c, 200, { status: "deleted" });
       } catch (error) {
@@ -829,7 +834,7 @@ export function ingestSessionsApi(ctx: ApiContext) {
               archive_file_id: archiveFile.id,
             },
           });
-          if (ctx.acpMgr) ctx.acpMgr.closeSession(session.id);
+          if (ctx.harnessMgr) await ctx.harnessMgr.closeSession(session.id);
           return writeJson(c, 201, {
             review_id: review.id,
             status: review.status,

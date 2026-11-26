@@ -271,20 +271,6 @@
   font-weight: 500;
 }
 
-.llmwiki-chat-item-actions {
-  flex-shrink: 0;
-  padding-right: 0.25rem;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
-.llmwiki-chat-item:hover .llmwiki-chat-item-actions,
-.llmwiki-chat-item:focus-within .llmwiki-chat-item-actions,
-.llmwiki-chat-item[data-active="true"] .llmwiki-chat-item-actions,
-.llmwiki-chat-item-actions:has([aria-expanded="true"]) {
-  opacity: 1;
-}
-
 /* ---------- Chat transcript role & steps ---------- */
 .llmwiki-role-badge {
   display: inline-flex;

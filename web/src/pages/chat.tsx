@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react"
+import { useMemo, useRef, useState, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "react-router"
 import {
@@ -14,7 +14,6 @@ import {
   Loader2Icon,
   MessageSquareIcon,
   MessageSquareTextIcon,
-  MoreHorizontalIcon,
   PaperclipIcon,
   PencilIcon,
   PlusIcon,
@@ -47,8 +46,8 @@ import { AppLink } from "@/components/blocks/router"
 import { Body, Inline, Page, ScrollRegion, Stack } from "@/components/blocks/surfaces"
 import { EmptyState } from "@/components/blocks/state-boundary"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupTextarea } from "@/components/ui/input-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -112,43 +111,9 @@ function recencyBucket(time: string | undefined, now: Date): RecencyKey {
 }
 
 function ChatPane({ sessionId, onCreate, creating }: { sessionId: string | undefined; onCreate: () => void; creating: boolean }) {
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
-  const confirm = useConfirm()
   const [filter, setFilter] = useState("")
-  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
   const sessionsQuery = useQuery({ queryKey: ["ingest-sessions"], queryFn: listIngestSessions })
   const sessions = useMemo(() => sessionsQuery.data?.sessions ?? [], [sessionsQuery.data])
-
-  const rename = useMutation({
-    mutationFn: (value: { id: string; title: string }) => updateIngestSession(value.id, { title: value.title }),
-    onSuccess: async (_res, vars) => {
-      notify.success("会话已重命名")
-      setRenaming(null)
-      await queryClient.invalidateQueries({ queryKey: ["ingest-sessions"] })
-      await queryClient.invalidateQueries({ queryKey: ["ingest-session", vars.id] })
-    },
-    onError: (error: Error) => notify.error(error),
-  })
-
-  const archive = useMutation({
-    mutationFn: (session: SessionListItem) => archiveIngestSession(session.id, session.title),
-    onSuccess: (result) => {
-      notify.success(`已归档：${result.review_id}`)
-      void queryClient.invalidateQueries({ queryKey: ["ingest-sessions"] })
-    },
-    onError: (error: Error) => notify.error(error),
-  })
-
-  const remove = useMutation({
-    mutationFn: (id: string) => deleteIngestSession(id),
-    onSuccess: async (_res, deletedId) => {
-      notify.success("会话已删除")
-      await queryClient.invalidateQueries({ queryKey: ["ingest-sessions"] })
-      if (deletedId === sessionId) navigate("/chat")
-    },
-    onError: (error: Error) => notify.error(error),
-  })
 
   const filtered = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -230,43 +195,6 @@ function ChatPane({ sessionId, onCreate, creating }: { sessionId: string | undef
                               </span>
                             </span>
                           </AppLink>
-                          <div className="llmwiki-chat-item-actions">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  size="icon-xs"
-                                  variant="ghost"
-                                  aria-label={`操作会话 ${title}`}
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  <MoreHorizontalIcon />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onSelect={() => setRenaming({ id: session.id, title: session.title || "" })}>
-                                  <PencilIcon />重命名
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onSelect={() => archive.mutate(session)}>
-                                  <ArchiveIcon />归档
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  variant="destructive"
-                                  onSelect={async () => {
-                                    const ok = await confirm({
-                                      title: `删除会话「${title}」？`,
-                                      description: "会话消息会一并删除，已归档的评审不受影响。",
-                                      confirmLabel: "删除",
-                                      destructive: true,
-                                    })
-                                    if (ok) remove.mutate(session.id)
-                                  }}
-                                >
-                                  <Trash2Icon />删除
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
                         </li>
                       )
                     })}
@@ -277,28 +205,6 @@ function ChatPane({ sessionId, onCreate, creating }: { sessionId: string | undef
           </div>
         )}
       </PaneSection>
-      <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) setRenaming(null) }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>重命名会话</DialogTitle>
-            <DialogDescription>标题只影响列表展示。</DialogDescription>
-          </DialogHeader>
-          <Input
-            aria-label="会话标题"
-            value={renaming?.title ?? ""}
-            onChange={(event) => setRenaming((current) => current === null ? current : { ...current, title: event.target.value })}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenaming(null)}>取消</Button>
-            <Button
-              disabled={renaming === null || renaming.title.trim() === "" || rename.isPending}
-              onClick={() => { if (renaming !== null) rename.mutate({ id: renaming.id, title: renaming.title.trim() }) }}
-            >
-              保存
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   )
 }
@@ -451,6 +357,32 @@ function MessageView({ message, onRetry }: { message: IngestSessionMessage; onRe
         <Button size="sm" variant="ghost" onClick={onRetry}><RotateCcwIcon />重试</Button>
       ) : null}
     </Turn>
+  )
+}
+
+function SessionAction({ label, icon, onSelect, destructive = false, disabled = false }: {
+  label: string
+  icon: ReactNode
+  onSelect: () => void
+  destructive?: boolean
+  disabled?: boolean
+}) {
+  return (
+    <Tooltip delayDuration={600}>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={label}
+          disabled={disabled}
+          onClick={onSelect}
+          className={destructive ? "text-destructive hover:text-destructive" : undefined}
+        >
+          {icon}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -624,27 +556,28 @@ function Conversation({ session }: { session: IngestSession }) {
       title={session.title || "新对话"}
       layout="fill"
       leading={<ListPaneTrigger />}
-      actions={[
-        { label: "编辑", icon: <PencilIcon />, iconOnly: true, onSelect: () => setRenaming({ id: session.id, title: session.title || "" }) },
-        { label: "归档", icon: <ArchiveIcon />, iconOnly: true, onSelect: () => archive.mutate() },
-        { label: "刷新", icon: <RotateCcwIcon />, iconOnly: true, onSelect: () => { void messagesQuery.refetch() } },
-        {
-          label: "删除",
-          icon: <Trash2Icon />,
-          iconOnly: true,
-          destructive: true,
-          disabled: remove.isPending,
-          onSelect: async () => {
-            const ok = await confirm({
-              title: `删除会话「${session.title || "未命名对话"}」？`,
-              description: "会话消息会一并删除，已归档的评审不受影响。",
-              confirmLabel: "删除",
-              destructive: true,
-            })
-            if (ok) remove.mutate()
-          },
-        },
-      ]}
+      primary={(
+        <>
+          <SessionAction label="重命名" icon={<PencilIcon />} onSelect={() => setRenaming({ id: session.id, title: session.title || "" })} />
+          <SessionAction label="归档" icon={<ArchiveIcon />} onSelect={() => archive.mutate()} />
+          <SessionAction label="刷新" icon={<RotateCcwIcon />} onSelect={() => { void messagesQuery.refetch() }} />
+          <SessionAction
+            label="删除"
+            icon={<Trash2Icon />}
+            destructive
+            disabled={remove.isPending}
+            onSelect={async () => {
+              const ok = await confirm({
+                title: `删除会话「${session.title || "未命名对话"}」？`,
+                description: "会话消息会一并删除，已归档的评审不受影响。",
+                confirmLabel: "删除",
+                destructive: true,
+              })
+              if (ok) remove.mutate()
+            }}
+          />
+        </>
+      )}
     >
       <ScrollRegion name="conversation" follow>
         <Body width="reading">

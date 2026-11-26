@@ -547,7 +547,7 @@ function MoveDocumentDialog({
     return idx >= 0 ? rel.slice(0, idx) : ""
   }, [doc.relative_path])
 
-  const [targetFolder, setTargetFolder] = React.useState(currentFolder || folders[0]?.path || "")
+  const [targetFolder, setTargetFolder] = React.useState(currentFolder)
   const [filename, setFilename] = React.useState(doc.filename)
 
   const mutation = useMutation({
@@ -578,9 +578,10 @@ function MoveDocumentDialog({
         <Stack gap="md">
           <Stack gap="xs">
             <Label htmlFor="move-doc-folder">目标目录</Label>
-            <Select value={targetFolder} onValueChange={setTargetFolder}>
+            <Select value={targetFolder || "__root__"} onValueChange={(value) => setTargetFolder(value === "__root__" ? "" : value)}>
               <SelectTrigger id="move-doc-folder"><SelectValue /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="__root__">（根目录）</SelectItem>
                 {folders.map((f) => (
                   <SelectItem key={f.path} value={f.path}>
                     {f.display_name ? `${f.path} (${f.display_name})` : f.path}
@@ -595,7 +596,7 @@ function MoveDocumentDialog({
           </Stack>
           <Actions align="end">
             <Button variant="outline" onClick={onClose}>取消</Button>
-            <Button disabled={!targetFolder.trim() || mutation.isPending} onClick={() => mutation.mutate()}>
+            <Button disabled={mutation.isPending} onClick={() => mutation.mutate()}>
               确认移动
             </Button>
           </Actions>

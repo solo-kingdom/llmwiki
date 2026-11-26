@@ -25,7 +25,7 @@ import {
 import { Markdown } from "@/components/blocks/markdown"
 import { ReferencesBlock } from "@/components/blocks/references-block"
 import { useAppNavigate } from "@/components/blocks/router"
-import { Actions, Body, NavItem, NavList, Page, Panel, Row, Rows, Split, Stack, Toolbar } from "@/components/blocks/surfaces"
+import { Actions, Body, Inline, NavItem, NavList, Page, Panel, Row, Rows, Split, Stack, Toolbar } from "@/components/blocks/surfaces"
 import { StatusBadge } from "@/components/blocks/status-badge"
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
 import { Time } from "@/components/blocks/format"
@@ -39,12 +39,14 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
 import {
   deleteDocument,
   getBacklinks,
   getDocument,
   getForwardReferences,
   getWikiTree,
+  listDocuments,
   listPageHistory,
   moveDocument,
   moveFolder,
@@ -82,6 +84,8 @@ type TreeNode = {
 type TreeModel = { nodes: TreeNode[]; folderKeys: string[]; ancestors: Map<string, string[]> }
 type DragPayload = { kind: "doc"; id: string; folder: string } | { kind: "folder"; path: string }
 
+const TREE_OVERRIDES_KEY = "llmwiki:wiki:tree-overrides"
+
 const FOLDER_LABELS: Record<string, { zh: string; en: string }> = {
   concepts: { zh: "概念", en: "Concepts" },
   entities: { zh: "实体", en: "Entities" },
@@ -106,6 +110,26 @@ function folderPathOfDoc(doc: { relative_path?: string | undefined; path?: strin
   const raw = (doc.relative_path ?? doc.path ?? "").replace(/^\/+/, "").replace(/^wiki\//, "")
   const idx = raw.lastIndexOf("/")
   return idx >= 0 ? raw.slice(0, idx) : ""
+}
+
+/**
+ * Pages maintained by `llmwiki reindex`; mirrors RESERVED_TOP_LEVEL_WIKI_PAGES in
+ * src/engine/wiki_org.ts. The API rejects moving/archiving/deleting them.
+ */
+const SYSTEM_PAGE_PATHS = new Set(["wiki/index.md", "wiki/log.md", "wiki/overview.md"])
+
+function isSystemPage(doc: { relative_path?: string | undefined; path?: string | undefined }): boolean {
+  return SYSTEM_PAGE_PATHS.has((doc.relative_path ?? doc.path ?? "").replace(/^\/+/, ""))
+}
+
+/** Total pages under a subtree, including nested folders and the currently filtered/archived view. */
+function countTreeDocs(nodes: TreeNode[]): number {
+  let count = 0
+  for (const node of nodes) {
+    if (node.doc !== undefined) count += 1
+    if (node.children !== undefined) count += countTreeDocs(node.children)
+  }
+  return count
 }
 
 function buildTree(folders: WikiFolder[], documents: DocumentListItem[], typeFilter: string): TreeModel {
@@ -161,9 +185,12 @@ function buildTree(folders: WikiFolder[], documents: DocumentListItem[], typeFil
   return { nodes, folderKeys, ancestors }
 }
 
-/** Folders first (by sort_order then label); documents sorted by title/filename. */
+/** System pages first (stable), then folders (by sort_order then label), then documents. */
 function sortNodes(nodes: TreeNode[], lang: "zh" | "en"): TreeNode[] {
   return [...nodes].sort((a, b) => {
+    const systemA = a.doc !== undefined && isSystemPage(a.doc) ? 0 : 1
+    const systemB = b.doc !== undefined && isSystemPage(b.doc) ? 0 : 1
+    if (systemA !== systemB) return systemA - systemB
     const folderA = a.children === undefined ? 1 : 0
     const folderB = b.children === undefined ? 1 : 0
     if (folderA !== folderB) return folderA - folderB
@@ -204,9 +231,18 @@ function TreeRows({
   onDeleteDoc: (doc: DocumentListItem) => void
 }) {
   const clampedDepth = Math.min(3, depth)
+  const sorted = sortNodes(nodes, lang)
+  const systemCount = depth === 0
+    ? sorted.filter((node) => node.doc !== undefined && isSystemPage(node.doc)).length
+    : 0
   return (
     <>
-      {sortNodes(nodes, lang).map((node) => {
+      {systemCount > 0 ? (
+        <li role="presentation" className="text-xs font-medium tracking-wide text-muted-foreground">
+          系统
+        </li>
+      ) : null}
+      {sorted.map((node, index) => {
         if (node.children !== undefined && node.folderPath !== undefined) {
           const folderPath = node.folderPath
           const folderObj: WikiFolder = node.folder ?? {
@@ -221,6 +257,7 @@ function TreeRows({
           }
           const open = isOpen(node.key)
           const label = folderLabel(node.segment, lang, node.folder)
+          const count = countTreeDocs(node.children ?? [])
           const isDropTarget = dragOverKey === node.key
           const menuItems = (
             <>
@@ -299,28 +336,31 @@ function TreeRows({
                       icon={<WikiFolderIcon open={open} />}
                       onSelect={() => toggle(node.key)}
                       trailing={
-                        <span className="wiki-tree-row-actions">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                size="icon-xs"
-                                variant="ghost"
-                                aria-label={`操作目录 ${label}`}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <MoreHorizontalIcon />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">{menuItems}</DropdownMenuContent>
-                          </DropdownMenu>
-                        </span>
+                        <Inline gap="xs">
+                          <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
+                          <span className="wiki-tree-row-actions">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  aria-label={`操作目录 ${label}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreHorizontalIcon />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>{menuItems}</DropdownMenuContent>
+                            </DropdownMenu>
+                          </span>
+                        </Inline>
                       }
                     >
                       <span className="wiki-tree-folder-label">{label}</span>
                     </NavItem>
                   </div>
                 </ContextMenuTrigger>
-                <ContextMenuContent>{ctxItems}</ContextMenuContent>
+                <ContextMenuContent onClick={(event) => event.stopPropagation()}>{ctxItems}</ContextMenuContent>
               </ContextMenu>
               {open ? (
                 <TreeRows
@@ -341,87 +381,111 @@ function TreeRows({
           )
         }
         const doc = node.doc as DocumentListItem
+        const system = isSystemPage(doc)
+        const lastSystem = depth === 0 && systemCount > 0 && index === systemCount - 1
         return (
-          <ContextMenu key={node.key}>
-            <ContextMenuTrigger asChild>
-              <div
-                draggable
-                className="wiki-tree-row"
-                onDragStart={(e) => {
-                  e.dataTransfer.setData(
-                    "application/x-llmwiki-tree",
-                    JSON.stringify({ kind: "doc", id: doc.id, folder: folderPathOfDoc(doc) } satisfies DragPayload),
-                  )
-                  e.dataTransfer.effectAllowed = "move"
-                }}
-              >
-                <NavItem
-                  depth={clampedDepth}
-                  to={`/wiki/${encodeURIComponent(doc.id)}`}
-                  active={doc.id === currentId}
-                  icon={<WikiFileIcon doc={doc} treeAligned />}
-                  trailing={
-                    <span className="wiki-tree-row-actions">
-                      {doc.archived_at ? <StatusBadge status="archived" /> : null}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            size="icon-xs"
-                            variant="ghost"
-                            aria-label={`操作页面 ${doc.title || doc.filename}`}
-                            onClick={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                            }}
-                          >
-                            <MoreHorizontalIcon />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "move-doc", doc })}>
-                            <FolderInputIcon />移动 / 重命名
-                          </DropdownMenuItem>
-                          {doc.archived_at ? (
-                            <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "reopen-doc", doc })}>
-                              <ArchiveRestoreIcon />重新启用
-                            </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "archive-doc", doc })}>
-                              <ArchiveIcon />归档页面
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem variant="destructive" onSelect={() => onDeleteDoc(doc)}>
-                            <Trash2Icon />删除页面
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </span>
-                  }
+          <React.Fragment key={node.key}>
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <div
+                  draggable={!system}
+                  className={doc.archived_at ? "wiki-tree-row is-archived" : "wiki-tree-row"}
+                  onDragStart={(e) => {
+                    if (system) {
+                      e.preventDefault()
+                      return
+                    }
+                    e.dataTransfer.setData(
+                      "application/x-llmwiki-tree",
+                      JSON.stringify({ kind: "doc", id: doc.id, folder: folderPathOfDoc(doc) } satisfies DragPayload),
+                    )
+                    e.dataTransfer.effectAllowed = "move"
+                  }}
                 >
-                  {doc.title || doc.filename}
-                </NavItem>
-              </div>
-            </ContextMenuTrigger>
-            <ContextMenuContent>
-              <ContextMenuItem onSelect={() => onOpenDialog({ kind: "move-doc", doc })}>
-                <FolderInputIcon />移动 / 重命名
-              </ContextMenuItem>
-              {doc.archived_at ? (
-                <ContextMenuItem onSelect={() => onOpenDialog({ kind: "reopen-doc", doc })}>
-                  <ArchiveRestoreIcon />重新启用
-                </ContextMenuItem>
-              ) : (
-                <ContextMenuItem onSelect={() => onOpenDialog({ kind: "archive-doc", doc })}>
-                  <ArchiveIcon />归档页面
-                </ContextMenuItem>
-              )}
-              <ContextMenuSeparator />
-              <ContextMenuItem variant="destructive" onSelect={() => onDeleteDoc(doc)}>
-                <Trash2Icon />删除页面
-              </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
+                  <NavItem
+                    depth={clampedDepth}
+                    to={`/wiki/${encodeURIComponent(doc.id)}`}
+                    active={doc.id === currentId}
+                    icon={<WikiFileIcon doc={doc} treeAligned />}
+                    trailing={
+                      <Inline gap="xs">
+                        {system ? <StatusBadge status="system" /> : null}
+                        {doc.archived_at ? <StatusBadge status="archived" /> : null}
+                        {system ? null : (
+                          <span className="wiki-tree-row-actions">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  aria-label={`操作页面 ${doc.title || doc.filename}`}
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                  }}
+                                >
+                                  <MoreHorizontalIcon />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+                                <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "move-doc", doc })}>
+                                  <FolderInputIcon />移动 / 重命名
+                                </DropdownMenuItem>
+                                {doc.archived_at ? (
+                                  <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "reopen-doc", doc })}>
+                                    <ArchiveRestoreIcon />重新启用
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem onSelect={() => onOpenDialog({ kind: "archive-doc", doc })}>
+                                    <ArchiveIcon />归档页面
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem variant="destructive" onSelect={() => onDeleteDoc(doc)}>
+                                  <Trash2Icon />删除页面
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </span>
+                        )}
+                      </Inline>
+                    }
+                  >
+                    {doc.title || doc.filename}
+                  </NavItem>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent onClick={(event) => event.stopPropagation()}>
+                {system ? (
+                  <ContextMenuItem disabled>系统页面由 reindex 自动维护</ContextMenuItem>
+                ) : (
+                  <>
+                    <ContextMenuItem onSelect={() => onOpenDialog({ kind: "move-doc", doc })}>
+                      <FolderInputIcon />移动 / 重命名
+                    </ContextMenuItem>
+                    {doc.archived_at ? (
+                      <ContextMenuItem onSelect={() => onOpenDialog({ kind: "reopen-doc", doc })}>
+                        <ArchiveRestoreIcon />重新启用
+                      </ContextMenuItem>
+                    ) : (
+                      <ContextMenuItem onSelect={() => onOpenDialog({ kind: "archive-doc", doc })}>
+                        <ArchiveIcon />归档页面
+                      </ContextMenuItem>
+                    )}
+                    <ContextMenuSeparator />
+                    <ContextMenuItem variant="destructive" onSelect={() => onDeleteDoc(doc)}>
+                      <Trash2Icon />删除页面
+                    </ContextMenuItem>
+                  </>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
+            {lastSystem ? (
+              <li role="presentation" aria-hidden>
+                <Separator />
+              </li>
+            ) : null}
+          </React.Fragment>
         )
       })}
     </>
@@ -452,7 +516,20 @@ function useWikiPane({
   const [dragOverKey, setDragOverKey] = React.useState<string | null>(null)
   // Folders are collapsed by default; only the open page's ancestors are expanded. `overrides` records
   // explicit user choices (toggle / expand-all / collapse-all) so they win over the derived default.
-  const [overrides, setOverrides] = React.useState<ReadonlyMap<string, boolean>>(new Map())
+  const [overrides, setOverrides] = React.useState<ReadonlyMap<string, boolean>>(() => {
+    try {
+      const raw = window.localStorage.getItem(TREE_OVERRIDES_KEY)
+      if (raw === null) return new Map()
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return new Map()
+      return new Map(Object.entries(parsed).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"))
+    } catch {
+      return new Map()
+    }
+  })
+  React.useEffect(() => {
+    window.localStorage.setItem(TREE_OVERRIDES_KEY, JSON.stringify(Object.fromEntries(overrides)))
+  }, [overrides])
   const debounced = useDebounced(query)
   const search = useQuery({
     queryKey: ["wiki-search", debounced, typeFilter, showArchived],
@@ -476,6 +553,7 @@ function useWikiPane({
   const invalidateTree = React.useCallback(async (docId?: string) => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["wiki-tree"] }),
+      queryClient.invalidateQueries({ queryKey: ["wiki-link-documents"] }),
       queryClient.invalidateQueries({ queryKey: ["documents", "wiki"] }),
       queryClient.invalidateQueries({ queryKey: ["workspace"] }),
       ...(docId ? [queryClient.invalidateQueries({ queryKey: ["document", docId] })] : []),
@@ -555,65 +633,75 @@ function useWikiPane({
 
   const sideHeader = (
     <Stack gap="sm">
-      <Toolbar>
-        <InputGroup className="min-w-0 flex-1">
-          <InputGroupAddon><SearchIcon /></InputGroupAddon>
-          <InputGroupInput
-            aria-label="搜索页面"
-            placeholder="搜索标题、路径或内容"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </InputGroup>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label="新建目录"
-          title="新建目录"
-          onClick={() => setDialogState({ kind: "create-folder", parentPath: "" })}
-        >
-          <FolderPlusIcon />
-        </Button>
-        <Button size="icon-sm" variant="ghost" aria-label="定位当前页面" title="定位当前页面" onClick={locateCurrent}>
-          <LocateFixedIcon />
-        </Button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label={allOpen ? "全部折叠" : "全部展开"}
-          title={allOpen ? "全部折叠" : "全部展开"}
-          onClick={allOpen ? collapseAll : expandAll}
-        >
-          {allOpen ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
-        </Button>
+      <InputGroup>
+        <InputGroupAddon><SearchIcon /></InputGroupAddon>
+        <InputGroupInput
+          aria-label="搜索页面"
+          placeholder="搜索标题、路径或内容"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </InputGroup>
+      <Toolbar
+        end={
+          <>
+            {onShowArchivedChange ? (
+              <Button
+                size="icon-sm"
+                variant={showArchived ? "secondary" : "ghost"}
+                aria-label={showArchived ? "隐藏已归档页面" : "显示已归档页面"}
+                aria-pressed={showArchived}
+                title={showArchived ? "隐藏已归档页面" : "显示已归档页面"}
+                onClick={() => onShowArchivedChange(!showArchived)}
+              >
+                <ArchiveIcon />
+              </Button>
+            ) : null}
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="新建目录"
+              title="新建目录"
+              onClick={() => setDialogState({ kind: "create-folder", parentPath: "" })}
+            >
+              <FolderPlusIcon />
+            </Button>
+            {searching ? null : (
+              <>
+                <Button size="icon-sm" variant="ghost" aria-label="定位当前页面" title="定位当前页面" onClick={locateCurrent}>
+                  <LocateFixedIcon />
+                </Button>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={allOpen ? "全部折叠" : "全部展开"}
+                  title={allOpen ? "全部折叠" : "全部展开"}
+                  onClick={allOpen ? collapseAll : expandAll}
+                >
+                  {allOpen ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
+                </Button>
+              </>
+            )}
+          </>
+        }
+      >
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger aria-label="按页面类型筛选" className="w-28 shrink-0">
+            <SelectValue placeholder="全部类型" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部类型</SelectItem>
+            <SelectItem value="concept"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="concept" />概念</span></SelectItem>
+            <SelectItem value="entity"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="entity" />实体</span></SelectItem>
+            <SelectItem value="experience"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="experience" />经验</span></SelectItem>
+            <SelectItem value="ledger"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="ledger" />台账</span></SelectItem>
+            <SelectItem value="synthesis"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="synthesis" />综合</span></SelectItem>
+            <SelectItem value="comparison"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="comparison" />对比</span></SelectItem>
+            <SelectItem value="query"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="query" />问题</span></SelectItem>
+            <SelectItem value="page"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="page" />普通页面</span></SelectItem>
+          </SelectContent>
+        </Select>
       </Toolbar>
-      <Select value={typeFilter} onValueChange={setTypeFilter}>
-        <SelectTrigger aria-label="按页面类型筛选" className="w-full">
-          <SelectValue placeholder="全部类型" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">全部类型</SelectItem>
-          <SelectItem value="concept"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="concept" />概念 (concept)</span></SelectItem>
-          <SelectItem value="entity"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="entity" />实体 (entity)</span></SelectItem>
-          <SelectItem value="experience"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="experience" />经验 (experience)</span></SelectItem>
-          <SelectItem value="ledger"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="ledger" />台账 (ledger)</span></SelectItem>
-          <SelectItem value="synthesis"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="synthesis" />综合 (synthesis)</span></SelectItem>
-          <SelectItem value="comparison"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="comparison" />对比 (comparison)</span></SelectItem>
-          <SelectItem value="query"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="query" />问题 (query)</span></SelectItem>
-          <SelectItem value="page"><span className="llmwiki-select-option"><WikiPageTypeIcon pageType="page" />普通页面 (page)</span></SelectItem>
-        </SelectContent>
-      </Select>
-      {onShowArchivedChange ? (
-        <Button
-          size="sm"
-          variant={showArchived ? "secondary" : "ghost"}
-          className="w-full justify-start"
-          onClick={() => onShowArchivedChange(!showArchived)}
-        >
-          <ArchiveIcon />
-          {showArchived ? "正在显示已归档页面（点击隐藏）" : "显示已归档页面"}
-        </Button>
-      ) : null}
     </Stack>
   )
 
@@ -633,7 +721,11 @@ function useWikiPane({
           if (!raw) return
           try {
             const payload = JSON.parse(raw) as DragPayload
-            if (payload.kind === "folder" && payload.path.includes("/")) {
+            if (payload.kind === "doc" && payload.folder !== "") {
+              e.preventDefault()
+              setDragOverKey(null)
+              handleDropOnFolder("", payload)
+            } else if (payload.kind === "folder" && payload.path.includes("/")) {
               e.preventDefault()
               setDragOverKey(null)
               handleDropOnFolder("", payload)
@@ -822,16 +914,24 @@ function Reader({
     onError: (error) => notify.error(error, "恢复失败"),
   })
 
+  // `documents` comes from the visible tree, which omits hidden subdirs (sources/templates).
+  // Auto-generated pages still link to `sources/...`, so resolve inline wiki links against the
+  // complete wiki document list; otherwise the content index renders dead links.
+  const linkDocs = useQuery({
+    queryKey: ["wiki-link-documents"],
+    queryFn: () => listDocuments({ source_kind: "wiki", archived: "include" }),
+    staleTime: 60_000,
+  })
   const linkIndex = React.useMemo(() => {
     const index = new Map<string, string>()
-    for (const item of documents) {
+    for (const item of [...documents, ...(linkDocs.data ?? [])]) {
       const rel = (item.relative_path ?? "").replace(/\.md$/i, "").replace(/^\/+/, "")
       if (rel) index.set(rel.toLowerCase(), item.id)
       index.set(item.filename.replace(/\.md$/i, "").toLowerCase(), item.id)
       index.set(item.filename.toLowerCase(), item.id)
     }
     return index
-  }, [documents])
+  }, [documents, linkDocs.data])
 
   const rawBody = React.useMemo(() => stripFrontmatter(doc?.content ?? ""), [doc?.content])
   const body = React.useMemo(
@@ -1272,7 +1372,12 @@ function Reader({
 export function WikiReaderPage() {
   const { id } = useParams()
   const navigate = useAppNavigate()
-  const [showArchived, setShowArchived] = React.useState(false)
+  const [showArchived, setShowArchived] = React.useState(
+    () => window.localStorage.getItem("llmwiki:wiki:show-archived") === "1",
+  )
+  React.useEffect(() => {
+    window.localStorage.setItem("llmwiki:wiki:show-archived", showArchived ? "1" : "0")
+  }, [showArchived])
   const treeQuery = useQuery({
     queryKey: ["wiki-tree", showArchived],
     queryFn: () => getWikiTree({ exclude_hidden: true, archived: showArchived ? "include" : "exclude" }),

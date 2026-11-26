@@ -147,6 +147,11 @@
   font-weight: 500;
 }
 
+/* Archived rows keep a persistent badge; mute the label so they recede in the tree. */
+.wiki-tree-row.is-archived .truncate {
+  opacity: 0.6;
+}
+
 /* Crisp stroke + vibrant duotone fills */
 .wiki-icon-folder,
 .wiki-icon-folder-open,

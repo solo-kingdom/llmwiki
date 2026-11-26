@@ -408,6 +408,15 @@ describe.skipIf(!databaseUrl)("postgres store integration", () => {
     expect(moveParentDel.moved_documents).toBe(1);
     expect((await store.getDocument(docBId))?.relative_path).toBe(`wiki/${root}/b.md`);
 
+    // Move a nested page back to the wiki root; reserved top-level filenames stay protected.
+    const rootMove = await store.moveDocument(docBId, "", "b-root.md", "test");
+    expect(rootMove.document.relative_path).toBe("wiki/b-root.md");
+    await expect(store.moveDocument(docBId, "", "index.md", "test")).rejects.toBeInstanceOf(
+      FolderValidationError,
+    );
+    // Restore it under the test root so the suite's prefix cleanup catches it.
+    await store.moveDocument(docBId, root, "b.md", "test");
+
     const cascadeDel = await store.deleteFolder(`${root}/new`, "cascade", "", "test");
     expect(cascadeDel.deleted_documents).toBe(1);
     expect(await store.getDocument(docAId)).not.toBeNull();

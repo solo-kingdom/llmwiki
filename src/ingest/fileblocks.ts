@@ -93,9 +93,15 @@ export function normalizeWikiFileBlocks(blocks: Map<string, string>): {
   const out = new Map<string, string>();
   const adjustments: string[] = [];
   for (const [filePath, content] of blocks) {
-    const normalized = normalizeWikiFilePath(filePath);
-    if (normalized !== filePath) adjustments.push(`${filePath} -> ${normalized}`);
-    out.set(normalized, content);
+    try {
+      const normalized = normalizeWikiFilePath(filePath);
+      if (normalized !== filePath) adjustments.push(`${filePath} -> ${normalized}`);
+      out.set(normalized, content);
+    } catch (error) {
+      // A single out-of-vocabulary path (models often emit purpose.md / index.md
+      // or bare page names) must not fail the whole ingest; keep the valid pages.
+      adjustments.push(`skipped ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   return { blocks: out, adjustments };
 }

@@ -43,8 +43,40 @@ export const PROVIDER_ENDPOINTS: Readonly<
     anthropic: "https://api.minimax.cn/anthropic/v1",
   },
   minimax: {
+    openai: "https://api.minimax.io/v1",
+    anthropic: "https://api.minimax.io/anthropic/v1",
+  },
+})
+
+/**
+ * Hosts serving both an OpenAI-compatible and an Anthropic-compatible endpoint.
+ * Used to warn when a base URL belongs to one protocol but the other is selected —
+ * e.g. `https://api.minimaxi.com/v1` (OpenAI) behind `api_format: anthropic` returns
+ * HTTP 401 because the Anthropic client sends `x-api-key` instead of `Authorization`.
+ * `api.minimaxi.com` is kept as the legacy CN alias of `api.minimax.cn`.
+ */
+export const DUAL_PROTOCOL_ENDPOINTS: Readonly<
+  Record<string, { readonly openai: string; readonly anthropic: string }>
+> = Object.freeze({
+  "api.deepseek.com": {
+    openai: "https://api.deepseek.com",
+    anthropic: "https://api.deepseek.com/anthropic",
+  },
+  "open.bigmodel.cn": {
+    openai: "https://open.bigmodel.cn/api/paas/v4",
+    anthropic: "https://open.bigmodel.cn/api/anthropic",
+  },
+  "api.minimax.cn": {
+    openai: "https://api.minimax.cn/v1",
+    anthropic: "https://api.minimax.cn/anthropic/v1",
+  },
+  "api.minimaxi.com": {
     openai: "https://api.minimaxi.com/v1",
-    anthropic: "https://api.minimaxi.com/anthropic",
+    anthropic: "https://api.minimaxi.com/anthropic/v1",
+  },
+  "api.minimax.io": {
+    openai: "https://api.minimax.io/v1",
+    anthropic: "https://api.minimax.io/anthropic/v1",
   },
 })
 
@@ -113,6 +145,34 @@ export function adapterBaseUrl(
   return baseUrlForAdapter(baseUrl, format)
 }
 
+/** Infers the protocol a known dual-protocol base URL actually serves. */
+export function inferProtocolFromBaseUrl(
+  baseUrl: string | undefined,
+): ProviderApiFormat | undefined {
+  if (!isUsableBaseUrl(baseUrl)) return undefined
+  let parsed: URL
+  try {
+    parsed = new URL(baseUrl.trim())
+  } catch {
+    return undefined
+  }
+  if (!DUAL_PROTOCOL_ENDPOINTS[parsed.host]) return undefined
+  return parsed.pathname.toLowerCase().includes("/anthropic") ? "anthropic" : "openai"
+}
+
+/** Returns the known dual-protocol endpoint for `format`, deriving it from `baseUrl`'s host. */
+export function endpointForFormat(
+  baseUrl: string | undefined,
+  format: ProviderApiFormat,
+): string | undefined {
+  if (format === "ollama" || !isUsableBaseUrl(baseUrl)) return undefined
+  try {
+    return DUAL_PROTOCOL_ENDPOINTS[new URL(baseUrl.trim()).host]?.[format]
+  } catch {
+    return undefined
+  }
+}
+
 export type CatalogBaseUrlSource = "provider" | "known"
 export interface CatalogBaseUrl {
   readonly url: string
@@ -124,13 +184,23 @@ export function catalogBaseUrl(
   format: ProviderApiFormat,
 ): CatalogBaseUrl | undefined {
   if (!provider) return undefined
+  // Only Ollama serves an Ollama endpoint; another provider's URL must not be reused for it.
+  if (format === "ollama" && provider.id !== "ollama") return undefined
+  const catalogUrl = isUsableBaseUrl(provider.api_base)
+    ? baseUrlForAdapter(provider.api_base, format)
+    : undefined
+  const catalogProtocol = inferProtocolFromBaseUrl(catalogUrl)
+  // models.dev is the source of truth when its endpoint already fits the requested protocol.
+  // The curated map only supplies a protocol the catalog URL cannot express (e.g. an
+  // OpenAI-only catalog entry behind the Anthropic adapter).
+  if (catalogUrl && (catalogProtocol === undefined || catalogProtocol === format)) {
+    return { url: catalogUrl, source: "provider" }
+  }
   const endpointByFormat = PROVIDER_ENDPOINTS[provider.id]?.[format]
   if (isUsableBaseUrl(endpointByFormat)) {
     return { url: endpointByFormat, source: "known" }
   }
-  if (isUsableBaseUrl(provider.api_base)) {
-    return { url: baseUrlForAdapter(provider.api_base, format), source: "provider" }
-  }
+  if (catalogUrl) return { url: catalogUrl, source: "provider" }
   const known = KNOWN_BASE_URLS[provider.id]
   return isUsableBaseUrl(known) ? { url: known, source: "known" } : undefined
 }

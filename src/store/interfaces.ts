@@ -1,3 +1,4 @@
+import type { IngestJobListFilter, IngestJobListResult } from "./job_list.js";
 import type {
   ActivityLog,
   ActivityLogListFilter,
@@ -132,7 +133,7 @@ export interface JobStore {
   createIngestJob(job: IngestJob): Promise<void>;
   getIngestJob(id: string): Promise<IngestJob | null>;
   getIngestJobBySourceRef(sourceRef: string, inputType: string): Promise<IngestJob | null>;
-  listIngestJobs(limit: number): Promise<IngestJob[]>;
+  listIngestJobs(filter: IngestJobListFilter): Promise<IngestJobListResult>;
   updateIngestJobStatus(id: string, status: string): Promise<void>;
   updateIngestJobFailure(
     id: string,

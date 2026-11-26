@@ -175,6 +175,63 @@ describe.skipIf(!databaseUrl)("postgres store integration", () => {
     expect(await store.listIngestJobEvents(job.id, 10)).toHaveLength(1);
   });
 
+  it("filters, pages and counts ingest jobs without treating like wildcards as operators", async () => {
+    const tag = `joblist-${suffix}`;
+    const blank = {
+      id: "",
+      parent_job_id: "",
+      source_ref: tag,
+      retries: 0,
+      max_retries: 3,
+      error: "",
+      error_code: "",
+      error_message: "",
+      missing_dependency: "",
+      remediation: "",
+      result_summary: "",
+      created_at: "",
+      updated_at: "",
+    };
+    const failed = { ...blank, input_type: "text", source_path: `notes/${tag}-failed.md`, status: "failed" };
+    const succeeded = { ...blank, input_type: "upload", source_path: `uploads/${tag}-ok.bin`, status: "succeeded" };
+    const queued = { ...blank, input_type: "text", source_path: `notes/${tag}-100%_queued.md`, status: "queued" };
+    await store.createIngestJob(failed);
+    await store.createIngestJob(succeeded);
+    await store.createIngestJob(queued);
+    await pool.query("UPDATE ingest_jobs SET created_at = $2, updated_at = $2 WHERE id = $1", [failed.id, "2026-01-01 00:00:03"]);
+    await pool.query("UPDATE ingest_jobs SET created_at = $2, updated_at = $2 WHERE id = $1", [succeeded.id, "2026-01-01 00:00:02"]);
+    await pool.query("UPDATE ingest_jobs SET created_at = $2, updated_at = $2 WHERE id = $1", [queued.id, "2026-01-01 00:00:01"]);
+
+    const base = { statuses: [] as string[], inputType: "", query: tag, limit: 50, offset: 0 };
+    try {
+      const all = await store.listIngestJobs(base);
+      expect(all.total).toBe(3);
+      expect(all.jobs.map((job) => job.id)).toEqual([failed.id, succeeded.id, queued.id]);
+
+      const failedOnly = await store.listIngestJobs({ ...base, statuses: ["failed"] });
+      expect(failedOnly.total).toBe(1);
+      expect(failedOnly.jobs.map((job) => job.id)).toEqual([failed.id]);
+      expect(failedOnly.counts).toEqual(all.counts);
+
+      const textOnly = await store.listIngestJobs({ ...base, inputType: "text" });
+      expect(textOnly.jobs.map((job) => job.id)).toEqual([failed.id, queued.id]);
+
+      const literal = await store.listIngestJobs({ ...base, query: `${tag}-100%_queued` });
+      expect(literal.jobs.map((job) => job.id)).toEqual([queued.id]);
+
+      const escapedWildcard = await store.listIngestJobs({ ...base, query: `%${tag}` });
+      expect(escapedWildcard.total).toBe(0);
+
+      const page = await store.listIngestJobs({ ...base, limit: 0, offset: 1 });
+      expect(page.total).toBe(3);
+      expect(page.jobs.map((job) => job.id)).toEqual([succeeded.id]);
+    } finally {
+      await store.deleteIngestJob(failed.id);
+      await store.deleteIngestJob(succeeded.id);
+      await store.deleteIngestJob(queued.id);
+    }
+  });
+
   it("verifies migration v4 backfill regex and folder creation on live PostgreSQL", async () => {
     const legacyId = randomUUID();
     const topicId = randomUUID();

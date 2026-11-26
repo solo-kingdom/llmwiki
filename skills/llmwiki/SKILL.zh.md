@@ -110,4 +110,5 @@ PostgreSQL            页面、目录树、版本、搜索、图谱、lint — �
 - 错误是 `{"error": "message"}` + 4xx/5xx。`/api/v1/workspace` 或摄取接口返回 `503` 表示服务端没配知识库——停下报告，不要循环重试。
 - 列表返回 `[]`，不会是 `null`。
 - 摄取作业同步返回 job id；轮询 `GET /api/v1/ingest/jobs/{id}`（`queued → running → succeeded|failed`），不要假定已完成。
+- `GET /api/v1/ingest/jobs` 返回 `{ jobs, total, counts }`，不是裸数组。可用 `status`（逗号分隔：`queued`、`running`、`succeeded`、`failed`、`cancelled`）、`input_type`、`q`（匹配 id、来源路径、source ref）筛选。`limit` 默认 50、最大 100；`offset` 按 `total` 翻页。`counts` 是不带筛选条件的各状态总数。
 - 除 SSE 外，服务端对每个请求有 60s 超时。大库上的 `POST /api/v1/reindex` 可能被切断——超时不等于失败，先重新读状态，别盲目再发一次。

@@ -529,6 +529,20 @@ export interface IngestJobResponse {
   job: IngestJob
 }
 
+export interface IngestJobStatusCounts {
+  queued: number
+  running: number
+  succeeded: number
+  failed: number
+  cancelled: number
+}
+
+export interface IngestJobList {
+  jobs: IngestJob[]
+  total: number
+  counts: IngestJobStatusCounts
+}
+
 export interface IngestJobEvent {
   id: number
   job_id: string

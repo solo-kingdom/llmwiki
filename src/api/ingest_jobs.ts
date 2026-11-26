@@ -5,6 +5,13 @@ import { logIngestJob } from "../activity/index.js";
 import { ArchiveStorageService, ingestAutoFolder } from "../archive/storage.js";
 import { normalizeConversation, normalizeText, normalizeUpload } from "../ingest/normalize.js";
 import { recordRulesSnapshot } from "../ingest/processor.js";
+import {
+  JOB_LIST_DEFAULT_LIMIT,
+  clampJobListLimit,
+  clampJobListOffset,
+  parseJobStatusFilter,
+  type IngestJobListFilter,
+} from "../store/job_list.js";
 import type { ArchiveFileOrigin, IngestJob } from "../store/types.js";
 import {
   getID,
@@ -296,9 +303,21 @@ export function ingestJobsApi(ctx: ApiContext) {
     },
 
     async listIngestJobs(c: Context): Promise<Response> {
-      const limit = parseQueryInt(c, "limit", 50);
+      let statuses: string[];
       try {
-        return writeJson(c, 200, await ctx.db.listIngestJobs(limit));
+        statuses = parseJobStatusFilter(c.req.query("status") ?? "");
+      } catch (error) {
+        return writeError(c, 400, errorMessage(error));
+      }
+      const filter: IngestJobListFilter = {
+        statuses,
+        inputType: (c.req.query("input_type") ?? "").trim(),
+        query: (c.req.query("q") ?? "").trim(),
+        limit: clampJobListLimit(parseQueryInt(c, "limit", JOB_LIST_DEFAULT_LIMIT)),
+        offset: clampJobListOffset(parseQueryInt(c, "offset", 0)),
+      };
+      try {
+        return writeJson(c, 200, await ctx.db.listIngestJobs(filter));
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }

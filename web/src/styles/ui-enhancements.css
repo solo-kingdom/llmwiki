@@ -350,6 +350,24 @@
   font-variant-numeric: tabular-nums;
 }
 
+button.llmwiki-stat-pill {
+  appearance: none;
+  margin: 0;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1;
+}
+
+button.llmwiki-stat-pill:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.llmwiki-stat-pill--pressed {
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
 .llmwiki-stat-pill svg {
   width: 0.8125rem;
   height: 0.8125rem;
@@ -360,6 +378,7 @@
 .llmwiki-stat-pill--emerald { background: var(--llmwiki-tone-emerald-soft); color: var(--llmwiki-tone-emerald); }
 .llmwiki-stat-pill--rose { background: var(--llmwiki-tone-rose-soft); color: var(--llmwiki-tone-rose); }
 .llmwiki-stat-pill--amber { background: var(--llmwiki-tone-amber-soft); color: var(--llmwiki-tone-amber); }
+.llmwiki-stat-pill--muted { background: color-mix(in srgb, var(--muted-foreground) 12%, transparent); color: var(--muted-foreground); }
 
 .llmwiki-cell-lead {
   display: inline-flex;

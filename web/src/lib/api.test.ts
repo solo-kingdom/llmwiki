@@ -3,6 +3,7 @@ import {
   archiveDocument,
   createFolder,
   createTextIngestJob,
+  listIngestJobs,
   deleteFolder,
   getDocument,
   getWikiTree,
@@ -59,6 +60,17 @@ describe("api client", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ content: "hello", title: "T" }));
     expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
+  });
+
+  it("builds ingest job list filters as query params", async () => {
+    const fetchMock = mockFetch({
+      jobs: [],
+      total: 0,
+      counts: { queued: 0, running: 0, succeeded: 0, failed: 0, cancelled: 0 },
+    });
+    await listIngestJobs({ status: "failed", inputType: "text", q: "a b", limit: 50, offset: 50 });
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toBe("/api/v1/ingest/jobs?limit=50&offset=50&status=failed&input_type=text&q=a+b");
   });
 
   it("surfaces server error messages", async () => {

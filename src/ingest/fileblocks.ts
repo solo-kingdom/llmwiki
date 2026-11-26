@@ -5,7 +5,36 @@ import { logger } from "../logger.js";
 import { mergeWikiPage } from "./merge.js";
 import type { ApplyWikiBlocksOptions, ApplyWikiResult } from "./types.js";
 
-const FILE_BLOCK_RE = /---FILE:\s*(.+?)\n(.*?)---END FILE---/gs;
+interface ScannedFileBlock {
+  path: string;
+  content: string;
+}
+
+/**
+ * Tolerant scanner: accepts the canonical `---FILE: ... ---END FILE---` form and
+ * blocks whose terminator is omitted (common with reasoning providers such as
+ * MiniMax, which start a new FILE block or simply end the message instead).
+ */
+function scanFileBlocks(output: string): ScannedFileBlock[] {
+  const blocks: ScannedFileBlock[] = [];
+  let current: ScannedFileBlock | null = null;
+  for (const line of output.split("\n")) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("---FILE:")) {
+      if (current) blocks.push(current);
+      current = { path: trimmed.slice("---FILE:".length).trim(), content: "" };
+      continue;
+    }
+    if (current && trimmed.startsWith("---END FILE---")) {
+      blocks.push(current);
+      current = null;
+      continue;
+    }
+    if (current) current.content += `${line}\n`;
+  }
+  if (current) blocks.push(current);
+  return blocks;
+}
 
 export class NoWikiFilesWrittenError extends Error {
   constructor() {
@@ -15,19 +44,16 @@ export class NoWikiFilesWrittenError extends Error {
 }
 
 export function parseFileBlocks(output: string): string[] {
-  const paths: string[] = [];
-  for (const match of output.matchAll(FILE_BLOCK_RE)) {
-    const value = (match[1] ?? "").trim();
-    if (value) paths.push(value);
-  }
-  return paths;
+  return scanFileBlocks(output)
+    .map((block) => block.path.trim())
+    .filter((value) => value.length > 0);
 }
 
 export function parseFileBlocksWithContent(output: string): Map<string, string> {
   const result = new Map<string, string>();
-  for (const match of output.matchAll(FILE_BLOCK_RE)) {
-    const filePath = (match[1] ?? "").trim();
-    if (filePath) result.set(filePath, match[2] ?? "");
+  for (const block of scanFileBlocks(output)) {
+    const filePath = block.path.trim();
+    if (filePath) result.set(filePath, block.content);
   }
   return result;
 }

@@ -7,6 +7,7 @@ import type {
   ArchiveFolder,
   ArchiveFolderWithCounts,
   ArchiveLinkedDocument,
+  ArchiveSearchHit,
   ArchiveSourceSummary,
   ArchiveStorageBackend,
   ChangeSet,
@@ -329,7 +330,11 @@ export interface ArchiveStore {
   getArchiveFile(id: string): Promise<ArchiveFile | null>;
   getArchiveFileByRelativePath(relativePath: string): Promise<ArchiveFile | null>;
   getArchiveFileInlineBytes(id: string): Promise<Uint8Array | null>;
-  createArchiveFile(file: ArchiveFile, inlineBytes: Uint8Array | null): Promise<ArchiveFile>;
+  createArchiveFile(
+    file: ArchiveFile,
+    inlineBytes: Uint8Array | null,
+    searchableText?: string,
+  ): Promise<ArchiveFile>;
   updateArchiveFileLocation(id: string, folderPath: string, filename: string): Promise<ArchiveFile>;
   updateArchiveFileContentMeta(
     id: string,
@@ -341,8 +346,15 @@ export interface ArchiveStore {
       inline_bytes: Uint8Array | null;
       media_type?: string;
       kind?: ArchiveFileKind;
+      searchable_text?: string;
     },
   ): Promise<ArchiveFile>;
+  listArchiveFilesMissingSearchText(limit?: number): Promise<ArchiveFile[]>;
+  updateArchiveFileSearchableText(id: string, searchableText: string): Promise<void>;
+  searchArchiveFiles(
+    query: string,
+    options?: { kind?: string; folder_path?: string; limit?: number },
+  ): Promise<ArchiveSearchHit[]>;
   deleteArchiveFile(id: string): Promise<ArchiveFile | null>;
 
   linkDocumentArchiveSource(

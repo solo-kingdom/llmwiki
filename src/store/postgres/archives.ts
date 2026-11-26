@@ -9,6 +9,8 @@ import type {
   ArchiveFolder,
   ArchiveFolderWithCounts,
   ArchiveLinkedDocument,
+  ArchiveSearchHit,
+  ArchiveSearchMatchType,
   ArchiveSourceSummary,
   ArchiveStorageBackend,
   DeleteArchiveFolderResult,
@@ -86,6 +88,49 @@ export function ancestorArchiveFolderPaths(folderPath: string): string[] {
 function parentFolderOf(folderPath: string): string {
   const idx = folderPath.lastIndexOf("/");
   return idx < 0 ? "" : folderPath.slice(0, idx);
+}
+
+export function escapeLikePattern(raw: string): string {
+  return raw.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/** Extract a concise, single-line snippet centered around the first query match. */
+export function extractSearchSnippet(text: string, query: string, maxLen = 180): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  const q = query.trim();
+  if (!q) {
+    return normalized.length <= maxLen ? normalized : `${normalized.slice(0, maxLen).trimEnd()}…`;
+  }
+
+  const lowerText = normalized.toLowerCase();
+  const lowerQ = q.toLowerCase();
+  let matchIdx = lowerText.indexOf(lowerQ);
+  if (matchIdx < 0) {
+    const terms = lowerQ.split(/\s+/).filter(Boolean);
+    for (const term of terms) {
+      const idx = lowerText.indexOf(term);
+      if (idx >= 0 && (matchIdx < 0 || idx < matchIdx)) {
+        matchIdx = idx;
+      }
+    }
+  }
+
+  if (matchIdx < 0) {
+    return normalized.length <= maxLen ? normalized : `${normalized.slice(0, maxLen).trimEnd()}…`;
+  }
+
+  const before = Math.min(60, Math.floor(maxLen / 3));
+  let start = Math.max(0, matchIdx - before);
+  if (start > 0) {
+    const spaceIdx = normalized.indexOf(" ", start);
+    if (spaceIdx > start && spaceIdx < matchIdx && matchIdx - spaceIdx <= before) {
+      start = spaceIdx + 1;
+    }
+  }
+  const end = Math.min(normalized.length, start + maxLen);
+  const slice = normalized.slice(start, end).trim();
+  return `${start > 0 ? "…" : ""}${slice}${end < normalized.length ? "…" : ""}`;
 }
 
 function isPgUniqueViolation(error: unknown): boolean {
@@ -454,7 +499,11 @@ export function archivesRepo(pool: Pool): ArchiveStore {
       return new Uint8Array(row[0]);
     },
 
-    async createArchiveFile(file: ArchiveFile, inlineBytes: Uint8Array | null): Promise<ArchiveFile> {
+    async createArchiveFile(
+      file: ArchiveFile,
+      inlineBytes: Uint8Array | null,
+      searchableText = "",
+    ): Promise<ArchiveFile> {
       const folderPath = normalizeArchiveFolderPath(file.folder_path);
       const filename = validateArchiveFilename(file.filename);
       const relPath = buildArchiveRelativePath(folderPath, filename);
@@ -467,9 +516,9 @@ export function archivesRepo(pool: Pool): ArchiveStore {
             client,
             `INSERT INTO archive_files (
               id, folder_path, filename, relative_path, media_type, kind, size, sha256,
-              storage_backend, storage_key, inline_bytes, origin, source_ref, ingest_job_id,
+              storage_backend, storage_key, inline_bytes, searchable_text, origin, source_ref, ingest_job_id,
               created_at, updated_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,${NOW_TEXT},${NOW_TEXT})
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,${NOW_TEXT},${NOW_TEXT})
             RETURNING ${ARCHIVE_FILE_COLUMNS}`,
             [
               id,
@@ -483,6 +532,7 @@ export function archivesRepo(pool: Pool): ArchiveStore {
               file.storage_backend,
               file.storage_key,
               inlineBytes ? Buffer.from(inlineBytes) : null,
+              searchableText,
               file.origin,
               file.source_ref,
               file.ingest_job_id,
@@ -541,6 +591,7 @@ export function archivesRepo(pool: Pool): ArchiveStore {
              inline_bytes = $6,
              media_type = COALESCE($7, media_type),
              kind = COALESCE($8, kind),
+             searchable_text = COALESCE($9, searchable_text),
              updated_at = ${NOW_TEXT}
          WHERE id = $1
          RETURNING ${ARCHIVE_FILE_COLUMNS}`,
@@ -553,10 +604,132 @@ export function archivesRepo(pool: Pool): ArchiveStore {
           patch.inline_bytes ? Buffer.from(patch.inline_bytes) : null,
           patch.media_type ?? null,
           patch.kind ?? null,
+          patch.searchable_text ?? null,
         ],
       );
       if (!row) throw new ArchiveNotFoundError(`archive file not found: ${id}`);
       return scanArchiveFile(row);
+    },
+
+    async listArchiveFilesMissingSearchText(limit = 50): Promise<ArchiveFile[]> {
+      const safeLimit = Math.max(1, Math.min(500, limit));
+      const rows = await queryRows(
+        pool,
+        `SELECT ${ARCHIVE_FILE_COLUMNS} FROM archive_files
+         WHERE searchable_text IS NULL
+         ORDER BY updated_at DESC
+         LIMIT $1`,
+        [safeLimit],
+      );
+      return rows.map(scanArchiveFile);
+    },
+
+    async updateArchiveFileSearchableText(id: string, searchableText: string): Promise<void> {
+      await exec(
+        pool,
+        `UPDATE archive_files SET searchable_text = $2 WHERE id = $1`,
+        [id, searchableText],
+      );
+    },
+
+    async searchArchiveFiles(
+      query: string,
+      options: { kind?: string; folder_path?: string; limit?: number } = {},
+    ): Promise<ArchiveSearchHit[]> {
+      const trimmed = query.trim();
+      if (!trimmed) return [];
+      const safeLimit = Math.max(1, Math.min(50, options.limit ?? 20));
+      const likePattern = `%${escapeLikePattern(trimmed)}%`;
+
+      const clauses: string[] = [];
+      const baseArgs: unknown[] = [trimmed, likePattern];
+      if (options.kind && options.kind.trim() && options.kind.trim().toLowerCase() !== "all") {
+        baseArgs.push(options.kind.trim().toLowerCase());
+        clauses.push(`kind = $${baseArgs.length}`);
+      }
+      if (options.folder_path !== undefined && options.folder_path.trim() !== "") {
+        const norm = normalizeArchiveFolderPath(options.folder_path);
+        baseArgs.push(norm, `${norm}/%`);
+        clauses.push(`(folder_path = $${baseArgs.length - 1} OR folder_path LIKE $${baseArgs.length})`);
+      }
+      const filterSql = clauses.length > 0 ? `AND ${clauses.join(" AND ")}` : "";
+      const limitParam = `$${baseArgs.length + 1}`;
+      const args = [...baseArgs, safeLimit];
+
+      const ftsSql = `
+        SELECT ${ARCHIVE_FILE_COLUMNS},
+          COALESCE(searchable_text, ''),
+          (ts_rank_cd(to_tsvector('simple', COALESCE(searchable_text, '')), websearch_to_tsquery('simple', $1))
+           + similarity(COALESCE(searchable_text, ''), $1)
+           + CASE WHEN filename ILIKE $2 ESCAPE '\\' THEN 2.0
+                  WHEN relative_path ILIKE $2 ESCAPE '\\' THEN 1.0
+                  ELSE 0.0 END) AS score,
+          (CASE
+             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\')
+              AND (to_tsvector('simple', COALESCE(searchable_text, '')) @@ websearch_to_tsquery('simple', $1)
+                   OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\') THEN 3
+             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\') THEN 2
+             ELSE 1
+           END) AS tier
+        FROM archive_files
+        WHERE (
+          filename ILIKE $2 ESCAPE '\\'
+          OR relative_path ILIKE $2 ESCAPE '\\'
+          OR to_tsvector('simple', COALESCE(searchable_text, '')) @@ websearch_to_tsquery('simple', $1)
+          OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\'
+        )
+        ${filterSql}
+        ORDER BY tier DESC, score DESC, updated_at DESC
+        LIMIT ${limitParam}`;
+
+      const likeSql = `
+        SELECT ${ARCHIVE_FILE_COLUMNS},
+          COALESCE(searchable_text, ''),
+          (CASE WHEN filename ILIKE $2 ESCAPE '\\' THEN 2.0
+                WHEN relative_path ILIKE $2 ESCAPE '\\' THEN 1.0
+                ELSE 0.5 END) AS score,
+          (CASE
+             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\')
+              AND COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\' THEN 3
+             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\') THEN 2
+             ELSE 1
+           END) AS tier
+        FROM archive_files
+        WHERE (
+          filename ILIKE $2 ESCAPE '\\'
+          OR relative_path ILIKE $2 ESCAPE '\\'
+          OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\'
+        )
+        ${filterSql}
+        ORDER BY tier DESC, score DESC, updated_at DESC
+        LIMIT ${limitParam}`;
+
+      let rows: unknown[][];
+      try {
+        rows = await queryRows(pool, ftsSql, args);
+      } catch {
+        rows = await queryRows(pool, likeSql, args);
+      }
+
+      const lowerQ = trimmed.toLowerCase();
+      return rows.map((row) => {
+        const file = scanArchiveFile(row);
+        const searchableText = asString(row[15]);
+        const score = Number(row[16] ?? 0);
+        const tier = asNumber(row[17]);
+        const nameHit = file.filename.toLowerCase().includes(lowerQ);
+        const pathHit = file.relative_path.toLowerCase().includes(lowerQ);
+        const contentHit = tier === 3 || (!nameHit && !pathHit);
+        let matchType: ArchiveSearchMatchType = "content";
+        if ((nameHit || pathHit) && contentHit) matchType = "both";
+        else if (nameHit) matchType = "filename";
+        else if (pathHit) matchType = "path";
+
+        const snippet = contentHit
+          ? extractSearchSnippet(searchableText, trimmed, 180)
+          : extractSearchSnippet(searchableText, "", 140);
+        return { file, match_type: matchType, snippet, score };
+      });
     },
 
     async deleteArchiveFile(id: string): Promise<ArchiveFile | null> {

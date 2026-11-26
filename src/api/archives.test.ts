@@ -9,6 +9,7 @@ import {
   ArchiveConflictError,
   ArchiveNotFoundError,
   buildArchiveRelativePath,
+  extractSearchSnippet,
   normalizeArchiveFolderPath,
   validateArchiveFilename,
 } from "../store/postgres/archives.js";
@@ -16,6 +17,7 @@ import type {
   ApiKeyRecord,
   ArchiveFile,
   ArchiveFolder,
+  ArchiveSearchHit,
   ArchiveSourceSummary,
   Document,
   FolderDeleteMode,
@@ -27,6 +29,7 @@ function makeInMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
   const folders = new Map<string, ArchiveFolder>();
   const files = new Map<string, ArchiveFile>();
   const inlineMap = new Map<string, Uint8Array | null>();
+  const searchTextMap = new Map<string, string | null>();
   const keys = new Map<string, ApiKeyRecord & { key_hash: string }>();
   const docs = new Map<string, Document>();
   const jobs = new Map<string, IngestJob>();
@@ -179,7 +182,7 @@ function makeInMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
       return null;
     }),
     getArchiveFileInlineBytes: vi.fn(async (id: string) => inlineMap.get(id) ?? null),
-    createArchiveFile: vi.fn(async (file: ArchiveFile, inlineBytes: Uint8Array | null) => {
+    createArchiveFile: vi.fn(async (file: ArchiveFile, inlineBytes: Uint8Array | null, searchableText = "") => {
       if (file.folder_path) await store.ensureArchiveFolders([file.folder_path]);
       const saved: ArchiveFile = {
         ...file,
@@ -189,6 +192,7 @@ function makeInMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
       };
       files.set(saved.id, saved);
       inlineMap.set(saved.id, inlineBytes ? new Uint8Array(inlineBytes) : null);
+      searchTextMap.set(saved.id, searchableText);
       return saved;
     }),
     updateArchiveFileLocation: vi.fn(async (id: string, folderPath: string, filename: string) => {
@@ -208,6 +212,7 @@ function makeInMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
       storage_backend: ArchiveFile["storage_backend"];
       storage_key: string;
       inline_bytes: Uint8Array | null;
+      searchable_text?: string;
     }) => {
       const cur = files.get(id);
       if (!cur) throw new ArchiveNotFoundError("not found");
@@ -216,12 +221,46 @@ function makeInMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
       cur.storage_backend = patch.storage_backend;
       cur.storage_key = patch.storage_key;
       inlineMap.set(id, patch.inline_bytes ? new Uint8Array(patch.inline_bytes) : null);
+      if (patch.searchable_text !== undefined) {
+        searchTextMap.set(id, patch.searchable_text);
+      }
       return cur;
+    }),
+    listArchiveFilesMissingSearchText: vi.fn(async (limit = 50) =>
+      [...files.values()].filter((f) => searchTextMap.get(f.id) === null).slice(0, limit),
+    ),
+    updateArchiveFileSearchableText: vi.fn(async (id: string, text: string) => {
+      searchTextMap.set(id, text);
+    }),
+    searchArchiveFiles: vi.fn(async (query: string, opts: { kind?: string; folder_path?: string; limit?: number } = {}) => {
+      const q = query.trim().toLowerCase();
+      const hits: ArchiveSearchHit[] = [];
+      for (const file of files.values()) {
+        if (opts.kind && opts.kind !== "all" && file.kind !== opts.kind) continue;
+        if (opts.folder_path && file.folder_path !== opts.folder_path && !file.folder_path.startsWith(`${opts.folder_path}/`)) {
+          continue;
+        }
+        const text = searchTextMap.get(file.id) ?? "";
+        const nameHit = file.filename.toLowerCase().includes(q);
+        const pathHit = file.relative_path.toLowerCase().includes(q);
+        const contentHit = text.toLowerCase().includes(q);
+        if (!nameHit && !pathHit && !contentHit) continue;
+        const match_type = (nameHit || pathHit) && contentHit ? "both" : nameHit ? "filename" : pathHit ? "path" : "content";
+        hits.push({
+          file,
+          match_type,
+          snippet: contentHit ? extractSearchSnippet(text, query, 180) : extractSearchSnippet(text, "", 140),
+          score: match_type === "both" ? 3 : nameHit || pathHit ? 2 : 1,
+        });
+      }
+      hits.sort((a, b) => b.score - a.score);
+      return hits.slice(0, opts.limit ?? 20);
     }),
     deleteArchiveFile: vi.fn(async (id: string) => {
       const cur = files.get(id) ?? null;
       files.delete(id);
       inlineMap.delete(id);
+      searchTextMap.delete(id);
       return cur;
     }),
     listArchiveFileDocuments: vi.fn(async (archiveFileId: string) =>
@@ -490,5 +529,65 @@ describe("Archives HTTP API & storage settings", () => {
     const skillDoc = await app.request("/skills/llmwiki-archive.md");
     expect(skillDoc.status).toBe(200);
     expect(await skillDoc.text()).toContain("POST /api/v1/archives/files/:id/ingest");
+  });
+
+  it("searches archive files by content, filename, kind filter, and updated body", async () => {
+    const { app } = await makeTestApp();
+
+    const missingQ = await app.request("/api/v1/archives/search");
+    expect(missingQ.status).toBe(400);
+
+    const form = new FormData();
+    form.set("folder_path", "research/notes");
+    form.append(
+      "files",
+      new File(["# 部署指南\n\n使用向量索引和全文检索提高召回率。"], "deploy.md", { type: "text/markdown" }),
+    );
+    form.append(
+      "files",
+      new File(["<html><body><h1>架构说明</h1><p>网关支持限流与熔断。</p></body></html>"], "arch.html", {
+        type: "text/html",
+      }),
+    );
+    form.append("files", new File(["const retryLimit = 3;"], "retry.ts", { type: "text/plain" }));
+    const upRes = await app.request("/api/v1/archives/files", { method: "POST", body: form });
+    expect(upRes.status).toBe(201);
+    const uploaded = (await upRes.json()) as { files: ArchiveFile[] };
+    const tsFile = uploaded.files.find((f) => f.filename === "retry.ts")!;
+
+    // Search Chinese content
+    const zhRes = await app.request(`/api/v1/archives/search?q=${encodeURIComponent("全文检索")}`);
+    expect(zhRes.status).toBe(200);
+    const zhBody = (await zhRes.json()) as { results: ArchiveSearchHit[] };
+    expect(zhBody.results).toHaveLength(1);
+    expect(zhBody.results[0]!.file.filename).toBe("deploy.md");
+    expect(zhBody.results[0]!.match_type).toBe("content");
+    expect(zhBody.results[0]!.snippet).toContain("全文检索");
+
+    // Search matching both filename and content + kind filter
+    const bothRes = await app.request("/api/v1/archives/search?q=retry");
+    expect(bothRes.status).toBe(200);
+    const bothBody = (await bothRes.json()) as { results: ArchiveSearchHit[] };
+    expect(bothBody.results[0]!.match_type).toBe("both");
+
+    const htmlOnly = await app.request(`/api/v1/archives/search?q=${encodeURIComponent("熔断")}&kind=html`);
+    expect(htmlOnly.status).toBe(200);
+    const htmlBody = (await htmlOnly.json()) as { results: ArchiveSearchHit[] };
+    expect(htmlBody.results).toHaveLength(1);
+    expect(htmlBody.results[0]!.file.filename).toBe("arch.html");
+
+    // Edit content and verify updated body is searchable
+    const putRes = await app.request(`/api/v1/archives/files/${tsFile.id}/content`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "const maxBackoffMs = 5000;" }),
+    });
+    expect(putRes.status).toBe(200);
+
+    const updatedRes = await app.request("/api/v1/archives/search?q=maxBackoffMs");
+    expect(updatedRes.status).toBe(200);
+    const updatedBody = (await updatedRes.json()) as { results: ArchiveSearchHit[] };
+    expect(updatedBody.results).toHaveLength(1);
+    expect(updatedBody.results[0]!.snippet).toContain("maxBackoffMs");
   });
 });

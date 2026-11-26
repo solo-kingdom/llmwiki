@@ -556,6 +556,15 @@ export interface ArchiveSourceSummary {
   created_at: string;
 }
 
+export type ArchiveSearchMatchType = "filename" | "path" | "content" | "both";
+
+export interface ArchiveSearchHit {
+  file: ArchiveFile;
+  match_type: ArchiveSearchMatchType;
+  snippet: string;
+  score: number;
+}
+
 export interface MoveArchiveFolderResult {
   from_path: string;
   to_path: string;

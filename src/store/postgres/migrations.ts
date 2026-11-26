@@ -535,6 +535,16 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE ingest_reviews ADD COLUMN IF NOT EXISTS archive_file_id TEXT NOT NULL DEFAULT ''`,
     ],
   },
+  {
+    version: 8,
+    statements: [
+      `ALTER TABLE archive_files ADD COLUMN IF NOT EXISTS searchable_text TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_archive_files_filename_trgm ON archive_files USING gin (filename gin_trgm_ops)`,
+      `CREATE INDEX IF NOT EXISTS idx_archive_files_path_trgm ON archive_files USING gin (relative_path gin_trgm_ops)`,
+      `CREATE INDEX IF NOT EXISTS idx_archive_files_text_fts ON archive_files USING gin (to_tsvector('simple', COALESCE(searchable_text, '')))`,
+      `CREATE INDEX IF NOT EXISTS idx_archive_files_text_trgm ON archive_files USING gin (COALESCE(searchable_text, '') gin_trgm_ops)`,
+    ],
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

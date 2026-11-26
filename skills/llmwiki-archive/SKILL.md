@@ -25,6 +25,7 @@ Archives store raw files and media independently from the Wiki abstraction layer
 | Method & Path | Body / Query | Notes |
 |---|---|---|
 | `GET /api/v1/archives/tree` | `?kind=&q=` | Returns `{ folders, files }` |
+| `GET /api/v1/archives/search` | `?q=&kind=&folder=&limit=` | Searches filename, path, and text content (`markdown`/`html`/`text`); returns `{ query, results }` with `match_type` and `snippet` |
 | `POST /api/v1/archives/folders` | `{ path, display_name?, description?, sort_order? }` | Auto-creates missing parent folders |
 | `PATCH /api/v1/archives/folders` | `{ path, display_name?, description?, sort_order? }` | Updates folder metadata |
 | `POST /api/v1/archives/folders/move` | `{ from_path, to_path }` | Moves folder tree and updates child file paths |

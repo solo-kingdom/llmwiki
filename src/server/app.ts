@@ -207,6 +207,7 @@ export function createApp(deps: AppDeps): Hono {
 
   // Archives (file tree & multi-format storage)
   app.get("/api/v1/archives/tree", api.getArchiveTree);
+  app.get("/api/v1/archives/search", api.searchArchives);
   app.post("/api/v1/archives/folders", api.createArchiveFolder);
   app.patch("/api/v1/archives/folders", api.updateArchiveFolder);
   app.post("/api/v1/archives/folders/move", api.moveArchiveFolder);

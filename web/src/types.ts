@@ -151,6 +151,8 @@ export interface SearchChunk {
   title: string
   path: string
   file_type: string
+  page_type?: string
+  archived_at?: string
   score: number
   match_type?: "keyword" | "semantic"
 }
@@ -378,6 +380,20 @@ export interface ArchiveSourceSummary {
 export interface ArchiveTreeResponse {
   folders: ArchiveFolder[]
   files: ArchiveFile[]
+}
+
+export type ArchiveSearchMatchType = "filename" | "path" | "content" | "both"
+
+export interface ArchiveSearchHit {
+  file: ArchiveFile
+  match_type: ArchiveSearchMatchType
+  snippet: string
+  score: number
+}
+
+export interface ArchiveSearchResponse {
+  query: string
+  results: ArchiveSearchHit[]
 }
 
 export interface ArchiveStorageCheckResult {

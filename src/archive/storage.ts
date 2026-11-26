@@ -37,6 +37,7 @@ import {
 } from "../store/types.js";
 
 export const MAX_ARCHIVE_INLINE_BYTES = 10 * 1024 * 1024;
+export const MAX_ARCHIVE_SEARCHABLE_BYTES = 1024 * 1024;
 
 const EXT_TO_KIND: Record<string, ArchiveFileKind> = {
   ".md": "markdown",
@@ -168,6 +169,42 @@ export function detectMediaType(filename: string, provided = ""): string {
 
 export function isTextEditableKind(kind: ArchiveFileKind): boolean {
   return kind === "markdown" || kind === "html" || kind === "text";
+}
+
+function decodeHtmlEntities(input: string): string {
+  return input
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
+}
+
+/** Extract normalized UTF-8 searchable text (capped at 1 MB) for text-like archive files. */
+export function extractArchiveSearchableText(kind: ArchiveFileKind, bytes: Uint8Array): string {
+  if (!isTextEditableKind(kind) || bytes.byteLength === 0) return "";
+  const slice = bytes.byteLength > MAX_ARCHIVE_SEARCHABLE_BYTES
+    ? bytes.subarray(0, MAX_ARCHIVE_SEARCHABLE_BYTES)
+    : bytes;
+  const decoded = new TextDecoder("utf-8", { fatal: false })
+    .decode(slice)
+    .replace(/\u0000/g, "");
+  if (kind === "html") {
+    const stripped = decodeHtmlEntities(
+      decoded
+        .replace(/<!--[\s\S]*?-->/g, " ")
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " "),
+    )
+      .replace(/[ \t\f\v]+/g, " ")
+      .replace(/\r\n?/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (stripped) return stripped;
+  }
+  return decoded.replace(/\r\n?/g, "\n").trim();
 }
 
 export interface ArchiveS3Config {
@@ -508,8 +545,10 @@ export class ArchiveStorageService {
       updated_at: "",
     };
 
+    const searchableText = extractArchiveSearchableText(kind, input.bytes);
+
     try {
-      return await this.db.createArchiveFile(record, inlineBytes);
+      return await this.db.createArchiveFile(record, inlineBytes, searchableText);
     } catch (error) {
       if (storageBackend !== "db" && storageKey) {
         await this.deleteExternal(cfg, storageBackend, storageKey);
@@ -541,6 +580,7 @@ export class ArchiveStorageService {
 
     const prevBackend = file.storage_backend;
     const prevKey = file.storage_key;
+    const searchableText = extractArchiveSearchableText(kind, bytes);
 
     let updated: ArchiveFile;
     try {
@@ -552,6 +592,7 @@ export class ArchiveStorageService {
         inline_bytes: inlineBytes,
         media_type: mediaType,
         kind,
+        searchable_text: searchableText,
       });
     } catch (error) {
       if (nextBackend !== "db" && nextKey) {
@@ -569,6 +610,54 @@ export class ArchiveStorageService {
       promoted: prevBackend === "db" && nextBackend !== "db",
       previousBackend: prevBackend,
     };
+  }
+
+  /** Backfill `searchable_text` for legacy rows where `searchable_text IS NULL`. */
+  async backfillSearchableText(batchSize = 50): Promise<number> {
+    if (
+      typeof this.db.listArchiveFilesMissingSearchText !== "function" ||
+      typeof this.db.updateArchiveFileSearchableText !== "function"
+    ) {
+      return 0;
+    }
+    const pending = await this.db.listArchiveFilesMissingSearchText(batchSize);
+    let updated = 0;
+    for (const file of pending) {
+      try {
+        if (!isTextEditableKind(file.kind)) {
+          await this.db.updateArchiveFileSearchableText(file.id, "");
+          updated += 1;
+          continue;
+        }
+        let bytes: Uint8Array;
+        if (file.size <= MAX_ARCHIVE_SEARCHABLE_BYTES) {
+          bytes = await this.readFullBytes(file);
+        } else {
+          const rangeRes = await this.openRangeStream(
+            file,
+            `bytes=0-${MAX_ARCHIVE_SEARCHABLE_BYTES - 1}`,
+          );
+          if (rangeRes.stream) {
+            const reader = rangeRes.stream.getReader();
+            const chunks: Uint8Array[] = [];
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (value) chunks.push(value);
+            }
+            bytes = new Uint8Array(Buffer.concat(chunks));
+          } else {
+            bytes = new Uint8Array();
+          }
+        }
+        const text = extractArchiveSearchableText(file.kind, bytes);
+        await this.db.updateArchiveFileSearchableText(file.id, text);
+        updated += 1;
+      } catch (error) {
+        logger.warn({ error, fileId: file.id, path: file.relative_path }, "archive: backfill searchable_text failed");
+      }
+    }
+    return updated;
   }
 
   async readFullBytes(file: ArchiveFile): Promise<Uint8Array> {

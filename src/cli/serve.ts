@@ -8,6 +8,7 @@ import {
 } from "../acp/config.js";
 import { createApiContext, mcpActivity } from "../api/context.js";
 import { trimActivityLogs } from "../api/settings.js";
+import { ArchiveStorageService } from "../archive/storage.js";
 import { WorkspaceFileIndexer } from "../engine/file_indexer.js";
 import { engineStoreFromStore } from "../engine/adapter.js";
 import { PageLockManager } from "../ingest/lock.js";
@@ -96,6 +97,12 @@ export async function runServe(options: ServeOptions): Promise<void> {
 
     const processor = new JobProcessor(store, workspace);
     processor.start(2000);
+
+    void new ArchiveStorageService(store, workspace)
+      .backfillSearchableText(200)
+      .catch((error) => {
+        logger.warn({ error }, "archive searchable_text backfill");
+      });
 
     const trimTimer = setInterval(() => {
       void trimActivityLogs(apiCtx).catch((error) => {

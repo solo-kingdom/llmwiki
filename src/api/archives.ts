@@ -96,6 +96,26 @@ export function archivesApi(ctx: ApiContext) {
       }
     },
 
+    async searchArchives(c: Context): Promise<Response> {
+      const q = (c.req.query("q") ?? "").trim();
+      if (!q) return writeError(c, 400, "query parameter 'q' is required");
+      const kind = (c.req.query("kind") ?? "").trim();
+      const folderPath = (c.req.query("folder") ?? "").trim();
+      const rawLimit = Number.parseInt(c.req.query("limit") ?? "20", 10);
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(50, rawLimit)) : 20;
+      try {
+        await storage().backfillSearchableText(50).catch(() => 0);
+        const results = await ctx.db.searchArchiveFiles(q, {
+          kind: kind || undefined,
+          folder_path: folderPath || undefined,
+          limit,
+        });
+        return writeJson(c, 200, { query: q, results });
+      } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
+
     async createArchiveFolder(c: Context): Promise<Response> {
       const req = await readJsonBody<{
         path?: string;

@@ -4,15 +4,28 @@ import path from "node:path";
 import { DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Store } from "../store/interfaces.js";
-import { ArchiveConflictError, buildArchiveRelativePath, normalizeArchiveFolderPath } from "../store/postgres/archives.js";
+import {
+  ArchiveConflictError,
+  buildArchiveRelativePath,
+  escapeLikePattern,
+  extractSearchSnippet,
+  normalizeArchiveFolderPath,
+} from "../store/postgres/archives.js";
 import type { ArchiveFile, ArchiveFolder } from "../store/types.js";
-import { ArchiveStorageService, detectArchiveKind, ingestAutoFolder } from "./storage.js";
+import {
+  ArchiveStorageService,
+  MAX_ARCHIVE_SEARCHABLE_BYTES,
+  detectArchiveKind,
+  extractArchiveSearchableText,
+  ingestAutoFolder,
+} from "./storage.js";
 
 function createMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
   const config = new Map<string, string>(Object.entries(initialConfig));
   const folders = new Map<string, ArchiveFolder>();
   const files = new Map<string, ArchiveFile>();
   const inlineMap = new Map<string, Uint8Array | null>();
+  const searchTextMap = new Map<string, string | null>();
 
   const store = {
     getAllConfig: async () => Object.fromEntries(config.entries()),
@@ -48,7 +61,7 @@ function createMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
       return null;
     },
     getArchiveFileInlineBytes: async (id: string) => inlineMap.get(id) ?? null,
-    createArchiveFile: async (file: ArchiveFile, inlineBytes: Uint8Array | null) => {
+    createArchiveFile: async (file: ArchiveFile, inlineBytes: Uint8Array | null, searchableText = "") => {
       for (const f of files.values()) {
         if (f.relative_path === file.relative_path) {
           throw new ArchiveConflictError(`duplicate: ${file.relative_path}`);
@@ -62,6 +75,7 @@ function createMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
       };
       files.set(saved.id, saved);
       inlineMap.set(saved.id, inlineBytes ? new Uint8Array(inlineBytes) : null);
+      searchTextMap.set(saved.id, searchableText);
       return saved;
     },
     updateArchiveFileContentMeta: async (
@@ -74,6 +88,7 @@ function createMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
         inline_bytes: Uint8Array | null;
         media_type?: string;
         kind?: ArchiveFile["kind"];
+        searchable_text?: string;
       },
     ) => {
       const existing = files.get(id);
@@ -90,17 +105,26 @@ function createMemoryArchiveStore(initialConfig: Record<string, string> = {}) {
       };
       files.set(id, updated);
       inlineMap.set(id, patch.inline_bytes ? new Uint8Array(patch.inline_bytes) : null);
+      if (patch.searchable_text !== undefined) {
+        searchTextMap.set(id, patch.searchable_text);
+      }
       return updated;
+    },
+    listArchiveFilesMissingSearchText: async (limit = 50) =>
+      [...files.values()].filter((f) => searchTextMap.get(f.id) === null).slice(0, limit),
+    updateArchiveFileSearchableText: async (id: string, text: string) => {
+      searchTextMap.set(id, text);
     },
     deleteArchiveFile: async (id: string) => {
       const existing = files.get(id) ?? null;
       files.delete(id);
       inlineMap.delete(id);
+      searchTextMap.delete(id);
       return existing;
     },
   } as unknown as Store;
 
-  return { store, config, files, inlineMap, folders };
+  return { store, config, files, inlineMap, searchTextMap, folders };
 }
 
 async function readStreamToBytes(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
@@ -294,5 +318,54 @@ describe("ArchiveStorageService", () => {
     expect(buildArchiveRelativePath("a/b", "c.md")).toBe("a/b/c.md");
     expect(detectArchiveKind("page.html")).toBe("html");
     expect(ingestAutoFolder("ingest_text", new Date(2026, 10, 5))).toBe("ingest/texts/2026-11");
+  });
+
+  it("extracts searchable text, escapes LIKE wildcards, builds snippets, and backfills legacy files", async () => {
+    const html = Buffer.from(
+      "<html><head><style>body{color:red}</style><script>var secret='ignore';</script></head><body><h1>Architecture &amp; Design</h1><p>Hybrid search &lt;v2&gt;</p></body></html>",
+    );
+    const extractedHtml = extractArchiveSearchableText("html", html);
+    expect(extractedHtml).toContain("Architecture & Design");
+    expect(extractedHtml).toContain("Hybrid search <v2>");
+    expect(extractedHtml).not.toContain("secret");
+
+    expect(extractArchiveSearchableText("image", Buffer.from("PNGDATA"))).toBe("");
+
+    const oversized = Buffer.alloc(MAX_ARCHIVE_SEARCHABLE_BYTES + 128, "a");
+    expect(extractArchiveSearchableText("text", oversized).length).toBe(MAX_ARCHIVE_SEARCHABLE_BYTES);
+
+    expect(escapeLikePattern("100%_test\\a")).toBe("100\\%\\_test\\\\a");
+    const snippet = extractSearchSnippet(
+      "Prefix ".repeat(15) + "PostgreSQL full-text indexing enables fast archive content lookup." + " suffix".repeat(15),
+      "full-text indexing",
+      80,
+    );
+    expect(snippet).toContain("full-text indexing");
+    expect(snippet.startsWith("…")).toBe(true);
+
+    const ws = await makeWorkspace();
+    const { store, files, searchTextMap } = createMemoryArchiveStore({ archive_inline_max_bytes: "16" });
+    const svc = new ArchiveStorageService(store, ws);
+
+    const mdFile = await svc.storeNewFile({
+      folderPath: "docs",
+      filename: "legacy.md",
+      bytes: Buffer.from("# Legacy\n\nSearchable body keyword: zephyr."),
+    });
+    const binFile = await svc.storeNewFile({
+      folderPath: "media",
+      filename: "photo.png",
+      bytes: Buffer.from("01234567890123456789"),
+    });
+    expect(searchTextMap.get(mdFile.id)).toContain("zephyr");
+    // Simulate legacy rows before migration v8
+    searchTextMap.set(mdFile.id, null);
+    searchTextMap.set(binFile.id, null);
+    expect(files.size).toBe(2);
+
+    const backfilled = await svc.backfillSearchableText(10);
+    expect(backfilled).toBe(2);
+    expect(searchTextMap.get(mdFile.id)).toContain("zephyr");
+    expect(searchTextMap.get(binFile.id)).toBe("");
   });
 });

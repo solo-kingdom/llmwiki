@@ -10,6 +10,7 @@ import {
   moveDocument,
   moveFolder,
   reopenDocument,
+  searchArchiveFiles,
   searchDocuments,
 } from "./api";
 
@@ -103,5 +104,12 @@ describe("api client", () => {
 
     await reopenDocument("doc-1", { reason: "重新启用" });
     expect((fetchMock.mock.calls[3] as unknown as [string])[0]).toBe("/api/v1/documents/doc-1/reopen");
+  });
+
+  it("calls archive search endpoint with query, kind, and limit", async () => {
+    const fetchMock = mockFetch({ query: "rag", results: [] });
+    await searchArchiveFiles({ q: "rag", kind: "markdown", limit: 15 });
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toBe("/api/v1/archives/search?q=rag&kind=markdown&limit=15");
   });
 });

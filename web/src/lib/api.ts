@@ -53,6 +53,7 @@ import type {
   ArchiveFolder,
   ArchiveFile,
   ArchiveFileDetail,
+  ArchiveSearchResponse,
   ArchiveStorageCheckResult,
 } from "@/types"
 
@@ -960,6 +961,19 @@ export function getArchiveTree(params?: { kind?: string; q?: string }): Promise<
   if (params?.q) sp.set("q", params.q)
   const qs = sp.toString()
   return request(`/api/v1/archives/tree${qs ? `?${qs}` : ""}`)
+}
+
+export function searchArchiveFiles(params: {
+  q: string
+  kind?: string
+  folder?: string
+  limit?: number
+}): Promise<ArchiveSearchResponse> {
+  const sp = new URLSearchParams({ q: params.q })
+  if (params.kind && params.kind !== "all") sp.set("kind", params.kind)
+  if (params.folder) sp.set("folder", params.folder)
+  if (params.limit !== undefined) sp.set("limit", String(params.limit))
+  return request<ArchiveSearchResponse>(`/api/v1/archives/search?${sp.toString()}`)
 }
 
 export function createArchiveFolder(body: {

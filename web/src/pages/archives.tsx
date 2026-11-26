@@ -18,7 +18,6 @@ import {
   Trash2Icon,
   UnfoldVerticalIcon,
   UploadIcon,
-  XIcon,
 } from "lucide-react"
 import { useConfirm } from "@/components/blocks/confirm"
 import { Time } from "@/components/blocks/format"
@@ -26,13 +25,13 @@ import { Markdown } from "@/components/blocks/markdown"
 import { notify } from "@/components/blocks/notify"
 import { useAppNavigate } from "@/components/blocks/router"
 import { EmptyState, ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
-import { Actions, Body, Inline, NavItem, NavList, Page, Panel, Row, Rows, Split, Stack, Toolbar } from "@/components/blocks/surfaces"
+import { Actions, Body, Inline, NavItem, NavList, Page, Panel, Row, Rows, Split, Stack } from "@/components/blocks/surfaces"
+import { ArchiveSearchDialog, useSearchShortcut } from "@/components/search-modal"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -411,8 +410,7 @@ function useArchivePane({
   currentId,
   kindFilter,
   onKindFilterChange,
-  query,
-  onQueryChange,
+  onOpenSearch,
   onTriggerUpload,
   onOpenDialog,
 }: {
@@ -421,8 +419,7 @@ function useArchivePane({
   currentId?: string | undefined
   kindFilter: string
   onKindFilterChange: (v: string) => void
-  query: string
-  onQueryChange: (v: string) => void
+  onOpenSearch: () => void
   onTriggerUpload: (folderPath: string) => void
   onOpenDialog: (state: ArchiveDialogState) => void
 }) {
@@ -445,19 +442,13 @@ function useArchivePane({
     window.localStorage.setItem(ARCHIVE_TREE_OVERRIDES_KEY, JSON.stringify(Object.fromEntries(overrides)))
   }, [overrides])
 
-  const searching = query.trim() !== ""
   const filteredFiles = React.useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return files.filter((file) => {
-      if (kindFilter !== "all" && file.kind !== kindFilter) return false
-      if (q && !file.relative_path.toLowerCase().includes(q) && !file.filename.toLowerCase().includes(q)) return false
-      return true
-    })
-  }, [files, kindFilter, query])
+    return files.filter((file) => kindFilter === "all" || file.kind === kindFilter)
+  }, [files, kindFilter])
 
   const tree = React.useMemo(
-    () => buildArchiveTree(folders, searching ? [] : filteredFiles, kindFilter === "all" && !searching),
-    [folders, filteredFiles, kindFilter, searching],
+    () => buildArchiveTree(folders, filteredFiles, kindFilter === "all"),
+    [folders, filteredFiles, kindFilter],
   )
 
   const currentAncestors = React.useMemo(() => {
@@ -556,86 +547,70 @@ function useArchivePane({
   }
 
   const sideHeader = (
-    <Stack gap="sm">
-      <InputGroup>
-        <InputGroupAddon><SearchIcon /></InputGroupAddon>
-        <InputGroupInput
+    <div className="llmwiki-tree-header">
+      <Select value={kindFilter} onValueChange={onKindFilterChange}>
+        <SelectTrigger aria-label="按类型筛选" className="shrink-0">
+          <SelectValue placeholder="全部类型" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部类型</SelectItem>
+          {ARCHIVE_KIND_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              <span className="llmwiki-select-option"><WikiFileIcon doc={{ filename: option.filename }} />{option.label}</span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <div className="llmwiki-tree-header-actions">
+        <Button
+          size="icon-sm"
+          variant="ghost"
           aria-label="搜索档案"
-          placeholder="搜索文件名或路径"
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-        />
-        {query ? (
-          <InputGroupAddon align="inline-end">
-            <Button size="icon-sm" variant="ghost" aria-label="清除搜索" onClick={() => onQueryChange("")}>
-              <XIcon />
-            </Button>
-          </InputGroupAddon>
-        ) : null}
-      </InputGroup>
-      <Toolbar
-        end={
-          <>
-            <Button size="icon-sm" variant="ghost" aria-label="上传文件" title="上传文件" onClick={() => onTriggerUpload("")}>
-              <UploadIcon />
-            </Button>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="新建目录"
-              title="新建目录"
-              onClick={() => onOpenDialog({ kind: "new-folder", parentPath: "" })}
-            >
-              <FolderPlusIcon />
-            </Button>
-            {searching ? null : (
-              <>
-                <Button size="icon-sm" variant="ghost" aria-label="定位当前文件" title="定位当前文件" onClick={locateCurrent}>
-                  <LocateFixedIcon />
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={allOpen ? "全部折叠" : "全部展开"}
-                  title={allOpen ? "全部折叠" : "全部展开"}
-                  onClick={allOpen ? collapseAll : expandAll}
-                >
-                  {allOpen ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
-                </Button>
-              </>
-            )}
-          </>
-        }
-      >
-        <Select value={kindFilter} onValueChange={onKindFilterChange}>
-          <SelectTrigger aria-label="按类型筛选" className="w-28 shrink-0">
-            <SelectValue placeholder="全部类型" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部类型</SelectItem>
-            {ARCHIVE_KIND_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                <span className="llmwiki-select-option"><WikiFileIcon doc={{ filename: option.filename }} />{option.label}</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Toolbar>
-    </Stack>
+          title="搜索档案 (⌘K)"
+          onClick={onOpenSearch}
+        >
+          <SearchIcon />
+        </Button>
+        <Button size="icon-sm" variant="ghost" aria-label="上传文件" title="上传文件" onClick={() => onTriggerUpload("")}>
+          <UploadIcon />
+        </Button>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label="新建目录"
+          title="新建目录"
+          onClick={() => onOpenDialog({ kind: "new-folder", parentPath: "" })}
+        >
+          <FolderPlusIcon />
+        </Button>
+        <Button size="icon-sm" variant="ghost" aria-label="定位当前文件" title="定位当前文件" onClick={locateCurrent}>
+          <LocateFixedIcon />
+        </Button>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={allOpen ? "全部折叠" : "全部展开"}
+          title={allOpen ? "全部折叠" : "全部展开"}
+          onClick={allOpen ? collapseAll : expandAll}
+        >
+          {allOpen ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
+        </Button>
+      </div>
+    </div>
   )
 
-  const empty = searching ? filteredFiles.length === 0 : tree.nodes.length === 0
+  const empty = tree.nodes.length === 0
   const side = (
     <Stack gap="sm">
       {empty ? (
         <EmptyState
-          title={searching ? "没有匹配的档案文件" : kindFilter === "all" ? "暂无档案文件" : "没有符合筛选的档案文件"}
-          description={searching ? `没有匹配“${query.trim()}”的结果` : kindFilter === "all" ? "点击上方上传按钮或直接拖入文件即可开始。" : undefined}
-          action={searching ? undefined : (
+          title={kindFilter === "all" ? "暂无档案文件" : "没有符合筛选的档案文件"}
+          description={kindFilter === "all" ? "点击上方上传按钮或直接拖入文件即可开始。" : undefined}
+          action={
             <Button size="sm" variant="outline" onClick={() => onTriggerUpload("")}>
               <UploadIcon />上传文件
             </Button>
-          )}
+          }
         />
       ) : null}
       <div
@@ -660,34 +635,20 @@ function useArchivePane({
         }}
       >
         <NavList label="档案文件">
-          {searching ? (
-            filteredFiles.map((file) => (
-              <NavItem
-                key={file.id}
-                to={`/archives/${encodeURIComponent(file.id)}`}
-                active={file.id === currentId}
-                icon={<WikiFileIcon doc={file} />}
-                trailing={<span className="text-xs tabular-nums text-muted-foreground">{formatBytes(file.size)}</span>}
-              >
-                {file.filename}
-              </NavItem>
-            ))
-          ) : (
-            <ArchiveTreeRows
-              nodes={tree.nodes}
-              depth={0}
-              isOpen={isOpen}
-              toggle={toggle}
-              currentId={currentId}
-              dragOverKey={dragOverKey}
-              setDragOverKey={setDragOverKey}
-              onDropOnFolder={handleDropOnFolder}
-              onUpload={(folderPath, picked) => { void handleUpload(folderPath, picked) }}
-              onOpenDialog={onOpenDialog}
-              onTriggerUpload={onTriggerUpload}
-              onDeleteFile={(file) => { void handleDeleteFile(file) }}
-            />
-          )}
+          <ArchiveTreeRows
+            nodes={tree.nodes}
+            depth={0}
+            isOpen={isOpen}
+            toggle={toggle}
+            currentId={currentId}
+            dragOverKey={dragOverKey}
+            setDragOverKey={setDragOverKey}
+            onDropOnFolder={handleDropOnFolder}
+            onUpload={(folderPath, picked) => { void handleUpload(folderPath, picked) }}
+            onOpenDialog={onOpenDialog}
+            onTriggerUpload={onTriggerUpload}
+            onDeleteFile={(file) => { void handleDeleteFile(file) }}
+          />
         </NavList>
       </div>
     </Stack>
@@ -993,8 +954,9 @@ export function ArchivesPage() {
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const [uploadFolder, setUploadFolder] = React.useState("")
   const [kindFilter, setKindFilter] = React.useState("all")
-  const [query, setQuery] = React.useState("")
+  const [searchOpen, setSearchOpen] = React.useState(false)
   const [dialogState, setDialogState] = React.useState<ArchiveDialogState>(null)
+  useSearchShortcut(() => setSearchOpen(true))
 
   const treeQuery = useQuery({
     queryKey: ["archive-tree"],
@@ -1026,8 +988,7 @@ export function ArchivesPage() {
     currentId: id,
     kindFilter,
     onKindFilterChange: setKindFilter,
-    query,
-    onQueryChange: setQuery,
+    onOpenSearch: () => setSearchOpen(true),
     onTriggerUpload: triggerUpload,
     onOpenDialog: setDialogState,
   })
@@ -1114,6 +1075,13 @@ export function ArchivesPage() {
       )}
 
       <ArchiveTreeDialogs state={dialogState} folders={folders} onClose={() => setDialogState(null)} />
+      <ArchiveSearchDialog
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        kindFilter={kindFilter}
+        onClearKindFilter={() => setKindFilter("all")}
+        onSelectFile={(fileId) => navigate(`/archives/${encodeURIComponent(fileId)}`)}
+      />
     </div>
   )
 }

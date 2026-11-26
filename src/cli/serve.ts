@@ -96,7 +96,8 @@ export async function runServe(options: ServeOptions): Promise<void> {
       mcpServer,
     });
 
-    const processor = new JobProcessor(store, workspace);
+    // Jobs and the HTTP API write the same wiki pages, so they queue on one lock manager.
+    const processor = new JobProcessor(store, workspace, { lockManager: lockMgr });
     processor.start(2000);
 
     void new ArchiveStorageService(store, workspace)

@@ -177,6 +177,8 @@ export async function loadHarnixSettings(db: Store): Promise<HarnixSettings> {
     rawMaxCallsPerRound,
     rawTemp,
     rawMaxTokens,
+    rawLastInstanceId,
+    rawLastModel,
   ] = await Promise.all([
     db.getConfig("default_agent_kind"),
     db.getConfig("default_acp_agent_id"),
@@ -186,6 +188,8 @@ export async function loadHarnixSettings(db: Store): Promise<HarnixSettings> {
     db.getConfig(CONFIG_SESSION_TOOL_LOOP_MAX_CALLS_PER_ROUND),
     db.getConfig("temperature"),
     db.getConfig("max_tokens"),
+    db.getConfig("last_instance_id"),
+    db.getConfig("last_model"),
   ]);
 
   const defaultKind: HarnessKind =
@@ -198,6 +202,8 @@ export async function loadHarnixSettings(db: Store): Promise<HarnixSettings> {
   const temperature = parseFloatOrUndefined(rawTemp);
   const maxTokens = parseIntOr(rawMaxTokens, 0) || undefined;
   const maxConcurrent = parseIntOr(rawMaxConcurrent, defaults.acp.maxConcurrentSessions);
+  const legacyInstanceId = rawLastInstanceId.trim();
+  const legacyModel = rawLastModel.trim();
 
   let acp = defaults.acp;
   try {
@@ -211,6 +217,8 @@ export async function loadHarnixSettings(db: Store): Promise<HarnixSettings> {
     defaultKind,
     native: {
       ...defaults.native,
+      ...(legacyInstanceId ? { providerInstanceId: legacyInstanceId } : {}),
+      ...(legacyModel ? { model: legacyModel } : {}),
       maxTurns,
       maxToolCallsPerTurn,
       ...(temperature !== undefined ? { temperature } : {}),
@@ -218,12 +226,34 @@ export async function loadHarnixSettings(db: Store): Promise<HarnixSettings> {
     },
     pi: {
       ...defaults.pi,
+      ...(defaultKind === "pi" && legacyInstanceId ? { providerInstanceId: legacyInstanceId } : {}),
+      ...(defaultKind === "pi" && legacyModel ? { model: legacyModel } : {}),
       maxTurns,
       maxToolCallsPerTurn,
       ...(maxTokens !== undefined ? { maxTokens } : {}),
     },
     acp,
   });
+}
+
+export async function resolveHarnessDefaultModel(
+  db: Store,
+  settings: HarnixSettings,
+  kind: HarnessKind,
+): Promise<{ instanceId: string; model: string }> {
+  if (kind === "acp") {
+    return { instanceId: "", model: "" };
+  }
+  const bound = kind === "pi" ? settings.pi : settings.native;
+  let instanceId = bound.providerInstanceId?.trim() ?? "";
+  let model = bound.model?.trim() ?? "";
+  if (!instanceId) {
+    instanceId = (await db.getConfig("last_instance_id")).trim();
+  }
+  if (!model) {
+    model = (await db.getConfig("last_model")).trim();
+  }
+  return { instanceId, model };
 }
 
 export async function saveHarnixSettings(db: Store, input: unknown): Promise<HarnixSettings> {

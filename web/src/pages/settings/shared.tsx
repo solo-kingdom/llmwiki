@@ -1,5 +1,5 @@
 import * as React from "react"
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { notify } from "@/components/blocks/notify"
 import { Grid, Row, Stack } from "@/components/blocks/surfaces"
 import { Button } from "@/components/ui/button"
@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { useApp } from "@/context/app-context"
-import { updateSettings } from "@/lib/api"
+import { listProviderModels, updateSettings } from "@/lib/api"
 import type { Settings } from "@/types"
 
 /** Shared save path for every settings section: patch + toast + refetch the app context. */
@@ -21,6 +21,18 @@ export function useSettingsSave() {
     },
     onError: (error: Error) => notify.error(error, "保存失败"),
   })
+}
+
+export function useCatalogModelNames(catalogId: string | undefined): Map<string, string> {
+  const query = useQuery({
+    queryKey: ["provider-models", catalogId],
+    queryFn: () => listProviderModels(catalogId ?? ""),
+    enabled: Boolean(catalogId) && catalogId !== "custom",
+  })
+  return React.useMemo(
+    () => new Map((query.data ?? []).map((m) => [m.model_id, m.name])),
+    [query.data],
+  )
 }
 
 export function SettingRow({ label, description, control }: { label: string; description?: string | undefined; control: React.ReactNode }) {

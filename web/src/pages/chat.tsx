@@ -290,7 +290,7 @@ function ModelPicker({ session }: { session: IngestSession }) {
 }
 
 function HarnessPicker({ session }: { session: IngestSession }) {
-  const { acpAgents, settings } = useApp()
+  const { acpAgents, instances, settings } = useApp()
   const queryClient = useQueryClient()
   const enabledAgents = acpAgents.filter((a) => a.enabled)
   const currentKind: AgentKind = session.agent_kind ?? settings?.harnix_settings?.defaultKind ?? "native"
@@ -298,10 +298,22 @@ function HarnessPicker({ session }: { session: IngestSession }) {
   const archived = session.status === "archived"
 
   const update = useMutation({
-    mutationFn: ({ kind, acpAgentId }: { kind: AgentKind; acpAgentId?: string }) =>
+    mutationFn: ({
+      kind,
+      acpAgentId,
+      instanceId,
+      model,
+    }: {
+      kind: AgentKind
+      acpAgentId?: string
+      instanceId?: string
+      model?: string
+    }) =>
       updateIngestSession(session.id, {
         agent_kind: kind,
         ...(acpAgentId !== undefined ? { acp_agent_id: acpAgentId } : {}),
+        ...(instanceId !== undefined ? { instance_id: instanceId } : {}),
+        ...(model !== undefined ? { model } : {}),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["ingest-session", session.id] })
@@ -326,7 +338,24 @@ function HarnessPicker({ session }: { session: IngestSession }) {
             onValueChange={(value) => {
               const kind = value as AgentKind
               const acpAgentId = kind === "acp" ? (currentAcpId || enabledAgents[0]?.id || "") : ""
-              update.mutate({ kind, acpAgentId })
+              if (kind === "acp") {
+                update.mutate({ kind, acpAgentId })
+                return
+              }
+              const bound = kind === "pi" ? settings?.harnix_settings?.pi : settings?.harnix_settings?.native
+              const boundInstanceId = bound?.providerInstanceId?.trim() ?? ""
+              const boundModel = bound?.model?.trim() ?? ""
+              const inst = instances.find((item) => item.id === boundInstanceId)
+              const validModel =
+                inst !== undefined && boundModel !== "" && (inst.models ?? []).includes(boundModel)
+                  ? boundModel
+                  : ""
+              update.mutate({
+                kind,
+                acpAgentId,
+                ...(inst !== undefined ? { instanceId: inst.id } : {}),
+                ...(inst !== undefined && validModel !== "" ? { model: validModel } : {}),
+              })
             }}
           >
             <SelectTrigger aria-label="对话 Harness 实现" size="sm" className="w-full"><SelectValue /></SelectTrigger>
@@ -470,7 +499,9 @@ function SessionAction({ label, icon, onSelect, destructive = false, disabled = 
 }
 
 function Conversation({ session }: { session: IngestSession }) {
+  const { settings } = useApp()
   const queryClient = useQueryClient()
+  const sessionKind: AgentKind = session.agent_kind ?? settings?.harnix_settings?.defaultKind ?? "native"
   const navigate = useNavigate()
   const confirm = useConfirm()
   const messagesQuery = useQuery({
@@ -690,8 +721,8 @@ function Conversation({ session }: { session: IngestSession }) {
             }}
           />
           <InputGroupAddon align="block-end">
-            <ModelPicker session={session} />
             <HarnessPicker session={session} />
+            {sessionKind !== "acp" ? <ModelPicker session={session} /> : null}
             <Stack direction="row" gap="xs" grow justify="end">
               <Button size="icon-sm" variant="ghost" aria-label="上传附件" title="上传附件" disabled={upload.isPending} onClick={() => fileRef.current?.click()}>
                 <PaperclipIcon />

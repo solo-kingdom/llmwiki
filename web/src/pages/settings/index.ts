@@ -1,6 +1,6 @@
 export { SettingsLayout } from "./layout"
 export { ModelsSection } from "./models"
-export { HarnessSection } from "./harness"
+export { HarnessRuntimeSection } from "./harness"
 export { IngestSection } from "./ingest"
 export { StorageSection } from "./storage"
 export { AccessSection } from "./access"

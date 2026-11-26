@@ -32,7 +32,7 @@ import { toolLoopConfigForModeFromStore } from "../mcp/tool_loop_settings.js";
 import type { Store } from "../store/interfaces.js";
 import type { IngestSession, IngestSessionMessage } from "../store/types.js";
 import { HarnessManager, resolveCwd } from "./manager.js";
-import { loadHarnixSettings, resolveProviderCredentials } from "./settings.js";
+import { loadHarnixSettings, resolveHarnessDefaultModel, resolveProviderCredentials } from "./settings.js";
 
 export const KIND_NATIVE = "native";
 export const KIND_PI = "pi";
@@ -462,8 +462,11 @@ export async function resolveSessionRuntime(
 
   let instanceId = session.llm_instance_id;
   let model = session.llm_model;
-  if (!instanceId) instanceId = await db.getConfig("last_instance_id");
-  if (!model) model = await db.getConfig("last_model");
+  if (!instanceId || !model) {
+    const resolved = await resolveHarnessDefaultModel(db, settings, kind);
+    if (!instanceId) instanceId = resolved.instanceId;
+    if (!model) model = resolved.model;
+  }
   let provider: HarnessProviderCredentials;
   try {
     provider = await resolveProviderCredentials(db, instanceId, model);

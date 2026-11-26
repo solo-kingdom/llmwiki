@@ -165,6 +165,173 @@ describe("llmwiki harnix integration", () => {
     expect(putBad.status).toBe(400);
   });
 
+  it("preserves per-implementation config and bound model across native -> pi -> acp -> native switches", async () => {
+    const { store, config } = makeStore({
+      last_instance_id: "inst_1",
+      last_model: "gpt-test",
+    });
+    store.getProviderInstance = vi.fn(async (id: string) => {
+      if (id === "inst_1") {
+        return {
+          id: "inst_1",
+          name: "OpenAI Mock",
+          catalog_id: "custom",
+          api_format: "openai",
+          base_url: "http://127.0.0.1:9999/v1",
+          api_key: "sk-1",
+          models: ["gpt-test"],
+          enabled: true,
+          created_at: "",
+          updated_at: "",
+        };
+      }
+      if (id === "inst_2") {
+        return {
+          id: "inst_2",
+          name: "Anthropic Mock",
+          catalog_id: "custom",
+          api_format: "anthropic",
+          base_url: "http://127.0.0.1:9998/v1",
+          api_key: "sk-2",
+          models: ["claude-test"],
+          enabled: true,
+          created_at: "",
+          updated_at: "",
+        };
+      }
+      return null;
+    }) as Store["getProviderInstance"];
+
+    const app = makeApp(store);
+
+    // 1. Save native config + bound model
+    const r1 = await app.request("/api/v1/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        harnix_settings: {
+          version: 1,
+          defaultKind: "native",
+          native: {
+            providerInstanceId: "inst_1",
+            model: "gpt-test",
+            maxTurns: 12,
+          },
+        },
+      }),
+    });
+    expect(r1.status).toBe(200);
+    expect(config.get("last_instance_id")).toBe("inst_1");
+    expect(config.get("last_model")).toBe("gpt-test");
+
+    // 2. Switch to pi with its own model & reasoning=true, preserving native
+    const currentAfterNative = ((await r1.json()) as { harnix_settings: Record<string, unknown> })
+      .harnix_settings;
+    const r2 = await app.request("/api/v1/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        harnix_settings: {
+          ...currentAfterNative,
+          defaultKind: "pi",
+          pi: {
+            ...(currentAfterNative.pi as Record<string, unknown>),
+            providerInstanceId: "inst_2",
+            model: "claude-test",
+            reasoning: true,
+          },
+        },
+      }),
+    });
+    expect(r2.status).toBe(200);
+    expect(config.get("last_instance_id")).toBe("inst_2");
+    expect(config.get("last_model")).toBe("claude-test");
+
+    // 3. Switch to acp -> must not clear last_instance_id/last_model, and preserves native/pi
+    const currentAfterPi = ((await r2.json()) as { harnix_settings: Record<string, unknown> })
+      .harnix_settings;
+    const r3 = await app.request("/api/v1/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        harnix_settings: {
+          ...currentAfterPi,
+          defaultKind: "acp",
+          acp: {
+            ...(currentAfterPi.acp as Record<string, unknown>),
+            maxConcurrentSessions: 6,
+          },
+        },
+      }),
+    });
+    expect(r3.status).toBe(200);
+    expect(config.get("last_instance_id")).toBe("inst_2");
+    expect(config.get("last_model")).toBe("claude-test");
+
+    // 4. Switch back to native -> restores native config & syncs last_instance_id/last_model back to inst_1/gpt-test
+    const currentAfterAcp = ((await r3.json()) as { harnix_settings: Record<string, unknown> })
+      .harnix_settings;
+    const r4 = await app.request("/api/v1/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        harnix_settings: {
+          ...currentAfterAcp,
+          defaultKind: "native",
+        },
+      }),
+    });
+    expect(r4.status).toBe(200);
+    const body4 = (await r4.json()) as {
+      last_instance_id: string;
+      last_model: string;
+      harnix_settings: {
+        defaultKind: string;
+        native: { providerInstanceId?: string; model?: string; maxTurns: number };
+        pi: { providerInstanceId?: string; model?: string; reasoning: boolean };
+        acp: { maxConcurrentSessions: number };
+      };
+    };
+    expect(body4.harnix_settings.defaultKind).toBe("native");
+    expect(body4.harnix_settings.native.providerInstanceId).toBe("inst_1");
+    expect(body4.harnix_settings.native.model).toBe("gpt-test");
+    expect(body4.harnix_settings.native.maxTurns).toBe(12);
+    expect(body4.harnix_settings.pi.providerInstanceId).toBe("inst_2");
+    expect(body4.harnix_settings.pi.model).toBe("claude-test");
+    expect(body4.harnix_settings.pi.reasoning).toBe(true);
+    expect(body4.harnix_settings.acp.maxConcurrentSessions).toBe(6);
+    expect(body4.last_instance_id).toBe("inst_1");
+    expect(body4.last_model).toBe("gpt-test");
+
+    // 5. Probe pi uses pi's bound model even when last_instance_id is inst_1
+    const piCheck = await app.request("/api/v1/harness/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "pi" }),
+    });
+    expect(piCheck.status).toBe(200);
+    const piCheckBody = (await piCheck.json()) as { ok: boolean; message: string };
+    expect(piCheckBody.ok).toBe(true);
+    expect(piCheckBody.message).toContain("claude-test");
+
+    // 6. resolveSessionRuntime uses pi's bound model when session has no explicit model
+    const piSession: IngestSession = {
+      id: "s_pi_bound",
+      title: "pi bound",
+      status: "active",
+      storage_path: "",
+      llm_instance_id: "",
+      llm_model: "",
+      mode: "qa",
+      agent_kind: "pi",
+      acp_agent_id: "",
+      created_at: "",
+      updated_at: "",
+    };
+    const rt = await resolveSessionRuntime(store, "", null, piSession);
+    expect(rt.label()).toBe("pi / claude-test");
+  });
+
   it("probes native, pi, and acp harnesses via /api/v1/harness/check", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "llmwiki-acp-probe-"));
     cleanups.push(() => fs.rm(dir, { recursive: true, force: true }));

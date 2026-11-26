@@ -53,13 +53,13 @@ export function IntegrationsSection() {
         </Panel>
       </Section>
 
-      <Section size="lg" gap="lg" title="ACP Agent" description="外部 coding agent 已统一收口到 Harness 设置。">
+      <Section size="lg" gap="lg" title="ACP Agent" description="外部 coding agent 已统一收口到「模型与 Harness」设置。">
         <Panel padding="none">
           <Rows label="ACP Agent">
             <SettingRow
               label="ACP 配置入口"
-              description={`${acpAgents.length} 个已配置；支持在 Harness 设置中管理与探测。`}
-              control={<Button size="sm" variant="outline" asChild><AppLink to="/settings/harness">前往 Harness 设置</AppLink></Button>}
+              description={`${acpAgents.length} 个已配置；支持在模型与 Harness 设置中管理与探测。`}
+              control={<Button size="sm" variant="outline" asChild><AppLink to="/settings/models">前往模型与 Harness 设置</AppLink></Button>}
             />
           </Rows>
         </Panel>

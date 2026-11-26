@@ -9,7 +9,7 @@ import { folderPathFromWikiRelPath } from "../engine/wiki_org.js";
 import { formatFolderTreeForPrompt } from "../mcp/diagnostic_tools.js";
 import { IngestCache } from "./cache.js";
 import { applyBlocksToStore } from "./dbapply.js";
-import { applyWikiBlocks, normalizeWikiFileBlocks, normalizeWikiFilePath, parseFileBlocksWithContent } from "./fileblocks.js";
+import { applyWikiBlocks, NoWikiFilesWrittenError, normalizeWikiFileBlocks, normalizeWikiFilePath, parseFileBlocks, parseFileBlocksWithContent } from "./fileblocks.js";
 import { llmMessagesForRecord, recordLLMRequest, recordLLMResponse } from "./job_events.js";
 import { PageLockManager } from "./lock.js";
 import { normalizeUpload } from "./normalize.js";
@@ -452,7 +452,13 @@ ${content}
     const started = Date.now();
 
     const promptStep = options.promptStep ?? promptStepForStepName(step);
-    const config = this.toolLoopConfig ?? defaultToolLoopConfigForStep(promptStep);
+    // Generation must emit FILE blocks as plain text. With tools enabled, MiniMax
+    // often finishes on a tool-call-only message whose content is empty, which
+    // used to surface as "applied 0 pages"; keep generation tool-free instead.
+    const generationOnly = promptStep === "generation";
+    const config = generationOnly
+      ? { maxRounds: 0, maxToolCallsPerRound: 0 }
+      : (this.toolLoopConfig ?? defaultToolLoopConfigForStep(promptStep));
 
     if (config.maxRounds > 0) {
       const executor = new PipelineToolExecutor(this.workspace, this.db, this.mcpExecutor, options.toolMode ?? "");
@@ -461,7 +467,7 @@ ${content}
         if (tools.length > 0) {
           const result = await runToolLoop(this.llmClient, executor, messages, tools, temperature, maxTokens, config);
           recordLLMResponse(this.recorder, step, result, Date.now() - started);
-          return result;
+          return this.ensureGenerationBlocks(step, result, messages, temperature, maxTokens);
         }
       } catch (error) {
         this.recorder?.record(step, "warn", "tool loop failed, falling back to stream", {
@@ -471,14 +477,14 @@ ${content}
       }
     }
 
-    if (this.mcpExecutor && !this.mcpExecutor.isLocalOnly()) {
+    if (!generationOnly && this.mcpExecutor && !this.mcpExecutor.isLocalOnly()) {
       const mcpConfig = this.toolLoopConfig ?? defaultToolLoopConfig();
       try {
         const tools = await this.mcpExecutor.listTools();
         if (tools.length > 0) {
           const result = await runToolLoop(this.llmClient, this.mcpExecutor, messages, tools, temperature, maxTokens, mcpConfig);
           recordLLMResponse(this.recorder, step, result, Date.now() - started);
-          return result;
+          return this.ensureGenerationBlocks(step, result, messages, temperature, maxTokens);
         }
       } catch (error) {
         this.recorder?.record(step, "warn", "tool loop failed, falling back to stream", {
@@ -498,7 +504,41 @@ ${content}
     }
     const result = chunks.join("");
     recordLLMResponse(this.recorder, step, result, Date.now() - started);
-    return result;
+    return this.ensureGenerationBlocks(step, result, messages, temperature, maxTokens);
+  }
+
+  private async ensureGenerationBlocks(
+    step: string,
+    result: string,
+    messages: Message[],
+    temperature: number,
+    maxTokens: number,
+  ): Promise<string> {
+    if (promptStepForStepName(step) !== "generation") return result;
+    if (parseFileBlocks(result).length > 0) return result;
+    if (!this.llmClient) throw new Error("LLM client not configured");
+    this.recorder?.record(step, "warn", "generation returned no FILE blocks; retrying with strict format", {
+      char_count: result.length,
+    });
+    const strict: Message[] = [
+      ...messages,
+      {
+        role: "user",
+        content:
+          "上一条回复没有可用的 FILE 块。现在只输出 wiki 文件，严格使用如下格式：\n" +
+          "---FILE: wiki/<目录>/<页面>.md\n（markdown 正文）\n---END FILE---\n" +
+          "路径必须以 wiki/ 开头，至少一个 FILE 块；不要输出分析、解释或任何额外文字。",
+      },
+    ];
+    const chunks: string[] = [];
+    for await (const event of this.llmClient.streamChat(strict, temperature, maxTokens)) {
+      if (event.type === "token") chunks.push(event.content ?? "");
+      if (event.type === "error" && event.error) throw event.error;
+    }
+    const retry = chunks.join("");
+    recordLLMResponse(this.recorder, step, retry, 0);
+    if (parseFileBlocks(retry).length === 0) throw new NoWikiFilesWrittenError();
+    return retry;
   }
 }
 

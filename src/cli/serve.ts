@@ -4,8 +4,6 @@ import { HarnessManager } from "../harness/index.js";
 import { createApiContext, mcpActivity } from "../api/context.js";
 import { trimActivityLogs } from "../api/settings.js";
 import { ArchiveStorageService } from "../archive/storage.js";
-import { WorkspaceFileIndexer } from "../engine/file_indexer.js";
-import { engineStoreFromStore } from "../engine/adapter.js";
 import { PageLockManager } from "../ingest/lock.js";
 import { JobProcessor } from "../ingest/processor.js";
 import { logger } from "../logger.js";
@@ -16,19 +14,16 @@ import { openDatabase } from "../db/pool.js";
 import { loadSnapshot } from "../llm/provider_snapshot.js";
 import { CATALOG_SYNC_INTERVAL_MS, isCatalogStale, syncModelsDev } from "../llm/provider_sync.js";
 import { openStore } from "../store/postgres/db.js";
-import { importSettingsIfEmpty } from "../workspace/settings.js";
 import { createApp } from "../server/app.js";
 import type { ServeOptions } from "../config.js";
 import { isLoopback, resolveWorkspaceDir } from "./workspace.js";
 
 export async function runServe(options: ServeOptions): Promise<void> {
-  const workspace = resolveWorkspaceDir(options.workspace);
+  const workspace = options.workspace.trim() ? resolveWorkspaceDir(options.workspace) : "";
   const pool = openDatabase(options.databaseUrl);
   const store = await openStore(pool);
 
   try {
-    await importSettingsIfEmpty(store, workspace);
-
     try {
       if (await store.cacheIsEmpty()) {
         const { providers, models } = loadSnapshot();
@@ -50,9 +45,7 @@ export async function runServe(options: ServeOptions): Promise<void> {
     }
 
     const lockMgr = new PageLockManager();
-    const adapter = engineStoreFromStore(store);
-    const indexer = new WorkspaceFileIndexer(adapter, workspace);
-    const apiCtx = createApiContext({ db: store, workspace, lockMgr, indexer });
+    const apiCtx = createApiContext({ db: store, workspace, lockMgr });
 
     let mcpServer: McpServer | null = null;
     if (!options.noMcp) {
@@ -61,7 +54,7 @@ export async function runServe(options: ServeOptions): Promise<void> {
         "You are connected to an LLM Wiki workspace. Call the `guide` tool first to see available knowledge bases and learn the full workflow.",
       );
       const activity = mcpActivity(apiCtx);
-      registerTools(mcpServer, workspace, store, indexer, activity);
+      registerTools(mcpServer, workspace, store, activity);
       mcpServer.setToolPolicy(defaultToolPolicy(options.mcpAllowWrite));
       mcpServer.setAuditDb(createAuditAdapter(store, activity));
     }
@@ -77,7 +70,6 @@ export async function runServe(options: ServeOptions): Promise<void> {
       skillsRoot: process.env.LLMWIKI_SKILLS_ROOT ?? path.resolve("skills"),
       harnessManager,
       lockMgr,
-      indexer,
       mcpServer,
     });
 

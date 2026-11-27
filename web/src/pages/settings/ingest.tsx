@@ -20,16 +20,6 @@ export function IngestSection() {
           <NumberSetting label="Chunk 大小" value={settings.chunk_size} defaultValue={512} onSave={(value) => save.mutate({ chunk_size: value })} />
           <NumberSetting label="Chunk 重叠" value={settings.chunk_overlap} defaultValue={128} onSave={(value) => save.mutate({ chunk_overlap: value })} />
           <SettingRow
-            label="自动重建索引"
-            description="内容变化后刷新派生索引"
-            control={<Switch aria-label="自动重建索引" checked={settings.auto_reindex} onCheckedChange={(value) => save.mutate({ auto_reindex: value })} />}
-          />
-          <SettingRow
-            label="监控来源目录"
-            description="发现新文件时自动创建摄入任务"
-            control={<Switch aria-label="监控来源目录" checked={settings.watch_sources} onCheckedChange={(value) => save.mutate({ watch_sources: value })} />}
-          />
-          <SettingRow
             label="主题目录写入策略"
             description="legacy 兼容旧结构；report 记录旧类型根告警；enforce 禁止新自动页面写入旧类型根或未登记目录"
             control={

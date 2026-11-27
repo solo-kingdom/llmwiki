@@ -170,7 +170,7 @@ function SearchEmptyBlock({
   )
 }
 
-const SYSTEM_PAGE_PATHS = new Set(["wiki/index.md", "wiki/log.md", "wiki/overview.md"])
+const SYSTEM_PAGE_PATHS = new Set(["wiki/overview.md"])
 
 function isSystemHit(hit: SearchChunk): boolean {
   const cleaned = hit.path.replace(/^\/+/, "")

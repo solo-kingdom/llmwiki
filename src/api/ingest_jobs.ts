@@ -73,11 +73,6 @@ function newJob(
 }
 
 export function ingestJobsApi(ctx: ApiContext) {
-  function requireWorkspace(c: Context): Response | null {
-    if (!ctx.workspace.trim()) return writeError(c, 503, "workspace not configured for ingest");
-    return null;
-  }
-
   async function persistArchiveSource(
     origin: ArchiveFileOrigin,
     filename: string,
@@ -120,8 +115,6 @@ export function ingestJobsApi(ctx: ApiContext) {
 
   return {
     async createConversationIngestJob(c: Context): Promise<Response> {
-      const denied = requireWorkspace(c);
-      if (denied) return denied;
       const req = await readJsonBody<{
         content?: string;
         title?: string;
@@ -154,8 +147,6 @@ export function ingestJobsApi(ctx: ApiContext) {
     },
 
     async createTextIngestJob(c: Context): Promise<Response> {
-      const denied = requireWorkspace(c);
-      if (denied) return denied;
       const req = await readJsonBody<{
         content?: string;
         filename?: string;
@@ -195,8 +186,6 @@ export function ingestJobsApi(ctx: ApiContext) {
     },
 
     async createUploadIngestJobs(c: Context): Promise<Response> {
-      const denied = requireWorkspace(c);
-      if (denied) return denied;
       let form: FormData;
       try {
         form = await c.req.formData();
@@ -402,8 +391,6 @@ export function ingestJobsApi(ctx: ApiContext) {
     },
 
     async getJobSource(c: Context): Promise<Response> {
-      const denied = requireWorkspace(c);
-      if (denied) return denied;
       const id = getID(c);
       if (!id) return writeError(c, 400, "missing job id");
       let job;

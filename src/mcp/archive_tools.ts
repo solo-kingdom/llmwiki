@@ -337,7 +337,6 @@ export function registerArchiveTools(
     },
     async (args) => {
       if (!db) return "Error: database not connected";
-      if (!workspace.trim()) return "Error: workspace not configured for ingest";
       const id = typeof args["id"] === "string" ? args["id"].trim() : "";
       const relPath = typeof args["path"] === "string" ? args["path"].trim().replace(/^\/+/, "") : "";
       if (!id && !relPath) return "Error: id or path is required";

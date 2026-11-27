@@ -64,23 +64,15 @@ curl -fsS "$APP_API_BASE/skills/<name>.zh.md" # 各阶段中文文档（英文�
 ## 知识库模型
 
 ```
-purpose.md            知识库目标，摄取/整理前先读
-rules.md              全局约定，注入每一次 LLM 步骤
-raw/sources/…         原始材料（上传、抓取），agent 只读
-wiki/overview.md      顶层概览页
-wiki/index.md         reindex 生成的目录，永远不要手写
-wiki/log.md           追加式日志：`## [YYYY-MM-DD] action | description`
+wiki/overview.md      顶层金字塔总览页
 wiki/<主题>/…         多级主题目录（页面类型由 frontmatter \`type:\` 标注：entity|concept|synthesis|comparison|query|experience|ledger|page）
-wiki/sources/         源摘要页（默认在列表/搜索/图谱中隐藏）
-wiki/templates/       系统模板目录
-PostgreSQL            页面、目录树、版本、搜索、图谱、lint — 唯一真源
+archives/             原始档案库（DB inline / local / S3）
+PostgreSQL            页面、目录树、版本、规则、搜索、图谱、lint — 唯一真源
 ```
 
-- **写操作走 API**；绕过服务端改的文件，必须先 `POST /api/v1/reindex`，否则搜索、图谱、lint 都看不见。
-- `wiki/index.md` 由 reindex 和摄取落地重建，不要写。
-- `wiki/sources/`、`wiki/templates/` 会被索引，但在列表、搜索、图谱里隐藏——它们用于溯源，不是给人浏览的。
-- `raw/` 对 agent 只读：摄取作业往里写，agent 只引用、不修改。
-- 响应里的路径都是相对工作区（如 `wiki/产品与项目/llmwiki/页面.md`），汇报时照抄这个路径。
+- **写操作走 API**；所有变更直接写入 PostgreSQL 并自动记录 `change_sets` 与版本历史。
+- `archives/` 承载原始来源：agent 只引用、不修改。
+- 响应里的路径都是逻辑相对路径（如 `wiki/products/llmwiki/page.md`），汇报时照抄这个路径。
 
 ## 路由
 
@@ -102,7 +94,7 @@ PostgreSQL            页面、目录树、版本、搜索、图谱、lint — �
 4. **不编造。** 知识库没有依据就明说，改为摄取来源，不要靠猜填空；`draft` / `deprecated` / 已归档页不作为现行真理。
 5. **高风险先确认。** 删除、覆盖、批量修改前向用户复述目标并等待确认。
 6. **每批改动后跑 lint**；`GET /api/v1/lint` 还有你造成的 `severity: error` 时不许报成功。
-7. **不编辑 `wiki/index.md`、`.llmwiki/`、`raw/`。**
+7. **不直接修改派生状态**；所有变更通过文档/设置/档案 API 完成。
 8. **报证据不报动作**：列出改动的路径、lint 结果、执行过回滚就给出 change set id。
 
 ## 响应约定

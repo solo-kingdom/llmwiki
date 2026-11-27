@@ -1,5 +1,3 @@
-import { lintWorkspace } from "../engine/lint.js";
-import { LINT_CODE_DEAD_LINK } from "../engine/lint_types.js";
 import type { Store } from "../store/interfaces.js";
 import type { RelatedSubsetEntry, WikiPageBody, WikiRefInput } from "./types.js";
 
@@ -94,17 +92,7 @@ export class ContextResolver {
   }
 
   private async deadLinkTargets(): Promise<Set<string>> {
-    const out = new Set<string>();
-    if (!this.workspace.trim()) return out;
-    try {
-      const report = await lintWorkspace(this.workspace);
-      for (const issue of report.issues) {
-        if (issue.code === LINT_CODE_DEAD_LINK) out.add(issue.path);
-      }
-    } catch {
-      // lint failure should not block chat context resolution
-    }
-    return out;
+    return new Set<string>();
   }
 }
 

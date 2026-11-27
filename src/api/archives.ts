@@ -322,7 +322,6 @@ export function archivesApi(ctx: ApiContext) {
     },
 
     async ingestArchiveFile(c: Context): Promise<Response> {
-      if (!ctx.workspace.trim()) return writeError(c, 503, "workspace not configured for ingest");
       const id = getID(c);
       if (!id) return writeError(c, 400, "missing archive file id");
       const req = (await readJsonBody<{ source_ref?: string }>(c)) ?? {};

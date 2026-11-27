@@ -109,10 +109,10 @@ function pathFilterClause(pathFilter: string): string {
     const hidden = [...WIKI_HIDDEN_SUBDIRS]
       .map((subdir) => `d.relative_path LIKE 'wiki/${subdir}/%'`)
       .join(" OR ");
-    return `AND d.source_kind = 'wiki' AND d.relative_path NOT IN ('wiki/index.md', 'wiki/log.md') AND NOT (${hidden}) `;
+    return `AND d.source_kind = 'wiki' AND NOT (${hidden}) `;
   }
   if (pathFilter === "sources") return "AND d.source_kind != 'wiki' ";
-  return "AND d.relative_path NOT IN ('wiki/index.md', 'wiki/log.md') ";
+  return "";
 }
 
 function buildSearchFilterClause(

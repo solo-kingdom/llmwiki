@@ -1,8 +1,6 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { validateWikiWritePath } from "../engine/wiki_org.js";
 import { logger } from "../logger.js";
-import { mergeWikiPage } from "./merge.js";
+import { mergeWikiPageContent } from "./merge.js";
 import type { ApplyWikiBlocksOptions, ApplyWikiResult } from "./types.js";
 
 interface ScannedFileBlock {
@@ -106,11 +104,11 @@ export function normalizeWikiFileBlocks(blocks: Map<string, string>): {
   return { blocks: out, adjustments };
 }
 
-export async function applyWikiBlocks(
-  workspace: string,
+export async function applyWikiBlocksInMemory(
+  existingByPath: Map<string, string | null>,
   blocks: Map<string, string>,
   options: ApplyWikiBlocksOptions | null,
-): Promise<ApplyWikiResult> {
+): Promise<{ result: ApplyWikiResult; contents: Map<string, string> }> {
   const rawCount = blocks.size;
   const normalized = normalizeWikiFileBlocks(blocks);
   if (normalized.adjustments.length > 0) {
@@ -118,17 +116,14 @@ export async function applyWikiBlocks(
   }
 
   const result: ApplyWikiResult = { written: [], deleted: [] };
+  const contents = new Map<string, string>();
   let handled = 0;
   for (const [filePath, content] of normalized.blocks) {
-    const fullPath = path.join(workspace, filePath);
-
     if (content === "---DELETE---\n") {
-      try {
-        await rm(fullPath, { force: true });
+      if (existingByPath.get(filePath) != null) {
         result.deleted.push(filePath);
-      } catch (error) {
-        logger.warn({ path: filePath, error }, "ApplyWikiBlocks delete failed");
       }
+      handled += 1;
       continue;
     }
 
@@ -136,7 +131,8 @@ export async function applyWikiBlocks(
 
     let writeContent = content;
     if (options?.merge && !options.forceOverwrite) {
-      const merged = await mergeWikiPage(fullPath, content, options.merge, {
+      const oldContent = existingByPath.get(filePath) ?? null;
+      const merged = await mergeWikiPageContent(oldContent, content, options.merge, {
         unlockTypeAndTitle: options.unlockTypeAndTitle,
       });
       if (merged === null) {
@@ -146,8 +142,7 @@ export async function applyWikiBlocks(
       writeContent = merged;
     }
 
-    await mkdir(path.dirname(fullPath), { recursive: true });
-    await writeFile(fullPath, writeContent, "utf8");
+    contents.set(filePath, writeContent);
     result.written.push(filePath);
     handled += 1;
   }
@@ -160,23 +155,5 @@ export async function applyWikiBlocks(
   ) {
     throw new NoWikiFilesWrittenError();
   }
-  return result;
-}
-
-export async function readTextFile(filePath: string): Promise<string | null> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (error) {
-    if (isNotFound(error)) return null;
-    throw error;
-  }
-}
-
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "ENOENT"
-  );
+  return { result, contents };
 }

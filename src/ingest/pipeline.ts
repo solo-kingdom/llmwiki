@@ -14,7 +14,7 @@ import { folderPathFromWikiRelPath, isCanonicalSlugSegment } from "../engine/wik
 import { formatFolderTreeForPrompt } from "../mcp/diagnostic_tools.js";
 import { IngestCache } from "./cache.js";
 import { applyBlocksToStore } from "./dbapply.js";
-import { applyWikiBlocks, NoWikiFilesWrittenError, normalizeWikiFileBlocks, normalizeWikiFilePath, parseFileBlocks, parseFileBlocksWithContent } from "./fileblocks.js";
+import { NoWikiFilesWrittenError, normalizeWikiFileBlocks, normalizeWikiFilePath, parseFileBlocks, parseFileBlocksWithContent } from "./fileblocks.js";
 import { llmMessagesForRecord, recordLLMRequest, recordLLMResponse, traceRetries } from "./job_events.js";
 import { PageLockManager, withPageLocks } from "./lock.js";
 import { normalizeUpload } from "./normalize.js";
@@ -56,8 +56,10 @@ export class Pipeline {
   private toolLoopConfig: ToolLoopConfig | null = null;
   private docLang = "zh";
   private rulesSupplement = "";
+  private workspacePurpose = "";
+  private workspaceRules = "";
+  private stepAppends: Record<string, string> = {};
   private forceOverwrite = false;
-  private applyToDB: boolean;
   private targetDir = "";
   private changeSetKind = "";
   private changeSetJobId = "";
@@ -77,19 +79,13 @@ export class Pipeline {
   ) {
     this.db = db;
     this.llmClient = llmClient;
-    this.applyToDB = db !== null;
     this.cache = new IngestCache(workspace, db);
     this.lockMgr = lockManager ?? new PageLockManager();
   }
 
   setDb(db: Store | null): void {
     this.db = db;
-    this.applyToDB = db !== null;
     (this as unknown as { cache: IngestCache }).cache = new IngestCache(this.workspace, db);
-  }
-
-  setApplyToDB(value: boolean): void {
-    this.applyToDB = value;
   }
 
   lastChangeSetId(): string {
@@ -140,6 +136,13 @@ export class Pipeline {
     this.rulesSupplement = value;
   }
 
+  setWorkspaceRules(rules: { purpose?: string; rules?: string; stepAppends?: Record<string, string>; supplement?: string }): void {
+    if (rules.purpose !== undefined) this.workspacePurpose = rules.purpose;
+    if (rules.rules !== undefined) this.workspaceRules = rules.rules;
+    if (rules.stepAppends !== undefined) this.stepAppends = rules.stepAppends;
+    if (rules.supplement !== undefined) this.rulesSupplement = rules.supplement;
+  }
+
   setForceOverwrite(value: boolean): void {
     this.forceOverwrite = value;
   }
@@ -172,6 +175,9 @@ export class Pipeline {
       workspace: this.workspace,
       docLang: this.docLang,
       rulesSupplement: this.rulesSupplement,
+      workspacePurpose: this.workspacePurpose,
+      workspaceRules: this.workspaceRules,
+      stepAppends: this.stepAppends,
     };
   }
 
@@ -193,7 +199,12 @@ export class Pipeline {
       input_type: source.kind,
     });
 
-    const rulesHash = computeRulesHash(this.workspace, this.rulesSupplement);
+    const rulesHash = computeRulesHash({
+      purpose: this.workspacePurpose,
+      rules: this.workspaceRules,
+      stepAppends: this.stepAppends,
+      supplement: this.rulesSupplement,
+    });
     const cached = await this.cache.lookupForSource(source, legacyKeys, rulesHash);
     if (cached) {
       this.recorder?.record("cache", "hit", "cache hit", {
@@ -451,7 +462,7 @@ ${content}
 
     const actions = parsePlanActions(planJson);
     const movedSources = new Set<string>();
-    if (actions.length > 0 && this.applyToDB && this.db) {
+    if (actions.length > 0 && this.db) {
       for (const action of actions) {
         if (action.action !== "move" || !action.from_path || !action.to_path) continue;
         try {
@@ -500,11 +511,10 @@ ${content}
   }
 
   private async applyBlocks(blocks: Map<string, string>): Promise<ApplyWikiResult> {
-    if (!this.applyToDB || !this.db) {
-      return applyWikiBlocks(this.effectiveWorkspace(), blocks, this.applyOptions());
+    if (!this.db) {
+      throw new Error("database not configured");
     }
     const { result, changeSetId } = await applyBlocksToStore(this.effectiveWorkspace(), blocks, this.applyOptions(), {
-      applyToDB: this.applyToDB,
       db: this.db,
       changeSetKind: this.changeSetKind,
       changeSetJobId: this.changeSetJobId,

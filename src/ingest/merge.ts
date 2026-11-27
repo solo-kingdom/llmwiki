@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { Client } from "../llm/client.js";
 import { diffMergeBody } from "./diff_merge.js";
@@ -176,20 +175,13 @@ export async function mergeBodyLLM(
 }
 
 /** Returns null when the write should be skipped. */
-export async function mergeWikiPage(
-  fullPath: string,
+export async function mergeWikiPageContent(
+  oldContent: string | null,
   newContent: string,
   context: MergeContext,
   options: { unlockTypeAndTitle?: boolean } = {},
 ): Promise<string | null> {
-  let oldContent: string;
-  try {
-    oldContent = await readFile(fullPath, "utf8");
-  } catch (error) {
-    if (isNotFound(error)) return newContent;
-    throw error;
-  }
-
+  if (oldContent === null) return newContent;
   if (oldContent === newContent) return null;
 
   const oldPage = splitWikiPage(oldContent);
@@ -209,12 +201,3 @@ export async function mergeWikiPage(
 }
 
 export { splitWikiPage, joinWikiPage, MERGE_MIN_BODY_RATIO };
-
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "ENOENT"
-  );
-}

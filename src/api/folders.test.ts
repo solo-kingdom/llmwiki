@@ -235,7 +235,7 @@ describe("folders and tree API", () => {
   });
 
   it("rejects archiving and deleting system pages", async () => {
-    const systemDoc = { id: "doc-sys", relative_path: "wiki/index.md", source_kind: "wiki" };
+    const systemDoc = { id: "doc-sys", relative_path: "wiki/overview.md", source_kind: "wiki" };
     const app = makeApp(makeMockStore({ getDocument: vi.fn().mockResolvedValue(systemDoc) }));
     const archiveRes = await app.request("/api/v1/documents/doc-sys/archive", {
       method: "POST",

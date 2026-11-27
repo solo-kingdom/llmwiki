@@ -50,7 +50,6 @@ import {
   type LintReport,
   type LintStats,
 } from "./lint_types.js";
-import { validateLogMD } from "./log_validator.js";
 import {
   CONFIG_STRUCTURE_POLICY_MODE,
   LEGACY_TYPE_ROOTS,
@@ -485,10 +484,6 @@ export function lintPages(pages: LintPageInput[], options: LintOptions = {}): Li
     }
   }
 
-  if (options.logContent !== undefined) {
-    issues.push(...validateLogMD(options.logContent));
-  }
-
   const stats = computeStatsFromParsed(parsedPages, issues, options.sourceCount ?? rawSources.size);
   return {
     issues,
@@ -647,7 +642,6 @@ export async function lintDocuments(
   const rawSources = new Set<string>();
   const pages: LintPageInput[] = [];
   let sourceCount = 0;
-  let logContent: string | undefined;
 
   for (const doc of docs) {
     if (doc.source_kind !== "wiki") {
@@ -658,9 +652,6 @@ export async function lintDocuments(
     }
     const relPath = doc.relative_path;
     if (!relPath) continue;
-    if (relPath === "wiki/log.md") {
-      logContent = doc.content;
-    }
     const kind = classifyWikiPath(relPath);
     const referenceEntries =
       typeof store.listReferenceEntries === "function"
@@ -689,7 +680,6 @@ export async function lintDocuments(
     today: options.today,
     rawSources,
     workspaceRoot: options.workspace,
-    logContent,
     sourceCount,
     folders,
     structurePolicyMode: parseStructurePolicyMode(storedPolicyMode),
@@ -938,7 +928,7 @@ function isOrphanExcluded(relPath: string): boolean {
   const normalized = relPath.split(path.sep).join("/");
   if (isWikiSystemPath(normalized)) return true;
   if (isFolderOverviewPath(normalized)) return true;
-  if (["wiki/index.md", "wiki/log.md", "wiki/overview.md"].includes(normalized)) return true;
+  if (normalized === "wiki/overview.md") return true;
   if (normalized.startsWith("wiki/sources/")) {
     return !normalized.slice("wiki/sources/".length).includes("/");
   }
@@ -1097,33 +1087,6 @@ export function experienceShapeScore(content: string): number {
   );
   const signals = ["症状", "现象", "最短判别", "根因", "处理", "验证", "复发记录", "symptoms", "root cause", "verification"];
   return new Set(headings.filter((heading) => signals.some((signal) => heading.includes(signal)))).size;
-}
-
-export async function lintGhostIndexEntries(
-  workspace: string,
-  store: EngineStore,
-): Promise<LintIssue[]> {
-  const resolvedWorkspace = path.resolve(workspace);
-  const docs = await store.listAllDocuments();
-  const issues: LintIssue[] = [];
-  for (const doc of docs) {
-    const rel = docRelativePath(doc);
-    if (!rel) continue;
-    const fullPath = path.join(resolvedWorkspace, rel);
-    try {
-      await stat(fullPath);
-      continue;
-    } catch (error) {
-      if (!isNotFound(error)) throw error;
-    }
-    issues.push({
-      severity: LINT_SEVERITY_ERROR,
-      code: LINT_CODE_GHOST_INDEX_ENTRY,
-      path: rel,
-      message: "索引幽灵页：数据库中存在但文件已缺失，请运行 reindex 或删除整理残留",
-    });
-  }
-  return issues;
 }
 
 export function docRelativePath(doc: { path: string; filename: string }): string {

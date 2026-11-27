@@ -193,7 +193,6 @@ describe("Ingest auto-archiving & Wiki bidirectional links", () => {
       blocks,
       { force: true },
       {
-        applyToDB: true,
         db: store,
         changeSetKind: "ingest",
         changeSetJobId: j1.job.id,

@@ -1,17 +1,21 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { parse as parseYaml } from "yaml";
 import { templateGuidanceForGeneration } from "../engine/templates.js";
-import { logger } from "../logger.js";
-import type { PromptContext, PromptStep, RuleFilesPreview } from "./types.js";
+import type { PromptContext, PromptStep } from "./types.js";
 
 const MAX_WORKSPACE_RULE_FILE_LEN = 5000;
 const MAX_RULES_SUPPLEMENT_LEN = 2048;
-const MAX_RULE_PREVIEW_LEN = 500;
 
 export const MAX_RULES_SUPPLEMENT_LEN_EXPORT = MAX_RULES_SUPPLEMENT_LEN;
+export const CONFIG_WORKSPACE_PURPOSE = "workspace_purpose";
+export const CONFIG_WORKSPACE_RULES = "workspace_rules";
+export const CONFIG_PROMPTS_STEP_APPENDS = "prompts_step_appends";
+
+export interface WorkspaceRulesBundle {
+  purpose: string;
+  rules: string;
+  stepAppends: Record<string, string>;
+  supplement: string;
+}
 
 export function promptStepForMode(mode: string): PromptStep {
   if (mode === "qa") return "session_qa";
@@ -72,15 +76,16 @@ export function composeSystemPrompt(step: PromptStep, context: PromptContext): s
 
   if (step === "generation") parts.push(templateGuidanceForGeneration(context.docLang));
 
-  const purpose = readTruncatedWorkspaceFile(context.workspace, "purpose.md", MAX_WORKSPACE_RULE_FILE_LEN);
-  if (purpose) parts.push(`## 工作区研究目标 (purpose.md)\n\n${purpose}`);
-  else if (context.workspace) logger.warn({ workspace: context.workspace }, "purpose.md not found or empty");
+  const rawPurpose = (context.workspacePurpose ?? "").trim();
+  const purpose = rawPurpose ? truncateUtf8(rawPurpose, MAX_WORKSPACE_RULE_FILE_LEN) : "";
+  if (purpose) parts.push(`## 知识库研究目标\n\n${purpose}`);
 
-  const rules = readTruncatedWorkspaceFile(context.workspace, "rules.md", MAX_WORKSPACE_RULE_FILE_LEN);
-  if (rules) parts.push(`## 工作区规则 (rules.md)\n\n${rules}`);
+  const rawRules = (context.workspaceRules ?? "").trim();
+  const rules = rawRules ? truncateUtf8(rawRules, MAX_WORKSPACE_RULE_FILE_LEN) : "";
+  if (rules) parts.push(`## 知识库规则\n\n${rules}`);
 
-  const append = loadStepAppend(context.workspace, step);
-  if (append) parts.push(`## 步骤补充 (prompts.yaml)\n\n${append}`);
+  const append = (context.stepAppends?.[step] ?? "").trim();
+  if (append) parts.push(`## 步骤补充\n\n${append}`);
 
   const supplement = context.rulesSupplement.trim();
   if (supplement) {
@@ -96,7 +101,6 @@ export function composeSystemPrompt(step: PromptStep, context: PromptContext): s
 function lockedFormatInstruction(step: PromptStep): string {
   switch (step) {
     case "generation":
-    case "rollback":
       return `【格式契约 — 不可违反】
 - 输出 wiki 文件必须使用 FILE 块：---FILE: 相对路径
 （markdown 正文）
@@ -145,20 +149,18 @@ export function fidelityInstruction(docLang: string): string {
 function workflowPrinciplesInstruction(docLang: string): string {
   if (docLang === "en") {
     return `【LLM Wiki workflow principles】
-- The skills/ documents are the design blueprint; this prompt is the runtime implementation
-- Treat raw/ as immutable source material and wiki/ as the persistent knowledge product
-- Filesystem content is authoritative; SQLite/FTS is only a rebuildable index
+- PostgreSQL is the single source of truth for wiki pages, folders, revisions (change_sets), and archives
+- Keep raw sources in archives and wiki/ as the structured, persistent knowledge product
 - Search and read existing pages before planning updates; preserve old information when merging
-- Use source summaries, wikilinks, and page paths so claims remain traceable
-- Keep system pages (overview.md, index.md, log.md) conservative; log entries use ## [YYYY-MM-DD] action | description`;
+- Use wikilinks and structured references so claims remain traceable
+- Keep pyramid navigation pages (wiki/overview.md and folder _overview.md) accurate`;
   }
   return `【LLM Wiki 工作流原则】
-- skills/ 文档是提示词设计蓝本；当前 prompt 是运行时实现
-- raw/ 是不可变源材料层，wiki/ 是持久知识产物
-- 文件系统内容是真理源；SQLite/FTS 只是可重建索引
+- PostgreSQL 是 wiki 页面、目录、变更历史（change_sets）与原始档案（archives）的唯一真源
+- 原始来源由 archives 承载，wiki/ 是结构化持久知识产物
 - 规划更新前先搜索并读取已有页面；合并时保留旧信息
-- 使用源摘要、wikilink 与页面路径保证论断可追溯
-- 谨慎处理 overview.md、index.md、log.md 等系统页；日志条目使用 ## [YYYY-MM-DD] action | description`;
+- 使用 wikilink 与结构化引用保证论断可追溯
+- 审慎维护金字塔导航页（wiki/overview.md 与各组 _overview.md）`;
 }
 
 function defaultTaskInstruction(step: PromptStep, docLang: string): string {
@@ -264,7 +266,7 @@ function defaultTaskInstructionZH(step: PromptStep): string {
         "- 对 lint 报告中的 entity_concept_coupling 警告：将实体绑定型概念标题拆为中性概念页，并通过 wikilink 链接实体案例\n" +
         "- 若存在 ≥2 个共享相同触发信号或最短判别的活跃 pitfall，建议归纳为 kind: pattern 经验页；对 review_overdue 建议复审或通过归档（archive）隔离过时页面\n" +
         "- 优先处理影响最大的问题，给出优先级排序\n" +
-        "- 不要建议删除 overview.md、index.md、log.md；合并/移动前必须保留所有独特信息并考虑链接更新\n" +
+        "- 不要建议删除 overview.md 或各组 _overview.md；合并/移动前必须保留所有独特信息并考虑链接更新\n" +
         "- 用户满意后会点击「归档」将重组方案写入 wiki"
       );
     case "merge_body":
@@ -272,9 +274,6 @@ function defaultTaskInstructionZH(step: PromptStep): string {
 - 仅输出完整 markdown 正文（不含 frontmatter）
 - 合并结果不得明显短于旧正文（目标不低于旧内容约 70%）
 - 对冲突事实保留双方说法和来源，不要静默覆盖`;
-    case "rollback":
-      return `你是 wiki 回滚助手。根据 diff、原始摄入源与当前文件内容，生成回滚后的 wiki 文件（FILE 块）。
-- 移除该次摄入新增的内容，恢复被修改或删除的内容`;
     default:
       return "";
   }
@@ -346,41 +345,13 @@ You can use search, read, and references to find existing wiki pages. Keep tool 
         "- Provide actionable reorganization plans (move/merge/split/add tags/add links)\n" +
         "- For entity_concept_coupling lint warnings: split entity-bound concept titles into neutral concepts and link entity cases via wikilinks\n" +
         "- Prioritize issues by impact and provide a priority ranking\n" +
-        "- Do not propose deleting overview.md, index.md, or log.md; preserve all unique information when merging/moving pages and consider link updates\n" +
+        "- Do not propose deleting overview.md or folder _overview.md; preserve all unique information when merging/moving pages and consider link updates\n" +
         `- The user will click "Archive" when satisfied to write the reorganization plan to the wiki`
       );
     case "merge_body":
       return `Merge old and new wiki body text; preserve important old content; output markdown body only without frontmatter. Preserve conflicting claims with their sources instead of silently overwriting them.`;
-    case "rollback":
-      return `Restore wiki files after rolling back an ingest using the diff, source content, and current files. Output FILE blocks.`;
     default:
       return "";
-  }
-}
-
-function readTruncatedWorkspaceFile(workspace: string, rel: string, maxLen: number): string {
-  if (!workspace) return "";
-  try {
-    const data = readFileSync(path.join(workspace, rel), "utf8");
-    const value = data.trim();
-    return value ? truncateUtf8(value, maxLen) : "";
-  } catch {
-    return "";
-  }
-}
-
-interface PromptsYaml {
-  steps?: Record<string, { append?: string; replace?: string }>;
-}
-
-function loadStepAppend(workspace: string, step: PromptStep): string {
-  if (!workspace) return "";
-  try {
-    const raw = readFileSync(path.join(workspace, ".llmwiki", "prompts.yaml"), "utf8");
-    const config = parseYaml(raw) as PromptsYaml | null;
-    return config?.steps?.[step]?.append?.trim() ?? "";
-  } catch {
-    return "";
   }
 }
 
@@ -400,73 +371,63 @@ export async function resolveRulesSupplement(db: { getConfig(key: string): Promi
   }
 }
 
+export async function loadWorkspaceRules(
+  db: { getConfig(key: string): Promise<string> } | null,
+): Promise<WorkspaceRulesBundle> {
+  if (!db) return { purpose: "", rules: "", stepAppends: {}, supplement: "" };
+  const [purpose, rules, rawStepAppends, supplement] = await Promise.all([
+    db.getConfig(CONFIG_WORKSPACE_PURPOSE).catch(() => ""),
+    db.getConfig(CONFIG_WORKSPACE_RULES).catch(() => ""),
+    db.getConfig(CONFIG_PROMPTS_STEP_APPENDS).catch(() => ""),
+    resolveRulesSupplement(db),
+  ]);
+  let stepAppends: Record<string, string> = {};
+  if (rawStepAppends.trim()) {
+    try {
+      const parsed = JSON.parse(rawStepAppends) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        for (const [k, v] of Object.entries(parsed)) {
+          if (typeof v === "string" && v.trim()) stepAppends[k] = v;
+        }
+      }
+    } catch {
+      stepAppends = {};
+    }
+  }
+  return {
+    purpose: purpose.trim(),
+    rules: rules.trim(),
+    stepAppends,
+    supplement,
+  };
+}
+
 export function validateRulesSupplement(value: string): void {
   if ([...value].length > MAX_RULES_SUPPLEMENT_LEN) {
     throw new Error(`rules_supplement exceeds maximum length of ${MAX_RULES_SUPPLEMENT_LEN} characters`);
   }
 }
 
-export function computeRulesHash(workspace: string, supplement: string): string {
+export function computeRulesHash(input: Partial<WorkspaceRulesBundle> | string, legacySupplement = ""): string {
+  const bundle: WorkspaceRulesBundle =
+    typeof input === "string"
+      ? { purpose: "", rules: "", stepAppends: {}, supplement: legacySupplement }
+      : {
+          purpose: input.purpose ?? "",
+          rules: input.rules ?? "",
+          stepAppends: input.stepAppends ?? {},
+          supplement: input.supplement ?? "",
+        };
   const hash = createHash("sha256");
-  const writeFileHash = (rel: string) => {
-    try {
-      const data = readFileSync(path.join(workspace, rel));
-      hash.update(rel);
-      hash.update(data);
-    } catch {
-      // missing files are simply not part of the hash
-    }
-  };
-  if (workspace) {
-    writeFileHash("purpose.md");
-    writeFileHash("rules.md");
-    try {
-      const data = readFileSync(path.join(workspace, ".llmwiki", "prompts.yaml"));
-      hash.update(".llmwiki/prompts.yaml");
-      hash.update(data);
-    } catch {
-      // no prompts.yaml
-    }
-  }
+  hash.update("purpose:");
+  hash.update(bundle.purpose);
+  hash.update("rules:");
+  hash.update(bundle.rules);
+  hash.update("stepAppends:");
+  hash.update(JSON.stringify(Object.entries(bundle.stepAppends).sort(([a], [b]) => a.localeCompare(b))));
   hash.update("supplement:");
-  hash.update(supplement);
+  hash.update(bundle.supplement);
   return hash.digest("hex");
-}
-
-export async function loadRuleFilesPreview(workspace: string): Promise<RuleFilesPreview> {
-  if (!workspace) return { purpose_preview: "", rules_preview: "" };
-  const out: RuleFilesPreview = { purpose_preview: "", rules_preview: "" };
-  for (const [rel, key, mtimeKey] of [
-    ["purpose.md", "purpose_preview", "purpose_mtime"],
-    ["rules.md", "rules_preview", "rules_mtime"],
-  ] as const) {
-    try {
-      const info = await stat(path.join(workspace, rel));
-      const data = await readFile(path.join(workspace, rel), "utf8");
-      (out as unknown as Record<string, unknown>)[mtimeKey] = Math.floor(info.mtimeMs / 1000);
-      (out as unknown as Record<string, unknown>)[key] = truncateUtf8(data.trim(), MAX_RULE_PREVIEW_LEN);
-    } catch {
-      // ignore missing files
-    }
-  }
-  return out;
-}
-
-export async function writeWorkspaceScaffoldsIfMissing(workspace: string): Promise<void> {
-  if (!workspace) return;
-  await mkdir(path.join(workspace, ".llmwiki"), { recursive: true });
-  const files: Record<string, string> = {
-    "rules.md": RULES_SCAFFOLD_MD,
-    ".llmwiki/prompts.yaml": DEFAULT_PROMPTS_YAML_EXAMPLE,
-  };
-  for (const [rel, content] of Object.entries(files)) {
-    const full = path.join(workspace, rel);
-    try {
-      await stat(full);
-    } catch {
-      await writeFile(full, content, "utf8");
-    }
-  }
 }
 
 export function languageInstructionForPipeline(lang: string): string {

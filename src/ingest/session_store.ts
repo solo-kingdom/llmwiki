@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { slugWithFallback } from "./normalize.js";
@@ -23,33 +21,6 @@ export function sessionDir(sessionId: string): string {
 
 export function sessionAttachmentsDir(sessionId: string): string {
   return path.posix.join(sessionDir(sessionId), "attachments");
-}
-
-export async function removeSessionDir(workspace: string, sessionId: string): Promise<void> {
-  if (!workspace.trim() || !sessionId.trim()) return;
-  await rm(path.join(workspace, sessionDir(sessionId)), { recursive: true, force: true });
-}
-
-export async function ensureSessionDirs(workspace: string, sessionId: string): Promise<string> {
-  if (!workspace.trim()) throw new Error("workspace not configured");
-  if (!sessionId.trim()) throw new Error("session id required");
-  const rel = sessionDir(sessionId);
-  await mkdir(path.join(workspace, rel, "attachments"), { recursive: true });
-  return rel;
-}
-
-export async function writeSessionAttachment(
-  workspace: string,
-  sessionId: string,
-  filename: string,
-  data: Uint8Array,
-): Promise<{ attachmentId: string; relPath: string }> {
-  await ensureSessionDirs(workspace, sessionId);
-  let base = path.basename(filename.trim());
-  if (!base || base === ".") base = `file-${randomUUID()}`;
-  const relPath = path.posix.join(sessionAttachmentsDir(sessionId), base);
-  await writeFile(path.join(workspace, relPath), data);
-  return { attachmentId: base, relPath };
 }
 
 export function buildSessionArchiveMarkdown(

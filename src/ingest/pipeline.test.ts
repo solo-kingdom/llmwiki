@@ -54,10 +54,23 @@ const plan = JSON.stringify({
 });
 const file = `---FILE: ${pagePath}\n---\ntitle: Provider协议错配导致401\ntype: experience\n---\n# Provider协议错配导致401\n\n## 经验结论\n检查协议。\n---END FILE---\n`;
 
+function mockStore(): Store {
+  return {
+    getConfig: async () => "",
+    listFolders: async () => [],
+    listDocumentsFiltered: async () => [],
+    getDocumentByRelativePath: async () => null,
+    applyChangeSet: vi.fn().mockResolvedValue(undefined),
+    replaceReferenceEntriesInTx: vi.fn().mockResolvedValue(undefined),
+    listReferenceEntries: vi.fn().mockResolvedValue([]),
+    replaceReferencesInTx: vi.fn().mockResolvedValue(undefined),
+  } as unknown as Store;
+}
+
 describe("Pipeline page plan gate", () => {
   it("does not call generation or write files when analysis is empty", async () => {
     let generated = false;
-    const pipeline = new Pipeline(await workspace(), null, client("", file, () => { generated = true; }));
+    const pipeline = new Pipeline("", mockStore(), client("", file, () => { generated = true; }));
     pipeline.setToolLoopConfig({ maxRounds: 0, maxToolCallsPerRound: 0 });
 
     await expect(pipeline.ingestNormalized(source)).rejects.toThrow("analysis is empty");
@@ -65,7 +78,7 @@ describe("Pipeline page plan gate", () => {
   });
 
   it("generates only from a valid analysis page plan", async () => {
-    const pipeline = new Pipeline(await workspace(), null, client(plan, file));
+    const pipeline = new Pipeline("", mockStore(), client(plan, file));
     pipeline.setToolLoopConfig({ maxRounds: 0, maxToolCallsPerRound: 0 });
 
     await expect(pipeline.ingestNormalized(source)).resolves.toEqual([pagePath]);
@@ -136,7 +149,7 @@ describe("Pipeline page plan gate", () => {
         yield { type: "done" };
       },
     } as unknown as Client;
-    const pipeline = new Pipeline(await workspace(), null, customClient);
+    const pipeline = new Pipeline("", mockStore(), customClient);
     pipeline.setToolLoopConfig({ maxRounds: 0, maxToolCallsPerRound: 0 });
 
     const result = await pipeline.applyFromPlan(source, plan);

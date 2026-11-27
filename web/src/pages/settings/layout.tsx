@@ -12,7 +12,7 @@ export const SETTINGS_SECTIONS: SectionNavItem[] = [
   { label: "存储", to: "/settings/storage", icon: <HardDriveIcon className="llmwiki-tone-teal" /> },
   { label: "访问控制", to: "/settings/access", icon: <KeyRoundIcon className="llmwiki-tone-amber" /> },
   { label: "外部集成", to: "/settings/integrations", icon: <PlugIcon className="llmwiki-tone-violet" /> },
-  { label: "规则文件", to: "/settings/rules", icon: <ScrollTextIcon className="llmwiki-tone-emerald" /> },
+  { label: "知识库规则", to: "/settings/rules", icon: <ScrollTextIcon className="llmwiki-tone-emerald" /> },
 ]
 
 export function SettingsLayout() {

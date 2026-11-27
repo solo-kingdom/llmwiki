@@ -1,6 +1,6 @@
 ---
 name: llmwiki-organize
-description: Create, edit, merge, move and delete llmwiki pages over HTTP — enforce frontmatter and directory contract, keep wiki/log.md current, and leave the vault lintable. Use when the user asks to add or rewrite a wiki page, clean up duplicates, reorganize structure, or fix page metadata.
+description: Create, edit, merge, move and delete llmwiki pages over HTTP — enforce frontmatter and directory contract, and leave the vault lintable. Use when the user asks to add or rewrite a wiki page, clean up duplicates, reorganize structure, or fix page metadata.
 license: MIT
 metadata:
   author: llmwiki
@@ -35,7 +35,7 @@ Frontmatter on every wiki page — a missing `title`, `date` or `type` is a lint
 title: 注意力机制
 type: concept
 date: 2025-01-31
-description: 一句话摘要，会进入 wiki/index.md
+description: 一句话摘要
 tags: [transformer, nlp]
 ---
 ```
@@ -44,7 +44,7 @@ Rules the linter enforces:
 
 - `type` must be valid (`entity`, `concept`, `source`, `synthesis`, `comparison`, `query`, `experience`, `ledger`, `page`). Only `wiki/sources/` requires `type: source`; business pages can live in any nested topic folder under `wiki/`.
 - `experience` requires `status` (`draft`/`validated`/`deprecated`) and supports `kind` (`practice`/`pitfall`/`pattern`) and `symptoms`; `ledger` requires `status`; `confidence: high` requires `last_verified`, and `validated` experience requires `last_verified` and `review_after`.
-- Business pages live inside topic subfolders (e.g. `wiki/AI-Engineering/Agent/harness.md`). `wiki/foo.md` is `misplaced_wiki_page`; only `wiki/overview.md`, `wiki/index.md` and `wiki/log.md` may sit at the top level.
+- Business pages live inside topic subfolders (e.g. `wiki/AI-Engineering/Agent/harness.md`). `wiki/foo.md` is `misplaced_wiki_page`; only `wiki/overview.md` may sit at the top level.
 - Links use Obsidian syntax: `[[AI-Engineering/Agent/harness|Harness]]`, `[[entities/transformer|Transformer]]`, or bare `[[attention]]` when the slug is unique. Markdown links `[text](/wiki/concepts/attention.md)` work too. A link to a missing page is `dead_link`.
 - One page, one subject. If a page grows two subjects, split it and link the halves.
 
@@ -113,25 +113,12 @@ curl -fsS "${AUTH[@]}" -X DELETE "$LLMWIKI_URL/api/v1/documents/{id}"
 # {"status":"deleted","path":"wiki/concepts/old.md"}
 ```
 
-Delete removes the file **and** the index row, so reindex will not resurrect it. Before deleting, check `backlinks`; afterwards reindex and check lint. `POST /documents/bulk-delete {"ids":[…]}` does the same for many pages.
-
-## Journal (`wiki/log.md`)
-
-Append-only, newest entry on top or bottom consistently with the file you read — match what is already there:
-
-```bash
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents/{log_id}/content"
-# read, prepend: ## [2025-01-31] create | concepts/attention-mechanism | 新增注意力机制概念页
-curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/documents/{log_id}/content" \
-  -H 'Content-Type: application/json' -d '{"content": "<old body + new entry>"}'
-```
-
-Format is fixed: `## [YYYY-MM-DD] <action> | <description>`. Actions in use: `create`, `update`, `merge`, `move`, `delete`, `ingest`. Do not reorder or rewrite older entries.
+Delete removes the document from PostgreSQL (recorded in `change_sets`). Before deleting, check `backlinks`; afterwards reindex and check lint. `POST /documents/bulk-delete {"ids":[…]}` does the same for many pages.
 
 ## Close the loop
 
 ```bash
-curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"     # regenerates wiki/index.md + graph
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"     # rebuilds chunks, graph + folder overviews
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/lint"                # must have no error-severity issue you caused
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/history?limit=1"  # change set id for the write you just made
 ```
@@ -140,7 +127,7 @@ Report the changed paths, the lint summary, and the change set id if you rolled 
 
 ## Never
 
-- Edit `wiki/index.md` (generated), `.llmwiki/` (derived), or anything under `raw/`.
+- Edit derived system state directly outside the document API.
 - Create pages at `wiki/` root, in singular dirs (`entity/`, `concept/`) or in `wiki/raw/`.
 - Write a page whose body contradicts its frontmatter (`type`, `date`).
 - Leave a batch of edits unlinted or unreindexed.

@@ -395,8 +395,6 @@ export interface Settings {
   temperature: number
   chunk_size: number
   chunk_overlap: number
-  auto_reindex: boolean
-  watch_sources: boolean
   activity_logs_max_count?: number
   ingest_job_events_max_count?: number
   session_message_events_max_count?: number
@@ -554,10 +552,10 @@ export interface CreatedApiKey extends ApiKey {
 }
 
 export interface WorkspaceRuleFilesPreview {
+  purpose?: string
+  rules?: string
   purpose_preview: string
   rules_preview: string
-  purpose_mtime?: number
-  rules_mtime?: number
 }
 
 export interface ActivityLog {

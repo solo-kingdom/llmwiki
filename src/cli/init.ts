@@ -1,15 +1,10 @@
+import { readFile } from "node:fs/promises";
 import path from "node:path";
-import {
-  ensureWorkspaceStructure,
-  SEED_TOPIC_FOLDERS,
-  writeWorkspaceScaffoldsIfMissing,
-} from "../engine/scaffold.js";
+import { SEED_TOPIC_FOLDERS } from "../engine/scaffold.js";
 import { engineStoreFromStore } from "../engine/adapter.js";
 import { Reindexer } from "../engine/reindex.js";
-import { writeWorkspaceScaffoldsIfMissing as writeIngestScaffolds } from "../ingest/prompts.js";
-import { importSettings } from "../workspace/settings.js";
-import { resolveWorkspaceDir as resolveCliWorkspace } from "./workspace.js";
-import { openCliStore } from "./workspace.js";
+import { CONFIG_WORKSPACE_PURPOSE, CONFIG_WORKSPACE_RULES } from "../ingest/prompts.js";
+import { openCliStore, resolveWorkspaceDir as resolveCliWorkspace } from "./workspace.js";
 
 export async function runInit(dir: string | undefined, name: string | undefined, databaseUrl?: string): Promise<void> {
   const store = await openCliStore(databaseUrl);
@@ -40,11 +35,19 @@ export async function runInit(dir: string | undefined, name: string | undefined,
     }
 
     const workspace = resolveCliWorkspace(dir);
-    await ensureWorkspaceStructure(workspace);
-    const initDate = new Date().toISOString().slice(0, 10);
-    await writeWorkspaceScaffoldsIfMissing(workspace, initDate);
-    await writeIngestScaffolds(workspace);
-    await importSettings(store, workspace);
+    for (const [filename, configKey] of [
+      ["purpose.md", CONFIG_WORKSPACE_PURPOSE],
+      ["rules.md", CONFIG_WORKSPACE_RULES],
+    ] as const) {
+      const existing = (await store.getConfig(configKey).catch(() => "")).trim();
+      if (existing) continue;
+      try {
+        const raw = (await readFile(path.join(workspace, filename), "utf8")).trim();
+        if (raw) await store.setConfig(configKey, raw);
+      } catch {
+        // ignore missing local rule files during one-way import
+      }
+    }
 
     const reindexer = new Reindexer(engineStoreFromStore(store), workspace);
     const count = await reindexer.rebuild("default");

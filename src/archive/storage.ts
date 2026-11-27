@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import {
@@ -238,7 +239,10 @@ export function parseArchiveInlineMaxBytes(raw: string): number {
 }
 
 export function defaultArchiveLocalDir(workspace: string): string {
-  return workspace.trim() ? path.join(workspace, ".archive-blobs") : "";
+  if (workspace.trim()) return path.join(workspace, ".archive-blobs");
+  const dataDir = (process.env.LLMWIKI_DATA_DIR ?? "").trim();
+  if (dataDir) return path.join(dataDir, "archive-blobs");
+  return path.join(os.homedir(), ".llmwiki", "archive-blobs");
 }
 
 export function parseArchiveStorageConfig(

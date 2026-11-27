@@ -40,7 +40,7 @@ Read the workspace payload before anything else:
 curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"
 ```
 
-Response: `{"indexed": <n>, "status": "ok"}`. It is synchronous, and the server kills any non-streaming request after 60s — on a large vault a timeout does not necessarily mean the run failed. Check `GET /api/v1/workspace` counts and `GET /api/v1/lint` before retrying. Reindex walks the vault, re-reads frontmatter and links, prunes rows whose files disappeared, and regenerates `wiki/index.md`. Run it after changes made outside the write API and after restoring files.
+Response: `{"indexed": <n>, "status": "ok"}`. It is synchronous, and the server kills any non-streaming request after 60s — on a large vault a timeout does not necessarily mean the run failed. Check `GET /api/v1/workspace` counts and `GET /api/v1/lint` before retrying. Reindex rebuilds chunks, references, and folder `_overview.md` pages from PostgreSQL documents.
 
 ## 3. Configure the model used by ingest and sessions
 
@@ -59,7 +59,7 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
   -d '{"job_instance_id":"<instance_id>","job_model":"<model id>"}'
 ```
 
-`PUT /api/v1/settings` is a partial update: send only the keys you change. Accepted keys include `job_instance_id`, `job_model`, `job_parallel_enabled`, `job_max_concurrent`, `temperature`, `max_tokens`, `chunk_size`, `chunk_overlap`, `auto_reindex`, `watch_sources`, `doc_language` (`zh`/`en`), `ui_language`, `rules_supplement`, `embedding_instance_id`, `embedding_model`, `embedding_dim`, `default_agent_kind`, `default_acp_agent_id`. Unknown keys are ignored — verify by re-reading settings.
+`PUT /api/v1/settings` is a partial update: send only the keys you change. Accepted keys include `job_instance_id`, `job_model`, `job_parallel_enabled`, `job_max_concurrent`, `temperature`, `max_tokens`, `chunk_size`, `chunk_overlap`, `doc_language` (`zh`/`en`), `ui_language`, `rules_supplement`, `embedding_instance_id`, `embedding_model`, `embedding_dim`, `default_agent_kind`, `default_acp_agent_id`. Unknown keys are ignored — verify by re-reading settings.
 
 `GET` on provider instances returns `api_key_masked` only, never the key. `PUT /api/v1/provider-instances/{id}` replaces fields, including the key.
 

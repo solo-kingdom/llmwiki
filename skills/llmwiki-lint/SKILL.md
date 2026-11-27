@@ -36,13 +36,10 @@ Severities: `error` (breaks navigation, indexing or the page contract), `warning
 | `missing_frontmatter` | error | `title`, `date` or `type` absent in a typed page | `PUT /documents/{id}/content` with a complete frontmatter block |
 | `type_dir_mismatch` | error | `type` disagrees with the directory | decide which is right; usually move the page into the correct dir (create + delete), otherwise fix `type` |
 | `dead_link` | error | `[[target]]` resolves to nothing | create the target page, or repoint the link to the page that exists |
-| `ghost_index_entry` | error | SQLite has a row whose file no longer exists | `POST /api/v1/reindex` prunes it; if it survives, delete the document row via `DELETE /documents/{id}` |
-| `misplaced_wiki_page` | warning | business page sits at `wiki/*.md` | move it into its typed subdir; only `overview.md`, `index.md`, `log.md` belong at the wiki root |
-| `orphan_page` | warning | no other wiki page links here | link it from a related page; `index.md` is generated, so editing it does nothing |
+| `misplaced_wiki_page` | warning | business page sits at `wiki/*.md` | move it into a topic folder; only `wiki/overview.md` belongs at the wiki root |
+| `orphan_page` | warning | no other active wiki page links here | link it from a related page or folder `_overview.md` |
 | `duplicate_page` | warning | two pages in one dir share a normalized filename | merge into one, repoint inbound links, delete the loser |
 | `entity_concept_coupling` | warning | a concept page's title is bound to one entity | rename/generalize the concept and link the entity case as `[[entities/…]]` |
-| `log_format_invalid` | error | `wiki/log.md` entry breaks `## [YYYY-MM-DD] action \| description` | rewrite that one entry; never reorder the log |
-| `log_date_decreasing` | warning | log entries out of chronological order | reorder entries, keep every one |
 | `confidence_invalid` / `confidence_missing` | error / warning | invalid or missing `confidence` on active page | set `high`/`medium`/`low` |
 | `verification_missing` | error | `high` missing `last_verified` or `validated` experience missing dates | add `last_verified` / `review_after` |
 | `date_invalid` | error | non-ISO or invalid calendar date | fix to `YYYY-MM-DD` |
@@ -52,7 +49,7 @@ Severities: `error` (breaks navigation, indexing or the page contract), `warning
 | `symptoms_missing` / `pattern_instances_insufficient` | warning | `pitfall`/`pattern` missing `symptoms`, or `pattern` has `< 2` active pitfalls | add `symptoms` or link instances |
 | `review_overdue` / `archived_reference` | warning | past `review_after` / active page links to archived page | re-verify or update link |
 
-`wiki/templates/` is scaffolding and is skipped by every check — a freshly initialised vault lints clean. If it does not, the vault itself is broken.
+A freshly initialized PostgreSQL workspace lints clean.
 
 Frontmatter is not validated beyond presence and directory agreement: an odd `date` value passes lint but displays wrong, so check dates when you touch a page anyway.
 
@@ -73,7 +70,7 @@ Give: issues by severity before → after, the files changed, anything deliberat
 
 ## Never
 
-- Edit `wiki/index.md`, `.llmwiki/`, or `raw/` to silence a finding.
+- Edit derived state directly to silence a finding.
 - Delete a page with inbound links before repointing them.
 - Mass-delete "orphans" — an orphan is often a page that simply needs one link, and deleting user knowledge to make a number go down is not a fix.
 - Claim a clean vault without a post-fix `GET /lint`.

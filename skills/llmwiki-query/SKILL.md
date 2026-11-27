@@ -22,7 +22,7 @@ curl -fsS -G "${AUTH[@]}" "$LLMWIKI_URL/api/v1/search" \
 ```
 
 - `q` is required; an empty `q` returns `400`.
-- `filter=wiki` (default) searches wiki pages only and skips hidden dirs (`wiki/sources/`, `wiki/templates/`).
+- `filter=wiki` (default) searches wiki pages only and skips hidden dirs (`wiki/sources/`).
 - `filter=sources` searches source material (`raw/…`, ingested originals).
 - `filter` with any other value searches everything.
 - `types` is repeatable (`types=concept&types=entity&types=experience`) and narrows by page type; also supports `kinds` (`practice|pitfall|pattern`), `statuses` (`draft|validated|deprecated`), `confidences` (`high|medium|low`), `archived` (`exclude|include|only`, default `exclude`), and `review_overdue=true`.

@@ -12,8 +12,8 @@ describe("indexEntriesFromDocuments", () => {
         source_kind: "wiki",
       },
       {
-        relative_path: "wiki/index.md",
-        title: "内容目录",
+        relative_path: "wiki/overview.md",
+        title: "全局总览",
         date: "2026-11-25",
         content: "",
         source_kind: "wiki",

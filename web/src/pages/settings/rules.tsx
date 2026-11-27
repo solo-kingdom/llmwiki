@@ -12,8 +12,8 @@ function RuleFiles() {
   const ruleFiles = useQuery({ queryKey: ["rule-files"], queryFn: getWorkspaceRuleFiles })
   const [draft, setDraft] = React.useState<{ purpose: string; rules: string } | null>(null)
   const [open, setOpen] = React.useState(false)
-  const purpose = draft?.purpose ?? ruleFiles.data?.purpose_preview ?? ""
-  const rules = draft?.rules ?? ruleFiles.data?.rules_preview ?? ""
+  const purpose = draft?.purpose ?? ruleFiles.data?.purpose ?? ruleFiles.data?.purpose_preview ?? ""
+  const rules = draft?.rules ?? ruleFiles.data?.rules ?? ruleFiles.data?.rules_preview ?? ""
 
   const save = useMutation({
     mutationFn: () => updateWorkspaceRuleFiles({
@@ -21,7 +21,7 @@ function RuleFiles() {
       ...(rules.trim() !== "" ? { rules } : {}),
     }),
     onSuccess: async () => {
-      notify.success("规则文件已保存")
+      notify.success("知识库规则已保存")
       setOpen(false)
       setDraft(null)
       await ruleFiles.refetch()
@@ -31,18 +31,18 @@ function RuleFiles() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>编辑规则文件</Button>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>编辑知识库规则</Button>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>工作区规则文件</DialogTitle>
-          <DialogDescription>purpose.md 与 rules.md 会参与摄入和整理提示词。</DialogDescription>
+          <DialogTitle>知识库规则</DialogTitle>
+          <DialogDescription>研究目标与全局规则保存在 PostgreSQL 中，参与摄入、对话和整理提示词。</DialogDescription>
         </DialogHeader>
         {ruleFiles.isError ? <ErrorState error={ruleFiles.error} onRetry={() => void ruleFiles.refetch()} /> : null}
         {ruleFiles.isLoading ? <RowsSkeleton rows={3} /> : null}
         <Stack gap="md">
-          <div className="text-sm font-medium">purpose.md</div>
+          <div className="text-sm font-medium">研究目标（Purpose）</div>
           <Textarea className="min-h-32 font-mono text-xs break-words field-sizing-fixed" value={purpose} onChange={(event) => setDraft({ purpose: event.target.value, rules })} />
-          <div className="text-sm font-medium">rules.md</div>
+          <div className="text-sm font-medium">全局规则（Rules）</div>
           <Textarea className="min-h-32 font-mono text-xs break-words field-sizing-fixed" value={rules} onChange={(event) => setDraft({ purpose, rules: event.target.value })} />
         </Stack>
         <DialogFooter>
@@ -56,7 +56,7 @@ function RuleFiles() {
 
 export function RulesSection() {
   return (
-    <Section size="lg" gap="lg" title="规则文件" description="purpose.md 与 rules.md 参与摄入与整理提示词。">
+    <Section size="lg" gap="lg" title="知识库规则" description="研究目标与全局规则保存在数据库中，参与摄入与整理提示词。">
       <RuleFiles />
     </Section>
   )

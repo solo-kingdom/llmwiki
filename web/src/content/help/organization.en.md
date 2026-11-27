@@ -1,24 +1,15 @@
 ## Wiki Organization
 
-Business pages live in **typed directories**:
+Knowledge pages are organized into **topic domain → topic group → page** using lowercase kebab-case slug paths, while frontmatter `type` (`entity` / `concept` / `synthesis` / `comparison` / `query` / `experience` / `ledger`) describes page role.
 
-| Type | Directory | Purpose |
-|------|-----------|---------|
-| entity | `wiki/entities/` | People, orgs, products |
-| concept | `wiki/concepts/` | Terms and ideas |
-| source | `wiki/sources/` | Source summaries |
-| synthesis | `wiki/synthesis/` | Cross-source synthesis |
-| comparison | `wiki/comparisons/` | Comparisons |
-| query | `wiki/queries/` | Archived Q&A |
-
-Reserved top-level pages: `wiki/overview.md`, `wiki/index.md`, `wiki/log.md`. Templates under `wiki/templates/` guide generation and are not business content.
+Navigation pages: `wiki/overview.md` (global overview) and per-folder `_overview.md`. Change history is tracked automatically in PostgreSQL `change_sets` and `activity_logs`.
 
 ### Invalid layouts (anti-patterns)
 
-Not canonical: `wiki/purpose.md`, `wiki/rules.md` (belong at workspace root), `wiki/raw/`, singular `wiki/entity/`, or fictitious `wiki/skills/`. Directory trees with emoji prefixes or `root/` wrappers are usually LLM-fabricated, not real `structure()` output.
+Not canonical: `wiki/purpose.md`, `wiki/rules.md`, `wiki/raw/`, `wiki/skills/`, or top-level business pages under `wiki/*.md`.
 
 ### structure() tool output
 
-In Organize mode, call `structure()` first. Authentic output starts with `# Wiki 目录结构` / workspace path lines and `├── entities/ (N pages)` entries. See `docs/workspace-layout.md` for format examples. **Quote the tool result; do not invent example trees.**
+In Organize mode, call `structure()` first to inspect the live PostgreSQL folder tree. **Quote the tool result; do not invent example trees.**
 
-Updating an existing page **merges** by default. After a successful wiki apply, `wiki/index.md` is rebuilt automatically; organize move/merge actions append a structure entry to `wiki/log.md`.
+Updating an existing page **merges** by default (locked frontmatter fields, unioned arrays, LLM body merge). Every write is recorded in `change_sets` and `page_revisions`.

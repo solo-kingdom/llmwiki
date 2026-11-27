@@ -1,15 +1,11 @@
-import { readdir, stat } from "node:fs/promises";
-import path from "node:path";
 import type { Context } from "hono";
-import { loadRuleFilesPreview } from "../ingest/prompts.js";
 import { PAGE_TYPE_TO_WIKI_SUBDIR, WIKI_SYSTEM_SUBDIRS, isWikiSystemPath, wikiPageType } from "../engine/wiki_org.js";
+import { CONFIG_WORKSPACE_PURPOSE, CONFIG_WORKSPACE_RULES } from "../ingest/prompts.js";
 import { todayIsoDate } from "../store/postgres/doc_meta.js";
 import type { Document } from "../store/types.js";
 import {
-  indexDocumentRelPath,
   readJsonBody,
   writeError,
-  writeFileFirst,
   writeJson,
   type ApiContext,
 } from "./context.js";
@@ -52,58 +48,12 @@ interface WorkspaceOverview {
   last_updated?: string;
 }
 
-async function fileExists(target: string): Promise<boolean> {
-  try {
-    return (await stat(target)).isFile();
-  } catch {
-    return false;
-  }
-}
-
-async function dirExists(target: string): Promise<boolean> {
-  try {
-    return (await stat(target)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-function isMarkdownFile(name: string): boolean {
-  return path.extname(name).toLowerCase() === ".md";
-}
-
 function sortDirs(dirs: WorkspaceDir[]): WorkspaceDir[] {
   return dirs.sort((a, b) => {
     if (a.dir === "") return -1;
     if (b.dir === "") return 1;
     return a.dir.localeCompare(b.dir);
   });
-}
-
-async function countMarkdownByDir(dir: string): Promise<WorkspaceDir[]> {
-  let entries;
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const counts: Record<string, number> = {};
-  for (const entry of entries) {
-    if (!entry.isDirectory() && isMarkdownFile(entry.name)) counts[""] = (counts[""] ?? 0) + 1;
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (WIKI_SYSTEM_SUBDIRS.has(entry.name)) continue;
-    let subEntries;
-    try {
-      subEntries = await readdir(path.join(dir, entry.name), { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    counts[entry.name] = subEntries.filter((item) => !item.isDirectory() && isMarkdownFile(item.name))
-      .length;
-  }
-  return sortDirs(Object.entries(counts).map(([name, count]) => ({ dir: name, count })));
 }
 
 function wikiDirsFromDocuments(docs: Document[]): WorkspaceDir[] {
@@ -133,24 +83,32 @@ function businessPageTypes(): Record<string, number> {
 export function workspaceApi(ctx: ApiContext) {
   return {
     async getWorkspace(c: Context): Promise<Response> {
-      if (!ctx.workspace) return writeError(c, 503, "workspace not configured");
-      const root = ctx.workspace;
       const overview: WorkspaceOverview = {
-        root,
+        root: ctx.workspace || "postgresql",
         layout: {
-          purpose: await fileExists(path.join(root, "purpose.md")),
-          rules: await fileExists(path.join(root, "rules.md")),
-          wiki: await dirExists(path.join(root, "wiki")),
-          raw_sources: await dirExists(path.join(root, "raw", "sources")),
+          purpose: false,
+          rules: false,
+          wiki: false,
+          raw_sources: false,
           index_db: Boolean(ctx.db),
         },
         counts: { documents: 0, wiki_pages: 0, sources: 0 },
         page_types: businessPageTypes(),
-        wiki_dirs: await countMarkdownByDir(path.join(root, "wiki")),
+        wiki_dirs: [],
       };
 
       try {
-        const docs = await ctx.db.listDocumentsFiltered({ archived: "include" });
+        const [docs, purposeCfg, rulesCfg, archiveFiles] = await Promise.all([
+          ctx.db.listDocumentsFiltered({ archived: "include" }),
+          ctx.db.getConfig(CONFIG_WORKSPACE_PURPOSE).catch(() => ""),
+          ctx.db.getConfig(CONFIG_WORKSPACE_RULES).catch(() => ""),
+          typeof ctx.db.listArchiveFiles === "function"
+            ? ctx.db.listArchiveFiles().catch(() => [])
+            : Promise.resolve([]),
+        ]);
+        overview.layout.purpose = Boolean(purposeCfg.trim());
+        overview.layout.rules = Boolean(rulesCfg.trim());
+
         const today = todayIsoDate();
         const lifecycle: WorkspaceLifecycle = {
           active: 0,
@@ -183,6 +141,8 @@ export function workspaceApi(ctx: ApiContext) {
           }
           if (doc.updated_at > (overview.last_updated ?? "")) overview.last_updated = doc.updated_at;
         }
+        overview.layout.wiki = overview.counts.wiki_pages > 0;
+        overview.layout.raw_sources = overview.counts.sources > 0 || archiveFiles.length > 0;
         overview.wiki_dirs = wikiDirsFromDocuments(docs.filter((d) => !d.archived_at));
         overview.lifecycle = lifecycle;
       } catch (error) {
@@ -192,35 +152,39 @@ export function workspaceApi(ctx: ApiContext) {
     },
 
     async getWorkspaceRuleFiles(c: Context): Promise<Response> {
-      if (!ctx.workspace) return writeError(c, 503, "workspace not configured");
       try {
-        return writeJson(c, 200, await loadRuleFilesPreview(ctx.workspace));
+        const [purpose, rules] = await Promise.all([
+          ctx.db.getConfig(CONFIG_WORKSPACE_PURPOSE).catch(() => ""),
+          ctx.db.getConfig(CONFIG_WORKSPACE_RULES).catch(() => ""),
+        ]);
+        const purposeText = purpose.trim();
+        const rulesText = rules.trim();
+        return writeJson(c, 200, {
+          purpose: purposeText,
+          rules: rulesText,
+          purpose_preview: purposeText,
+          rules_preview: rulesText,
+        });
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }
     },
 
     async updateWorkspaceRuleFiles(c: Context): Promise<Response> {
-      if (!ctx.workspace) return writeError(c, 503, "workspace not configured");
       const req = await readJsonBody<{ purpose?: string; rules?: string }>(c);
       if (!req) return writeError(c, 400, "invalid request body");
       if (req.purpose === undefined && req.rules === undefined) {
         return writeError(c, 400, "purpose or rules is required");
       }
       const written: string[] = [];
-      for (const [rel, content] of [
-        ["purpose.md", req.purpose],
-        ["rules.md", req.rules],
+      for (const [key, label, content] of [
+        [CONFIG_WORKSPACE_PURPOSE, "purpose.md", req.purpose],
+        [CONFIG_WORKSPACE_RULES, "rules.md", req.rules],
       ] as const) {
         if (content === undefined) continue;
-        if (!content.trim()) return writeError(c, 400, `${rel}: content must not be empty`);
-        try {
-          await writeFileFirst(ctx, rel, content);
-        } catch (error) {
-          return writeError(c, 500, `file write failed: ${errorMessage(error)}`);
-        }
-        indexDocumentRelPath(ctx, rel);
-        written.push(rel);
+        if (!content.trim()) return writeError(c, 400, `${label}: content must not be empty`);
+        await ctx.db.setConfig(key, content);
+        written.push(label);
       }
       return writeJson(c, 200, { status: "ok", written });
     },

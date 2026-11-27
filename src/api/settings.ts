@@ -65,7 +65,6 @@ import {
   parseJobEventsMaxCount,
   parseSessionMsgEventsMaxCount,
 } from "../store/types.js";
-import { exportSettings } from "../workspace/settings.js";
 import {
   maskKey,
   parseQueryInt,
@@ -184,8 +183,6 @@ const ALLOWED_KEYS = new Set([
   "max_tokens",
   "chunk_size",
   "chunk_overlap",
-  "auto_reindex",
-  "watch_sources",
   "job_instance_id",
   "job_model",
   "job_parallel_enabled",
@@ -241,8 +238,6 @@ export function settingsApi(ctx: ApiContext) {
       max_tokens: value("max_tokens"),
       chunk_size: value("chunk_size"),
       chunk_overlap: value("chunk_overlap"),
-      auto_reindex: value("auto_reindex"),
-      watch_sources: value("watch_sources"),
       activity_logs_max_count: activityLogsMaxCountForResponse(value("activity_logs_max_count")),
       ingest_job_events_max_count: jobEventsMaxCountForResponse(value("ingest_job_events_max_count")),
       session_message_events_max_count: sessionMsgEventsMaxCountForResponse(
@@ -508,13 +503,6 @@ export function settingsApi(ctx: ApiContext) {
         }
       }
 
-      if (ctx.workspace) {
-        try {
-          await exportSettings(ctx.db, ctx.workspace);
-        } catch (error) {
-          return writeError(c, 500, errorMessage(error));
-        }
-      }
       return getSettings(c);
     },
 

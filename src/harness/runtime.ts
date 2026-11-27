@@ -17,7 +17,7 @@ import {
   type PermissionHandler,
 } from "harnix";
 import { ContextResolver, formatRelatedSubsetSection } from "../ingest/context.js";
-import { promptStepForMode, resolveRulesSupplement } from "../ingest/prompts.js";
+import { loadWorkspaceRules, promptStepForMode } from "../ingest/prompts.js";
 import { assembleIngestChatMessages } from "../ingest/session_chat.js";
 import { ChatWikiExecutor, recordToolReadReference } from "../ingest/tools.js";
 import { logger } from "../logger.js";
@@ -301,14 +301,16 @@ export class HarnixChatRuntime implements Runtime {
     }
 
     const step = promptStepForMode(request.mode);
+    const rulesBundle = await loadWorkspaceRules(this.db);
     const messages = assembleIngestChatMessages(
       request.history,
       request.userContent,
       request.docLang,
       this.workspace,
-      await resolveRulesSupplement(this.db),
+      rulesBundle.supplement,
       subsetSection,
       step,
+      rulesBundle,
     );
 
     const systemPrompt = messages[0]?.role === "system" ? messages[0].content : undefined;

@@ -64,23 +64,15 @@ If a file-based `llm-wiki` skill is also installed, the two cover different targ
 ## Vault model
 
 ```
-purpose.md            vault goal, read at the start of ingest/organize work
-rules.md              house rules injected into every LLM step
-raw/sources/…         source material (uploads, fetched pages) — read-only for agents
-wiki/overview.md      top-level orientation page
-wiki/index.md         generated table of contents — never hand-edit
-wiki/log.md           append-only journal: `## [YYYY-MM-DD] action | description`
+wiki/overview.md      top-level pyramid navigation page
 wiki/<topic>/...      nested topic folders (page `type` in frontmatter: entity|concept|synthesis|comparison|query|experience|ledger|page)
-wiki/sources/         source summaries (hidden from listing/search/graph)
-wiki/templates/       system page templates
-PostgreSQL            pages, folders, revisions, search, graph, lint — the only source of truth
+archives/             raw source files (DB inline / local / S3)
+PostgreSQL            pages, folders, revisions, rules, search, graph, lint — the only source of truth
 ```
 
-- **Write through the API.** Changes made behind the server's back need `POST /api/v1/reindex` before search, graph or lint can see them.
-- `wiki/index.md` is rebuilt by reindex and by ingest apply. Do not write it.
-- `wiki/sources/` and `wiki/templates/` are indexed but hidden from listing, search and the graph — they exist for provenance, not for browsing.
-- `raw/` is read-only for agents. Ingest jobs write there; agents cite it, never edit it.
-- Every path in a response is workspace-relative (`wiki/产品与项目/llmwiki/Page.md`). Quote those paths when reporting.
+- **Write through the API.** Changes are stored in PostgreSQL with full revision history (`change_sets`).
+- `archives/` holds raw sources; agents cite them, never edit them directly as wiki pages.
+- Every path in a response is workspace-relative (`wiki/products/llmwiki/page.md`). Quote those paths when reporting.
 
 ## Route the task
 
@@ -103,7 +95,7 @@ Read the stage skill before starting its task; each one lists the exact payloads
 4. **No silent inventing.** If the vault lacks the evidence, say so and ingest a source instead of guessing; never present `draft`, `deprecated`, or archived pages as current truth.
 5. **Confirm destructive changes.** Confirm with the user before deleting, overwriting, or bulk-modifying pages.
 6. **Verify with lint after every batch** of page changes; do not report success while `GET /api/v1/lint` returns `severity: error` issues you caused.
-7. **Never edit `wiki/index.md`, `.llmwiki/` or `raw/`.**
+7. **Never edit derived system state directly.** Use the document/settings/archive APIs.
 8. **Report evidence, not activity**: list the paths you changed, the lint result, and the change set id when you rolled back.
 
 ## Response conventions

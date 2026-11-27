@@ -1,6 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import path from "node:path";
 import type { Context } from "hono";
 import {
   AgentRuntimeError,
@@ -18,7 +16,6 @@ import { buildPageChunks, rebuildReferences, storeReferenceEntries } from "../in
 import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
 import { ReferenceParser, WIKI_DOUBLE_BRACKET_RE } from "../engine/references.js";
 import type { PageLockManager } from "../ingest/lock.js";
-import type { WorkspaceFileIndexer } from "../engine/file_indexer.js";
 import { engineStoreFromStore } from "../engine/adapter.js";
 import { logDocument, logMcpRemoteToolCall, logMcpTool } from "../activity/index.js";
 import { logger } from "../logger.js";
@@ -36,7 +33,6 @@ export interface ApiContext {
   db: Store;
   workspace: string;
   lockMgr: PageLockManager | null;
-  indexer: WorkspaceFileIndexer | null;
   publicWikiEnabled: boolean;
   harnessMgr: HarnessManager | null;
   flagToken: string;
@@ -46,7 +42,6 @@ export interface ApiDeps {
   db: Store;
   workspace?: string;
   lockMgr?: PageLockManager | null;
-  indexer?: WorkspaceFileIndexer | null;
   publicWikiEnabled?: boolean;
   harnessMgr?: HarnessManager | null;
   flagToken?: string;
@@ -57,7 +52,6 @@ export function createApiContext(deps: ApiDeps): ApiContext {
     db: deps.db,
     workspace: deps.workspace ?? "",
     lockMgr: deps.lockMgr ?? null,
-    indexer: deps.indexer ?? null,
     publicWikiEnabled: deps.publicWikiEnabled ?? false,
     harnessMgr: deps.harnessMgr ?? null,
     flagToken: deps.flagToken ?? "",
@@ -127,42 +121,6 @@ export function trimJoin(dir: string, name: string): string {
   return `${dir.slice(1)}/${name}`;
 }
 
-function requireWorkspace(ctx: ApiContext): string {
-  if (!ctx.workspace.trim()) throw new Error("workspace not configured");
-  return ctx.workspace;
-}
-
-export async function writeFileBytesFirst(ctx: ApiContext, canonicalPath: string, content: Uint8Array): Promise<void> {
-  if (!ctx.workspace) return;
-  const relPath = canonicalPath.replace(/^\/+/, "");
-  const fullPath = path.join(ctx.workspace, relPath);
-  const dir = path.dirname(fullPath);
-  await mkdir(dir, { recursive: true, mode: 0o755 });
-  const tmpPath = path.join(dir, `.llmwiki-write-${randomUUID()}`);
-  try {
-    await writeFile(tmpPath, content);
-    await rename(tmpPath, fullPath);
-  } catch (error) {
-    await rm(tmpPath, { force: true });
-    throw error;
-  }
-}
-
-export async function writeFileFirst(ctx: ApiContext, canonicalPath: string, content: string): Promise<void> {
-  await writeFileBytesFirst(ctx, canonicalPath, Buffer.from(content, "utf8"));
-}
-
-export async function removeWorkspaceFile(ctx: ApiContext, canonicalPath: string): Promise<void> {
-  if (!ctx.workspace) return;
-  const relPath = canonicalPath.replace(/^\/+/, "");
-  await rm(path.join(ctx.workspace, relPath), { force: true });
-}
-
-export function readWorkspaceFile(ctx: ApiContext, relPath: string): Promise<Buffer> {
-  const root = requireWorkspace(ctx);
-  return readFile(path.join(root, relPath.replace(/^\/+/, "")));
-}
-
 export async function applyPageWrite(
   ctx: ApiContext,
   kind: string,
@@ -225,20 +183,6 @@ export async function applyPageDeletes(
     { id: randomUUID(), kind, summary, page_count: writes.length, created_at: "" },
     writes,
   );
-}
-
-export function indexDocumentRelPath(ctx: ApiContext, relPath: string): void {
-  if (!ctx.indexer || !relPath) return;
-  void ctx.indexer.indexFile(relPath).catch((error: unknown) => {
-    logger.warn({ error, relPath }, "api: index file");
-  });
-}
-
-export function indexDocumentContent(ctx: ApiContext, docId: string, content: string): void {
-  if (!ctx.indexer || !docId) return;
-  void ctx.indexer.indexDocumentContent(docId, content).catch((error: unknown) => {
-    logger.warn({ error, docId }, "api: index document");
-  });
 }
 
 export async function sessionAgentRuntime(ctx: ApiContext, session: IngestSession | null): Promise<Runtime> {

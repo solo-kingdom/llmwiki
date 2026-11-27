@@ -52,8 +52,6 @@ export const PAGE_TYPE_TO_WIKI_SUBDIR: Record<string, string> = {
 
 export const RESERVED_TOP_LEVEL_WIKI_PAGES = new Set([
   "wiki/overview.md",
-  "wiki/index.md",
-  "wiki/log.md",
 ]);
 
 export const WIKI_SYSTEM_SUBDIRS = new Set(["templates"]);

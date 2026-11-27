@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { AcpHarness, type AcpAgentEntry, type HarnixSettings } from "harnix";
 
@@ -8,7 +9,13 @@ export async function resolveCwd(
   policy: "workspace" | "session",
 ): Promise<string> {
   if (!workspace.trim()) {
-    throw new Error("workspace is not configured");
+    const fallbackRoot = path.join(os.tmpdir(), "llmwiki-acp");
+    const dir =
+      policy === "session"
+        ? path.join(fallbackRoot, sessionId.trim() || "default")
+        : fallbackRoot;
+    await mkdir(dir, { recursive: true, mode: 0o755 });
+    return dir;
   }
   const root = path.resolve(workspace);
   if (policy === "session") {

@@ -219,25 +219,27 @@ describe("PageLockManager.lockAll", () => {
 
 describe("IngestCache under concurrency", () => {
   it("keeps every entry when many jobs save at once", async () => {
-    const workspace = await tempWorkspace();
-    const cache = new IngestCache(workspace);
+    const cache = new IngestCache("");
 
     await Promise.all(
       Array.from({ length: 20 }, (_, index) =>
-        cache.save(`key-${index}`, { source_name: `s${index}`, sha256: "x", written_files: [] }),
+        cache.save(`key-${index}`, { source_name: `s${index}`, sha256: "x", written_files: [`wiki/p/${index}.md`] }),
       ),
     );
 
-    const stored = JSON.parse(await readFile(cache.cachePath(), "utf8")) as { entries: Record<string, unknown> };
-    expect(Object.keys(stored.entries)).toHaveLength(20);
+    const hits = await Promise.all(
+      Array.from({ length: 20 }, (_, index) => cache.lookup(`key-${index}`, "x", [])),
+    );
+    expect(hits.filter(Boolean)).toHaveLength(20);
   });
 
-  it("treats an unreadable cache file as empty instead of failing the job", async () => {
-    const workspace = await tempWorkspace();
-    const cache = new IngestCache(workspace);
-    await mkdir(path.dirname(cache.cachePath()), { recursive: true });
-    await writeFile(cache.cachePath(), '{"entries": {"a": ', "utf8");
-
-    expect(await cache.load()).toEqual({ entries: {} });
+  it("treats a failing DB cache lookup as a cache miss instead of failing the job", async () => {
+    const db = {
+      getIngestCacheEntry: async () => {
+        throw new Error("db unavailable");
+      },
+    } as never;
+    const cache = new IngestCache("", db);
+    expect(await cache.lookup("missing", "x", [])).toBeNull();
   });
 });

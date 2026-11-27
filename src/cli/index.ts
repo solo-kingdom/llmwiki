@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { resolveDatabaseUrl } from "../config.js";
+import { runCleanupLegacy } from "./cleanup_legacy.js";
 import { runClusterPlan } from "./cluster_plan.js";
 import { runDedupArchives } from "./dedup_archives.js";
 import { runEmbed } from "./embed.js";
@@ -10,7 +11,6 @@ import { runInit } from "./init.js";
 import { runLint } from "./lint.js";
 import { runMcp } from "./mcp.js";
 import { runMcpConfig } from "./mcp-config.js";
-import { runMigrate } from "./migrate.js";
 import { runMigrateReferences } from "./migrate_references.js";
 import { runMigrateStructure } from "./migrate_structure.js";
 import { runReindex } from "./reindex.js";
@@ -65,10 +65,10 @@ program
 
 program
   .command("lint [dir]")
-  .description("Check wiki content health (dead links, orphans, frontmatter)")
+  .description("Check wiki content health against PostgreSQL (or a local directory if [dir] is provided)")
   .option("--json", "Output LintReport as JSON", false)
   .action(async (dir: string | undefined, opts: { json?: boolean }) => {
-    await runLint(dir, Boolean(opts.json));
+    await runLint(dir, Boolean(opts.json), databaseUrl());
   });
 
 program
@@ -112,9 +112,10 @@ program
   .command("export")
   .description("Export pages from PostgreSQL to a directory")
   .requiredOption("--out <dir>", "Output directory (required)")
-  .option("--include-raw", "Also export stored source blobs under raw/sources/", false)
-  .action(async (opts: { out: string; includeRaw?: boolean }) => {
-    await runExport(opts.out, Boolean(opts.includeRaw), databaseUrl());
+  .option("--include-raw", "Also export stored archive files and legacy source blobs", false)
+  .option("--with-index", "Generate a static wiki/index.md in the export directory", false)
+  .action(async (opts: { out: string; includeRaw?: boolean; withIndex?: boolean }) => {
+    await runExport(opts.out, Boolean(opts.includeRaw), databaseUrl(), Boolean(opts.withIndex));
   });
 
 program
@@ -124,15 +125,6 @@ program
   .action(async (opts: { batch?: string }) => {
     const batch = Number.parseInt(String(opts.batch ?? "32"), 10);
     await runEmbed(Number.isFinite(batch) ? batch : 32, databaseUrl());
-  });
-
-program
-  .command("migrate")
-  .description("Import an existing workspace directory and legacy SQLite index into PostgreSQL")
-  .option("--workspace <dir>", "Workspace directory to import (required)")
-  .option("--name <name>", "Workspace name (default: directory name)")
-  .action(async (opts: { workspace?: string; name?: string }) => {
-    await runMigrate(opts.workspace, opts.name, databaseUrl());
   });
 
 program
@@ -173,6 +165,15 @@ program
   .option("--apply", "Merge duplicates, transfer links, and restore canonical filenames", false)
   .action(async (opts: { dryRun?: boolean; apply?: boolean }) => {
     await runDedupArchives(opts, databaseUrl());
+  });
+
+program
+  .command("cleanup-legacy")
+  .description("Find and delete legacy system pages (wiki/log.md, wiki/index.md, wiki/templates/*) from PostgreSQL")
+  .option("--dry-run", "Report matching legacy pages without deleting (default)", false)
+  .option("--apply", "Delete matching legacy pages via change_sets", false)
+  .action(async (opts: { dryRun?: boolean; apply?: boolean }) => {
+    await runCleanupLegacy(opts, databaseUrl());
   });
 
 program

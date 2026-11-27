@@ -105,7 +105,7 @@ function folderPathOfDoc(doc: { relative_path?: string | undefined; path?: strin
  * Pages maintained by `llmwiki reindex`; mirrors RESERVED_TOP_LEVEL_WIKI_PAGES in
  * src/engine/wiki_org.ts. The API rejects moving/archiving/deleting them.
  */
-const SYSTEM_PAGE_PATHS = new Set(["wiki/index.md", "wiki/log.md", "wiki/overview.md"])
+const SYSTEM_PAGE_PATHS = new Set(["wiki/overview.md"])
 
 function isSystemPage(doc: { relative_path?: string | undefined; path?: string | undefined }): boolean {
   return SYSTEM_PAGE_PATHS.has((doc.relative_path ?? doc.path ?? "").replace(/^\/+/, ""))
@@ -445,7 +445,7 @@ function TreeRows({
               </ContextMenuTrigger>
               <ContextMenuContent onClick={(event) => event.stopPropagation()}>
                 {system ? (
-                  <ContextMenuItem disabled>系统页面由 reindex 自动维护</ContextMenuItem>
+                  <ContextMenuItem disabled>系统导航页由系统自动维护</ContextMenuItem>
                 ) : (
                   <>
                     <ContextMenuItem onSelect={() => onOpenDialog({ kind: "move-doc", doc })}>

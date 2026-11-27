@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -20,11 +21,8 @@ import { attachmentSummaryPrompt } from "../ingest/session_chat.js";
 import {
   buildSessionArchiveMarkdown,
   defaultIngestSessionTitle,
-  ensureSessionDirs,
   normalizeSessionArchive,
-  removeSessionDir,
   sessionAttachmentsDir,
-  writeSessionAttachment,
 } from "../ingest/session_store.js";
 import {
   createSessionMessageRecorder,
@@ -42,11 +40,9 @@ import {
   getIntQuery,
   isStreamRequest,
   readJsonBody,
-  removeWorkspaceFile,
   runtimeErrorMessage,
   sessionAgentRuntime,
   writeError,
-  writeFileBytesFirst,
   writeJson,
   type ApiContext,
 } from "./context.js";
@@ -388,7 +384,6 @@ export function ingestSessionsApi(ctx: ApiContext) {
 
   return {
     async createIngestSession(c: Context): Promise<Response> {
-      if (!ctx.workspace.trim()) return writeError(c, 503, "workspace not configured for ingest");
       const req = (await readJsonBody<{
         title?: string;
         instance_id?: string;
@@ -441,9 +436,6 @@ export function ingestSessionsApi(ctx: ApiContext) {
       };
       try {
         await ctx.db.createIngestSession(session);
-        const rel = await ensureSessionDirs(ctx.workspace, session.id);
-        session.storage_path = rel;
-        await ctx.db.updateIngestSessionStoragePath(session.id, rel);
         await ctx.db.updateIngestSessionTitle(session.id, session.title);
         return writeJson(c, 201, { session });
       } catch (error) {
@@ -551,7 +543,6 @@ export function ingestSessionsApi(ctx: ApiContext) {
       try {
         await ctx.db.deleteIngestSession(session.id);
         if (ctx.harnessMgr) await ctx.harnessMgr.closeSession(session.id);
-        if (ctx.workspace) await removeSessionDir(ctx.workspace, session.id);
         return writeJson(c, 200, { status: "deleted" });
       } catch (error) {
         if (errorMessage(error).includes("not found")) return writeError(c, 404, "session not found");
@@ -570,7 +561,6 @@ export function ingestSessionsApi(ctx: ApiContext) {
     },
 
     async appendIngestSessionMessage(c: Context): Promise<Response> {
-      if (!ctx.workspace.trim()) return writeError(c, 503, "workspace not configured for ingest");
       const session = await loadSession(c);
       if (session instanceof Response) return session;
       const req = await readJsonBody<{ content?: string; wiki_refs?: WikiRefRequest[] }>(c);
@@ -608,7 +598,6 @@ export function ingestSessionsApi(ctx: ApiContext) {
     },
 
     async retryIngestSessionMessage(c: Context): Promise<Response> {
-      if (!ctx.workspace.trim()) return writeError(c, 503, "workspace not configured for ingest");
       const session = await loadSession(c);
       if (session instanceof Response) return session;
       if (!isStreamRequest(c)) return writeError(c, 400, "streaming is required for retry");
@@ -655,7 +644,6 @@ export function ingestSessionsApi(ctx: ApiContext) {
     },
 
     async patchIngestSessionMessage(c: Context): Promise<Response> {
-      if (!ctx.workspace.trim()) return writeError(c, 503, "workspace not configured for ingest");
       const session = await loadSession(c);
       if (session instanceof Response) return session;
       const messageId = c.req.param("messageId") ?? "";
@@ -703,7 +691,6 @@ export function ingestSessionsApi(ctx: ApiContext) {
     },
 
     async uploadIngestSessionAttachment(c: Context): Promise<Response> {
-      if (!ctx.workspace.trim()) return writeError(c, 503, "workspace not configured for ingest");
       const session = await loadSession(c);
       if (session instanceof Response) return session;
       let form: FormData;
@@ -724,12 +711,19 @@ export function ingestSessionsApi(ctx: ApiContext) {
         return writeError(c, 400, errorMessage(error));
       }
       try {
-        const { attachmentId, relPath } = await writeSessionAttachment(
-          ctx.workspace,
-          session.id,
-          file.name,
-          data,
-        );
+        const storage = new ArchiveStorageService(ctx.db, ctx.workspace);
+        const filename = path.basename(file.name.trim()) || `file-${randomUUID()}`;
+        const archiveFile = await storage.storeNewFile({
+          folderPath: `ingest/sessions/${session.id}/attachments`,
+          filename,
+          bytes: data,
+          mediaType: file.type || undefined,
+          origin: "ingest_session",
+          sourceRef: `session:${session.id}`,
+          autoRename: true,
+        });
+        const attachmentId = archiveFile.id;
+        const relPath = archiveFile.relative_path;
         const summary = await summarizeAttachment(file.name, relPath, data);
         const message: IngestSessionMessage = {
           id: "",
@@ -750,7 +744,6 @@ export function ingestSessionsApi(ctx: ApiContext) {
     },
 
     async archiveIngestSession(c: Context): Promise<Response> {
-      if (!ctx.workspace.trim()) return writeError(c, 503, "workspace not configured for ingest");
       const session = await loadSession(c);
       if (session instanceof Response) return session;
       try {
@@ -764,16 +757,25 @@ export function ingestSessionsApi(ctx: ApiContext) {
           (await readJsonBody<{ title?: string; deep_organize?: boolean; archive_folder?: string }>(c)) ?? {};
         const title = (req.title ?? "").trim() || session.title || "ingest-session";
         const messages = await ctx.db.listIngestSessionMessages(session.id);
-        const archiveMessages = messages
-          .filter((message) => !message.exclude_from_archive)
-          .map((message) => ({
-            role: message.role,
-            content: message.content,
-            messageType: message.message_type,
-            attachmentPath: message.attachment_id
-              ? path.posix.join(sessionAttachmentsDir(session.id), message.attachment_id)
-              : "",
-          }));
+        const archiveMessages = await Promise.all(
+          messages
+            .filter((message) => !message.exclude_from_archive)
+            .map(async (message) => {
+              let attachmentPath = "";
+              if (message.attachment_id) {
+                const archiveFile = await ctx.db.getArchiveFile(message.attachment_id).catch(() => null);
+                attachmentPath = archiveFile
+                  ? archiveFile.relative_path
+                  : path.posix.join(sessionAttachmentsDir(session.id), message.attachment_id);
+              }
+              return {
+                role: message.role,
+                content: message.content,
+                messageType: message.message_type,
+                attachmentPath,
+              };
+            }),
+        );
         const sessionRefs = await ctx.db.listSessionReferences(session.id);
         const archiveRefs = sessionRefs.map((ref) => ({
           path: ref.relative_path,

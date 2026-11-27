@@ -1,6 +1,5 @@
 import type { Store } from "../store/interfaces.js";
 import { Client, DEFAULT_STREAM_IDLE_TIMEOUT_MS, DEFAULT_TIMEOUT_MS } from "./client.js";
-import { loadConfig } from "./config.js";
 import type { LLMConfig } from "./types.js";
 
 export async function clientFromInstance(
@@ -42,29 +41,6 @@ export async function clientFromInstance(
     model: modelId,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     streamIdleTimeoutMs: DEFAULT_STREAM_IDLE_TIMEOUT_MS,
-  });
-}
-
-export async function clientFromWorkspace(workspace: string): Promise<Client> {
-  if (!workspace.trim()) {
-    throw new Error(
-      "provider instance and model are not configured; set them in Settings under Provider instances",
-    );
-  }
-  const config = await loadConfig(workspace);
-  const timeoutMs =
-    config.request_timeout > 0 ? config.request_timeout * 1000 : DEFAULT_TIMEOUT_MS;
-  const streamIdleTimeoutMs =
-    config.stream_idle_timeout > 0
-      ? config.stream_idle_timeout * 1000
-      : DEFAULT_STREAM_IDLE_TIMEOUT_MS;
-  return newValidatedClient({
-    provider: config.provider,
-    baseUrl: config.base_url,
-    apiKey: config.api_key,
-    model: config.model,
-    timeoutMs,
-    streamIdleTimeoutMs,
   });
 }
 

@@ -567,6 +567,19 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_archive_files_title_trgm ON archive_files USING gin (title gin_trgm_ops)`,
     ],
   },
+  {
+    version: 12,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS ingest_cache (
+        cache_key TEXT PRIMARY KEY,
+        source_name TEXT NOT NULL DEFAULT '',
+        content_sha256 TEXT NOT NULL DEFAULT '',
+        written_files TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT (${nowText}),
+        updated_at TEXT NOT NULL DEFAULT (${nowText})
+      )`,
+    ],
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

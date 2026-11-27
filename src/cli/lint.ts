@@ -1,15 +1,29 @@
-import { lintHasErrors, lintWorkspace } from "../engine/lint.js";
+import { lintDocuments, lintHasErrors, lintWorkspace } from "../engine/lint.js";
 import {
   LINT_SEVERITY_ERROR,
   LINT_SEVERITY_INFO,
   LINT_SEVERITY_WARNING,
   type LintReport,
 } from "../engine/lint_types.js";
-import { resolveWorkspaceDir } from "./workspace.js";
+import { openCliStore, resolveWorkspaceDir } from "./workspace.js";
 
-export async function runLint(dir: string | undefined, asJson: boolean): Promise<void> {
-  const workspace = resolveWorkspaceDir(dir);
-  const report = await lintWorkspace(workspace);
+export async function runLint(
+  dir: string | undefined,
+  asJson: boolean,
+  databaseUrl?: string,
+): Promise<void> {
+  let report: LintReport;
+  if (dir && dir.trim()) {
+    const workspace = resolveWorkspaceDir(dir);
+    report = await lintWorkspace(workspace);
+  } else {
+    const store = await openCliStore(databaseUrl);
+    try {
+      report = await lintDocuments(store);
+    } finally {
+      await store.close();
+    }
+  }
 
   if (asJson) {
     console.log(JSON.stringify(report, null, 2));

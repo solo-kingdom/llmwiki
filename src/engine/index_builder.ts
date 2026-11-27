@@ -1,4 +1,3 @@
-import { readFile, readdir, stat, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { parseFrontmatter, titleFromFilename } from "./frontmatter.js";
 
@@ -27,7 +26,7 @@ export interface IndexEntry {
   superseded_by: string;
 }
 
-const SYSTEM_WIKI_PATHS = new Set(["wiki/index.md", "wiki/log.md", "wiki/overview.md"]);
+const SYSTEM_WIKI_PATHS = new Set(["wiki/overview.md"]);
 
 export interface IndexSourceDocument {
   relative_path?: string;
@@ -47,8 +46,7 @@ export interface IndexSourceDocument {
 }
 
 /**
- * Build index entries from DB documents. PostgreSQL is the SSOT; the workspace
- * directory may only hold a stale export, so reindex must not depend on files.
+ * Build index entries from DB documents for on-demand export (`llmwiki export --with-index`).
  */
 export function indexEntriesFromDocuments(
   docs: readonly IndexSourceDocument[],
@@ -99,12 +97,7 @@ export function indexEntriesFromDocuments(
 }
 
 export class IndexBuilder {
-  constructor(private readonly workspace: string) {}
-
-  async buildIndex(): Promise<string> {
-    const entries = await this.scanWikiPages();
-    return this.buildIndexContent(formatDate(new Date()), entries);
-  }
+  constructor(private readonly _workspace = "") {}
 
   buildIndexContent(date: string, entriesBySubdir: Map<string, IndexEntry[]> | null): string {
     let output = "---\n";
@@ -113,7 +106,7 @@ export class IndexBuilder {
     output += `date: ${date}\n`;
     output += "---\n\n";
     output += "# 内容目录\n\n";
-    output += "> 本文件由 `llmwiki reindex` 自动维护，请勿手动编辑。\n\n";
+    output += "> 本文件由 `llmwiki export --with-index` 生成，仅作离线导出目录。\n\n";
 
     const headings = new Map(WIKI_SUBDIRS.map((item) => [item.dir, item.heading]));
     const dirKeys = entriesBySubdir ? [...entriesBySubdir.keys()] : [];
@@ -157,98 +150,6 @@ export class IndexBuilder {
     }
     return output;
   }
-
-  private async scanWikiPages(): Promise<Map<string, IndexEntry[]>> {
-    const result = new Map<string, IndexEntry[]>();
-    const wikiRoot = path.join(this.workspace, "wiki");
-    await this.walkDir(wikiRoot, "", result);
-    for (const entries of result.values()) {
-      entries.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
-    }
-    return result;
-  }
-
-  private async walkDir(
-    dirPath: string,
-    relSubdir: string,
-    result: Map<string, IndexEntry[]>,
-  ): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(dirPath, { withFileTypes: true });
-    } catch (error) {
-      if (isNotFound(error)) return;
-      throw error;
-    }
-    for (const entry of entries) {
-      const name = entry.name;
-      if (entry.isDirectory()) {
-        if (relSubdir === "" && name === "templates") continue;
-        if (name.startsWith(".")) continue;
-        const nextSubdir = relSubdir ? `${relSubdir}/${name}` : name;
-        await this.walkDir(path.join(dirPath, name), nextSubdir, result);
-        continue;
-      }
-      if (!relSubdir) continue;
-      if (!name.toLowerCase().endsWith(".md")) continue;
-      if (name === "index.md" || name === "log.md" || name === "overview.md") continue;
-      const list = result.get(relSubdir) ?? [];
-      list.push(await this.entryFromFile(relSubdir, name, path.join(dirPath, name)));
-      result.set(relSubdir, list);
-    }
-  }
-
-  private async entryFromFile(subdir: string, filename: string, fullPath: string): Promise<IndexEntry> {
-    const ext = path.posix.extname(filename);
-    const slug = ext ? filename.slice(0, -ext.length) : filename;
-    const data = await readFile(fullPath, "utf8");
-    const frontmatter = parseFrontmatter(data);
-    const title = frontmatter.title || titleFromFilename(filename);
-    let summary = frontmatter.description;
-    const expKind = frontmatter.kind ?? "";
-    if (frontmatter.type === "experience" && (expKind === "pitfall" || expKind === "pattern")) {
-      const parts = [`[${expKind}]`];
-      if (summary) parts.push(summary);
-      if (frontmatter.symptoms && frontmatter.symptoms.length > 0) {
-        parts.push(`现象：${frontmatter.symptoms.join("、")}`);
-      }
-      summary = parts.join(" ");
-    }
-    const description = truncateRunes(summary, 80);
-    let date = frontmatter.date;
-    if (!date) {
-      const info = await stat(fullPath);
-      date = formatDate(info.mtime);
-    } else if (date.length > 10) {
-      date = date.slice(0, 10);
-    }
-    return {
-      subdir,
-      slug,
-      title,
-      type: frontmatter.type,
-      description,
-      date,
-      confidence: frontmatter.confidence ?? "",
-      status: frontmatter.status ?? "",
-      last_verified: frontmatter.last_verified ?? "",
-      review_after: frontmatter.review_after ?? "",
-      archived_at: frontmatter.archived_at ?? "",
-      archive_reason: frontmatter.archive_reason ?? "",
-      superseded_by: frontmatter.superseded_by ?? "",
-    };
-  }
-
-  async writeIndex(): Promise<void> {
-    const content = await this.buildIndex();
-    const target = path.join(this.workspace, INDEX_REL_PATH);
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, content, "utf8");
-  }
-
-  async rebuildIndex(): Promise<void> {
-    await this.writeIndex();
-  }
 }
 
 export function escapeGFMTableCell(value: string): string {
@@ -265,13 +166,4 @@ export function truncateRunes(value: string, max: number): string {
 function formatDate(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "ENOENT"
-  );
 }

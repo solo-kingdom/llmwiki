@@ -9,7 +9,6 @@ import { createApi, createApiContext } from "../api/index.js";
 import { writeError } from "../api/context.js";
 import { rebuildDerived } from "../ingest/rebuild.js";
 import type { PageLockManager } from "../ingest/lock.js";
-import type { WorkspaceFileIndexer } from "../engine/file_indexer.js";
 import type { McpServer } from "../mcp/server.js";
 import type { Store } from "../store/interfaces.js";
 import { CONFIG_API_TOKEN } from "../store/types.js";
@@ -27,7 +26,6 @@ export interface AppDeps {
   skillsRoot: string;
   harnessManager?: HarnessManager | null;
   lockMgr?: PageLockManager | null;
-  indexer?: WorkspaceFileIndexer | null;
   mcpServer?: McpServer | null;
 }
 
@@ -39,7 +37,6 @@ export function createApp(deps: AppDeps): Hono {
       db: deps.db,
       workspace: deps.workspace,
       lockMgr: deps.lockMgr ?? null,
-      indexer: deps.indexer ?? null,
       publicWikiEnabled: deps.publicWiki,
       harnessMgr,
       flagToken: deps.token,

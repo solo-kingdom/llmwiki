@@ -11,8 +11,16 @@ export function assembleIngestChatMessages(
   rulesSupplement: string,
   relatedSubsetSection: string,
   step: PromptStep,
+  workspaceRules?: { purpose?: string; rules?: string; stepAppends?: Record<string, string> },
 ): Message[] {
-  let systemPrompt = composeSystemPrompt(step, { workspace, docLang, rulesSupplement });
+  let systemPrompt = composeSystemPrompt(step, {
+    workspace,
+    docLang,
+    rulesSupplement,
+    workspacePurpose: workspaceRules?.purpose,
+    workspaceRules: workspaceRules?.rules,
+    stepAppends: workspaceRules?.stepAppends,
+  });
   if (relatedSubsetSection.trim()) systemPrompt += `\n\n${relatedSubsetSection.trim()}`;
 
   const out: Message[] = [{ role: "system", content: systemPrompt }];

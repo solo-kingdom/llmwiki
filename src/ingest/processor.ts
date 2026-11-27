@@ -6,7 +6,7 @@ import { CanonicalPageConflictError } from "../engine/canonical.js";
 import { refreshFolderOverviews } from "../engine/folder_overview.js";
 import { folderPathFromWikiRelPath } from "../engine/wiki_org.js";
 import { ArchiveStorageService } from "../archive/storage.js";
-import { clientFromInstance, clientFromWorkspace } from "../llm/instance_client.js";
+import { clientFromInstance } from "../llm/instance_client.js";
 import type { Client } from "../llm/client.js";
 import { logger } from "../logger.js";
 import { McpRegistry } from "../mcp/registry.js";
@@ -19,7 +19,7 @@ import {
   type IngestReview,
 } from "../store/types.js";
 import { NoWikiFilesWrittenError } from "./fileblocks.js";
-import { computeRulesHash, resolveRulesSupplement } from "./prompts.js";
+import { computeRulesHash, loadWorkspaceRules } from "./prompts.js";
 import { normalizeJobSource } from "./normalize.js";
 import { PagePlanReviewRequiredError } from "./page_plan.js";
 import { PageLockManager } from "./lock.js";
@@ -386,7 +386,7 @@ export class JobProcessor {
     }
     await this.attachMCPRouter(pipeline);
     pipeline.setDocLanguage(await resolveDocLang(this.db));
-    pipeline.setRulesSupplement(await resolveRulesSupplement(this.db));
+    pipeline.setWorkspaceRules(await loadWorkspaceRules(this.db));
     return true;
   }
 
@@ -404,14 +404,14 @@ export class JobProcessor {
     }
     await this.attachMCPRouter(pipeline);
     pipeline.setDocLanguage(await resolveDocLang(this.db));
-    pipeline.setRulesSupplement(await resolveRulesSupplement(this.db));
+    pipeline.setWorkspaceRules(await loadWorkspaceRules(this.db));
     return true;
   }
 
   async checkRulesDrift(pipeline: Pipeline, jobId: string): Promise<void> {
     const recorder = pipeline.currentRecorder();
     if (!recorder) return;
-    const current = computeRulesHash(this.workspace, await resolveRulesSupplement(this.db));
+    const current = computeRulesHash(await loadWorkspaceRules(this.db));
     const snapshot = await queuedRulesHash(this.db, jobId);
     if (snapshot && snapshot !== current) {
       recorder.record("system", "info", "rules_drift: workspace rules changed since job was queued", {
@@ -445,7 +445,9 @@ export class JobProcessor {
     }
     const { instanceId, model } = await this.resolveJobInstanceAndModel();
     if (instanceId && model) return clientFromInstance(this.db, instanceId, model);
-    return clientFromWorkspace(this.workspace);
+    throw new Error(
+      "provider instance and model are not configured; set them in Settings under Provider instances",
+    );
   }
 
   private async resolveLLMClientForReview(review: IngestReview): Promise<Client> {
@@ -457,7 +459,9 @@ export class JobProcessor {
     }
     const { instanceId, model } = await this.resolveJobInstanceAndModel();
     if (instanceId && model) return clientFromInstance(this.db, instanceId, model);
-    return clientFromWorkspace(this.workspace);
+    throw new Error(
+      "provider instance and model are not configured; set them in Settings under Provider instances",
+    );
   }
 
   private async resolveJobInstanceAndModel(): Promise<{ instanceId: string; model: string }> {
@@ -876,9 +880,9 @@ export async function enqueueReviewApplyJob(
   return job;
 }
 
-export async function recordRulesSnapshot(db: Store, jobId: string, workspace: string): Promise<void> {
+export async function recordRulesSnapshot(db: Store, jobId: string, _workspace: string): Promise<void> {
   if (!jobId) return;
-  const hash = computeRulesHash(workspace, await resolveRulesSupplement(db));
+  const hash = computeRulesHash(await loadWorkspaceRules(db));
   let maxCount = DEFAULT_JOB_EVENTS_MAX_COUNT;
   try {
     const raw = await db.getConfig("ingest_job_events_max_count");

@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { buildArchivedDocument, buildReopenedDocument } from "../engine/archive.js";
-import { WorkspaceFileIndexer } from "../engine/file_indexer.js";
-import { parseFrontmatter } from "../engine/frontmatter.js";
-import { lintDocuments, lintWorkspace } from "../engine/lint.js";
-import { resolvePageType, validateWikiWritePath } from "../engine/wiki_org.js";
+import { lintDocuments } from "../engine/lint.js";
+import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
+import { validateWikiWritePath } from "../engine/wiki_org.js";
 import { workspaceLayoutSummary } from "../engine/workspace_layout.js";
-import { buildPageChunks } from "../ingest/dbapply.js";
+import {
+  buildPageChunks,
+  pageDocument,
+  rebuildReferences,
+  storeReferenceEntries,
+} from "../ingest/dbapply.js";
 import type { Store } from "../store/interfaces.js";
 import type { ArchiveFilter, Document, SearchOptions } from "../store/types.js";
 import { formatLintMcp } from "./local_tools.js";
@@ -62,7 +65,7 @@ export async function runLocalMcp(
     "LLM Wiki",
     "You are connected to an LLM Wiki workspace. Call the `guide` tool first to see available knowledge bases and learn the full workflow.",
   );
-  registerTools(server, workspace, db, null, activity);
+  registerTools(server, workspace, db, activity);
   await server.runStdio();
 }
 
@@ -70,7 +73,6 @@ export function registerTools(
   server: McpServer,
   workspace: string,
   db: Store,
-  indexer: WorkspaceFileIndexer | null,
   activity?: McpActivity,
 ): void {
   const register = (tool: Tool, handler: ToolHandler) => {
@@ -87,7 +89,7 @@ export function registerTools(
         "Get started with LLM Wiki. Call this to understand how the knowledge vault works and see your available knowledge bases.",
       inputSchema: { type: "object", properties: {}, required: [] },
     },
-    async () => guideText(workspace),
+    async () => guideText(db),
   );
 
   register(
@@ -155,14 +157,14 @@ export function registerTools(
         required: ["title", "content"],
       },
     },
-    async (args) => writeToolHandler(workspace, db, indexer, args, activity),
+    async (args) => writeToolHandler(workspace, db, args, activity),
   );
 
   register(
     {
       name: "delete",
       description:
-        "Delete a document from the knowledge vault. Supports path and glob patterns. Protected pages (overview.md, log.md) cannot be deleted.",
+        "Delete a document from the knowledge vault. Protected pages (overview.md) cannot be deleted.",
       inputSchema: {
         type: "object",
         properties: {
@@ -265,42 +267,43 @@ export function registerTools(
   );
 }
 
-async function guideText(workspace: string): Promise<string> {
+async function guideText(db: Store): Promise<string> {
   let output = "# LLM Wiki Guide\n\n";
   output += "## Architecture\n\n";
   output +=
-    "LLM Wiki is a knowledge management system that indexes documents\ninto a searchable SQLite-backed vault with full-text search,\nautomatic chunking, and reference graph tracking.\n\n";
+    "LLM Wiki is a PostgreSQL-backed knowledge workspace with full-text & vector search,\nautomatic chunking, revision history (change_sets), and reference graph tracking.\n\n";
   output += workspaceLayoutSummary();
-  output += "\n## Workspaces\n\n";
-
-  const wikiDir = path.join(workspace, "wiki");
-  const sourcesDir = path.join(workspace, "raw", "sources");
+  output += "\n## Knowledge Base Status (PostgreSQL SSOT)\n\n";
 
   try {
-    const entries = await readdir(wikiDir);
-    output += `### Wiki Pages (${entries.length} files)\n`;
-    for (const entry of entries) {
-      if (entry.endsWith(".md")) output += `- ${entry}\n`;
+    const [folders, docs, archives] = await Promise.all([
+      db.listFolders(true).catch(() => []),
+      db.listDocumentsFiltered({ archived: "exclude" }),
+      typeof db.listArchiveFiles === "function" ? db.listArchiveFiles().catch(() => []) : Promise.resolve([]),
+    ]);
+    const wikiDocs = docs.filter((d) => d.source_kind === "wiki");
+    output += `- **Active Wiki Pages**: ${wikiDocs.length}\n`;
+    output += `- **Topic Folders**: ${folders.length}\n`;
+    output += `- **Archive Files**: ${archives.length}\n\n`;
+    if (folders.length > 0) {
+      output += "### Topic Folders\n";
+      for (const folder of folders.slice(0, 30)) {
+        const label = folder.display_name ? `${folder.path} (${folder.display_name})` : folder.path;
+        output += `- \`wiki/${label}\` — ${folder.total_count} pages\n`;
+      }
+      if (folders.length > 30) output += `- ...and ${folders.length - 30} more folders\n`;
+      output += "\n";
     }
-    output += "\n";
   } catch {
-    output += "### Wiki Pages\n(directory not found)\n\n";
-  }
-
-  try {
-    const entries = await readdir(sourcesDir);
-    output += `### Source Documents (${entries.length} files)\n`;
-    for (const entry of entries) output += `- ${entry}\n`;
-    output += "\n";
-  } catch {
-    output += "### Source Documents\n(directory not found)\n\n";
+    output += "(database summary unavailable)\n\n";
   }
 
   output += "## Available Tools\n\n";
-  output += "- **search** — Full-text search across all indexed documents\n";
+  output += "- **search** — Full-text search, reference graph, or lint across DB documents\n";
   output += "- **read** — Read a document by path or ID\n";
-  output += "- **write** — Create or update a wiki page\n";
+  output += "- **write** — Create or update a wiki page (recorded in change_sets & revisions)\n";
   output += "- **delete** — Remove a document from the vault\n";
+  output += "- **audit / structure / gaps / similar** — DB-native diagnostics\n";
   output += "- **ping** — Test connectivity\n";
   return output;
 }
@@ -382,12 +385,8 @@ async function searchToolHandler(
       return output;
     }
     case "lint": {
-      const report = db
-        ? await lintDocuments(db, { workspace })
-        : workspace
-          ? await lintWorkspace(workspace)
-          : null;
-      if (!report) return "Error: workspace not configured";
+      if (!db) return "Error: database not connected";
+      const report = await lintDocuments(db);
       return formatLintMcp(report);
     }
     default:
@@ -405,9 +404,8 @@ function formatDocument(doc: Document): string {
 }
 
 async function writeToolHandler(
-  workspace: string,
+  _workspace: string,
   db: Store,
-  indexer: WorkspaceFileIndexer | null,
   args: Record<string, unknown>,
   activity?: McpActivity,
 ): Promise<string> {
@@ -432,56 +430,40 @@ async function writeToolHandler(
   } catch (error) {
     return `Error: ${error instanceof Error ? error.message : String(error)}`;
   }
-  const fm = parseFrontmatter(content);
-  const pageType = resolvePageType(fm.type, "", relPath);
 
-  const existing = await db.getDocumentByPath(filename, dirPath);
-  if (existing) {
-    if (workspace) await writeWikiPageFile(workspace, relPath, content);
-    await db.updateDocument(existing.id, content, title, tags, "", "");
-    if (indexer) {
-      if (workspace) await indexer.indexFile(relPath).catch(() => {});
-      else await indexer.indexDocumentContent(existing.id, content).catch(() => {});
-    }
-    await activity?.logDocument(db, "updated", existing.id, relPath, "mcp");
-    return `Updated: ${title} (ID: ${existing.id}, version incremented)`;
-  }
+  const existing = await db.getDocumentByRelativePath(relPath) ?? (await db.getDocumentByPath(filename, dirPath));
+  const norm = normalizeWikiContent(content, "wiki", "md");
+  const doc = await pageDocument(db, relPath, Buffer.from(norm.content, "utf8"));
+  if (title.trim()) doc.title = title.trim();
+  if (tags.length > 0) doc.tags = tags;
+  if (!doc.id) doc.id = existing?.id || randomUUID();
 
-  if (workspace) await writeWikiPageFile(workspace, relPath, content);
-  const doc: Document = {
-    id: "",
-    user_id: "",
-    filename,
-    title,
-    path: dirPath,
-    relative_path: relPath,
-    source_kind: "wiki",
-    file_type: "md",
-    file_size: 0,
-    document_number: 0,
-    status: "ready",
-    page_count: 0,
-    content,
-    tags,
-    date: "",
-    metadata: "",
-    error_message: "",
-    version: 0,
-    parser: "",
-    content_hash: "",
-    stale_since: "",
-    highlights: "[]",
-    created_at: "",
-    updated_at: "",
-    page_type: pageType,
-  };
-  await db.createDocument(doc);
-  if (indexer) {
-    if (workspace) await indexer.indexFile(relPath).catch(() => {});
-    else await indexer.indexDocumentContent(doc.id, content).catch(() => {});
-  }
-  await activity?.logDocument(db, "created", doc.id, relPath, "mcp");
-  return `Created: ${title} (ID: ${doc.id}, path: ${relPath})`;
+  const operation = existing ? "update" : "create";
+  await db.applyChangeSet(
+    {
+      id: randomUUID(),
+      kind: "manual",
+      summary: `mcp write ${relPath}`,
+      page_count: 1,
+      created_at: "",
+    },
+    [
+      {
+        relative_path: relPath,
+        document: doc,
+        operation,
+        chunks: buildPageChunks(doc.id, norm.content),
+        refs: [],
+      },
+    ],
+  );
+  const extracted = new Map<string, ExtractedReferenceEntry[]>([[relPath, norm.entries]]);
+  await storeReferenceEntries(db, extracted, new Set(existing ? [relPath] : [])).catch(() => {});
+  await rebuildReferences(db, [relPath]).catch(() => {});
+  await activity?.logDocument(db, existing ? "updated" : "created", doc.id, relPath, "mcp");
+  return existing
+    ? `Updated: ${doc.title} (ID: ${doc.id}, path: ${relPath})`
+    : `Created: ${doc.title} (ID: ${doc.id}, path: ${relPath})`;
 }
 
 async function deleteToolHandler(
@@ -493,7 +475,7 @@ async function deleteToolHandler(
   const requested = typeof args["path"] === "string" ? args["path"] : "";
   if (!requested) return "Error: path is required";
   const base = path.basename(requested);
-  if (base === "overview.md" || base === "log.md") {
+  if (base === "overview.md") {
     return `Error: cannot delete protected page: ${base}`;
   }
   let doc = await db.findDocumentByName(requested);
@@ -647,13 +629,4 @@ async function reopenToolHandler(
   } catch (error) {
     return `Error: ${error instanceof Error ? error.message : String(error)}`;
   }
-}
-
-async function writeWikiPageFile(workspace: string, relPath: string, content: string): Promise<void> {
-  if (!relPath.startsWith("wiki/")) {
-    throw new Error(`refusing to write outside wiki/: ${relPath}`);
-  }
-  const fullPath = path.join(workspace, relPath);
-  await mkdir(path.dirname(fullPath), { recursive: true });
-  await writeFile(fullPath, content, "utf8");
 }

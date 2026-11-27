@@ -23,7 +23,7 @@ curl -fsS -G "${AUTH[@]}" "$LLMWIKI_URL/api/v1/search" \
 ```
 
 - `q` 必填，空值返回 `400`。
-- `filter=wiki`（默认）只查 wiki 页面，并跳过隐藏目录（`wiki/sources/`、`wiki/templates/`）。
+- `filter=wiki`（默认）只查 wiki 页面，并跳过隐藏目录（`wiki/sources/`）。
 - `filter=sources` 只查原始材料（`raw/…`、摄取原件）。
 - 其他值表示全库检索。
 - `types` 可重复（`types=concept&types=entity&types=experience`），按页面类型缩小范围；还支持 `kinds`（`practice|pitfall|pattern`）、`statuses`（`draft|validated|deprecated`）、`confidences`（`high|medium|low`）、`archived`（`exclude|include|only`，默认排除已归档）、`review_overdue=true`。

@@ -37,7 +37,7 @@ import {
   LINT_SEVERITY_WARNING,
   type LintReport,
 } from "../engine/lint_types.js";
-import { lintDocuments, lintGhostIndexEntries, lintWorkspace } from "../engine/lint.js";
+import { lintDocuments } from "../engine/lint.js";
 import { LEGACY_TYPE_ROOTS, type StructurePolicyMode } from "../engine/placement_policy.js";
 import { classifyWikiPath, folderPathFromWikiRelPath, isWikiSystemPath, wikiSubdirFromPath } from "../engine/wiki_org.js";
 import type { Store } from "../store/interfaces.js";
@@ -132,26 +132,10 @@ export async function executeLocalAudit(
     }
   }
 
-  if (workspace && db) {
-    try {
-      const ghostIssues = await lintGhostIndexEntries(workspace, createEngineStoreAdapter(db));
-      if (ghostIssues.length > 0) {
-        output += `\n## 索引幽灵页 (${ghostIssues.length})\n\n`;
-        for (const issue of ghostIssues) {
-          output += `- **${issue.severity}** \`${issue.path}\` — ${issue.message}\n`;
-        }
-      }
-    } catch {
-      // Diagnostics are best-effort; an unreadable workspace skips this section.
-    }
-  }
-
   if (focus === "all" || focus === "structure" || focus === "links" || focus === "metadata") {
-    if (db || workspace) {
+    if (db) {
       try {
-        const report = db
-          ? await lintDocuments(db, { workspace })
-          : await lintWorkspace(workspace);
+        const report = await lintDocuments(db);
         output += `\n- 活跃: ${report.stats.active} / 已归档: ${report.stats.archived} / 待复审: ${report.stats.review_overdue}\n`;
         if (report.issues.length > 0) {
           output += formatAuditLintSection(report, focus);
@@ -302,10 +286,10 @@ export function formatFolderTreeForPrompt(
 }
 
 export async function executeLocalStructure(
-  workspace: string,
+  _workspace: string,
   db: Store,
 ): Promise<string> {
-  if (!workspace) return "Error: workspace not configured";
+  if (!db) return "Error: database not connected";
   const [docs, folders] = await Promise.all([
     db.listDocuments(),
     typeof db.listFolders === "function" ? db.listFolders(false).catch(() => []) : Promise.resolve([]),
@@ -347,9 +331,7 @@ export async function executeLocalStructure(
   }
 
   let output = "# Wiki 目录结构\n\n";
-  output += `工作区：\`${workspace}\`\n`;
-  output +=
-    "数据来源：PostgreSQL index（与文件系统不一致时请运行 `llmwiki reindex`，将自动清理幽灵索引）\n\n";
+  output += "数据来源：PostgreSQL（SSOT）\n\n";
   output += `总计 ${wikiDocs.length} 个 wiki 文档（${contentCount} 个业务内容页，${allDirs.size} 个目录）\n\n`;
 
   const reserved: Document[] = [];
@@ -403,23 +385,9 @@ export async function executeLocalStructure(
   }
 
   const topDirs = childrenMap.get("") ?? [];
-  const templates = dirPages.get("templates") ?? [];
-  const hasTemplates = templates.length > 0 || (await templatesDirExists(workspace));
-
   topDirs.forEach((dir, idx) => {
-    const isLast = !hasTemplates && idx === topDirs.length - 1;
-    renderFolder(dir, "", isLast);
+    renderFolder(dir, "", idx === topDirs.length - 1);
   });
-
-  if (templates.length > 0) {
-    output += `└── templates/ (${templates.length} 个系统模板)\n`;
-    templates.forEach((doc, index) => {
-      const branch = index === templates.length - 1 ? "    └── " : "    ├── ";
-      output += `${branch}${doc.title || doc.filename} (系统模板)\n`;
-    });
-  } else if (hasTemplates) {
-    output += "└── templates/ (0 个系统模板)\n    (空目录)\n";
-  }
 
   const tagCount = new Map<string, number>();
   for (const doc of wikiDocs) {
@@ -436,14 +404,14 @@ export async function executeLocalStructure(
 }
 
 export async function executeLocalGaps(
-  workspace: string,
+  _workspace: string,
   db: Store,
   args: Record<string, unknown>,
 ): Promise<string> {
   const mode = typeof args["mode"] === "string" && args["mode"] ? args["mode"] : "all";
   let output = "";
   if (mode === "all" || mode === "dangling") {
-    const dangling = await findDanglingLinks(workspace);
+    const dangling = await findDanglingLinks(db);
     output += `## 缺失页面 (被引用但不存在) (${dangling.length})\n\n`;
     if (dangling.length > 0) {
       for (const item of dangling) {
@@ -472,11 +440,11 @@ interface DanglingLink {
   refCount: number;
 }
 
-async function findDanglingLinks(workspace: string): Promise<DanglingLink[]> {
-  if (!workspace) return [];
+async function findDanglingLinks(db: Store): Promise<DanglingLink[]> {
+  if (!db) return [];
   let report: LintReport;
   try {
-    report = await lintWorkspace(workspace);
+    report = await lintDocuments(db);
   } catch {
     return [];
   }

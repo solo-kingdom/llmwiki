@@ -1,4 +1,5 @@
 import type { IngestJobListFilter, IngestJobListResult } from "./job_list.js";
+import type { CacheEntry } from "../ingest/types.js";
 import type {
   ActivityLog,
   ActivityLogListFilter,
@@ -380,6 +381,12 @@ export interface ArchiveStore {
   listArchiveFileDocuments(archiveFileId: string): Promise<ArchiveLinkedDocument[]>;
 }
 
+export interface IngestCacheStore {
+  getIngestCacheEntry?(cacheKey: string): Promise<CacheEntry | null>;
+  upsertIngestCacheEntry?(cacheKey: string, entry: CacheEntry): Promise<void>;
+  deleteIngestCacheEntry?(cacheKey: string): Promise<void>;
+}
+
 export interface Store
   extends DocumentStore,
     FolderStore,
@@ -394,6 +401,7 @@ export interface Store
     ProviderStore,
     ActivityStore,
     WorkspaceStore,
-    ApiKeyStore {
+    ApiKeyStore,
+    IngestCacheStore {
   close(): Promise<void>;
 }

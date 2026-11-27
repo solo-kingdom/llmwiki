@@ -5,8 +5,6 @@ import type { GraphData, GraphEdge, GraphNode } from "../types.js";
 import { hiddenSubdirsWhere } from "./documents.js";
 import { asNumber, asString, queryOne, queryRows } from "./sql.js";
 
-const EXCLUDED_GRAPH_SYSTEM_PATHS = `('wiki/index.md', 'wiki/log.md')`;
-
 export function graphRepo(
   pool: Pool,
 ): Pick<IndexStore, "listWikiGraphEdges" | "buildKnowledgeGraph"> {
@@ -23,9 +21,7 @@ export function graphRepo(
            AND COALESCE(src.deleted_at, '') = '' AND COALESCE(tgt.deleted_at, '') = ''
            AND COALESCE(src.archived_at, '') = '' AND COALESCE(tgt.archived_at, '') = ''
            AND src.source_kind = 'wiki' AND tgt.source_kind = 'wiki'
-           AND src.relative_path != '' AND tgt.relative_path != ''
-           AND src.relative_path NOT IN ${EXCLUDED_GRAPH_SYSTEM_PATHS}
-           AND tgt.relative_path NOT IN ${EXCLUDED_GRAPH_SYSTEM_PATHS}`,
+           AND src.relative_path != '' AND tgt.relative_path != ''`,
       );
       return rows.map((row) => ({
         source: asString(row[0]),
@@ -54,7 +50,6 @@ export function graphRepo(
          WHERE d.source_kind = 'wiki' AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
            AND COALESCE(d.archived_at, '') = ''
            AND d.relative_path != ''
-           AND d.relative_path NOT IN ${EXCLUDED_GRAPH_SYSTEM_PATHS}
            ${hiddenExclude}
            ${folderFilter}
          GROUP BY d.relative_path
@@ -103,8 +98,6 @@ export function graphRepo(
            AND COALESCE(src.archived_at, '') = '' AND COALESCE(tgt.archived_at, '') = ''
            AND src.source_kind = 'wiki' AND tgt.source_kind = 'wiki'
            AND src.relative_path != '' AND tgt.relative_path != ''
-           AND src.relative_path NOT IN ${EXCLUDED_GRAPH_SYSTEM_PATHS}
-           AND tgt.relative_path NOT IN ${EXCLUDED_GRAPH_SYSTEM_PATHS}
            AND NOT (${hiddenSubdirsWhere("src.relative_path")})
            AND NOT (${hiddenSubdirsWhere("tgt.relative_path")})
          ORDER BY src.relative_path, tgt.relative_path`,

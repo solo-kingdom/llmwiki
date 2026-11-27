@@ -39,7 +39,7 @@ curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/workspace"
 curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"
 ```
 
-返回 `{"indexed": <n>, "status": "ok"}`。它是同步的，而服务端对非流式请求有 60s 超时——大库超时不一定代表失败，先看 `GET /api/v1/workspace` 计数和 `GET /api/v1/lint`，再决定是否重试。Reindex 会遍历知识库、重读 frontmatter 与链接、清掉文件已消失的记录、重写 `wiki/index.md`。凡是在写接口之外改过文件或恢复过文件，都要跑一次。
+返回 `{"indexed": <n>, "status": "ok"}`。它是同步的，而服务端对非流式请求有 60s 超时——大库超时不一定代表失败，先看 `GET /api/v1/workspace` 计数和 `GET /api/v1/lint`，再决定是否重试。Reindex 会基于 PostgreSQL 中的文档内容重建分块（chunks）、引用图与目录 `_overview.md`。
 
 ## 3. 配置摄取与会话用的模型
 
@@ -58,7 +58,7 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
   -d '{"job_instance_id":"<instance_id>","job_model":"<model id>"}'
 ```
 
-`PUT /api/v1/settings` 是部分更新，只发要改的键。可用键包括 `job_instance_id`、`job_model`、`job_parallel_enabled`、`job_max_concurrent`、`temperature`、`max_tokens`、`chunk_size`、`chunk_overlap`、`auto_reindex`、`watch_sources`、`doc_language`（`zh`/`en`）、`ui_language`、`rules_supplement`、`embedding_instance_id`、`embedding_model`、`embedding_dim`、`default_agent_kind`、`default_acp_agent_id`。未知键会被忽略，改完重新读 settings 确认。
+`PUT /api/v1/settings` 是部分更新，只发要改的键。可用键包括 `job_instance_id`、`job_model`、`job_parallel_enabled`、`job_max_concurrent`、`temperature`、`max_tokens`、`chunk_size`、`chunk_overlap`、`doc_language`（`zh`/`en`）、`ui_language`、`rules_supplement`、`embedding_instance_id`、`embedding_model`、`embedding_dim`、`default_agent_kind`、`default_acp_agent_id`。未知键会被忽略，改完重新读 settings 确认。
 
 查 provider 实例时只返回 `api_key_masked`，不会回传密钥；`PUT /api/v1/provider-instances/{id}` 可换字段，包括 key。
 

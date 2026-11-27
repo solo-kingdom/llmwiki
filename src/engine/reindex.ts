@@ -3,13 +3,12 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { chunkText, defaultChunkConfig } from "./chunker.js";
 import { getMetadataJSON, parseFrontmatter, titleFromFilename } from "./frontmatter.js";
-import { IndexBuilder, INDEX_REL_PATH } from "./index_builder.js";
-import { docRelativePath } from "./lint.js";
 import { ReferenceParser } from "./references.js";
 import type { ChunkData, DocData, EngineStore } from "./store_iface.js";
 import { folderPathFromWikiRelPath, resolvePageType } from "./wiki_org.js";
 
-const IGNORE_DIRS = new Set([".llmwiki", ".git", "node_modules", "__pycache__", ".venv", "venv"]);
+const IGNORE_DIRS = new Set([".llmwiki", ".git", ".obsidian", "node_modules", "__pycache__", ".venv", "venv"]);
+const SKIP_LEGACY_REL_PATHS = new Set(["wiki/index.md", "wiki/log.md"]);
 const TEXT_TYPES = new Set(["md", "txt", "csv", "html", "svg", "json", "xml"]);
 
 export class Reindexer {
@@ -18,6 +17,7 @@ export class Reindexer {
     private readonly workspace: string,
   ) {}
 
+  /** One-way import of existing workspace markdown/text files into PostgreSQL. */
   async rebuild(userID: string): Promise<number> {
     const files: string[] = [];
     await walkFiles(this.workspace, files);
@@ -25,6 +25,9 @@ export class Reindexer {
     const folderSet = new Set<string>();
     let indexed = 0;
     for (const relPath of files) {
+      if (SKIP_LEGACY_REL_PATHS.has(relPath) || relPath.startsWith("wiki/templates/")) {
+        continue;
+      }
       try {
         await this.indexFile(userID, relPath, path.join(this.workspace, relPath));
         indexed += 1;
@@ -45,34 +48,9 @@ export class Reindexer {
     }
 
     try {
-      const pruned = await this.pruneMissingFiles();
-      if (pruned > 0) {
-        console.warn(`Reindex: pruned ${pruned} document(s) missing from filesystem`);
-      }
-    } catch (error) {
-      console.warn(`Warning: failed to prune missing files: ${errorMessage(error)}`);
-    }
-
-    try {
       await this.rebuildReferences();
     } catch (error) {
       console.warn(`Warning: failed to rebuild references: ${errorMessage(error)}`);
-    }
-
-    try {
-      await this.verifyRecovery();
-    } catch (error) {
-      console.warn(`Warning: reindex verification found issues: ${errorMessage(error)}`);
-    }
-
-    const builder = new IndexBuilder(this.workspace);
-    await builder.rebuildIndex();
-    const indexPath = path.join(this.workspace, INDEX_REL_PATH);
-    try {
-      await this.indexFile(userID, INDEX_REL_PATH, indexPath);
-      indexed += 1;
-    } catch (error) {
-      throw new Error(`index ${INDEX_REL_PATH}: ${errorMessage(error)}`);
     }
 
     return indexed;
@@ -145,28 +123,6 @@ export class Reindexer {
     return doc.id;
   }
 
-  async indexRelPath(relPath: string): Promise<string> {
-    return this.indexFile("default", relPath, path.join(this.workspace, relPath));
-  }
-
-  private async pruneMissingFiles(): Promise<number> {
-    const documents = await this.store.listAllDocuments();
-    let pruned = 0;
-    for (const doc of documents) {
-      const rel = docRelativePath(doc);
-      if (!rel) continue;
-      try {
-        await stat(path.join(this.workspace, rel));
-        continue;
-      } catch (error) {
-        if (!isNotFound(error)) throw error;
-      }
-      await this.store.archiveDocument(doc.id);
-      pruned += 1;
-    }
-    return pruned;
-  }
-
   private async rebuildReferences(): Promise<void> {
     const wikiDocs = await this.store.listWikiDocuments();
     const allDocs = await this.store.listAllDocuments();
@@ -186,7 +142,6 @@ export class Reindexer {
       for (const reference of references) {
         await this.store.upsertReference(doc.id, reference.targetPath, reference.refType, reference.page);
       }
-      // Structured reference entries also produce edges (see dbapply.rebuildReferences).
       const entries = await this.store.listReferenceEntries(doc.id);
       for (const entry of entries) {
         if (!entry.targetDocumentId) continue;
@@ -195,50 +150,6 @@ export class Reindexer {
         seen.add(key);
         await this.store.upsertReference(doc.id, entry.targetDocumentId, "links_to", null);
       }
-    }
-  }
-
-  private async verifyRecovery(): Promise<void> {
-    const wikiDocs = await this.store.listWikiDocuments();
-    const allDocs = await this.store.listAllDocuments();
-    const indexedPaths = new Set(allDocs.map((doc) => doc.path + doc.filename));
-    const issues: string[] = [];
-
-    for (const doc of wikiDocs) {
-      const fullPath = path.join(this.workspace, (doc.path + doc.filename).replace(/^\/+/, ""));
-      try {
-        const data = await readFile(fullPath);
-        if (!doc.content && data.length > 0) {
-          issues.push(`wiki ${doc.filename}: file has content but DB doc content is empty`);
-        }
-      } catch (error) {
-        if (isNotFound(error)) {
-          issues.push(`wiki doc ${doc.path + doc.filename} in DB but file missing on disk`);
-          continue;
-        }
-        issues.push(`read wiki file ${fullPath}: ${errorMessage(error)}`);
-      }
-    }
-
-    const files: string[] = [];
-    await walkFiles(this.workspace, files);
-    for (const rel of files) {
-      const ext = path.posix.extname(rel).toLowerCase().replace(/^\./, "");
-      if (!TEXT_TYPES.has(ext)) continue;
-      let dir = "/";
-      let filename = rel;
-      const lastSlash = rel.lastIndexOf("/");
-      if (lastSlash >= 0) {
-        dir = `/${rel.slice(0, lastSlash)}/`;
-        filename = rel.slice(lastSlash + 1);
-      }
-      if (!indexedPaths.has(dir + filename)) {
-        issues.push(`file ${rel} on disk but not in index`);
-      }
-    }
-
-    if (issues.length > 0) {
-      throw new Error(`reindex verification found ${issues.length} issues: ${issues.join("; ")}`);
     }
   }
 }

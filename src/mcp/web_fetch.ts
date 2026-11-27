@@ -1,5 +1,3 @@
-import { mkdir, rename, writeFile, unlink } from "node:fs/promises";
-import path from "node:path";
 import type { Tool } from "./types.js";
 
 const WEB_FETCH_MAX_URLS = 5;
@@ -8,7 +6,6 @@ const WEB_FETCH_MAX_REDIRECTS = 5;
 const WEB_FETCH_MAX_BODY_SIZE = 2 * 1024 * 1024;
 const WEB_FETCH_MAX_RESULT_SIZE = 50 * 1024;
 const WEB_FETCH_MAX_TOTAL_SIZE = 200 * 1024;
-const WEB_FETCH_BASE_DIR = "raw/sources/web-fetch";
 
 export const webFetchTool: Tool = {
   name: "web_fetch",
@@ -150,13 +147,6 @@ async function fetchAndExtractUrl(workspace: string, rawUrl: string): Promise<Fe
     return result;
   }
 
-  if (workspace && result.content) {
-    try {
-      result.savedPath = await persistFetchResult(workspace, result);
-    } catch {
-      result.savedPath = "";
-    }
-  }
   return result;
 }
 
@@ -283,48 +273,9 @@ function formatFetchResult(result: FetchResult): string {
   let output = `## ${result.url}\n`;
   if (result.title) output += `> Title: ${result.title}\n`;
   output += `> Fetched: ${new Date().toISOString()}\n`;
-  if (result.savedPath) output += `> Saved: ${result.savedPath}\n`;
   output += "\n";
   output += result.error ? `⚠️ Error: ${result.error}\n` : result.content;
   return output;
-}
-
-async function persistFetchResult(workspace: string, result: FetchResult): Promise<string> {
-  if (!result.content) throw new Error("no content to persist");
-  const parsed = new URL(result.url);
-  const domain = parsed.host || "unknown";
-  const slug = urlSlug(parsed.pathname);
-  const stamp = timestampSlug(new Date());
-  const filename = `${slug}-${stamp}.md`;
-  const relPath = `${WEB_FETCH_BASE_DIR}/${domain}/${filename}`;
-  const fullPath = path.join(workspace, relPath);
-
-  const content = [
-    "---",
-    `source_url: ${result.url}`,
-    `title: ${JSON.stringify(result.title)}`,
-    `fetched_at: ${new Date().toISOString()}`,
-    `content_type: ${result.contentType}`,
-    "---",
-    "",
-    result.content,
-  ].join("\n");
-
-  await mkdir(path.dirname(fullPath), { recursive: true });
-  const tempPath = `${fullPath}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    await writeFile(tempPath, content, "utf8");
-    await rename(tempPath, fullPath);
-  } catch (error) {
-    await unlink(tempPath).catch(() => {});
-    throw error;
-  }
-  return relPath;
-}
-
-function timestampSlug(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
 function errorMessage(error: unknown): string {

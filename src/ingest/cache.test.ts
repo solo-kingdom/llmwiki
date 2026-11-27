@@ -1,27 +1,22 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { Store } from "../store/interfaces.js";
 import type { Document } from "../store/types.js";
-import { IngestCache, cacheKeyForNormalized, contentSHA256 } from "./cache.js";
-
-const tempDirs: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-});
+import type { CacheEntry } from "./types.js";
+import { IngestCache } from "./cache.js";
 
 describe("IngestCache", () => {
-  it("validates cached outputs against DB-SSOT and rulesHash", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "llmwiki-cache-"));
-    tempDirs.push(dir);
+  it("validates cached outputs against DB-SSOT and rulesHash without workspace disk files", async () => {
     let docExists = true;
+    const rows = new Map<string, CacheEntry>();
     const db = {
       getDocumentByRelativePath: async (rel: string) =>
         docExists && rel === "wiki/products/llmwiki/note.md"
           ? ({ id: "doc-1", relative_path: rel } as Document)
           : null,
+      getIngestCacheEntry: async (key: string) => rows.get(key) ?? null,
+      upsertIngestCacheEntry: async (key: string, entry: CacheEntry) => {
+        rows.set(key, entry);
+      },
     } as unknown as Store;
 
     const source = {
@@ -31,7 +26,7 @@ describe("IngestCache", () => {
       sourceRef: "",
       content: new TextEncoder().encode("cache test body"),
     };
-    const cache = new IngestCache(dir, db);
+    const cache = new IngestCache("", db);
     await cache.saveForSource(source, ["wiki/products/llmwiki/note.md"], "rules-v1");
 
     expect(await cache.lookupForSource(source, [], "rules-v1")).not.toBeNull();

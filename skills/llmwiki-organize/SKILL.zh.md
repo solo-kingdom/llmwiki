@@ -1,6 +1,6 @@
 ---
 name: llmwiki-organize
-description: 通过 HTTP 新建、改写、合并、移动、删除 llmwiki 页面——保证 frontmatter 与目录契约、维护 wiki/log.md、让知识库始终可 lint。用户要求新增或重写 wiki 页面、清理重复、调整结构、修正页面元数据时使用。
+description: 通过 HTTP 新建、改写、合并、移动、删除 llmwiki 页面——保证 frontmatter 与目录契约、让知识库始终可 lint。用户要求新增或重写 wiki 页面、清理重复、调整结构、修正页面元数据时使用。
 license: MIT
 metadata:
   author: llmwiki
@@ -36,7 +36,7 @@ metadata:
 title: 注意力机制
 type: concept
 date: 2025-01-31
-description: 一句话摘要，会进入 wiki/index.md
+description: 一句话摘要
 tags: [transformer, nlp]
 ---
 ```
@@ -45,7 +45,7 @@ Lint 会强制检查的规则：
 
 - `type` 必须是合法枚举值（`entity` / `concept` / `source` / `synthesis` / `comparison` / `query` / `experience` / `ledger` / `page`）；仅 `wiki/sources/` 强制 `type: source`，其余业务页可放在任意主题多级目录。
 - `experience` 必填 `status`（`draft`/`validated`/`deprecated`），可选 `kind`（`practice`/`pitfall`/`pattern`）与 `symptoms`；`ledger` 必填 `status`；`confidence: high` 需 `last_verified`，`validated` 经验需 `last_verified` 与 `review_after`。
-- 业务页只能放在主题子目录里（如 `wiki/AI工程/Agent/harness.md`）。`wiki/foo.md` 会报 `misplaced_wiki_page`；顶层只允许 `wiki/overview.md`、`wiki/index.md`、`wiki/log.md`。
+- 业务页只能放在主题子目录里（如 `wiki/AI工程/Agent/harness.md`）。`wiki/foo.md` 会报 `misplaced_wiki_page`；顶层只允许 `wiki/overview.md`。
 - 链接用 Obsidian 语法：`[[AI工程/Agent/harness|Harness]]`、`[[entities/transformer|Transformer]]`，slug 唯一时可写 `[[attention]]`；markdown 链接 `[文本](/wiki/concepts/attention.md)` 也认。指向不存在页面的链接是 `dead_link`。
 - 一页一个主题。页面里长出第二个主题时拆开并互相链接。
 
@@ -116,25 +116,12 @@ curl -fsS "${AUTH[@]}" -X DELETE "$LLMWIKI_URL/api/v1/documents/{id}"
 # {"status":"deleted","path":"wiki/concepts/old.md"}
 ```
 
-删除会同时删文件和索引行，reindex 不会把它复活。删前查 `backlinks`，删后 reindex 并看 lint。`POST /documents/bulk-delete {"ids":[…]}` 可批量。
-
-## 日志（`wiki/log.md`）
-
-只追加，且与文件中已有顺序保持一致（新条目放最前还是最后，照抄现状）：
-
-```bash
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents/{log_id}/content"
-# 读取后追加：## [2025-01-31] create | concepts/attention-mechanism | 新增注意力机制概念页
-curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/documents/{log_id}/content" \
-  -H 'Content-Type: application/json' -d '{"content": "<原内容 + 新条目>"}'
-```
-
-格式固定：`## [YYYY-MM-DD] <action> | <description>`。在用 action：`create`、`update`、`merge`、`move`、`delete`、`ingest`。不要重排或改写历史条目。
+删除会直接移除数据库文档并记录 `change_sets`。删前查 `backlinks`，删后 reindex 并看 lint。`POST /documents/bulk-delete {"ids":[…]}` 可批量。
 
 ## 收口
 
 ```bash
-curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"     # 重建 wiki/index.md 与图谱
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/reindex"     # 重建 chunks、图谱与目录总览
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/lint"                # 不能留下你造成的 error
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/history?limit=1"  # 取本次写入的 change set id
 ```
@@ -143,7 +130,7 @@ curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/history?limit=1"  # 取本次写入�
 
 ## 禁止
 
-- 编辑 `wiki/index.md`（生成物）、`.llmwiki/`（派生物）、`raw/` 下任何文件。
+- 绕过文档 API 直接修改派生状态。
 - 在 `wiki/` 顶层、单数目录（`entity/`、`concept/`）或 `wiki/raw/` 里建页面。
 - 写出前后矛盾的页面（正文与 `type`、`date` 对不上）。
 - 一批改动不做 lint、不 reindex 就结束。

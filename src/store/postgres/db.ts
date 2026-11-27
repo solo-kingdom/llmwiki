@@ -9,6 +9,7 @@ import { documentsRepo } from "./documents.js";
 import { foldersRepo } from "./folders.js";
 import { graphRepo } from "./graph.js";
 import { ingestJobsRepo } from "./ingest_jobs.js";
+import { ingestCacheRepo } from "./ingest_cache.js";
 import { ingestReviewsRepo } from "./ingest_reviews.js";
 import { ingestSessionsRepo } from "./ingest_sessions.js";
 import { migrate } from "./migrations.js";
@@ -32,6 +33,7 @@ export function createStore(pool: Pool): Store {
     ...configRepo(pool),
     ...activityRepo(pool),
     ...ingestJobsRepo(pool),
+    ...ingestCacheRepo(pool),
     ...ingestSessionsRepo(pool),
     ...ingestReviewsRepo(pool),
     ...providersRepo(pool),

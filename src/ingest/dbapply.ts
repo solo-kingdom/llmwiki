@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { chunkText, defaultChunkConfig } from "../engine/chunker.js";
 import { getMetadataJSON, parseFrontmatter, titleFromFilename } from "../engine/frontmatter.js";
@@ -17,13 +15,12 @@ import { resolvePageType } from "../engine/wiki_org.js";
 import type { Store } from "../store/interfaces.js";
 import type { ChangeSet, Chunk, Document, PageWrite } from "../store/types.js";
 import {
-  applyWikiBlocks,
+  applyWikiBlocksInMemory,
   normalizeWikiFileBlocks,
 } from "./fileblocks.js";
 import type { ApplyWikiBlocksOptions, ApplyWikiResult, JobRecorder } from "./types.js";
 
 export interface ApplyState {
-  applyToDB: boolean;
   db: Store | null;
   changeSetKind: string;
   changeSetJobId: string;
@@ -35,7 +32,7 @@ export interface ApplyState {
 }
 
 export async function applyBlocksToStore(
-  workspace: string,
+  _workspace: string,
   blocks: Map<string, string>,
   options: ApplyWikiBlocksOptions,
   state: ApplyState,
@@ -84,96 +81,90 @@ export async function applyBlocksToStore(
     }
   }
 
-  const scratch = await mkdtemp(path.join(os.tmpdir(), "llmwiki-apply-"));
-  try {
-    for (const rel of normalized.blocks.keys()) {
-      const doc = existingByPath.get(rel);
-      if (!doc) continue;
-      const full = path.join(scratch, rel);
-      await mkdir(path.dirname(full), { recursive: true });
-      await writeFile(full, doc.content, "utf8");
-    }
-
-    const result = await applyWikiBlocks(scratch, normalized.blocks, options);
-    if (result.written.length === 0 && result.deleted.length === 0) {
-      return { result, changeSetId: "" };
-    }
-
-    const changeSet: ChangeSet = {
-      id: "",
-      kind: state.changeSetKind,
-      job_id: state.changeSetJobId,
-      review_id: state.changeSetReviewId,
-      archive_file_id: state.archiveFileId ?? "",
-      source_filename: state.sourceFilename,
-      normalized_content: state.normalizedContent,
-      summary: `apply ${result.written.length} page(s)`,
-      page_count: 0,
-      created_at: "",
-    };
-
-    const writes: PageWrite[] = [];
-    const extracted = new Map<string, ExtractedReferenceEntry[]>();
-    for (const rel of result.written) {
-      const data = await readFile(path.join(scratch, rel));
-      let text = new TextDecoder().decode(data);
-      const norm = normalizeWikiContent(text, "wiki", "md");
-      extracted.set(rel, norm.entries);
-      if (norm.entries.length > 0 || text !== norm.content) {
-        text = norm.content;
-        await writeFile(path.join(scratch, rel), Buffer.from(text, "utf8"));
-      }
-      const doc = await pageDocument(state.db, rel, Buffer.from(text, "utf8"));
-      const existing = existingByPath.get(rel);
-      writes.push({
-        relative_path: rel,
-        document: doc,
-        operation: existing ? "update" : "create",
-        chunks: pageChunks(doc.id, text),
-        refs: [],
-      });
-    }
-    for (const rel of result.deleted) {
-      writes.push({
-        relative_path: rel,
-        document: null,
-        operation: "delete",
-        chunks: [],
-        refs: [],
-      });
-    }
-
-    await state.db.applyChangeSet(changeSet, writes);
-    if (state.archiveFileId && typeof state.db.linkDocumentArchiveSource === "function") {
-      for (const rel of result.written) {
-        try {
-          const doc = await state.db.getDocumentByRelativePath(rel);
-          if (doc) {
-            await state.db.linkDocumentArchiveSource(doc.id, state.archiveFileId, changeSet.id, "ingest_source");
-          }
-        } catch (error) {
-          state.recorder?.record(
-            "apply_files",
-            "warn",
-            `link archive source failed (${rel}): ${errorMessage(error)}`,
-            null,
-          );
-        }
-      }
-    }
-    try {
-      const updatePaths = new Set(
-        writes.filter((w) => w.operation === "update").map((w) => w.relative_path),
-      );
-      await storeReferenceEntries(state.db, extracted, updatePaths);
-      await rebuildReferences(state.db, result.written);
-    } catch (error) {
-      state.recorder?.record("apply_files", "warn", `rebuild references: ${errorMessage(error)}`, null);
-    }
-    return { result, changeSetId: changeSet.id };
-  } finally {
-    await rm(scratch, { recursive: true, force: true });
+  const existingContentByPath = new Map<string, string | null>();
+  for (const [rel, doc] of existingByPath) {
+    existingContentByPath.set(rel, doc ? doc.content : null);
   }
+
+  const { result, contents } = await applyWikiBlocksInMemory(
+    existingContentByPath,
+    normalized.blocks,
+    options,
+  );
+  if (result.written.length === 0 && result.deleted.length === 0) {
+    return { result, changeSetId: "" };
+  }
+
+  const changeSet: ChangeSet = {
+    id: "",
+    kind: state.changeSetKind,
+    job_id: state.changeSetJobId,
+    review_id: state.changeSetReviewId,
+    archive_file_id: state.archiveFileId ?? "",
+    source_filename: state.sourceFilename,
+    normalized_content: state.normalizedContent,
+    summary: `apply ${result.written.length} page(s)`,
+    page_count: 0,
+    created_at: "",
+  };
+
+  const writes: PageWrite[] = [];
+  const extracted = new Map<string, ExtractedReferenceEntry[]>();
+  for (const rel of result.written) {
+    let text = contents.get(rel) ?? "";
+    const norm = normalizeWikiContent(text, "wiki", "md");
+    extracted.set(rel, norm.entries);
+    if (norm.entries.length > 0 || text !== norm.content) {
+      text = norm.content;
+    }
+    const doc = await pageDocument(state.db, rel, Buffer.from(text, "utf8"));
+    const existing = existingByPath.get(rel);
+    writes.push({
+      relative_path: rel,
+      document: doc,
+      operation: existing ? "update" : "create",
+      chunks: pageChunks(doc.id, text),
+      refs: [],
+    });
+  }
+  for (const rel of result.deleted) {
+    writes.push({
+      relative_path: rel,
+      document: null,
+      operation: "delete",
+      chunks: [],
+      refs: [],
+    });
+  }
+
+  await state.db.applyChangeSet(changeSet, writes);
+  if (state.archiveFileId && typeof state.db.linkDocumentArchiveSource === "function") {
+    for (const rel of result.written) {
+      try {
+        const doc = await state.db.getDocumentByRelativePath(rel);
+        if (doc) {
+          await state.db.linkDocumentArchiveSource(doc.id, state.archiveFileId, changeSet.id, "ingest_source");
+        }
+      } catch (error) {
+        state.recorder?.record(
+          "apply_files",
+          "warn",
+          `link archive source failed (${rel}): ${errorMessage(error)}`,
+          null,
+        );
+      }
+    }
+  }
+  try {
+    const updatePaths = new Set(
+      writes.filter((w) => w.operation === "update").map((w) => w.relative_path),
+    );
+    await storeReferenceEntries(state.db, extracted, updatePaths);
+    await rebuildReferences(state.db, result.written);
+  } catch (error) {
+    state.recorder?.record("apply_files", "warn", `rebuild references: ${errorMessage(error)}`, null);
+  }
+  return { result, changeSetId: changeSet.id };
 }
 
 export async function pageDocument(db: Store, rel: string, data: Uint8Array): Promise<Document> {

@@ -1,29 +1,22 @@
-## Workspace Layout
+## Data & Logical Layout
 
-Typical layout after `init`:
+PostgreSQL is the single source of truth for wiki pages, topic folders, revision history (`change_sets` / `page_revisions`), and raw `archives`:
 
-```
-~/research/
-├── purpose.md          # Goals and scope (workspace root)
-├── rules.md            # Writing and citation rules (workspace root)
-├── wiki/               # LLM-maintained structured Markdown
-│   ├── overview.md     # Global overview (system page)
-│   ├── index.md        # Content catalog (auto-rebuilt after apply)
-│   ├── log.md          # Operation log (system page)
-│   ├── entities/       # Entities (plural typed dirs)
-│   ├── concepts/
-│   ├── sources/
-│   ├── synthesis/
-│   ├── comparisons/
-│   ├── queries/
-│   └── templates/      # System templates (not business content)
-├── raw/                # Immutable sources (outside wiki/)
-│   └── sources/
-└── .llmwiki/          # legacy SQLite directory (unused by the TypeScript rewrite)
+```text
+PostgreSQL SSOT
+├── Knowledge Base Rules (app_config)
+│   ├── Purpose
+│   └── Rules
+├── wiki/                     # Structured knowledge pages (logical paths)
+│   ├── overview.md           # Global pyramid overview
+│   ├── <domain>/             # Lowercase kebab-case topic domain
+│   │   ├── _overview.md      # Domain overview
+│   │   └── <group>/          # Topic group
+│   │       ├── _overview.md  # Group overview
+│   │       └── <page>.md     # Knowledge page
+└── archives/                 # Raw source archive (DB inline / local / S3)
 ```
 
-See `docs/workspace-layout.md` for the canonical layout.
-
-- **`raw/`**: original PDFs, notes, web clips — LLM read-only.
-- **`wiki/`**: generated knowledge pages in typed subdirectories (below).
-- **`purpose.md` / `rules.md`**: edit in Obsidian or your editor; Settings shows previews and a rules supplement field.
+- **`archives/`**: original PDFs, notes, and session attachments stored via ArchiveStorageService.
+- **`wiki/`**: knowledge pages organized by topic domain and group; `page_type` describes page role.
+- **Knowledge Base Rules**: edited directly in **Settings → 知识库规则** and applied to ingest, chat, and organize prompts.

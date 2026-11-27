@@ -218,12 +218,8 @@ export async function executeLocalSearch(
     case "references":
       return executeLocalReferences(db, args);
     case "lint": {
-      const report = db
-        ? await lintDocuments(db, { workspace })
-        : workspace
-          ? await lintWorkspace(workspace)
-          : null;
-      if (!report) return "Error: workspace not configured";
+      if (!db) return "Error: database not connected";
+      const report = await lintDocuments(db);
       return formatLintMcp(report);
     }
     default:

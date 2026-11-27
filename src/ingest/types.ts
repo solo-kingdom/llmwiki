@@ -109,10 +109,10 @@ export interface SessionArchiveMessage {
 }
 
 export interface RuleFilesPreview {
+  purpose: string;
+  rules: string;
   purpose_preview: string;
   rules_preview: string;
-  purpose_mtime?: number;
-  rules_mtime?: number;
 }
 
 export interface WikiRefRequest {
@@ -121,9 +121,12 @@ export interface WikiRefRequest {
 }
 
 export interface PromptContext {
-  workspace: string;
+  workspace?: string;
   docLang: string;
   rulesSupplement: string;
+  workspacePurpose?: string;
+  workspaceRules?: string;
+  stepAppends?: Record<string, string>;
 }
 
 export type PromptStep =
@@ -134,6 +137,5 @@ export type PromptStep =
   | "session_qa"
   | "session_organize"
   | "merge_body"
-  | "rollback"
   | "plan_organize"
   | "plan_qa";

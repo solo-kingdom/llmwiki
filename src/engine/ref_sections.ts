@@ -45,7 +45,7 @@ const SOURCE_SECTION_NAMES = new Set([
 ]);
 
 const HEADING_RE = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
-const BULLET_RE = /^\s*[-*+]\s+(.+)$/;
+const BULLET_RE = /^\s*(?:[-*+]|\d+[.)])\s+(.+)$/;
 
 interface Heading {
   line: number;
@@ -167,8 +167,15 @@ function sectionIsStrippable(lines: string[], section: Section): boolean {
   for (let i = section.heading.line + 1; i < section.endLine; i++) {
     const line = lines[i];
     if (line === undefined || line.trim() === "") continue;
-    if (line.trimStart().startsWith("<!--") || line.trimStart().startsWith(">")) continue;
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("<!--") || trimmed.startsWith(">")) continue;
     if (BULLET_RE.test(line)) continue;
+    // Also strip compact lines containing only [[wikilink]] references.
+    if (WIKI_DOUBLE_BRACKET_RE.test(trimmed)) {
+      WIKI_DOUBLE_BRACKET_RE.lastIndex = 0;
+      const stripped = trimmed.replace(WIKI_DOUBLE_BRACKET_RE, "").replace(/[\s\-—–:：,，.。;；]+/g, "");
+      if (stripped.length <= 24) continue;
+    }
     return false;
   }
   return true;

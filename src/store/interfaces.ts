@@ -88,6 +88,7 @@ export interface IndexStore {
   upsertReference(sourceID: string, targetID: string, refType: string, page: number | null): Promise<void>;
   replaceReferencesInTx(sourceDocID: string, edges: RefEdge[]): Promise<void>;
   replaceReferenceEntriesInTx(docID: string, entries: ReferenceEntryInput[]): Promise<void>;
+  mergeReferenceEntriesInTx(docID: string, entries: ReferenceEntryInput[]): Promise<void>;
   listReferenceEntries(docID: string): Promise<ReferenceEntryView[]>;
   getBacklinks(docID: string): Promise<ReferenceSummary[]>;
   getForwardReferences(docID: string): Promise<ReferenceSummary[]>;
@@ -95,7 +96,7 @@ export interface IndexStore {
   findStalePages(): Promise<StalePage[]>;
   propagateStaleness(docID: string): Promise<void>;
   listWikiGraphEdges(): Promise<GraphEdge[]>;
-  buildKnowledgeGraph(limit: number): Promise<GraphData>;
+  buildKnowledgeGraph(limit: number, folderPrefix?: string): Promise<GraphData>;
 
   storeChunkEmbeddings(embeddings: ChunkEmbedding[]): Promise<void>;
   searchVector(
@@ -332,6 +333,7 @@ export interface ArchiveStore {
   listArchiveFiles(filter?: { folder_path?: string; kind?: string; q?: string }): Promise<ArchiveFile[]>;
   getArchiveFile(id: string): Promise<ArchiveFile | null>;
   getArchiveFileByRelativePath(relativePath: string): Promise<ArchiveFile | null>;
+  findArchiveFileBySha256?(sha256: string, folderPath?: string): Promise<ArchiveFile | null>;
   getArchiveFileInlineBytes(id: string): Promise<Uint8Array | null>;
   createArchiveFile(
     file: ArchiveFile,
@@ -339,6 +341,13 @@ export interface ArchiveStore {
     searchableText?: string,
   ): Promise<ArchiveFile>;
   updateArchiveFileLocation(id: string, folderPath: string, filename: string): Promise<ArchiveFile>;
+  setArchiveFileIngestJobId?(id: string, jobId: string): Promise<void>;
+  updateArchiveFileTitle?(id: string, title: string): Promise<ArchiveFile | null>;
+  mergeDuplicateArchiveFiles?(
+    keepId: string,
+    dropIds: string[],
+    patch?: { folderPath?: string; filename?: string; title?: string },
+  ): Promise<ArchiveFile>;
   updateArchiveFileContentMeta(
     id: string,
     patch: {

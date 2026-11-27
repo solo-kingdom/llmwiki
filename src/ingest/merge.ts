@@ -89,12 +89,17 @@ function unionStringSlices(a: string[], b: string[]): string[] {
   return out;
 }
 
-export function mergeFrontmatter(oldYaml: string, newYaml: string): string {
+export function mergeFrontmatter(
+  oldYaml: string,
+  newYaml: string,
+  options: { unlockTypeAndTitle?: boolean } = {},
+): string {
   const oldMap = parseYamlMap(oldYaml);
   const newMap = parseYamlMap(newYaml);
   const out: Record<string, unknown> = { ...oldMap, ...newMap };
 
   for (const key of LOCKED_FRONTMATTER_KEYS) {
+    if (options.unlockTypeAndTitle && (key === "type" || key === "title")) continue;
     const value = oldMap[key];
     if (key in oldMap && !isEmptyYamlValue(value)) out[key] = value;
   }
@@ -175,6 +180,7 @@ export async function mergeWikiPage(
   fullPath: string,
   newContent: string,
   context: MergeContext,
+  options: { unlockTypeAndTitle?: boolean } = {},
 ): Promise<string | null> {
   let oldContent: string;
   try {
@@ -194,7 +200,7 @@ export async function mergeWikiPage(
     return diffMergeBody(context, oldPage.body, newPage.body);
   }
 
-  const mergedFrontmatter = mergeFrontmatter(oldPage.frontmatter, newPage.frontmatter);
+  const mergedFrontmatter = mergeFrontmatter(oldPage.frontmatter, newPage.frontmatter, options);
   let mergedBody = oldPage.body;
   if (oldPage.body !== newPage.body) {
     mergedBody = await diffMergeBody(context, oldPage.body, newPage.body);

@@ -14,6 +14,7 @@ export interface NormalizedSource {
   canonicalPath: string;
   originalName: string;
   sourceRef: string;
+  title?: string;
   content: Uint8Array;
 }
 
@@ -41,6 +42,7 @@ export interface MergeContext {
 
 export interface ApplyWikiBlocksOptions {
   forceOverwrite: boolean;
+  unlockTypeAndTitle?: boolean;
   merge: MergeContext | null;
 }
 

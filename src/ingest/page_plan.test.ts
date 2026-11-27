@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PagePlanReviewRequiredError,
+  assertBlocksMatchApprovedPlan,
   assertGenerationMatchesPagePlan,
   parseAnalysisPagePlan,
 } from "./page_plan.js";
@@ -62,5 +63,41 @@ describe("analysis page plan", () => {
 
     const wrongType = new Map([[plan.pages[0]!.path, "---\ntitle: Provider协议错配导致401\ntype: concept\n---\n"]]);
     expect(() => assertGenerationMatchesPagePlan(wrongType, plan)).toThrow("type");
+  });
+
+  it("rejects REDACTED entity names and attaches plan to PagePlanReviewRequiredError", () => {
+    expect(() => parseAnalysisPagePlan(JSON.stringify({
+      pages: [{
+        path: "wiki/projects/demo/REDACTED-service.md",
+        action: "create",
+        type: "entity",
+        title: "REDACTED 服务",
+        reuse_reason: "独立服务实体",
+      }],
+    }))).toThrow("REDACTED");
+
+    const pages = [1, 2, 3, 4].map((index) => ({
+      path: `wiki/system-network/proxy-dns/exp-${index}.md`,
+      action: "create",
+      type: "experience",
+      title: `经验 ${index}`,
+      reuse_reason: "独立可复用经验",
+    }));
+    let caught: unknown;
+    try {
+      parseAnalysisPagePlan(JSON.stringify({ pages }));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(PagePlanReviewRequiredError);
+    expect((caught as PagePlanReviewRequiredError).plan.pages).toHaveLength(4);
+  });
+
+  it("enforces approved plan paths in assertBlocksMatchApprovedPlan", () => {
+    const blocks = new Map([["wiki/system-network/proxy-dns/extra.md", "---\ntitle: Extra\n---\n"]]);
+    const approved = JSON.stringify({
+      changes: [{ path: "wiki/system-network/proxy-dns/allowed.md", action: "create" }],
+    });
+    expect(() => assertBlocksMatchApprovedPlan(blocks, approved)).toThrow("未包含在已批准计划中");
   });
 });

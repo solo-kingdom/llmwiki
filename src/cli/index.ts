@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { resolveDatabaseUrl } from "../config.js";
+import { runClusterPlan } from "./cluster_plan.js";
+import { runDedupArchives } from "./dedup_archives.js";
 import { runEmbed } from "./embed.js";
 import { runExport } from "./export.js";
 import { runIngest } from "./ingest.js";
@@ -143,11 +145,34 @@ program
 
 program
   .command("migrate-structure")
-  .description("Validate a structure migration manifest against PostgreSQL without writing")
+  .description("Validate or apply a structure migration manifest against PostgreSQL")
   .requiredOption("--manifest <file>", "Migration manifest JSON (required)")
-  .option("--dry-run", "Validate only; no write mode is available", false)
-  .action(async (opts: { manifest?: string; dryRun?: boolean }) => {
+  .option("--dry-run", "Validate only without writing", false)
+  .option("--apply", "Apply validated migration to PostgreSQL", false)
+  .option("--batch <name>", "Filter manifest entries by batch name")
+  .option("--reverse-out <file>", "Write reverse-migration manifest JSON after --apply")
+  .action(async (opts: { manifest?: string; dryRun?: boolean; apply?: boolean; batch?: string; reverseOut?: string }) => {
     await runMigrateStructure(opts, databaseUrl());
+  });
+
+program
+  .command("cluster-plan")
+  .description("Generate deterministic sub-folder clustering manifest for overcrowded wiki folders")
+  .option("--folder <path>", "Target wiki folder path (default: all overcrowded wiki folders)")
+  .option("--threshold <n>", "Overcrowded threshold", (v) => Number.parseInt(v, 10), 20)
+  .option("--min-cluster-size <n>", "Minimum documents per cluster", (v) => Number.parseInt(v, 10), 3)
+  .option("--out <file>", "Write JSON manifest to file instead of stdout")
+  .action(async (opts: { folder?: string; threshold?: number; minClusterSize?: number; out?: string }) => {
+    await runClusterPlan(opts, databaseUrl());
+  });
+
+program
+  .command("dedup-archives")
+  .description("Find and merge duplicate archive files sharing identical sha256 hashes")
+  .option("--dry-run", "Report duplicate groups without writing", false)
+  .option("--apply", "Merge duplicates, transfer links, and restore canonical filenames", false)
+  .action(async (opts: { dryRun?: boolean; apply?: boolean }) => {
+    await runDedupArchives(opts, databaseUrl());
   });
 
 program

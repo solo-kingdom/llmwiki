@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { refreshFolderOverviews } from "../engine/folder_overview.js";
+import { folderPathFromWikiRelPath } from "../engine/wiki_org.js";
 import {
   INDEX_REL_PATH,
   IndexBuilder,
@@ -86,6 +88,17 @@ export async function rebuildDerived(db: Store): Promise<number> {
   }
 
   await rebuildIndexPage(db, docs);
+  const folderSet = [
+    ...new Set(
+      docs
+        .filter((d) => d.source_kind === "wiki" && !d.archived_at)
+        .map((d) => folderPathFromWikiRelPath(d.relative_path))
+        .filter(Boolean),
+    ),
+  ];
+  if (folderSet.length > 0) {
+    await refreshFolderOverviews(db, folderSet).catch(() => undefined);
+  }
   if (!wikiPaths.includes(INDEX_REL_PATH)) wikiPaths.push(INDEX_REL_PATH);
   await rebuildReferences(db, wikiPaths);
   return docs.length;

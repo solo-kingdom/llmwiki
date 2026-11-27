@@ -9,16 +9,7 @@ interface WikiSubdir {
   heading: string;
 }
 
-const WIKI_SUBDIRS: WikiSubdir[] = [
-  { dir: "entities", heading: "实体 (entities)" },
-  { dir: "concepts", heading: "概念 (concepts)" },
-  { dir: "sources", heading: "源摘要 (sources)" },
-  { dir: "synthesis", heading: "综合分析 (synthesis)" },
-  { dir: "experiences", heading: "经验 (experiences)" },
-  { dir: "ledgers", heading: "业务台账 (ledgers)" },
-  { dir: "comparisons", heading: "对比分析 (comparisons)" },
-  { dir: "queries", heading: "查询归档 (queries)" },
-];
+const WIKI_SUBDIRS: WikiSubdir[] = [];
 
 export interface IndexEntry {
   subdir: string;

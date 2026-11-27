@@ -61,6 +61,8 @@ import { ReferenceParser, WIKI_DOUBLE_BRACKET_RE, WIKI_LINK_RE } from "./referen
 import type { EngineStore } from "./store_iface.js";
 import {
   classifyWikiPath,
+  isCanonicalWikiSlugPath,
+  isFolderOverviewPath,
   isValidConfidence,
   isValidExperienceKind,
   isValidExperienceStatus,
@@ -146,6 +148,7 @@ export function lintPages(pages: LintPageInput[], options: LintOptions = {}): Li
   for (const item of parsedPages) {
     const { page, fm, archived } = item;
     if (page.isSystem) continue;
+    const isOverview = isFolderOverviewPath(page.relPath);
 
     if (page.isMisplaced) {
       issues.push({
@@ -178,16 +181,25 @@ export function lintPages(pages: LintPageInput[], options: LintOptions = {}): Li
       }
 
       const filename = path.posix.basename(page.relPath);
-      if (!archived && (/\s/u.test(filename) || filename.includes("_"))) {
-        issues.push({
-          severity: LINT_SEVERITY_WARNING,
-          code: LINT_CODE_FILENAME_NONCANONICAL,
-          path: page.relPath,
-          message: "文件名应保留可读规范名，连续空白统一为 -，不使用 _ 分词",
-        });
+      if (!archived && !isOverview) {
+        if (/\s/u.test(filename) || filename.includes("_")) {
+          issues.push({
+            severity: LINT_SEVERITY_WARNING,
+            code: LINT_CODE_FILENAME_NONCANONICAL,
+            path: page.relPath,
+            message: "文件名应保留可读规范名，连续空白统一为 -，不使用 _ 分词",
+          });
+        } else if (options.structurePolicyMode === "enforce" && !isCanonicalWikiSlugPath(page.relPath)) {
+          issues.push({
+            severity: LINT_SEVERITY_WARNING,
+            code: LINT_CODE_FILENAME_NONCANONICAL,
+            path: page.relPath,
+            message: "路径应符合 A1 英文小写 kebab-case slug 规范",
+          });
+        }
       }
       const h1 = /^#\s+(.+)$/m.exec(page.content)?.[1]?.trim();
-      if (!archived && fm.title && h1 && normalizeCanonicalPageName(fm.title) !== normalizeCanonicalPageName(h1)) {
+      if (!archived && !isOverview && fm.title && h1 && normalizeCanonicalPageName(fm.title) !== normalizeCanonicalPageName(h1)) {
         issues.push({
           severity: LINT_SEVERITY_WARNING,
           code: LINT_CODE_FILENAME_NONCANONICAL,
@@ -338,7 +350,7 @@ export function lintPages(pages: LintPageInput[], options: LintOptions = {}): Li
       const fmSources = fm.sources ?? [];
       const originIsConversation =
         fm.type === "source" && (fm.origin === "user-input" || fm.origin === "conversation");
-      if (!archived && !originIsConversation && fmSources.length === 0 && dbSourceEntries.length === 0) {
+      if (!archived && !isOverview && !originIsConversation && fmSources.length === 0 && dbSourceEntries.length === 0) {
         issues.push({
           severity: LINT_SEVERITY_WARNING,
           code: LINT_CODE_SOURCES_MISSING,
@@ -522,6 +534,7 @@ function validateSourceRef(
 ): string | null {
   const value = reference.trim();
   if (!value) return "空来源";
+  if (value.startsWith("archive:")) return null;
   const isWikilink = value.startsWith("[[") && value.endsWith("]]");
   const target = isWikilink ? value.slice(2, -2).split("|")[0]?.split("#")[0]?.trim() ?? "" : value;
   const res = refParser.resolveLinkDetailed(target, docDirPath);
@@ -924,6 +937,7 @@ function isExternalOrAssetLink(href: string): boolean {
 function isOrphanExcluded(relPath: string): boolean {
   const normalized = relPath.split(path.sep).join("/");
   if (isWikiSystemPath(normalized)) return true;
+  if (isFolderOverviewPath(normalized)) return true;
   if (["wiki/index.md", "wiki/log.md", "wiki/overview.md"].includes(normalized)) return true;
   if (normalized.startsWith("wiki/sources/")) {
     return !normalized.slice("wiki/sources/".length).includes("/");
@@ -978,7 +992,7 @@ function lintDuplicatePages(pages: WikiPage[]): LintIssue[] {
 function lintGlobalDuplicatePages(parsedPages: ParsedLintPage[]): LintIssue[] {
   const groups = new Map<string, Set<string>>();
   for (const item of parsedPages) {
-    if (item.archived || item.page.isSystem || !item.page.inTypedSubdir || item.page.subdir === "sources") continue;
+    if (item.archived || item.page.isSystem || !item.page.inTypedSubdir || item.page.subdir === "sources" || isFolderOverviewPath(item.page.relPath)) continue;
     const filename = path.posix.basename(item.page.relPath);
     const values = [
       item.fm.title || titleFromFilename(filename),
@@ -1077,7 +1091,7 @@ function isTopicFolder(folder: string): boolean {
   return Boolean(root) && !LEGACY_TYPE_ROOTS.has(root) && !["sources", "templates", "raw"].includes(root);
 }
 
-function experienceShapeScore(content: string): number {
+export function experienceShapeScore(content: string): number {
   const headings = [...content.matchAll(/^#{2,3}\s+(.+)$/gm)].map((match) =>
     (match[1] ?? "").trim().toLowerCase().replace(/[：:].*$/, ""),
   );

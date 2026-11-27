@@ -10,7 +10,7 @@ metadata:
 
 # llmwiki-ingest
 
-摄取把原始材料变成知识库内容：服务端抽取文本、落到 `raw/`，由配置的模型起草来源摘要与页面改动，审核流程下只在批准后提交。`$LLMWIKI_URL` 和鉴权头来自入口 skill `llmwiki`。
+摄取把原始材料变成知识库内容：服务端抽取文本并归档到档案库（`archives`），由配置的模型起草页面改动，审核流程下只在批准后提交。`$LLMWIKI_URL` 和鉴权头来自入口 skill `llmwiki`。
 
 前置条件：必须配好 `job_instance_id` 与 `job_model`（见 `llmwiki-guide` §3），否则作业会因配置缺失失败。
 
@@ -92,7 +92,7 @@ curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/sessions/{id}/message
 # 流式拿模型回复（SSE）
 curl -fsS -N "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/sessions/{id}/messages?stream=1" \
   -H 'Content-Type: application/json' \
-  -d '{"content":"请把这份纪要整理成 wiki/sources 下的来源页","wiki_refs":[{"path":"wiki/产品与项目/llmwiki/foo.md"}]}'
+  -d '{"content":"请把这份纪要整理进对应主题组","wiki_refs":[{"document_id":"<doc_id>","relative_path":"wiki/products/llmwiki/foo.md"}]}'
 ```
 
 SSE 事件：`user_message`、`assistant_start`、`token`、`thought`、`tool_start`、`tool_done`、`plan`、`permission`、`warning`、`done`（最终消息对象）、`error`。同一会话同时只能有一个流——第二个请求返回 `409`。附件上传是 `POST /ingest/sessions/{id}/attachments`（multipart `file`），附件会随会话一起归档。
@@ -117,7 +117,7 @@ curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/reviews/{id}/feedback
 curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/reviews/{id}/replan"   # 202，重新生成计划
 ```
 
-批准前把 `plan_markdown` 给用户看——这是知识库被改动前最后一道关卡。`approve` 只在 `ready_for_review` 接受，返回 `202` 和落地作业 id；写入在 worktree 中完成后再合并，知识库不会写到一半。
+批准前把 `plan_markdown` 给用户看——这是知识库被改动前最后一道关卡。`approve` 只在 `ready_for_review` 接受，返回 `202` 和落地作业 id；写入在 PostgreSQL 事务中原子完成，知识库不会写到一半。
 
 ### 验证
 

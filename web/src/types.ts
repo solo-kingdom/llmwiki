@@ -474,6 +474,7 @@ export interface ArchiveFile {
   id: string
   folder_path: string
   filename: string
+  title?: string
   relative_path: string
   media_type: string
   kind: ArchiveFileKind

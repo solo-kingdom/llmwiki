@@ -7,9 +7,10 @@ import type { McpRouter } from "../mcp/router.js";
 import type { Store } from "../store/interfaces.js";
 import {
   CONFIG_STRUCTURE_POLICY_MODE,
+  OPEN_AUTO_FOLDER_DOMAINS,
   parseStructurePolicyMode,
 } from "../engine/placement_policy.js";
-import { folderPathFromWikiRelPath } from "../engine/wiki_org.js";
+import { folderPathFromWikiRelPath, isCanonicalSlugSegment } from "../engine/wiki_org.js";
 import { formatFolderTreeForPrompt } from "../mcp/diagnostic_tools.js";
 import { IngestCache } from "./cache.js";
 import { applyBlocksToStore } from "./dbapply.js";
@@ -18,12 +19,13 @@ import { llmMessagesForRecord, recordLLMRequest, recordLLMResponse, traceRetries
 import { PageLockManager, withPageLocks } from "./lock.js";
 import { normalizeUpload } from "./normalize.js";
 import {
+  assertBlocksMatchApprovedPlan,
   assertGenerationMatchesPagePlan,
   parseAnalysisPagePlan,
   validateAnalysisPagePlanAgainstStore,
   type AnalysisPagePlan,
 } from "./page_plan.js";
-import { composeSystemPrompt } from "./prompts.js";
+import { composeSystemPrompt, computeRulesHash } from "./prompts.js";
 import { formatFeedbackForPlan, parsePlanActions, parsePlanResult, sourcePathsToDelete } from "./review.js";
 import {
   formatReferencedPagesForAnalysis,
@@ -76,13 +78,14 @@ export class Pipeline {
     this.db = db;
     this.llmClient = llmClient;
     this.applyToDB = db !== null;
-    this.cache = new IngestCache(workspace);
+    this.cache = new IngestCache(workspace, db);
     this.lockMgr = lockManager ?? new PageLockManager();
   }
 
   setDb(db: Store | null): void {
     this.db = db;
     this.applyToDB = db !== null;
+    (this as unknown as { cache: IngestCache }).cache = new IngestCache(this.workspace, db);
   }
 
   setApplyToDB(value: boolean): void {
@@ -190,7 +193,8 @@ export class Pipeline {
       input_type: source.kind,
     });
 
-    const cached = await this.cache.lookupForSource(source, legacyKeys);
+    const rulesHash = computeRulesHash(this.workspace, this.rulesSupplement);
+    const cached = await this.cache.lookupForSource(source, legacyKeys, rulesHash);
     if (cached) {
       this.recorder?.record("cache", "hit", "cache hit", {
         canonical_path: source.canonicalPath,
@@ -203,7 +207,7 @@ export class Pipeline {
     const pagePlan = await this.validatedPagePlan(analysis);
     const files = await this.generate(name, content, analysis, pagePlan);
     this.recorder?.record("apply_files", "complete", "wiki files applied", { paths_written: files });
-    await this.cache.saveForSource(source, files);
+    await this.cache.saveForSource(source, files, rulesHash);
     return files;
   }
 
@@ -239,9 +243,7 @@ export class Pipeline {
     const content = new TextDecoder().decode(source.content);
     this.recorder?.record("apply", "start", "regenerating FILE blocks from approved plan", null);
 
-    const analysis = await this.analyze(name, content);
-    await this.validatedPagePlan(analysis, false);
-    const result = await this.generateFromPlan(name, content, analysis, plan);
+    const result = await this.generateFromPlan(name, content, "", plan);
     this.recorder?.record("apply_files", "complete", "wiki files applied from approved plan", {
       paths_written: result.written,
       paths_deleted: result.deleted,
@@ -293,6 +295,41 @@ export class Pipeline {
   private async validatedPagePlan(analysis: string, enforceReviewThreshold = true): Promise<AnalysisPagePlan> {
     const pagePlan = parseAnalysisPagePlan(analysis, { enforceReviewThreshold });
     await validateAnalysisPagePlanAgainstStore(pagePlan, this.db);
+    if (pagePlan.proposed_folders && pagePlan.proposed_folders.length > 0 && this.db) {
+      const existingFolders =
+        typeof this.db.listFolders === "function" ? await this.db.listFolders(true) : [];
+      const folderSet = new Set(existingFolders.map((f) => f.path));
+      const needsReview: string[] = [];
+      for (const proposed of pagePlan.proposed_folders) {
+        if (folderSet.has(proposed.path)) continue;
+        const [domain, group] = proposed.path.split("/");
+        if (
+          domain &&
+          group &&
+          OPEN_AUTO_FOLDER_DOMAINS.has(domain) &&
+          isCanonicalSlugSegment(domain) &&
+          isCanonicalSlugSegment(group) &&
+          typeof this.db.createFolder === "function"
+        ) {
+          await this.db.createFolder({
+            path: proposed.path,
+            display_name: proposed.display_name,
+            description: proposed.description,
+          });
+          folderSet.add(proposed.path);
+          this.recorder?.record("analysis", "info", `auto-created open-domain folder: ${proposed.path}`, proposed as unknown as Record<string, unknown>);
+        } else {
+          needsReview.push(proposed.path);
+        }
+      }
+      if (needsReview.length > 0 && enforceReviewThreshold) {
+        const { PagePlanReviewRequiredError } = await import("./page_plan.js");
+        throw new PagePlanReviewRequiredError(
+          `提议新建非开放域目录 [${needsReview.join(", ")}]，必须转入 review 确认`,
+          pagePlan,
+        );
+      }
+    }
     this.recorder?.record("analysis", "complete", "validated analysis page plan", {
       page_count: pagePlan.pages.length,
       paths: pagePlan.pages.map((page) => page.path),
@@ -410,6 +447,7 @@ ${content}
         adjustments: normalized.adjustments,
       });
     }
+    assertBlocksMatchApprovedPlan(normalized.blocks, planJson);
 
     const actions = parsePlanActions(planJson);
     const movedSources = new Set<string>();
@@ -526,6 +564,13 @@ ${content}
           return this.ensureGenerationBlocks(step, result, messages, temperature, maxTokens);
         }
       } catch (error) {
+        if (promptStep === "analysis") {
+          this.recorder?.record(step, "error", "analysis tool loop failed; refusing blind fallback", {
+            error: errorMessage(error),
+            max_rounds: config.maxRounds,
+          });
+          throw new Error(`analysis tool loop failed; refusing blind generation: ${errorMessage(error)}`);
+        }
         this.recorder?.record(step, "warn", "tool loop failed, falling back to stream", {
           error: errorMessage(error),
           max_rounds: config.maxRounds,

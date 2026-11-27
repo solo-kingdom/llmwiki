@@ -18,13 +18,23 @@ export interface PagePlanPage {
   relations: PagePlanRelation[];
 }
 
+export interface PagePlanProposedFolder {
+  path: string;
+  display_name: string;
+  description: string;
+}
+
 export interface AnalysisPagePlan {
   summary: string;
   pages: PagePlanPage[];
+  proposed_folders?: PagePlanProposedFolder[];
 }
 
 export class PagePlanReviewRequiredError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly plan?: AnalysisPagePlan,
+  ) {
     super(message);
     this.name = "PagePlanReviewRequiredError";
   }
@@ -33,6 +43,7 @@ export class PagePlanReviewRequiredError extends Error {
 interface RawPagePlan {
   summary?: unknown;
   pages?: unknown;
+  proposed_folders?: unknown;
 }
 
 export function parseAnalysisPagePlan(
@@ -54,8 +65,14 @@ export function parseAnalysisPagePlan(
 
   const paths = new Set<string>();
   const pages = parsed.pages.map((value, index) => parsePage(value, index, paths));
-  if (options.enforceReviewThreshold !== false) assertPagePlanReviewThreshold(pages);
-  return { summary: typeof parsed.summary === "string" ? parsed.summary.trim() : "", pages };
+  const proposedFolders = parseProposedFolders(parsed.proposed_folders);
+  const plan: AnalysisPagePlan = {
+    summary: typeof parsed.summary === "string" ? parsed.summary.trim() : "",
+    pages,
+    ...(proposedFolders.length > 0 ? { proposed_folders: proposedFolders } : {}),
+  };
+  if (options.enforceReviewThreshold !== false) assertPagePlanReviewThreshold(plan);
+  return plan;
 }
 
 export async function validateAnalysisPagePlanAgainstStore(
@@ -114,6 +131,9 @@ function parsePage(value: unknown, index: number, paths: Set<string>): PagePlanP
   }
   const title = stringField(raw.title);
   if (!title) throw new Error(`page plan pages[${index}].title is required`);
+  if (type === "entity" && (title.toUpperCase().includes("REDACTED") || stringField(raw.path).toUpperCase().includes("REDACTED"))) {
+    throw new Error(`page plan entity must not use REDACTED placeholder: ${title}`);
+  }
   const relPath = normalizeWikiRelPath(normalizeWikiFilePath(stringField(raw.path)));
   validateWikiWritePath(relPath);
   if (paths.has(relPath)) throw new Error(`page plan contains duplicate path: ${relPath}`);
@@ -157,17 +177,86 @@ function parseRelations(value: unknown, pageIndex: number): PagePlanRelation[] {
   });
 }
 
-function assertPagePlanReviewThreshold(pages: PagePlanPage[]): void {
+function parseProposedFolders(value: unknown): PagePlanProposedFolder[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error("page plan proposed_folders must be an array");
+  const seen = new Set<string>();
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`page plan proposed_folders[${index}] must be an object`);
+    }
+    const raw = entry as Record<string, unknown>;
+    const rawPath = stringField(raw.path).replace(/^wiki\//, "").replace(/^\/+|\/+$/g, "");
+    const displayName = stringField(raw.display_name);
+    const description = stringField(raw.description);
+    if (!rawPath || !displayName || !description) {
+      throw new Error(`page plan proposed_folders[${index}] requires path, display_name, and description`);
+    }
+    const depth = rawPath.split("/").length;
+    if (depth !== 2) {
+      throw new Error(`page plan proposed_folders[${index}] must be a 2-level topic group: ${rawPath}`);
+    }
+    if (seen.has(rawPath)) {
+      throw new Error(`page plan proposed_folders contains duplicate path: ${rawPath}`);
+    }
+    seen.add(rawPath);
+    return { path: rawPath, display_name: displayName, description };
+  });
+}
+
+export function assertBlocksMatchApprovedPlan(
+  blocks: Map<string, string>,
+  planJson: string,
+): void {
+  let parsed: { changes?: Array<{ path?: string; to_path?: string }> };
+  try {
+    parsed = JSON.parse(planJson) as { changes?: Array<{ path?: string; to_path?: string }> };
+  } catch {
+    return;
+  }
+  const changes = parsed.changes;
+  if (!Array.isArray(changes) || changes.length === 0) return;
+  const allowed = new Set<string>();
+  for (const ch of changes) {
+    if (typeof ch.path === "string" && ch.path.trim()) {
+      try {
+        allowed.add(normalizeWikiRelPath(normalizeWikiFilePath(ch.path)));
+      } catch {
+        // ignore
+      }
+    }
+    if (typeof ch.to_path === "string" && ch.to_path.trim()) {
+      try {
+        allowed.add(normalizeWikiRelPath(normalizeWikiFilePath(ch.to_path)));
+      } catch {
+        // ignore
+      }
+    }
+  }
+  if (allowed.size === 0) return;
+  for (const [rawPath, content] of blocks) {
+    if (content === "---DELETE---\n") continue;
+    const rel = normalizeWikiRelPath(normalizeWikiFilePath(rawPath));
+    if (!allowed.has(rel)) {
+      throw new Error(`生成路径未包含在已批准计划中: ${rel}`);
+    }
+  }
+}
+
+function assertPagePlanReviewThreshold(plan: AnalysisPagePlan): void {
+  const pages = plan.pages;
   const business = pages.filter((page) => page.action === "create" && page.type !== "source");
   if (business.length > 3) {
     throw new PagePlanReviewRequiredError(
       `一个 source 计划新增 ${business.length} 个业务页，超过 3 个，必须转入 review 并逐页确认 reuse_reason`,
+      plan,
     );
   }
   const concepts = business.filter((page) => page.type === "concept").length;
   if (concepts > 2) {
     throw new PagePlanReviewRequiredError(
       `一个 source 计划包含 ${concepts} 个 concept，超过 2 个，必须转入 review 并逐页确认 reuse_reason`,
+      plan,
     );
   }
 }

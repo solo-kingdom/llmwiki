@@ -189,6 +189,8 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/v1/graph/forward/:id", api.forwardReferences);
   app.get("/api/v1/graph/uncited", api.uncitedSources);
   app.get("/api/v1/graph/stale", api.stalePages);
+  app.get("/api/v1/organize/overcrowded", api.listOvercrowdedFolders);
+  app.post("/api/v1/organize/auto-cluster", api.generateAutoClusterPlan);
 
   // Settings, API keys and logs
   app.get("/api/v1/settings", api.getSettings);

@@ -62,6 +62,35 @@ export const WIKI_HIDDEN_SUBDIRS = new Set(["templates", "sources"]);
 
 export const RESERVED_FOLDER_ROOTS = new Set(["templates", "sources", "raw"]);
 
+export const FOLDER_OVERVIEW_FILENAME = "_overview.md";
+
+const CANONICAL_SLUG_SEGMENT_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function isCanonicalSlugSegment(seg: string): boolean {
+  return CANONICAL_SLUG_SEGMENT_RE.test(seg);
+}
+
+export function isFolderOverviewPath(relPath: string): boolean {
+  const normalized = normalizeWikiRelPath(relPath);
+  if (!normalized.startsWith("wiki/")) return false;
+  return path.posix.basename(normalized) === FOLDER_OVERVIEW_FILENAME;
+}
+
+export function isCanonicalWikiSlugPath(relPath: string): boolean {
+  const normalized = normalizeWikiRelPath(relPath);
+  if (!normalized.startsWith("wiki/")) return false;
+  if (RESERVED_TOP_LEVEL_WIKI_PAGES.has(normalized)) return true;
+  const parts = normalized.slice("wiki/".length).split("/");
+  if (parts.length < 2) return false;
+  const filename = parts[parts.length - 1] ?? "";
+  const folderParts = parts.slice(0, -1);
+  if (!folderParts.every(isCanonicalSlugSegment)) return false;
+  if (filename === FOLDER_OVERVIEW_FILENAME) return true;
+  if (!filename.endsWith(".md")) return false;
+  const stem = filename.slice(0, -3);
+  return isCanonicalSlugSegment(stem);
+}
+
 export const MAX_FOLDER_DEPTH = 8;
 
 export const TYPED_WIKI_SUBDIRS = [
@@ -281,10 +310,8 @@ export function suggestedWikiSubdirForPageType(pageType: string): string {
 
 export function misplacedWikiPageMessage(relPath: string, pageType: string): string {
   void relPath;
-  let message = "业务页面不应位于 wiki/ 顶层，应放入主题子目录";
-  const subdir = suggestedWikiSubdirForPageType(pageType);
-  if (subdir) message += `（或参考原分类目录：wiki/${subdir}/）`;
-  return message;
+  void pageType;
+  return "业务页面不应位于 wiki/ 顶层，应放入对应的英文 kebab-case 主题域/主题组目录（例如 wiki/system-network/proxy-dns/）";
 }
 
 export function validateWikiWritePath(relPath: string): void {

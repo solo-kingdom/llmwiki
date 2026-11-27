@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { slugWithFallback } from "./normalize.js";
 import {
   INPUT_KIND_SESSION_ARCHIVE,
   type NormalizedSource,
@@ -158,14 +159,14 @@ export function normalizeSessionArchive(
   now: Date,
 ): NormalizedSource {
   if (!content.trim()) throw new Error("content is required");
-  void title;
-  const name = `archive-${timestamp(now)}.md`;
+  const name = `${slugWithFallback(title, "session", now)}.md`;
   const relPath = path.posix.join(sessionDir(sessionId), name);
   return {
     kind: INPUT_KIND_SESSION_ARCHIVE,
     canonicalPath: relPath,
     originalName: name,
     sourceRef: sourceRef.trim() || `session_archive:${sessionId}`,
+    ...(title.trim() ? { title: title.trim() } : {}),
     content: Buffer.from(content, "utf8"),
   };
 }

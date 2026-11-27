@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -31,6 +31,17 @@ export function slug(value: string): string {
   return out.replace(/^-+|-+$/g, "");
 }
 
+export function slugWithFallback(title: string, fallbackPrefix: string, now: Date): string {
+  const ascii = slug(title);
+  if (ascii) return `${ascii}-${timestamp(now)}`;
+  const cleanTitle = title.trim();
+  if (cleanTitle) {
+    const shortHash = createHash("sha256").update(cleanTitle, "utf8").digest("hex").slice(0, 8);
+    return `${fallbackPrefix}-${shortHash}-${timestamp(now)}`;
+  }
+  return `${fallbackPrefix}-${timestamp(now)}`;
+}
+
 function canonicalPath(name: string): string {
   let base = path.basename(name.trim());
   if (!base || base === "." || base === "/") base = `source-${randomUUID()}.txt`;
@@ -49,13 +60,13 @@ export function normalizeConversation(
   now: Date,
 ): NormalizedSource {
   if (!content.trim()) throw new Error("content is required");
-  const base = slug(title) || "conversation";
-  const name = `${base}-${timestamp(now)}.md`;
+  const name = `${slugWithFallback(title, "conversation", now)}.md`;
   return {
     kind: INPUT_KIND_CONVERSATION,
     canonicalPath: canonicalPath(name),
     originalName: name,
     sourceRef: sourceRef.trim() || "conversation",
+    ...(title.trim() ? { title: title.trim() } : {}),
     content: Buffer.from(content, "utf8"),
   };
 }
@@ -70,14 +81,14 @@ export function normalizeText(
   if (!content.trim()) throw new Error("content is required");
   let name = filename.trim();
   if (!name) {
-    const base = slug(title) || "text";
-    name = `${base}-${timestamp(now)}.md`;
+    name = `${slugWithFallback(title, "text", now)}.md`;
   }
   return {
     kind: INPUT_KIND_TEXT,
     canonicalPath: canonicalPath(name),
     originalName: name,
     sourceRef: sourceRef.trim() || "text",
+    ...(title.trim() ? { title: title.trim() } : {}),
     content: Buffer.from(content, "utf8"),
   };
 }

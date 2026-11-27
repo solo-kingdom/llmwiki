@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  OPEN_AUTO_FOLDER_DOMAINS,
   evaluateWikiPlacement,
   parseStructurePolicyMode,
   writeOriginForChangeSet,
 } from "./placement_policy.js";
 
-const folders = new Set(["系统与网络", "系统与网络/代理与DNS"]);
+const folders = new Set(["system-network", "system-network/proxy-dns", "products"]);
 
 describe("wiki placement policy", () => {
   it("defaults to legacy and parses only explicit modes", () => {
@@ -43,25 +44,38 @@ describe("wiki placement policy", () => {
     expect(update.warnings[0]).toContain("旧页面原地更新");
   });
 
-  it("requires a registered topic group for new automatic pages", () => {
-    expect(() => evaluateWikiPlacement("wiki/系统与网络/DNS.md", {
+  it("requires a registered topic group and A1 kebab-case slug for new automatic pages", () => {
+    expect(() => evaluateWikiPlacement("wiki/system-network/dns.md", {
       mode: "enforce",
       origin: "auto_ingest",
       existing: false,
       folders,
     })).toThrow("主题域/主题组");
-    expect(() => evaluateWikiPlacement("wiki/系统与网络/未登记/DNS.md", {
+    expect(() => evaluateWikiPlacement("wiki/system-network/unregistered/dns.md", {
       mode: "enforce",
       origin: "auto_ingest",
       existing: false,
       folders,
     })).toThrow("未登记");
-    expect(() => evaluateWikiPlacement("wiki/系统与网络/代理与DNS/DNS.md", {
+    expect(() => evaluateWikiPlacement("wiki/system-network/proxy-dns/DNS中文.md", {
+      mode: "enforce",
+      origin: "auto_ingest",
+      existing: false,
+      folders,
+    })).toThrow("kebab-case");
+    expect(() => evaluateWikiPlacement("wiki/system-network/proxy-dns/dns.md", {
       mode: "enforce",
       origin: "auto_ingest",
       existing: false,
       folders,
     })).not.toThrow();
+    expect(() => evaluateWikiPlacement("wiki/system-network/proxy-dns/_overview.md", {
+      mode: "enforce",
+      origin: "auto_ingest",
+      existing: false,
+      folders,
+    })).not.toThrow();
+    expect(OPEN_AUTO_FOLDER_DOMAINS.has("products")).toBe(true);
   });
 
   it("keeps sources, migration, rollback and reindex compatible", () => {

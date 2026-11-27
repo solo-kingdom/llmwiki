@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { logDocument, record } from "../activity/index.js";
+import { refreshFolderOverviews } from "../engine/folder_overview.js";
 import { rebuildReferences } from "../ingest/dbapply.js";
 import {
   FolderConflictError,
@@ -126,6 +127,7 @@ export function foldersApi(ctx: ApiContext) {
         if (toRebuild.length > 0) {
           await rebuildReferences(ctx.db, toRebuild).catch(() => undefined);
         }
+        await refreshFolderOverviews(ctx.db, [result.to_path]).catch(() => undefined);
         record(ctx.db, {
           level: "info",
           category: "folder",

@@ -6,6 +6,98 @@ import type { Chunk, SearchChunk, SearchOptions } from "../types.js";
 import { parseStringArrayJson, todayIsoDate } from "./doc_meta.js";
 import { asNumber, asString, exec, queryRows } from "./sql.js";
 
+const MAX_SEARCH_TOKENS = 12;
+const CJK_SEQ_RE = /[\u4e00-\u9fff]+/g;
+const SEGMENT_SPLIT_RE = /[\s\p{P}\p{S}]+/u;
+
+export interface SearchQueryTokens {
+  groups: string[][];
+  flatTerms: string[];
+}
+
+/**
+ * Tokenize mixed Chinese/English queries into match groups.
+ * Each whitespace/punctuation segment forms a group; CJK runs >= 2 chars expand to
+ * the full run plus overlapping 2-char bigrams so PostgreSQL simple FTS / ILIKE
+ * matches Chinese phrases without a morphological tokenizer.
+ */
+export function tokenizeSearchQuery(query: string): SearchQueryTokens {
+  const trimmed = query.trim();
+  if (!trimmed) return { groups: [], flatTerms: [] };
+
+  const segments = trimmed.split(SEGMENT_SPLIT_RE).filter(Boolean);
+  const groups: string[][] = [];
+  const flatSet = new Set<string>();
+
+  for (const seg of segments) {
+    if (flatSet.size >= MAX_SEARCH_TOKENS) break;
+    const groupTerms: string[] = [];
+    const seenInGroup = new Set<string>();
+    const addTerm = (term: string) => {
+      const clean = term.trim().toLowerCase();
+      if (!clean || seenInGroup.has(clean)) return;
+      if (flatSet.size >= MAX_SEARCH_TOKENS && !flatSet.has(clean)) return;
+      seenInGroup.add(clean);
+      groupTerms.push(clean);
+      flatSet.add(clean);
+    };
+
+    const cjkMatches = [...seg.matchAll(CJK_SEQ_RE)];
+    if (cjkMatches.length === 0) {
+      addTerm(seg);
+    } else {
+      const asciiParts = seg.split(CJK_SEQ_RE).filter(Boolean);
+      for (const ascii of asciiParts) addTerm(ascii);
+      for (const match of cjkMatches) {
+        const run = match[0];
+        addTerm(run);
+        const chars = [...run];
+        if (chars.length >= 3) {
+          for (let i = 0; i + 1 < chars.length; i += 1) {
+            addTerm(`${chars[i]}${chars[i + 1]}`);
+          }
+        }
+      }
+    }
+
+    if (groupTerms.length > 0) groups.push(groupTerms);
+  }
+
+  return { groups, flatTerms: [...flatSet] };
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+function buildTokenGroupMatchSql(
+  groups: string[][],
+  columns: string[],
+  args: unknown[],
+  requireAllGroups: boolean,
+): { whereSql: string; groupHitExpr: string } {
+  if (groups.length === 0) return { whereSql: "", groupHitExpr: "0" };
+  const groupClauses: string[] = [];
+  const hitCases: string[] = [];
+  for (const group of groups) {
+    const termClauses: string[] = [];
+    for (const term of group) {
+      args.push(`%${escapeLike(term)}%`);
+      const param = `$${args.length}`;
+      const colMatch = columns.map((col) => `${col} ILIKE ${param} ESCAPE '\\'`).join(" OR ");
+      termClauses.push(`(${colMatch})`);
+    }
+    const groupSql = `(${termClauses.join(" OR ")})`;
+    groupClauses.push(groupSql);
+    hitCases.push(`(CASE WHEN ${groupSql} THEN 1 ELSE 0 END)`);
+  }
+  const joiner = requireAllGroups && groupClauses.length > 1 ? " AND " : " OR ";
+  return {
+    whereSql: `(${groupClauses.join(joiner)})`,
+    groupHitExpr: hitCases.join(" + "),
+  };
+}
+
 function normalizeSearchOptions(raw?: string[] | SearchOptions): SearchOptions {
   if (!raw) return {};
   if (Array.isArray(raw)) return { page_types: raw };
@@ -17,10 +109,10 @@ function pathFilterClause(pathFilter: string): string {
     const hidden = [...WIKI_HIDDEN_SUBDIRS]
       .map((subdir) => `d.relative_path LIKE 'wiki/${subdir}/%'`)
       .join(" OR ");
-    return `AND d.source_kind = 'wiki' AND NOT (${hidden}) `;
+    return `AND d.source_kind = 'wiki' AND d.relative_path NOT IN ('wiki/index.md', 'wiki/log.md') AND NOT (${hidden}) `;
   }
   if (pathFilter === "sources") return "AND d.source_kind != 'wiki' ";
-  return "";
+  return "AND d.relative_path NOT IN ('wiki/index.md', 'wiki/log.md') ";
 }
 
 function buildSearchFilterClause(
@@ -115,21 +207,26 @@ export function chunksRepo(
   pool: Pool,
 ): Omit<
   IndexStore,
-  "listWikiGraphEdges" | "buildKnowledgeGraph" | "replaceReferenceEntriesInTx" | "listReferenceEntries"
+  "listWikiGraphEdges" | "buildKnowledgeGraph" | "replaceReferenceEntriesInTx" | "mergeReferenceEntriesInTx" | "listReferenceEntries"
 > {
   async function searchFTS(query: string, limit: number, pathFilter: string, options: SearchOptions) {
+    const tokens = tokenizeSearchQuery(query);
     const args: unknown[] = [query, limit];
+    const tokenMatch = buildTokenGroupMatchSql(tokens.groups, ["dc.content", "d.title"], args, false);
+    const groupCondition = tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : "";
+    const hitScore = tokenMatch.whereSql ? `(${tokenMatch.groupHitExpr}) * 0.25 + ` : "";
     let sql = `
       SELECT d.id, dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
         d.filename, d.title, d.path, d.file_type,
-        (ts_rank_cd(to_tsvector('simple', dc.content), websearch_to_tsquery('simple', $1))
+        (${hitScore}ts_rank_cd(to_tsvector('simple', dc.content), websearch_to_tsquery('simple', $1))
          + similarity(dc.content, $1)) AS score,
         ${SEARCH_DOC_META_COLS}
       FROM document_chunks dc
       JOIN documents d ON dc.document_id = d.id
       WHERE d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
         AND (to_tsvector('simple', dc.content) @@ websearch_to_tsquery('simple', $1)
-             OR dc.content ILIKE '%' || $1 || '%') `;
+             OR dc.content ILIKE '%' || $1 || '%'
+             ${groupCondition}) `;
     sql += buildSearchFilterClause(pathFilter, options, args);
     sql += "ORDER BY score DESC, dc.chunk_index LIMIT $2";
     const rows = await queryRows(pool, sql, args);
@@ -137,26 +234,35 @@ export function chunksRepo(
   }
 
   async function searchLIKE(query: string, limit: number, pathFilter: string, options: SearchOptions) {
+    const tokens = tokenizeSearchQuery(query);
     const args: unknown[] = [query, limit];
+    const tokenMatch = buildTokenGroupMatchSql(tokens.groups, ["dc.content"], args, false);
+    const groupCondition = tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : "";
+    const scoreExpr = tokenMatch.whereSql ? `(${tokenMatch.groupHitExpr}) * 0.2` : "0.0";
     let sql = `
       SELECT d.id, dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
-        d.filename, d.title, d.path, d.file_type, 0.0 AS score,
+        d.filename, d.title, d.path, d.file_type, ${scoreExpr} AS score,
         ${SEARCH_DOC_META_COLS}
       FROM document_chunks dc
       JOIN documents d ON dc.document_id = d.id
-      WHERE dc.content ILIKE '%' || $1 || '%' AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = '' `;
+      WHERE (dc.content ILIKE '%' || $1 || '%' ${groupCondition}) AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = '' `;
     sql += buildSearchFilterClause(pathFilter, options, args);
-    sql += "LIMIT $2";
+    sql += "ORDER BY score DESC LIMIT $2";
     const rows = await queryRows(pool, sql, args);
     return rows.map(scanSearchChunk);
   }
 
   async function searchMetadata(query: string, limit: number, pathFilter: string, options: SearchOptions) {
+    const tokens = tokenizeSearchQuery(query);
     const args: unknown[] = [query, limit];
+    const metaCols = ["d.filename", "d.title", "d.path", "COALESCE(d.aliases, '[]')", "COALESCE(d.symptoms, '[]')"];
+    const tokenMatch = buildTokenGroupMatchSql(tokens.groups, metaCols, args, false);
+    const groupCondition = tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : "";
+    const groupScore = tokenMatch.whereSql ? `(${tokenMatch.groupHitExpr}) * 0.3` : "0.0";
     let sql = `
       SELECT d.id, COALESCE(SUBSTR(d.content, 1, 300), ''), 0, '', 0,
         d.filename, d.title, d.path, d.file_type,
-        (CASE WHEN COALESCE(d.symptoms, '[]') ILIKE '%' || $1 || '%' THEN 0.5 ELSE 0.0 END) AS score,
+        ((CASE WHEN COALESCE(d.symptoms, '[]') ILIKE '%' || $1 || '%' THEN 0.5 ELSE 0.0 END) + ${groupScore}) AS score,
         ${SEARCH_DOC_META_COLS}
       FROM documents d
       WHERE d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
@@ -164,7 +270,8 @@ export function chunksRepo(
              OR d.title ILIKE '%' || $1 || '%'
              OR d.path ILIKE '%' || $1 || '%'
              OR COALESCE(d.aliases, '[]') ILIKE '%' || $1 || '%'
-             OR COALESCE(d.symptoms, '[]') ILIKE '%' || $1 || '%') `;
+             OR COALESCE(d.symptoms, '[]') ILIKE '%' || $1 || '%'
+             ${groupCondition}) `;
     sql += buildSearchFilterClause(pathFilter, options, args);
     sql += "ORDER BY score DESC, d.updated_at DESC LIMIT $2";
     const rows = await queryRows(pool, sql, args);

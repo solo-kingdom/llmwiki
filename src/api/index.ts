@@ -9,6 +9,7 @@ import { historyApi } from "./history.js";
 import { ingestJobsApi } from "./ingest_jobs.js";
 import { ingestReviewsApi } from "./ingest_reviews.js";
 import { ingestSessionsApi } from "./ingest_sessions.js";
+import { organizeApi } from "./organize.js";
 import { providersApi } from "./providers.js";
 import { publicWikiApi } from "./public_wiki.js";
 import { searchApi } from "./search.js";
@@ -35,6 +36,7 @@ export function createApi(ctx: ApiContext) {
     ...capabilitiesApi(),
     ...apiKeysApi(ctx),
     ...archivesApi(ctx),
+    ...organizeApi(ctx),
   };
 }
 

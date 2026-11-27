@@ -98,4 +98,50 @@ describe("Pipeline page plan gate", () => {
     await expect(pipeline.ingestNormalized(source)).rejects.toThrow("legacy 类型根");
     expect(applyChangeSet).not.toHaveBeenCalled();
   });
+
+  it("does not silently fallback to tool-free stream when analysis tool loop fails", async () => {
+    const failingClient = {
+      model: "fake",
+      onRetry: null,
+      chat: async () => {
+        throw new Error("tool loop exploded");
+      },
+      streamChat: async function* () {
+        yield { type: "token", content: plan };
+        yield { type: "done" };
+      },
+    } as unknown as Client;
+    const db = {
+      getConfig: async () => "",
+      listFolders: async () => [],
+      listDocumentsFiltered: async () => [],
+      getDocumentByRelativePath: async () => null,
+    } as unknown as Store;
+    const pipeline = new Pipeline(await workspace(), db, failingClient);
+    pipeline.setToolLoopConfig({ maxRounds: 2, maxToolCallsPerRound: 2 });
+
+    await expect(pipeline.ingestNormalized(source)).rejects.toThrow("analysis tool loop failed");
+  });
+
+  it("applyFromPlan does not re-run analysis and enforces approved plan", async () => {
+    const streamCalls: string[] = [];
+    const customClient = {
+      model: "fake",
+      onRetry: null,
+      chat: async () => ({ content: "", reasoningContent: "", toolCalls: [] }),
+      streamChat: async function* (messages: Array<{ role: string; content?: string }>): AsyncGenerator<StreamEvent> {
+        const user = messages.find((m) => m.role === "user")?.content ?? "";
+        streamCalls.push(user);
+        yield { type: "token", content: file };
+        yield { type: "done" };
+      },
+    } as unknown as Client;
+    const pipeline = new Pipeline(await workspace(), null, customClient);
+    pipeline.setToolLoopConfig({ maxRounds: 0, maxToolCallsPerRound: 0 });
+
+    const result = await pipeline.applyFromPlan(source, plan);
+    expect(result).toEqual({ written: [pagePath], deleted: [] });
+    expect(streamCalls).toHaveLength(1);
+    expect(streamCalls[0]).toContain("已批准计划");
+  });
 });

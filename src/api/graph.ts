@@ -8,8 +8,9 @@ export function graphApi(ctx: ApiContext) {
       let limit = parseQueryInt(c, "limit", 300);
       if (limit <= 0) limit = 300;
       if (limit > 10000) limit = 10000;
+      const folder = (c.req.query("folder") ?? "").trim();
       try {
-        const data = await ctx.db.buildKnowledgeGraph(limit);
+        const data = await ctx.db.buildKnowledgeGraph(limit, folder || undefined);
         return writeJson(c, 200, {
           nodes: data.nodes ?? [],
           edges: data.edges ?? [],

@@ -191,8 +191,13 @@ function sortNodes(nodes: TreeNode[], lang: "zh" | "en"): TreeNode[] {
       const sb = b.folder?.sort_order ?? 0
       if (sa !== sb) return sa - sb
     }
-    const nameA = a.children === undefined ? a.segment : folderLabel(a.segment, lang, a.folder)
-    const nameB = b.children === undefined ? b.segment : folderLabel(b.segment, lang, b.folder)
+    if (a.children === undefined && b.children === undefined) {
+      const ovA = a.doc?.filename === "_overview.md" ? 0 : 1
+      const ovB = b.doc?.filename === "_overview.md" ? 0 : 1
+      if (ovA !== ovB) return ovA - ovB
+    }
+    const nameA = a.children === undefined ? (a.doc?.title || a.segment) : folderLabel(a.segment, lang, a.folder)
+    const nameB = b.children === undefined ? (b.doc?.title || b.segment) : folderLabel(b.segment, lang, b.folder)
     return nameA.localeCompare(nameB, lang === "en" ? "en" : "zh-Hans-CN")
   })
 }

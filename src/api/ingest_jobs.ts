@@ -85,17 +85,20 @@ export function ingestJobsApi(ctx: ApiContext) {
     sourceRef: string,
     archiveFolder?: string,
     mediaType?: string,
+    title?: string,
   ) {
     const svc = new ArchiveStorageService(ctx.db, ctx.workspace);
     const folderPath = (archiveFolder ?? "").trim() || ingestAutoFolder(origin, new Date());
     return svc.storeNewFile({
       folderPath,
       filename,
+      title,
       bytes,
       mediaType,
       origin,
       sourceRef,
       autoRename: true,
+      dedup: "reuse",
     });
   }
 
@@ -107,6 +110,9 @@ export function ingestJobsApi(ctx: ApiContext) {
   ): Promise<IngestJob> {
     const job = newJob(inputType, sourcePath, sourceRef, archiveFileId);
     await ctx.db.createIngestJob(job);
+    if (archiveFileId && typeof ctx.db.setArchiveFileIngestJobId === "function") {
+      await ctx.db.setArchiveFileIngestJobId(archiveFileId, job.id).catch(() => undefined);
+    }
     await recordRulesSnapshot(ctx.db, job.id, ctx.workspace);
     logIngestJob(ctx.db, job, "queued", "api");
     return job;
@@ -133,6 +139,7 @@ export function ingestJobsApi(ctx: ApiContext) {
           normalized.sourceRef,
           req.archive_folder,
           "text/markdown; charset=utf-8",
+          req.title,
         );
         const job = await createQueuedJob(
           normalized.kind,
@@ -172,6 +179,8 @@ export function ingestJobsApi(ctx: ApiContext) {
           normalized.content,
           normalized.sourceRef,
           req.archive_folder,
+          undefined,
+          req.title,
         );
         const job = await createQueuedJob(
           normalized.kind,
@@ -346,6 +355,13 @@ export function ingestJobsApi(ctx: ApiContext) {
         if (cancelled) {
           const updated = await ctx.db.getIngestJob(id);
           if (updated) logIngestJob(ctx.db, updated, "cancelled", "api");
+          if (job.archive_file_id && typeof ctx.db.listArchiveFileDocuments === "function") {
+            const linked = await ctx.db.listArchiveFileDocuments(job.archive_file_id).catch(() => []);
+            const file = await ctx.db.getArchiveFile(job.archive_file_id).catch(() => null);
+            if (linked.length === 0 && file && file.ingest_job_id === job.id) {
+              await new ArchiveStorageService(ctx.db, ctx.workspace).deleteFile(file.id).catch(() => undefined);
+            }
+          }
           return writeJson(c, 200, { status: "cancelled" });
         }
         const message =

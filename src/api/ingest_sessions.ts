@@ -802,11 +802,13 @@ export function ingestSessionsApi(ctx: ApiContext) {
         const archiveFile = await storage.storeNewFile({
           folderPath: archiveFolder,
           filename: normalized.originalName,
+          title,
           bytes: normalized.content,
           mediaType: "text/markdown; charset=utf-8",
           origin: "ingest_session",
           sourceRef: `session:${session.id}`,
           autoRename: true,
+          dedup: "reuse",
         });
 
         const review: IngestReview = {

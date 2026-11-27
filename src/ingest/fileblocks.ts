@@ -136,7 +136,9 @@ export async function applyWikiBlocks(
 
     let writeContent = content;
     if (options?.merge && !options.forceOverwrite) {
-      const merged = await mergeWikiPage(fullPath, content, options.merge);
+      const merged = await mergeWikiPage(fullPath, content, options.merge, {
+        unlockTypeAndTitle: options.unlockTypeAndTitle,
+      });
       if (merged === null) {
         handled += 1;
         continue;

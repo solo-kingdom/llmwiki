@@ -3,6 +3,8 @@ import { hostname } from "node:os";
 import path from "node:path";
 import { logIngestJob, logSession, record } from "../activity/index.js";
 import { CanonicalPageConflictError } from "../engine/canonical.js";
+import { refreshFolderOverviews } from "../engine/folder_overview.js";
+import { folderPathFromWikiRelPath } from "../engine/wiki_org.js";
 import { ArchiveStorageService } from "../archive/storage.js";
 import { clientFromInstance, clientFromWorkspace } from "../llm/instance_client.js";
 import type { Client } from "../llm/client.js";
@@ -185,17 +187,81 @@ export class JobProcessor {
 
       try {
         const files = await pipeline.ingestNormalized(normalized);
-        this.finalizeWikiApply(job.id, job.source_path, "", { written: files, deleted: [] });
+        await this.finalizeWikiApply(job.id, job.source_path, "", { written: files, deleted: [] });
         await this.markJobSucceeded(job.id, files);
       } catch (error) {
         const code = classifyPipelineError(error);
-        await this.failJob(job.id, code, errorMessage(error), "", remediationForCode(code));
+        let remediation = remediationForCode(code);
+        let message = errorMessage(error);
+        if (error instanceof PagePlanReviewRequiredError && error.plan) {
+          const reviewId = await this.createAutoReviewFromPlan(job, error.plan).catch(() => "");
+          if (reviewId) {
+            remediation = `review ${reviewId} created; inspect and approve it via /api/v1/ingest/reviews/${reviewId}`;
+            message = `${message} (review_id=${reviewId})`;
+          }
+        }
+        await this.failJob(job.id, code, message, "", remediation);
       }
     } finally {
       stopHeartbeat();
       await this.db.clearIngestJobLease(job.id).catch(() => undefined);
       pipeline.setJobRecorder(null);
     }
+  }
+
+  private async createAutoReviewFromPlan(
+    job: IngestJob,
+    plan: import("./page_plan.js").AnalysisPagePlan,
+  ): Promise<string> {
+    if (
+      typeof this.db.createIngestReview !== "function" ||
+      typeof this.db.createIngestReviewPlan !== "function"
+    ) {
+      return "";
+    }
+    const review: IngestReview = {
+      id: "",
+      session_id: "",
+      archive_source_path: job.source_path,
+      archive_file_id: job.archive_file_id ?? "",
+      status: "ready_for_review",
+      current_plan_version: 1,
+      approved_plan_version: 0,
+      created_at: "",
+      updated_at: "",
+      deep_organize: false,
+    };
+    await this.db.createIngestReview(review);
+    const changes = plan.pages.map((p) => ({
+      path: p.path,
+      action: p.action,
+      rationale: p.reuse_reason || `${p.type}: ${p.title}`,
+    }));
+    const lines = [
+      `# 自动转入审阅：${plan.summary || job.source_path}`,
+      "",
+      `来源作业 \`${job.id}\` 因新增页数超过直写阈值自动转为审阅：`,
+      "",
+      ...plan.pages.map(
+        (p) => `- **${p.action}** \`${p.path}\` [${p.type}] — ${p.title}${p.reuse_reason ? `（复用理由：${p.reuse_reason}）` : ""}`,
+      ),
+    ];
+    if (plan.proposed_folders && plan.proposed_folders.length > 0) {
+      lines.push("", "## 提议新建目录", "");
+      for (const f of plan.proposed_folders) {
+        lines.push(`- \`wiki/${f.path}/\` (${f.display_name}) — ${f.description}`);
+      }
+    }
+    await this.db.createIngestReviewPlan({
+      id: "",
+      review_id: review.id,
+      version: 1,
+      plan_markdown: lines.join("\n"),
+      plan_json: JSON.stringify({ summary: plan.summary, changes, proposed_folders: plan.proposed_folders ?? [] }),
+      created_at: "",
+    });
+    this.logReviewEvent(review.id, "", "review_ready", `auto-created review from job ${job.id}`, "success");
+    return review.id;
   }
 
   private async loadJobSource(
@@ -410,14 +476,55 @@ export class JobProcessor {
     return { instanceId: lastInstanceId, model: jobModel || lastModel };
   }
 
-  private finalizeWikiApply(
+  private async finalizeWikiApply(
     jobId: string,
     archivePath: string,
     planJson: string,
     result: ApplyWikiResult,
-  ): void {
+  ): Promise<void> {
     void archivePath;
     void planJson;
+    const affectedFolders = [
+      ...new Set(
+        [...result.written, ...result.deleted]
+          .map((p) => folderPathFromWikiRelPath(p))
+          .filter(Boolean),
+      ),
+    ];
+    if (affectedFolders.length > 0 && typeof this.db.listFolders === "function") {
+      await refreshFolderOverviews(this.db, affectedFolders).catch((error) => {
+        logger.warn({ error, jobId }, "processor: refresh folder overviews failed");
+      });
+    }
+    if (
+      affectedFolders.length > 0 &&
+      typeof this.db.getIngestJob === "function" &&
+      typeof this.db.getArchiveFile === "function" &&
+      typeof this.db.updateArchiveFileLocation === "function"
+    ) {
+      try {
+        const job = await this.db.getIngestJob(jobId);
+        if (job?.archive_file_id) {
+          const af = await this.db.getArchiveFile(job.archive_file_id);
+          const targetFolder = affectedFolders[0]!;
+          if (af && (!af.folder_path || af.folder_path === "ingest" || af.folder_path.startsWith("ingest/"))) {
+            await this.db.updateArchiveFileLocation(af.id, targetFolder, af.filename);
+            if (typeof this.db.getFolder === "function" && typeof this.db.updateArchiveFolder === "function") {
+              const wf = await this.db.getFolder(targetFolder);
+              if (wf && (wf.display_name || wf.description)) {
+                await this.db.updateArchiveFolder(targetFolder, {
+                  display_name: wf.display_name || undefined,
+                  description: wf.description || undefined,
+                  sort_order: wf.sort_order,
+                });
+              }
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn({ error, jobId }, "processor: align archive folder failed");
+      }
+    }
     const recorder = new StoreJobRecorder(this.db, jobId, DEFAULT_JOB_EVENTS_MAX_COUNT);
     recorder.record(
       "post_apply",
@@ -597,7 +704,7 @@ export class JobProcessor {
       return;
     }
 
-    this.finalizeWikiApply(job.id, job.source_path, plan.plan_json, result);
+    await this.finalizeWikiApply(job.id, job.source_path, plan.plan_json, result);
     await this.db.setIngestReviewFinalJob(reviewId, job.id);
     const changeSetId = pipeline.lastChangeSetId();
     if (changeSetId) await this.db.setIngestReviewChangeSet(reviewId, changeSetId);

@@ -6,6 +6,7 @@ import { chunkText, defaultChunkConfig } from "../engine/chunker.js";
 import { getMetadataJSON, parseFrontmatter, titleFromFilename } from "../engine/frontmatter.js";
 import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
 import { ReferenceParser } from "../engine/references.js";
+import { experienceShapeScore } from "../engine/lint.js";
 import {
   CONFIG_STRUCTURE_POLICY_MODE,
   evaluateWikiPlacement,
@@ -65,6 +66,21 @@ export async function applyBlocksToStore(
     const decision = evaluateWikiPlacement(rel, { mode, origin, existing: existing !== null, folders });
     for (const warning of decision.warnings) {
       state.recorder?.record("placement", "warn", warning, { path: rel, mode, origin });
+    }
+    if (origin === "auto_ingest" && !existing) {
+      const fm = parseFrontmatter(content);
+      if ((fm.type || "").toLowerCase() === "concept" && experienceShapeScore(content) >= 3) {
+        const msg = `concept 页面呈明显经验排查结构（应改为 experience）: ${rel}`;
+        if (mode === "enforce") throw new Error(msg);
+        state.recorder?.record("placement", "warn", msg, { path: rel, mode, origin });
+      }
+      if ((fm.confidence || "").toLowerCase() === "high" && !fm.last_verified) {
+        state.recorder?.record("placement", "warn", `首次自动生成页面自标 confidence: high 但缺少 last_verified，将降级为 medium: ${rel}`, { path: rel });
+        normalized.blocks.set(
+          rel,
+          content.replace(/^confidence:\s*high\s*$/m, "confidence: medium"),
+        );
+      }
     }
   }
 
@@ -146,7 +162,10 @@ export async function applyBlocksToStore(
       }
     }
     try {
-      await storeReferenceEntries(state.db, extracted);
+      const updatePaths = new Set(
+        writes.filter((w) => w.operation === "update").map((w) => w.relative_path),
+      );
+      await storeReferenceEntries(state.db, extracted, updatePaths);
       await rebuildReferences(state.db, result.written);
     } catch (error) {
       state.recorder?.record("apply_files", "warn", `rebuild references: ${errorMessage(error)}`, null);
@@ -268,11 +287,12 @@ export async function rebuildReferences(db: Store, relPaths: string[]): Promise<
 }
 
 /** Resolve extracted entries against the current doc index and persist them.
- * Entries for a page are replaced wholesale, so pages whose references were
- * removed on regeneration do not keep stale rows. */
+ * For newly created pages entries are replaced; for existing updates entries are
+ * merged by (kind, rawText) so prior ingest references are never wiped. */
 export async function storeReferenceEntries(
   db: Store,
   extracted: Map<string, ExtractedReferenceEntry[]>,
+  updatePaths: ReadonlySet<string> = new Set(),
 ): Promise<void> {
   if (extracted.size === 0) return;
   const docs = await db.listDocumentsFiltered({ archived: "include" });
@@ -289,16 +309,18 @@ export async function storeReferenceEntries(
     const doc = await db.getDocumentByRelativePath(rel);
     if (!doc) continue;
     const docPath = `${doc.path}${doc.filename}`;
-    await db.replaceReferenceEntriesInTx(
-      doc.id,
-      entries.map((entry) => ({
-        kind: entry.kind,
-        rawText: entry.rawText,
-        targetDocumentId: parser.resolveLink(entry.rawText, docPath),
-        annotation: entry.annotation,
-        position: entry.position,
-      })),
-    );
+    const mapped = entries.map((entry) => ({
+      kind: entry.kind,
+      rawText: entry.rawText,
+      targetDocumentId: parser.resolveLink(entry.rawText, docPath),
+      annotation: entry.annotation,
+      position: entry.position,
+    }));
+    if (updatePaths.has(rel) && typeof db.mergeReferenceEntriesInTx === "function") {
+      await db.mergeReferenceEntriesInTx(doc.id, mapped);
+    } else {
+      await db.replaceReferenceEntriesInTx(doc.id, mapped);
+    }
   }
 }
 

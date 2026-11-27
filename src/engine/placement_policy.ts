@@ -1,5 +1,7 @@
 import {
   folderPathFromWikiRelPath,
+  isCanonicalWikiSlugPath,
+  isFolderOverviewPath,
   normalizeWikiRelPath,
   RESERVED_TOP_LEVEL_WIKI_PAGES,
   validateWikiWritePath,
@@ -10,6 +12,8 @@ export const CONFIG_STRUCTURE_POLICY_MODE = "structure_policy_mode";
 
 export const STRUCTURE_POLICY_MODES = ["legacy", "report", "enforce"] as const;
 export type StructurePolicyMode = (typeof STRUCTURE_POLICY_MODES)[number];
+
+export const OPEN_AUTO_FOLDER_DOMAINS = new Set(["products"]);
 
 export type WikiWriteOrigin =
   | "auto_ingest"
@@ -98,6 +102,14 @@ export function evaluateWikiPlacement(
   }
 
   if (context.mode !== "enforce" || context.origin !== "auto_ingest" || context.existing) {
+    if (
+      context.mode === "report" &&
+      context.origin === "auto_ingest" &&
+      !context.existing &&
+      !isCanonicalWikiSlugPath(normalized)
+    ) {
+      decision.warnings.push(`路径不符合 A1 英文 kebab-case slug 规范: ${normalized}`);
+    }
     return decision;
   }
   const folder = folderPathFromWikiRelPath(normalized);
@@ -107,6 +119,9 @@ export function evaluateWikiPlacement(
   }
   if (!context.folders.has(folder)) {
     throw new Error(`目标主题组未登记，自动 job 不得直接创建新主题目录: ${folder}`);
+  }
+  if (!isFolderOverviewPath(normalized) && !isCanonicalWikiSlugPath(normalized)) {
+    throw new Error(`新自动业务页路径必须符合全英文小写 kebab-case slug 规范: ${normalized}`);
   }
   return decision;
 }

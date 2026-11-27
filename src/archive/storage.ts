@@ -372,6 +372,31 @@ function bodyToWebStream(body: unknown): ReadableStream<Uint8Array> {
   throw new Error("unsupported s3 stream body type");
 }
 
+export function extractArchiveTitle(
+  kind: ArchiveFileKind,
+  filename: string,
+  bytes: Uint8Array,
+  explicitTitle = "",
+): string {
+  const explicit = explicitTitle.trim();
+  if (explicit) return explicit;
+  if (kind === "markdown" || kind === "text") {
+    const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, 8192));
+    const fmMatch = /^---\s*\n([\s\S]*?)\n---/.exec(text);
+    if (fmMatch) {
+      const titleLine = /^title:\s*(.+)$/m.exec(fmMatch[1] ?? "");
+      if (titleLine?.[1]) {
+        const clean = titleLine[1].trim().replace(/^['"]|['"]$/g, "");
+        if (clean) return clean;
+      }
+    }
+    const h1 = /^#\s+(.+)$/m.exec(text);
+    if (h1?.[1]?.trim()) return h1[1].trim();
+  }
+  const dot = filename.lastIndexOf(".");
+  return dot > 0 ? filename.slice(0, dot) : filename;
+}
+
 export function ingestAutoFolder(origin: ArchiveFileOrigin, now = new Date()): string {
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -487,6 +512,7 @@ export class ArchiveStorageService {
   async storeNewFile(input: {
     folderPath: string;
     filename: string;
+    title?: string;
     bytes: Uint8Array;
     mediaType?: string;
     origin?: ArchiveFileOrigin;
@@ -494,10 +520,27 @@ export class ArchiveStorageService {
     ingestJobId?: string;
     overwrite?: boolean;
     autoRename?: boolean;
+    dedup?: "none" | "reuse";
   }): Promise<ArchiveFile> {
     const cfg = await this.getConfig();
     const folderPath = normalizeArchiveFolderPath(input.folderPath);
     let filename = validateArchiveFilename(input.filename);
+    const sha256 = createHash("sha256").update(input.bytes).digest("hex");
+    const mediaType = detectMediaType(filename, input.mediaType);
+    const kind = detectArchiveKind(filename, mediaType);
+    const extractedTitle = extractArchiveTitle(kind, filename, input.bytes, input.title);
+
+    if (input.dedup === "reuse" && typeof this.db.findArchiveFileBySha256 === "function") {
+      const existingBySha = await this.db.findArchiveFileBySha256(sha256);
+      if (existingBySha) {
+        if (!existingBySha.title && extractedTitle && typeof this.db.updateArchiveFileTitle === "function") {
+          const updated = await this.db.updateArchiveFileTitle(existingBySha.id, extractedTitle);
+          if (updated) return updated;
+        }
+        return existingBySha;
+      }
+    }
+
     if (input.autoRename) {
       filename = await this.resolveUniqueFilename(folderPath, filename);
     }
@@ -512,9 +555,6 @@ export class ArchiveStorageService {
     }
 
     const id = randomUUID();
-    const mediaType = detectMediaType(filename, input.mediaType);
-    const kind = detectArchiveKind(filename, mediaType);
-    const sha256 = createHash("sha256").update(input.bytes).digest("hex");
 
     let storageBackend: ArchiveStorageBackend = "db";
     let storageKey = "";
@@ -531,6 +571,7 @@ export class ArchiveStorageService {
       id,
       folder_path: folderPath,
       filename,
+      title: extractedTitle,
       relative_path: relPath,
       media_type: mediaType,
       kind,

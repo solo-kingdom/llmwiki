@@ -149,8 +149,8 @@ function sortArchiveNodes(nodes: TreeNode[]): TreeNode[] {
       const sb = b.folder?.sort_order ?? 0
       if (sa !== sb) return sa - sb
     }
-    const nameA = a.children === undefined ? a.segment : (a.folder?.display_name || a.segment)
-    const nameB = b.children === undefined ? b.segment : (b.folder?.display_name || b.segment)
+    const nameA = a.children === undefined ? (a.file?.title || a.segment) : (a.folder?.display_name || a.segment)
+    const nameB = b.children === undefined ? (b.file?.title || b.segment) : (b.folder?.display_name || b.segment)
     return nameA.localeCompare(nameB, "zh-Hans-CN")
   })
 }
@@ -383,7 +383,7 @@ function ArchiveTreeRows({
                       </Inline>
                     }
                   >
-                    {file.filename}
+                    <span title={file.relative_path}>{file.title || file.filename}</span>
                   </NavItem>
                 </div>
               </ContextMenuTrigger>

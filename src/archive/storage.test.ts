@@ -17,6 +17,7 @@ import {
   MAX_ARCHIVE_SEARCHABLE_BYTES,
   detectArchiveKind,
   extractArchiveSearchableText,
+  extractArchiveTitle,
   ingestAutoFolder,
 } from "./storage.js";
 
@@ -367,5 +368,29 @@ describe("ArchiveStorageService", () => {
     expect(backfilled).toBe(2);
     expect(searchTextMap.get(mdFile.id)).toContain("zephyr");
     expect(searchTextMap.get(binFile.id)).toBe("");
+  });
+
+  it("extracts archive title and reuses existing file when dedup=reuse matches sha256", async () => {
+    expect(extractArchiveTitle("markdown", "note.md", Buffer.from("---\ntitle: 路由排查\n---\n# Ignored\n"))).toBe("路由排查");
+    expect(extractArchiveTitle("markdown", "note.md", Buffer.from("# 仅标题\n正文"))).toBe("仅标题");
+
+    const ws = await makeWorkspace();
+    const { store, files } = createMemoryArchiveStore({ archive_inline_max_bytes: "1024" });
+    (store as unknown as { findArchiveFileBySha256: (sha: string) => Promise<ArchiveFile | null> }).findArchiveFileBySha256 = async (
+      sha: string,
+    ) => {
+      for (const f of files.values()) {
+        if (f.sha256 === sha) return f;
+      }
+      return null;
+    };
+    const svc = new ArchiveStorageService(store, ws);
+    const bytes = Buffer.from("# 重复文档\n正文内容");
+    const first = await svc.storeNewFile({ folderPath: "ingest", filename: "dup.md", bytes, dedup: "reuse" });
+    const second = await svc.storeNewFile({ folderPath: "ingest", filename: "dup.md", bytes, dedup: "reuse" });
+
+    expect(second.id).toBe(first.id);
+    expect(files.size).toBe(1);
+    expect(first.title).toBe("重复文档");
   });
 });

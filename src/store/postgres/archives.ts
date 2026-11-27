@@ -138,7 +138,7 @@ function isPgUniqueViolation(error: unknown): boolean {
 }
 
 const ARCHIVE_FILE_COLUMNS = `
-  id, folder_path, filename, relative_path, media_type, kind, size, sha256,
+  id, folder_path, filename, title, relative_path, media_type, kind, size, sha256,
   storage_backend, storage_key, origin, source_ref, ingest_job_id, created_at, updated_at`;
 
 function scanFolder(row: unknown[]): ArchiveFolder {
@@ -157,18 +157,19 @@ function scanArchiveFile(row: unknown[]): ArchiveFile {
     id: asString(row[0]),
     folder_path: asString(row[1]),
     filename: asString(row[2]),
-    relative_path: asString(row[3]),
-    media_type: asString(row[4]),
-    kind: asString(row[5]) as ArchiveFileKind,
-    size: asNumber(row[6]),
-    sha256: asString(row[7]),
-    storage_backend: asString(row[8]) as ArchiveStorageBackend,
-    storage_key: asString(row[9]),
-    origin: asString(row[10]) as ArchiveFileOrigin,
-    source_ref: asString(row[11]),
-    ingest_job_id: asString(row[12]),
-    created_at: asString(row[13]),
-    updated_at: asString(row[14]),
+    title: asString(row[3]),
+    relative_path: asString(row[4]),
+    media_type: asString(row[5]),
+    kind: asString(row[6]) as ArchiveFileKind,
+    size: asNumber(row[7]),
+    sha256: asString(row[8]),
+    storage_backend: asString(row[9]) as ArchiveStorageBackend,
+    storage_key: asString(row[10]),
+    origin: asString(row[11]) as ArchiveFileOrigin,
+    source_ref: asString(row[12]),
+    ingest_job_id: asString(row[13]),
+    created_at: asString(row[14]),
+    updated_at: asString(row[15]),
   };
 }
 
@@ -458,7 +459,7 @@ export function archivesRepo(pool: Pool): ArchiveStore {
       }
       if (filter.q && filter.q.trim()) {
         params.push(`%${filter.q.trim()}%`);
-        clauses.push(`(filename ILIKE $${params.length} OR relative_path ILIKE $${params.length})`);
+        clauses.push(`(filename ILIKE $${params.length} OR title ILIKE $${params.length} OR relative_path ILIKE $${params.length})`);
       }
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const rows = await queryRows(
@@ -489,6 +490,30 @@ export function archivesRepo(pool: Pool): ArchiveStore {
       return row ? scanArchiveFile(row) : null;
     },
 
+    async findArchiveFileBySha256(sha256: string, folderPath?: string): Promise<ArchiveFile | null> {
+      const clean = sha256.trim();
+      if (!clean) return null;
+      if (folderPath !== undefined) {
+        const norm = normalizeArchiveFolderPath(folderPath);
+        const row = await queryOne(
+          pool,
+          `SELECT ${ARCHIVE_FILE_COLUMNS} FROM archive_files
+           WHERE sha256 = $1 AND folder_path = $2
+           ORDER BY created_at ASC LIMIT 1`,
+          [clean, norm],
+        );
+        if (row) return scanArchiveFile(row);
+      }
+      const row = await queryOne(
+        pool,
+        `SELECT ${ARCHIVE_FILE_COLUMNS} FROM archive_files
+         WHERE sha256 = $1
+         ORDER BY created_at ASC LIMIT 1`,
+        [clean],
+      );
+      return row ? scanArchiveFile(row) : null;
+    },
+
     async getArchiveFileInlineBytes(id: string): Promise<Uint8Array | null> {
       const row = await queryOne<[Buffer | null]>(
         pool,
@@ -515,15 +540,16 @@ export function archivesRepo(pool: Pool): ArchiveStore {
           const row = await queryOne(
             client,
             `INSERT INTO archive_files (
-              id, folder_path, filename, relative_path, media_type, kind, size, sha256,
+              id, folder_path, filename, title, relative_path, media_type, kind, size, sha256,
               storage_backend, storage_key, inline_bytes, searchable_text, origin, source_ref, ingest_job_id,
               created_at, updated_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,${NOW_TEXT},${NOW_TEXT})
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,${NOW_TEXT},${NOW_TEXT})
             RETURNING ${ARCHIVE_FILE_COLUMNS}`,
             [
               id,
               folderPath,
               filename,
+              file.title ?? "",
               relPath,
               file.media_type,
               file.kind,
@@ -575,6 +601,73 @@ export function archivesRepo(pool: Pool): ArchiveStore {
           }
           throw error;
         }
+      });
+    },
+
+    async setArchiveFileIngestJobId(id: string, jobId: string): Promise<void> {
+      if (!id || !jobId) return;
+      await exec(
+        pool,
+        `UPDATE archive_files SET ingest_job_id = $2, updated_at = ${NOW_TEXT} WHERE id = $1`,
+        [id, jobId],
+      );
+    },
+
+    async updateArchiveFileTitle(id: string, title: string): Promise<ArchiveFile | null> {
+      const row = await queryOne(
+        pool,
+        `UPDATE archive_files SET title = $2, updated_at = ${NOW_TEXT} WHERE id = $1 RETURNING ${ARCHIVE_FILE_COLUMNS}`,
+        [id, title.trim()],
+      );
+      return row ? scanArchiveFile(row) : null;
+    },
+
+    async mergeDuplicateArchiveFiles(
+      keepId: string,
+      dropIds: string[],
+      patch?: { folderPath?: string; filename?: string; title?: string },
+    ): Promise<ArchiveFile> {
+      const cleanDrops = dropIds.filter((id) => id && id !== keepId);
+      return withTransaction(pool, async (client) => {
+        const keeperRow = await queryOne(
+          client,
+          `SELECT ${ARCHIVE_FILE_COLUMNS} FROM archive_files WHERE id = $1 FOR UPDATE`,
+          [keepId],
+        );
+        if (!keeperRow) throw new ArchiveNotFoundError(`archive file not found: ${keepId}`);
+        let keeper = scanArchiveFile(keeperRow);
+
+        for (const dropId of cleanDrops) {
+          await client.query(
+            `INSERT INTO document_archive_sources (document_id, archive_file_id, change_set_id, relation, created_at)
+             SELECT document_id, $2, change_set_id, relation, created_at
+             FROM document_archive_sources
+             WHERE archive_file_id = $1
+             ON CONFLICT (document_id, archive_file_id) DO NOTHING`,
+            [dropId, keepId],
+          );
+          await client.query(`UPDATE change_sets SET archive_file_id = $2 WHERE archive_file_id = $1`, [dropId, keepId]);
+          await client.query(`UPDATE ingest_jobs SET archive_file_id = $2 WHERE archive_file_id = $1`, [dropId, keepId]);
+          await client.query(`UPDATE ingest_reviews SET archive_file_id = $2 WHERE archive_file_id = $1`, [dropId, keepId]);
+          await client.query(`DELETE FROM archive_files WHERE id = $1`, [dropId]);
+        }
+
+        const nextFolder = patch?.folderPath !== undefined ? normalizeArchiveFolderPath(patch.folderPath) : keeper.folder_path;
+        const nextFilename = patch?.filename !== undefined ? validateArchiveFilename(patch.filename) : keeper.filename;
+        const nextTitle = patch?.title !== undefined ? patch.title.trim() : (keeper.title ?? "");
+        const nextRel = buildArchiveRelativePath(nextFolder, nextFilename);
+        if (nextFolder) await ensureArchiveFoldersTx(client, [nextFolder]);
+
+        const updatedRow = await queryOne(
+          client,
+          `UPDATE archive_files
+           SET folder_path = $2, filename = $3, relative_path = $4, title = $5, updated_at = ${NOW_TEXT}
+           WHERE id = $1
+           RETURNING ${ARCHIVE_FILE_COLUMNS}`,
+          [keepId, nextFolder, nextFilename, nextRel, nextTitle],
+        );
+        if (updatedRow) keeper = scanArchiveFile(updatedRow);
+        return keeper;
       });
     },
 
@@ -714,9 +807,9 @@ export function archivesRepo(pool: Pool): ArchiveStore {
       const lowerQ = trimmed.toLowerCase();
       return rows.map((row) => {
         const file = scanArchiveFile(row);
-        const searchableText = asString(row[15]);
-        const score = Number(row[16] ?? 0);
-        const tier = asNumber(row[17]);
+        const searchableText = asString(row[16]);
+        const score = Number(row[17] ?? 0);
+        const tier = asNumber(row[18]);
         const nameHit = file.filename.toLowerCase().includes(lowerQ);
         const pathHit = file.relative_path.toLowerCase().includes(lowerQ);
         const contentHit = tier === 3 || (!nameHit && !pathHit);

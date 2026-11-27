@@ -101,7 +101,7 @@ function lockedFormatInstruction(step: PromptStep): string {
 - 输出 wiki 文件必须使用 FILE 块：---FILE: 相对路径
 （markdown 正文）
 ---END FILE---
-- FILE 路径必须以 wiki/ 开头，例如 wiki/产品与项目/llmwiki/Provider协议错配导致401.md（禁止使用 entity/Page.md 等简写）
+- FILE 路径必须以 wiki/ 开头，目录段与文件 stem 必须使用全英文小写 kebab-case slug（例如 wiki/products/llmwiki/provider-protocol-mismatch-401.md；禁止中英文混排、空格、下划线或 entity/Page.md 等简写）
 - 回复必须以 ---FILE: 开头，不要任何前言、解释或 markdown 代码围栏包裹整段输出
 - 需要删除文件时：---FILE: path
 ---DELETE---
@@ -109,8 +109,8 @@ function lockedFormatInstruction(step: PromptStep): string {
     case "analysis":
       return `【格式契约 — 不可违反】
 - 输出简短分析说明 + 一个围栏 JSON page plan，不要输出 FILE 块
-- JSON 格式：{"summary":"...","pages":[{"path":"wiki/主题域/主题组/页面.md","action":"create|update","type":"experience|entity|concept|synthesis|comparison|query|ledger|source","title":"...","document_id":"update 时可填","reuse_reason":"create 必填","relations":[{"target":"wiki/主题域/主题组/相关页.md","kind":"involves"}]}]}
-- pages 至少一项；relations 只是结构化引用，不会生成关系页面`;
+- JSON 格式：{"summary":"...","proposed_folders":[{"path":"products/my-tool","display_name":"MyTool","description":"收什么/不收什么/相邻边界"}],"pages":[{"path":"wiki/domain/group/page-slug.md","action":"create|update","type":"experience|entity|concept|synthesis|comparison|query|ledger","title":"中文标题","document_id":"update 时可填","reuse_reason":"create 必填","relations":[{"target":"wiki/domain/group/related-page.md","kind":"involves"}]}]}
+- pages 至少一项；relations 只是结构化引用，不会生成关系页面；proposed_folders 仅在已有主题组确实不匹配时填写`;
     case "plan":
       return `【格式契约 — 不可违反】
 - 仅输出计划：人类可读的 Markdown 说明 + 围栏 JSON 块
@@ -169,26 +169,27 @@ function defaultTaskInstructionZH(step: PromptStep): string {
   switch (step) {
     case "analysis":
       return `你是一名知识分析师。请基于源文档和工具查到的已有页面，产出可执行 page plan：
-- entity 仅用于可唯一指代且有独立复用事实的对象；concept 仅用于可跨案例复用且标题中性的术语、机制或方法
-- 一个经验 source 默认规划 1 个主 experience，包含完整的现象、判断、处理、验证与边界；不要按诊断短语机械拆页
-- 普通实体/概念关系只放 relations，不创建 relation 页面；关系分析有独立阅读价值时才使用 synthesis/comparison
-- 每页独立选择「主题域/主题组」，按读者查找问题归属，不把同一 source 的所有页面机械放进同一目录
-- 文件、URL 或大段文本还需规划 wiki/sources/ 下的 source 摘要页；source 不占业务页复核阈值
-- create 必须写 reuse_reason；update 必须使用工具确认已有 path，并尽量带 document_id。优先 update 而非复制新页
+- 路径规范（A1）：目录段与文件 stem 必须使用全英文小写 kebab-case slug（^[a-z0-9]+(?:-[a-z0-9]+)*$）；title 与 H1 使用中文（专名保留 canonical 原文），旧中文名/缩写写入 aliases
+- 互斥类型判定：
+  - 故障现象、排查步骤、踩坑或实践模式 → 必须用 experience（不要用故障结论句建 concept）
+  - 可唯一指代的具象工具、服务、系统、人或组织且有独立事实 → entity（严禁用 <REDACTED> 占位符建 entity，严禁为单次出现的工具/配置文件建存根 entity）
+  - 可跨案例复用的中性术语、协议、机制或方法 → concept
+  - 普通关系只放 relations，不创建 relation 页面；有独立分析价值才用 synthesis/comparison
+- 原始来源由档案库（archives）唯一承载，不要规划或生成 wiki/sources/ 摘要页；每页按读者问题独立选择「主题域/主题组」
+- create 必须写 reuse_reason；update 必须使用工具确认已有 path 并尽量带 document_id。优先 update 而非复制新页
 - 新增超过 3 个业务页或超过 2 个 concept 会转入 review，不要以凑数量为目标
-- 文件名使用稳定可读规范名，不使用下划线分词；标题、frontmatter title 与正文 H1 保持同义
 
 你可以使用 search 搜索、read 读取已有页面。对关键名称尝试别名、缩写、中英文变体或更宽泛关键词；工具失败或无结果时不得编造 existing-page 结论。分析必须紧扣源文档，不确定内容标为「待证实」。`;
     case "generation":
       return `你是 wiki 页面生成器。严格按用户消息中的「已验证 page plan」生成 FILE 块，不得增删页面或改变 path/action/type/title。
 - 原始内容是事实依据；不要添加源中未支持的内容。generation 没有 read/search 能力，只能使用 analysis 已验证并提供的 existing-page 结果
-- 业务页位于「主题域/主题组」下，page_type 不影响目录；不得写入 wiki/ 顶层或 concepts/entities/devices 等 legacy 类型根
-- 必须在 YAML frontmatter 中准确填写 \`type:\` 与 \`confidence:\`（high / medium / low）
-- experience 需填写 kind/status，pitfall/pattern 需填写 symptoms；ledger 需填写 status
+- 业务页位于全英文小写 kebab-case 主题域/主题组下，page_type 不影响目录；不得写入 wiki/ 顶层或 concepts/entities/devices 等 legacy 类型根
+- YAML frontmatter 规范：
+  - 必填 title（中文）、type、date、description、tags（2-5 个规范标签）、sources（指向档案路径/ID）、confidence（首次自动生成默认 medium，禁止自标 high 或编造 last_verified）
+  - experience 必填 kind/status，pitfall/pattern 必填 symptoms；ledger 必填 status；旧文件名/英文名/缩写填入 aliases
 - 内容按金字塔表达：先结论与适用范围，再核心要点，最后证据细节。experience 依次组织现象、经验结论、最短判别、根因、处理、验证、边界与证据
 - 同一结论只保存在一个主页面，其他页面用 wikilink 和 relations 说明关系，不复制正文
-- 如果计划包含 source，则放在 wiki/sources/；每个新增事实都应能追溯到来源或已有页面
-- 凭据、密钥、个人联系方式、内部主机名统一脱敏为 <REDACTED>
+- 凭据、密钥、个人联系方式、内部主机名统一脱敏为 <REDACTED>（不要为脱敏占位符建独立页面）
 - 更新已有页面时保留原有重要信息，仅补充本次源支持的内容；冲突写入 Open Questions，不静默覆盖`;
     case "plan":
       return `你是 wiki 摄入规划师。请产出：

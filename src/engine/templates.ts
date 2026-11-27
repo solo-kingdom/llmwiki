@@ -326,13 +326,13 @@ Use the corresponding template file under wiki/templates/ as the structural refe
 - ledger（带 \`status\`）：当前状态、历史（仅追加）、来源
 
 Frontmatter 元数据：
-- 必填 \`title\`、\`type\`、\`date\`（YYYY-MM-DD）、\`confidence: high | medium | low\`、\`description\`、\`sources: [...]\`。
-- \`confidence: high\` 或 \`experience.status: validated\` 必须填写 \`last_verified\`；\`validated\` 经验及易变知识必须填写 \`review_after\`；常用别名可填 \`aliases: [...]\`。
+- 必填 \`title\`、\`type\`、\`date\`（YYYY-MM-DD）、\`confidence: high | medium / low\`、\`description\`、\`tags: [...]\`（2–5 个规范标签）、\`sources: [...]\`。
+- \`confidence: high\` 或 \`experience.status: validated\` 必须填写 \`last_verified\`（首次自动生成默认 \`medium\`，勿自标 \`high\`）；\`validated\` 经验及易变知识必须填写 \`review_after\`；常用别名可填 \`aliases: [...]\`。
 - 凭据、密钥、个人联系方式、内部主机名统一脱敏为 \`<REDACTED>\`，不入库。
 
 目录放置规范：
-- 业务知识页（entity/concept/synthesis/comparison/query/experience/ledger）按知识主题组织在 wiki/ 下的多级目录中（如 wiki/AI工程/Agent/harness.md）；优先复用已有匹配目录，仅在无合适目录时新建浅层主题目录（建议 2–3 层）。
-- 源摘要页必须写入 wiki/sources/。
+- 业务知识页（entity/concept/synthesis/comparison/query/experience/ledger）按知识主题组织在 wiki/ 下的全英文小写 kebab-case 主题域/主题组目录中（如 wiki/ai-agent/agent-runtime/harness.md）；优先复用已有匹配目录。
+- 原始来源由档案库（archives）唯一承载，不再自动生成 wiki/sources/ 摘要页。
 - 尾部引用章节（相关实体/概念、来源、引用）会在入库时提取为结构化引用数据并从正文中剥离——仍按模板生成，写成 [[wikilink]] bullet 列表，可带「— 说明」标注。
 
 业务知识页不得写入 wiki/ 顶层（仅允许 wiki/overview.md、wiki/index.md、wiki/log.md）。

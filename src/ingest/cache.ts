@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { Store } from "../store/interfaces.js";
 import type { CacheEntry, CacheFile, NormalizedSource } from "./types.js";
 
 // Concurrent jobs read-modify-write the same cache file; queue the writes per file so none is lost.
@@ -10,9 +11,10 @@ export function contentSHA256(content: Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-export function cacheKeyForNormalized(source: NormalizedSource | null): string {
+export function cacheKeyForNormalized(source: NormalizedSource | null, rulesHash = ""): string {
   if (!source) return "";
-  return `${source.canonicalPath}|${contentSHA256(source.content)}`;
+  const sha = contentSHA256(source.content);
+  return rulesHash ? `${sha}|${rulesHash}` : `${source.canonicalPath}|${sha}`;
 }
 
 function entryContentHash(entry: CacheEntry | null): string {
@@ -21,7 +23,10 @@ function entryContentHash(entry: CacheEntry | null): string {
 }
 
 export class IngestCache {
-  constructor(private readonly workspace: string) {}
+  constructor(
+    private readonly workspace: string,
+    private readonly db: Store | null = null,
+  ) {}
 
   cachePath(): string {
     return path.join(this.workspace, ".llmwiki", "cache.json");
@@ -55,9 +60,17 @@ export class IngestCache {
   async lookupForSource(
     source: NormalizedSource | null,
     legacyKeys: string[],
+    rulesHash = "",
   ): Promise<CacheEntry | null> {
     if (!source) return null;
-    return this.lookup(cacheKeyForNormalized(source), contentSHA256(source.content), legacyKeys);
+    const keys = rulesHash
+      ? [cacheKeyForNormalized(source, rulesHash), ...legacyKeys]
+      : [cacheKeyForNormalized(source), ...legacyKeys];
+    for (const key of keys) {
+      const hit = await this.lookup(key, contentSHA256(source.content), []);
+      if (hit) return hit;
+    }
+    return null;
   }
 
   async save(key: string, entry: CacheEntry): Promise<void> {
@@ -85,10 +98,10 @@ export class IngestCache {
     await rename(temp, filePath);
   }
 
-  async saveForSource(source: NormalizedSource | null, files: string[]): Promise<void> {
+  async saveForSource(source: NormalizedSource | null, files: string[], rulesHash = ""): Promise<void> {
     if (!source) return;
     const hash = contentSHA256(source.content);
-    await this.save(cacheKeyForNormalized(source), {
+    await this.save(cacheKeyForNormalized(source, rulesHash), {
       source_name: path.basename(source.canonicalPath),
       sha256: hash,
       content_sha256: hash,
@@ -99,6 +112,15 @@ export class IngestCache {
   private async writtenFilesExist(files: string[]): Promise<boolean> {
     if (!files || files.length === 0) return false;
     for (const rel of files) {
+      if (this.db) {
+        try {
+          const doc = await this.db.getDocumentByRelativePath(rel);
+          if (!doc) return false;
+          continue;
+        } catch {
+          return false;
+        }
+      }
       try {
         await stat(path.join(this.workspace, rel));
       } catch {

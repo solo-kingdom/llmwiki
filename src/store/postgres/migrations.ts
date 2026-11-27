@@ -560,6 +560,13 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE ingest_sessions ADD CONSTRAINT ingest_sessions_agent_kind_check CHECK (agent_kind IN ('native','pi','acp'))`,
     ],
   },
+  {
+    version: 11,
+    statements: [
+      `ALTER TABLE archive_files ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT ''`,
+      `CREATE INDEX IF NOT EXISTS idx_archive_files_title_trgm ON archive_files USING gin (title gin_trgm_ops)`,
+    ],
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

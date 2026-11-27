@@ -254,7 +254,7 @@ export async function refreshFolderOverviews(
     await db.applyChangeSet(
       {
         id: randomUUID(),
-        kind: "reindex",
+        kind: "manual",
         summary: `refresh ${writes.length} overview node(s)`,
         page_count: writes.length,
         created_at: "",

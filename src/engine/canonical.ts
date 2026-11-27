@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { Document } from "../store/types.js";
-import { classifyWikiPath, normalizeWikiRelPath, wikiSubdirFromPath } from "./wiki_org.js";
+import { classifyWikiPath, isFolderOverviewPath, normalizeWikiRelPath, wikiSubdirFromPath } from "./wiki_org.js";
 
 export class CanonicalPageConflictError extends Error {
   constructor(
@@ -48,6 +48,7 @@ export function findCanonicalPageConflict(
 
 function isCanonicalBusinessDocument(doc: Document): boolean {
   if (doc.source_kind !== "wiki" || doc.deleted_at || doc.archived_at) return false;
+  if (isFolderOverviewPath(doc.relative_path)) return false;
   if (classifyWikiPath(doc.relative_path) !== "typed_content") return false;
   return wikiSubdirFromPath(doc.relative_path).toLowerCase() !== "sources";
 }

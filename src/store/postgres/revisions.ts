@@ -177,7 +177,10 @@ async function assertNoCanonicalPageConflicts(client: PoolClient, writes: PageWr
     `SELECT ${REVISION_DOCUMENT_COLUMNS} FROM documents
      WHERE source_kind='wiki' AND COALESCE(deleted_at,'')='' AND COALESCE(archived_at,'')=''`,
   );
-  const existing = rows.map(scanRevisionDocument);
+  const deletingPaths = new Set(
+    writes.filter((w) => w.operation === "delete" || !w.document).map((w) => writePath(w)),
+  );
+  const existing = rows.map(scanRevisionDocument).filter((doc) => !deletingPaths.has(doc.relative_path));
   const accepted: Document[] = [];
   for (const write of writes) {
     if (!write.document) continue;

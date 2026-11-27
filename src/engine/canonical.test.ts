@@ -68,4 +68,26 @@ describe("canonical page names", () => {
     expect(findCanonicalPageConflict(candidate, [existing])?.id).toBe("d1");
     expect(findCanonicalPageConflict(existing, [existing])).toBeNull();
   });
+
+  it("exempts folder _overview.md from global canonical page conflict checks", () => {
+    const ov1 = doc({
+      id: "ov-1",
+      filename: "_overview.md",
+      title: "AI 与 Agent 概览",
+      path: "/wiki/ai-agent/",
+      relative_path: "wiki/ai-agent/_overview.md",
+      page_type: "page",
+    });
+    const ov2 = doc({
+      id: "ov-2",
+      filename: "_overview.md",
+      title: "模型与 Provider 概览",
+      path: "/wiki/ai-agent/models-providers/",
+      relative_path: "wiki/ai-agent/models-providers/_overview.md",
+      page_type: "page",
+    });
+    expect(canonicalKeysForDocument(ov1)).toEqual([]);
+    expect(canonicalKeysForDocument(ov2)).toEqual([]);
+    expect(findCanonicalPageConflict(ov2, [ov1])).toBeNull();
+  });
 });

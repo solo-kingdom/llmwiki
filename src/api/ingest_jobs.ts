@@ -72,6 +72,61 @@ function newJob(
   };
 }
 
+const MAX_WAIT_MS = 55_000;
+const DEFAULT_WAIT_POLL_MS = 200;
+const TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
+
+export function isTerminalIngestStatus(status: string): boolean {
+  return TERMINAL_JOB_STATUSES.has(status);
+}
+
+/**
+ * Parse ?wait= duration query parameter into milliseconds (clamped to [0, maxMs]).
+ * Accepts "30s", "500ms", "1m", or bare seconds like "30". Returns 0 on empty/invalid input.
+ */
+export function parseWaitMs(raw: string | undefined, maxMs = MAX_WAIT_MS): number {
+  if (!raw) return 0;
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed) return 0;
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m)?$/.exec(trimmed);
+  if (!match) return 0;
+  const value = Number.parseFloat(match[1] ?? "0");
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const unit = match[2] ?? "s";
+  let ms = value;
+  if (unit === "s") ms = value * 1000;
+  else if (unit === "m") ms = value * 60_000;
+  return Math.min(Math.floor(ms), maxMs);
+}
+
+async function waitForIngestJob(
+  getJob: (id: string) => Promise<IngestJob | null>,
+  initial: IngestJob,
+  waitMs: number,
+  pollMs = DEFAULT_WAIT_POLL_MS,
+): Promise<{ job: IngestJob; timedOut: boolean }> {
+  let latest = initial;
+  if (isTerminalIngestStatus(latest.status)) {
+    return { job: latest, timedOut: false };
+  }
+  const deadline = Date.now() + waitMs;
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    const sleepMs = Math.max(1, Math.min(pollMs, remaining));
+    await new Promise((resolve) => setTimeout(resolve, sleepMs));
+    const refreshed = await getJob(latest.id).catch(() => null);
+    if (refreshed) {
+      latest = refreshed;
+      if (isTerminalIngestStatus(latest.status)) {
+        return { job: latest, timedOut: false };
+      }
+    }
+  }
+  const finalCheck = await getJob(latest.id).catch(() => null);
+  if (finalCheck) latest = finalCheck;
+  return { job: latest, timedOut: !isTerminalIngestStatus(latest.status) };
+}
+
 export function ingestJobsApi(ctx: ApiContext) {
   async function persistArchiveSource(
     origin: ArchiveFileOrigin,
@@ -140,6 +195,20 @@ export function ingestJobsApi(ctx: ApiContext) {
           normalized.sourceRef,
           archiveFile.id,
         );
+        const waitMs = parseWaitMs(c.req.query("wait"));
+        if (waitMs > 0 && typeof ctx.db.getIngestJob === "function") {
+          const { job: latestJob, timedOut } = await waitForIngestJob(
+            (id) => ctx.db.getIngestJob(id),
+            job,
+            waitMs,
+          );
+          return writeJson(c, 201, {
+            job: latestJob,
+            archive_file: archiveFile,
+            waited: true,
+            timed_out: timedOut,
+          });
+        }
         return writeJson(c, 201, { job, archive_file: archiveFile });
       } catch (error) {
         return writeError(c, 500, `persist source failed: ${errorMessage(error)}`);
@@ -179,6 +248,20 @@ export function ingestJobsApi(ctx: ApiContext) {
           normalized.sourceRef,
           archiveFile.id,
         );
+        const waitMs = parseWaitMs(c.req.query("wait"));
+        if (waitMs > 0 && typeof ctx.db.getIngestJob === "function") {
+          const { job: latestJob, timedOut } = await waitForIngestJob(
+            (id) => ctx.db.getIngestJob(id),
+            job,
+            waitMs,
+          );
+          return writeJson(c, 201, {
+            job: latestJob,
+            archive_file: archiveFile,
+            waited: true,
+            timed_out: timedOut,
+          });
+        }
         return writeJson(c, 201, { job, archive_file: archiveFile });
       } catch (error) {
         return writeError(c, 500, `persist source failed: ${errorMessage(error)}`);

@@ -91,6 +91,7 @@ export interface Chunk {
 export interface SearchChunk {
   document_id: string;
   content: string;
+  snippet?: string;
   page: number;
   header_breadcrumb: string;
   chunk_index: number;

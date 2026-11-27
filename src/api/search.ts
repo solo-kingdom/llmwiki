@@ -77,6 +77,55 @@ export async function hybridSearch(
   return fuseSearch(keyword, semantic, limit);
 }
 
+export const DEFAULT_SNIPPET_LENGTH = 280;
+
+export function buildSearchSnippet(
+  content: string,
+  query: string,
+  maxLen = DEFAULT_SNIPPET_LENGTH,
+): string {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.length <= maxLen) return normalized;
+
+  const terms = query
+    .trim()
+    .split(/[\s,，。、;；:：/\\|()（）[\]【】"']+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+
+  const lower = normalized.toLowerCase();
+  let matchIdx = -1;
+  for (const term of terms) {
+    const idx = lower.indexOf(term.toLowerCase());
+    if (idx !== -1 && (matchIdx === -1 || idx < matchIdx)) {
+      matchIdx = idx;
+    }
+  }
+
+  let start = 0;
+  if (matchIdx > 0) {
+    const lead = Math.floor(maxLen * 0.3);
+    start = Math.max(0, matchIdx - lead);
+    if (start + maxLen > normalized.length) {
+      start = Math.max(0, normalized.length - maxLen);
+    }
+  }
+
+  const end = Math.min(normalized.length, start + maxLen);
+  const slice = normalized.slice(start, end).trim();
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < normalized.length ? "…" : "";
+  return `${prefix}${slice}${suffix}`;
+}
+
+export function attachSearchSnippets(results: SearchChunk[], query: string): SearchChunk[] {
+  return results.map((item) => ({
+    ...item,
+    snippet: item.snippet?.trim() ? item.snippet : buildSearchSnippet(item.content, query),
+  }));
+}
+
 export function searchApi(ctx: ApiContext) {
   return {
     async search(c: Context): Promise<Response> {
@@ -107,7 +156,8 @@ export function searchApi(ctx: ApiContext) {
       let mode = normalizeSearchMode(c.req.query("mode") ?? "");
       if (mode === "auto") mode = "hybrid";
       try {
-        const results = await hybridSearch(ctx, query, limit, filter, searchOptions, mode);
+        const rawResults = await hybridSearch(ctx, query, limit, filter, searchOptions, mode);
+        const results = attachSearchSnippets(rawResults, query);
         return writeJson(c, 200, { query, mode, results });
       } catch (error) {
         return writeError(c, 500, errorMessage(error));

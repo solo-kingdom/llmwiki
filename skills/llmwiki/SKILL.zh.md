@@ -55,9 +55,9 @@ curl -fsS "$APP_API_BASE/skills/<name>.zh.md" # 各阶段中文文档（英文�
 | 文档 | `GET/POST /api/v1/documents`、`GET/PATCH/DELETE /api/v1/documents/:id` | 列出/新建/读取/更新元信息/删除页面 |
 | 正文 | `GET/PUT /api/v1/documents/:id/content` | 读取或整篇替换 markdown（含 frontmatter） |
 | 生命周期 | `POST /api/v1/documents/:id/{move,archive,reopen}`、`POST /api/v1/documents/bulk-delete` | 移动、归档、重开、批量删除 |
-| 搜索 | `GET /api/v1/search?q=&mode=&limit=` | 全文/混合检索 |
+| 搜索 | `GET /api/v1/search?q=&mode=&limit=` | 全文/混合检索（每条结果含聚焦命中上下文的 `snippet` 及完整 `content`） |
 | 图谱与检查 | `GET /api/v1/graph`、`GET /api/v1/graph/{backlinks/:id,forward/:id,uncited,stale}`、`GET /api/v1/lint` | 知识图谱与健康检查 |
-| 摄取 | `GET/POST /api/v1/ingest/jobs*`、`GET/POST /api/v1/ingest/sessions*`、`GET/POST /api/v1/ingest/reviews*` | 摄取任务、对话会话、审阅计划 |
+| 摄取 | `GET/POST /api/v1/ingest/jobs*`（`/text`、`/conversation` 支持 `?wait=30s` 短等待同步返回终态，上限 55s）、`GET/POST /api/v1/ingest/sessions*`、`GET/POST /api/v1/ingest/reviews*` | 摄取任务、对话会话、审阅计划 |
 | 历史 | `GET /api/v1/history`、`GET /api/v1/history/:id{,/diff}`、`POST /api/v1/history/:id/rollback`、`GET /api/v1/pages/history`、`POST /api/v1/revisions/:id/restore` | 变更集、差异、回滚、版本恢复 |
 | 设置 | `GET/PUT /api/v1/settings`、`GET/PUT /api/v1/workspace/rule-files` | 运行设置（API Key 不可改 `api_token`）与 `purpose.md` / `rules.md` |
 

@@ -55,7 +55,9 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
 ```
 
 - 改动对新认领的作业即时生效，不用重启；`job_parallel_enabled:false` 即回到串行。
-- 同一 wiki 页面的写入会排队合并，并发作业不会互相覆盖内容。但并发作业看到的是开跑时的知识库快照，同批相关文档仍可能产出重叠页面——大批次跑完建议做一次整理复查。
+- 同一 wiki 页面的写入会排队合并；不同路径但标题/文件名/alias 规范化后相同的页面会在 PostgreSQL 事务内去重，冲突作业失败并给出已有路径，不会落出副本。
+- analysis 必须产出有效 page plan；空 analysis、无计划、generation 偏离计划都会失败且不会写入。一个 source 新增超过 3 个业务页或 2 个 concept 必须走 review。
+- `structure_policy_mode` 控制目录策略：`legacy` 兼容、`report` 记录旧类型根告警、`enforce` 禁止新自动页写旧类型根或未登记主题组。存量 update 与 rollback/reindex 保留兼容。
 - 限流（429）与瞬时错误（5xx、网络、流空闲）按有界退避自动重试，在作业事件里记为 `llm request retry`。供应商的每分钟请求上限会让高并发表现为「重试变多」而不是「失败变多」；重试占主导时调低 `job_max_concurrent`。
 
 ## 审核路径：会话 → 归档 → 计划 → 批准
@@ -90,7 +92,7 @@ curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/sessions/{id}/message
 # 流式拿模型回复（SSE）
 curl -fsS -N "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/sessions/{id}/messages?stream=1" \
   -H 'Content-Type: application/json' \
-  -d '{"content":"请把这份纪要整理成 wiki/sources 下的来源页","wiki_refs":[{"path":"wiki/concepts/foo.md"}]}'
+  -d '{"content":"请把这份纪要整理成 wiki/sources 下的来源页","wiki_refs":[{"path":"wiki/产品与项目/llmwiki/foo.md"}]}'
 ```
 
 SSE 事件：`user_message`、`assistant_start`、`token`、`thought`、`tool_start`、`tool_done`、`plan`、`permission`、`warning`、`done`（最终消息对象）、`error`。同一会话同时只能有一个流——第二个请求返回 `409`。附件上传是 `POST /ingest/sessions/{id}/attachments`（multipart `file`），附件会随会话一起归档。

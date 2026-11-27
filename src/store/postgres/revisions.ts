@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Pool, PoolClient } from "pg";
+import {
+  CanonicalPageConflictError,
+  canonicalKeysForDocument,
+  canonicalPathLockKey,
+  findCanonicalPageConflict,
+} from "../../engine/canonical.js";
 import { folderPathFromWikiRelPath, resolvePageType } from "../../engine/wiki_org.js";
 import type { RevisionStore } from "../interfaces.js";
 import type { ChangeSet, Chunk, Document, PageRevision, PageWrite, RefEdge, RevisionOperation } from "../types.js";
@@ -148,6 +154,37 @@ function writePath(write: PageWrite): string {
 
 async function lockWorkspace(client: PoolClient): Promise<void> {
   await client.query("SELECT pg_advisory_xact_lock(hashtext('llmwiki:workspace'))");
+}
+
+async function lockCanonicalPages(client: PoolClient, writes: PageWrite[]): Promise<void> {
+  const keys = new Set<string>();
+  for (const write of writes) {
+    const pathKey = canonicalPathLockKey(writePath(write));
+    if (pathKey) keys.add(pathKey);
+    if (write.document) {
+      for (const key of canonicalKeysForDocument(write.document)) keys.add(key);
+    }
+  }
+  for (const key of [...keys].sort()) {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`llmwiki:canonical:${key}`]);
+  }
+}
+
+async function assertNoCanonicalPageConflicts(client: PoolClient, writes: PageWrite[]): Promise<void> {
+  if (!writes.some((write) => write.document)) return;
+  const rows = await queryRows(
+    client,
+    `SELECT ${REVISION_DOCUMENT_COLUMNS} FROM documents
+     WHERE source_kind='wiki' AND COALESCE(deleted_at,'')='' AND COALESCE(archived_at,'')=''`,
+  );
+  const existing = rows.map(scanRevisionDocument);
+  const accepted: Document[] = [];
+  for (const write of writes) {
+    if (!write.document) continue;
+    const conflict = findCanonicalPageConflict(write.document, [...existing, ...accepted]);
+    if (conflict) throw new CanonicalPageConflictError(writePath(write), conflict);
+    accepted.push(write.document);
+  }
 }
 
 async function insertChangeSet(client: PoolClient, changeSet: ChangeSet): Promise<void> {
@@ -473,7 +510,8 @@ export function revisionsRepo(pool: Pool): RevisionStore {
       if (!changeSet) throw new Error("nil change set");
       if (!changeSet.kind) throw new Error("change set kind is required");
       await withTransaction(pool, async (client) => {
-        await lockWorkspace(client);
+        await lockCanonicalPages(client, writes);
+        await assertNoCanonicalPageConflicts(client, writes);
         if (!changeSet.id) changeSet.id = randomUUID();
         await insertChangeSet(client, changeSet);
         for (const write of writes) {

@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Store } from "../store/interfaces.js";
 import { logger } from "../logger.js";
 import { CONFIG_HARNIX_SETTINGS } from "../harness/settings.js";
+import { CONFIG_STRUCTURE_POLICY_MODE } from "../engine/placement_policy.js";
 import {
   CONFIG_SESSION_TOOL_LOOP_MAX_CALLS_PER_ROUND,
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_INGEST,
@@ -32,6 +33,7 @@ const EXPORT_KEYS = [
   "ui_language",
   "doc_language",
   "rules_supplement",
+  CONFIG_STRUCTURE_POLICY_MODE,
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_INGEST,
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_QA,
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_ORGANIZE,

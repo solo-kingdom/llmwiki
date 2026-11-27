@@ -6,6 +6,12 @@ import { chunkText, defaultChunkConfig } from "../engine/chunker.js";
 import { getMetadataJSON, parseFrontmatter, titleFromFilename } from "../engine/frontmatter.js";
 import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
 import { ReferenceParser } from "../engine/references.js";
+import {
+  CONFIG_STRUCTURE_POLICY_MODE,
+  evaluateWikiPlacement,
+  parseStructurePolicyMode,
+  writeOriginForChangeSet,
+} from "../engine/placement_policy.js";
 import { resolvePageType } from "../engine/wiki_org.js";
 import type { Store } from "../store/interfaces.js";
 import type { ChangeSet, Chunk, Document, PageWrite } from "../store/types.js";
@@ -41,10 +47,31 @@ export async function applyBlocksToStore(
     });
   }
 
+  const mode = parseStructurePolicyMode(
+    typeof state.db.getConfig === "function"
+      ? await state.db.getConfig(CONFIG_STRUCTURE_POLICY_MODE)
+      : "",
+  );
+  const origin = writeOriginForChangeSet(state.changeSetKind);
+  const folders = new Set<string>();
+  if (mode === "enforce" && origin === "auto_ingest") {
+    for (const folder of await state.db.listFolders(true)) folders.add(folder.path);
+  }
+  const existingByPath = new Map<string, Document | null>();
+  for (const [rel, content] of normalized.blocks) {
+    const existing = await state.db.getDocumentByRelativePath(rel);
+    existingByPath.set(rel, existing);
+    if (content === "---DELETE---\n") continue;
+    const decision = evaluateWikiPlacement(rel, { mode, origin, existing: existing !== null, folders });
+    for (const warning of decision.warnings) {
+      state.recorder?.record("placement", "warn", warning, { path: rel, mode, origin });
+    }
+  }
+
   const scratch = await mkdtemp(path.join(os.tmpdir(), "llmwiki-apply-"));
   try {
     for (const rel of normalized.blocks.keys()) {
-      const doc = await state.db.getDocumentByRelativePath(rel);
+      const doc = existingByPath.get(rel);
       if (!doc) continue;
       const full = path.join(scratch, rel);
       await mkdir(path.dirname(full), { recursive: true });
@@ -81,7 +108,7 @@ export async function applyBlocksToStore(
         await writeFile(path.join(scratch, rel), Buffer.from(text, "utf8"));
       }
       const doc = await pageDocument(state.db, rel, Buffer.from(text, "utf8"));
-      const existing = await state.db.getDocumentByRelativePath(rel);
+      const existing = existingByPath.get(rel);
       writes.push({
         relative_path: rel,
         document: doc,

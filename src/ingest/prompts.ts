@@ -34,10 +34,13 @@ title: Wiki 规则
 
 ## 页面策略
 
-- 默认创建 source / entity / concept 类页面
+- 目录按「主题域 → 主题组 → 页面」组织；page_type 只描述页面职责，不决定目录
+- 每个经验 source 默认形成 1 个主 experience，并按需更新已有实体/概念；新增超过 3 个业务页或 2 个 concept 必须 review
 - 可复用经验、踩坑与排查模式归入 experience（kind: practice | pitfall | pattern、status: draft | validated | deprecated；pitfall/pattern 需写 symptoms 现象词）
+- 实体和概念只有具备独立复用事实才成页；普通关系只写 relations/wikilink，不创建 relation 页面
 - 业务对象当前状态与追加历史归入 ledger（status 必填）
 - 除非源中明确存在综合论述，否则不要创建 synthesis 页面
+- 正文先写结论与适用范围，再写要点，最后写证据与细节
 
 ## 证据与隐私
 
@@ -98,11 +101,16 @@ function lockedFormatInstruction(step: PromptStep): string {
 - 输出 wiki 文件必须使用 FILE 块：---FILE: 相对路径
 （markdown 正文）
 ---END FILE---
-- FILE 路径必须以 wiki/ 开头，例如 wiki/entities/Page.md（禁止使用 entity/Page.md 等简写）
+- FILE 路径必须以 wiki/ 开头，例如 wiki/产品与项目/llmwiki/Provider协议错配导致401.md（禁止使用 entity/Page.md 等简写）
 - 回复必须以 ---FILE: 开头，不要任何前言、解释或 markdown 代码围栏包裹整段输出
 - 需要删除文件时：---FILE: path
 ---DELETE---
 ---END FILE---`;
+    case "analysis":
+      return `【格式契约 — 不可违反】
+- 输出简短分析说明 + 一个围栏 JSON page plan，不要输出 FILE 块
+- JSON 格式：{"summary":"...","pages":[{"path":"wiki/主题域/主题组/页面.md","action":"create|update","type":"experience|entity|concept|synthesis|comparison|query|ledger|source","title":"...","document_id":"update 时可填","reuse_reason":"create 必填","relations":[{"target":"wiki/主题域/主题组/相关页.md","kind":"involves"}]}]}
+- pages 至少一项；relations 只是结构化引用，不会生成关系页面`;
     case "plan":
       return `【格式契约 — 不可违反】
 - 仅输出计划：人类可读的 Markdown 说明 + 围栏 JSON 块
@@ -160,40 +168,32 @@ function defaultTaskInstruction(step: PromptStep, docLang: string): string {
 function defaultTaskInstructionZH(step: PromptStep): string {
   switch (step) {
     case "analysis":
-      return `你是一名知识分析师。请基于用户提供的源文档做结构化分析，先区分实体、概念、关系，再规划页面：
-- 实体（entity）：可唯一指代的具体对象，如人、组织、产品、项目
-- 概念（concept）：可跨对象复用的术语、方法、框架、机制、理论
-- 关系（relation）：实体与概念之间的案例、采用、提出、体现关系
-- 关键论点、与已有 wiki 的可能连接、源内矛盾或张力、建议页面结构
+      return `你是一名知识分析师。请基于源文档和工具查到的已有页面，产出可执行 page plan：
+- entity 仅用于可唯一指代且有独立复用事实的对象；concept 仅用于可跨案例复用且标题中性的术语、机制或方法
+- 一个经验 source 默认规划 1 个主 experience，包含完整的现象、判断、处理、验证与边界；不要按诊断短语机械拆页
+- 普通实体/概念关系只放 relations，不创建 relation 页面；关系分析有独立阅读价值时才使用 synthesis/comparison
+- 每页独立选择「主题域/主题组」，按读者查找问题归属，不把同一 source 的所有页面机械放进同一目录
+- 文件、URL 或大段文本还需规划 wiki/sources/ 下的 source 摘要页；source 不占业务页复核阈值
+- create 必须写 reuse_reason；update 必须使用工具确认已有 path，并尽量带 document_id。优先 update 而非复制新页
+- 新增超过 3 个业务页或超过 2 个 concept 会转入 review，不要以凑数量为目标
+- 文件名使用稳定可读规范名，不使用下划线分词；标题、frontmatter title 与正文 H1 保持同义
 
-对每个候选短语，分别列出实体候选、概念候选和关系候选。若短语形如「实体名 + 抽象概念」（如「AppLovin组织裁剪方法论」），应拆为实体 AppLovin、概念 组织裁剪方法论，以及它们之间的案例关系，不要当作单个概念页。
-
-你可以使用 search 工具搜索已有 wiki 页面，使用 read 工具读取页面全文。分析时应明确区分：哪些知识已有页面覆盖（建议 update），哪些是新知识（建议 create）。优先建议 update 已有页面。
-
-搜索时不要只查一次精确词：对关键实体/概念尝试别名、缩写、中文/英文变体或更宽泛关键词。摄入前留意隐私和敏感信息；如材料明显包含凭据、个人隐私或超出 purpose.md 范围的内容，应在分析中提示。
-
-要求：分析必须紧扣源文档；不确定的内容标注为「待证实」，不要当作事实。`;
+你可以使用 search 搜索、read 读取已有页面。对关键名称尝试别名、缩写、中英文变体或更宽泛关键词；工具失败或无结果时不得编造 existing-page 结论。分析必须紧扣源文档，不确定内容标为「待证实」。`;
     case "generation":
-      return `你是 wiki 页面生成器。根据用户消息中的「原始内容」与「分析结果」生成 wiki 页面（FILE 块）。
-- 以原始内容为首要依据；分析结果仅作组织参考
-- 不要添加源中未支持的内容
-- 业务知识页按知识主题组织在 wiki/ 下的多级目录中（如 wiki/AI工程/Agent/harness.md），不得写入 wiki/ 顶层
-- 优先复用提示中提供的已有目录；仅在无合适主题目录时新建浅层目录（建议 2–3 层）
-- 必须在 YAML frontmatter 中准确填写 \`type:\`（entity / concept / synthesis / comparison / query / experience / ledger / source）与 \`confidence:\`（high / medium / low）
-- 若为 experience，需填写 kind: practice | pitfall | pattern 与 status: draft | validated | deprecated；pitfall / pattern 需填写 symptoms 现象检索词；ledger 需填写 status
+      return `你是 wiki 页面生成器。严格按用户消息中的「已验证 page plan」生成 FILE 块，不得增删页面或改变 path/action/type/title。
+- 原始内容是事实依据；不要添加源中未支持的内容。generation 没有 read/search 能力，只能使用 analysis 已验证并提供的 existing-page 结果
+- 业务页位于「主题域/主题组」下，page_type 不影响目录；不得写入 wiki/ 顶层或 concepts/entities/devices 等 legacy 类型根
+- 必须在 YAML frontmatter 中准确填写 \`type:\` 与 \`confidence:\`（high / medium / low）
+- experience 需填写 kind/status，pitfall/pattern 需填写 symptoms；ledger 需填写 status
+- 内容按金字塔表达：先结论与适用范围，再核心要点，最后证据细节。experience 依次组织现象、经验结论、最短判别、根因、处理、验证、边界与证据
+- 同一结论只保存在一个主页面，其他页面用 wikilink 和 relations 说明关系，不复制正文
+- 如果计划包含 source，则放在 wiki/sources/；每个新增事实都应能追溯到来源或已有页面
 - 凭据、密钥、个人联系方式、内部主机名统一脱敏为 <REDACTED>
-- 如果摄入来自文件、URL 或大段文本，应创建或更新 wiki/sources/ 下的 source 摘要页
-- 每个新增事实都应能追溯到 source 摘要、原始内容或已有 wiki 页面
-- 遇到新旧事实冲突时保留冲突上下文，写入 Open Questions 或明确标注不确定性
-- 概念页标题默认保持中性，不要把具体实体名焊进概念标题；实体与概念通过 wikilink 关联
-- 若候选概念标题形如「实体名 + 方法/模型/文化/框架/策略/机制/理论/实践」等，应优先创建中性概念页（如 wiki/组织管理/组织裁剪方法论.md），并在正文中链接实体页（如 [[AppLovin]]）作为案例
-- 仅当源材料明确把整体短语当作固定专有名词时，才保留组合标题，并在正文说明命名依据
-
-你可以使用 read 工具读取已有 wiki 页面的当前内容。对于已有页面，生成的内容应保留原有信息并增量补充新内容。不要删除已有页面中的重要段落，除非源文档明确否定。`;
+- 更新已有页面时保留原有重要信息，仅补充本次源支持的内容；冲突写入 Open Questions，不静默覆盖`;
     case "plan":
       return `你是 wiki 摄入规划师。请产出：
 1) 人类可读的计划（Markdown：将改什么、为什么）
-2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/entities/Example.md","action":"create|update","rationale":"..."}]}
+2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/产品与项目/llmwiki/Example.md","action":"create|update","rationale":"..."}]}
 仅规划，不写文件。计划中应说明 source 摘要页、实体/概念页、交叉引用和潜在冲突如何处理。
 
 你可以使用 search 工具搜索已有 wiki 页面，使用 read 工具读取页面全文。工具探索应控制在必要范围；信息足够后必须输出 plan，不要无限调用工具。`;
@@ -203,9 +203,9 @@ function defaultTaskInstructionZH(step: PromptStep): string {
 1) 人类可读的计划（Markdown：将改什么、为什么）
 2) 围栏代码块中的 JSON，格式如下：
 {"summary":"...","changes":[
-  {"path":"wiki/entities/Example.md","action":"update","rationale":"..."},
-  {"path":"wiki/concepts/New.md","action":"move","from_path":"wiki/concepts/Old.md","to_path":"wiki/concepts/New.md","rationale":"重命名"},
-  {"path":"wiki/concepts/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/concepts/Merged.md","rationale":"合并重复"}
+  {"path":"wiki/产品与项目/llmwiki/Example.md","action":"update","rationale":"..."},
+  {"path":"wiki/产品与项目/llmwiki/New.md","action":"move","from_path":"wiki/concepts/legacy/Old.md","to_path":"wiki/产品与项目/llmwiki/New.md","rationale":"重命名"},
+  {"path":"wiki/产品与项目/llmwiki/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/产品与项目/llmwiki/Merged.md","rationale":"合并重复"}
 ]}
 
 重点：
@@ -221,7 +221,7 @@ function defaultTaskInstructionZH(step: PromptStep): string {
       return `你是 wiki 知识沉淀规划师。本次归档来自「问答模式」对话，用户通过问答探讨了已有 wiki 内容。
 请产出：
 1) 人类可读的计划（Markdown：将改什么、为什么）
-2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/concepts/Example.md","action":"update","rationale":"..."},{"path":"wiki/concepts/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/concepts/Merged.md","rationale":"合并重复页面"}]}
+2) 围栏代码块中的 JSON：{"summary":"...","changes":[{"path":"wiki/产品与项目/llmwiki/Example.md","action":"update","rationale":"..."},{"path":"wiki/产品与项目/llmwiki/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/产品与项目/llmwiki/Merged.md","rationale":"合并重复页面"}]}
 
 重点：
 - 如果对话中有值得沉淀的新知识或澄清，更新相关 wiki 页面
@@ -282,30 +282,24 @@ function defaultTaskInstructionZH(step: PromptStep): string {
 function defaultTaskInstructionEN(step: PromptStep): string {
   switch (step) {
     case "analysis":
-      return `You are a knowledge analyst. Analyze the source document by first separating entities, concepts, and relations, then plan pages:
-- entity: a uniquely identifiable concrete object such as a person, organization, product, or project
-- concept: a reusable term, method, framework, mechanism, or theory
-- relation: a case, adoption, or embodiment link between an entity and a concept
-- key arguments, connections to existing wiki pages, contradictions, and structural recommendations
+      return `You are a knowledge analyst. Produce an executable page plan from the source and verified existing pages:
+- entity requires a uniquely identifiable object with independently reusable facts; concept requires a neutral, reusable term, mechanism, or method
+- Default to one main experience per experience source, covering symptoms, diagnosis, resolution, verification, and boundaries; do not split every diagnostic phrase into a page
+- Put ordinary relationships in relations, never relation FILE pages; use synthesis/comparison only when the analysis itself has independent reading value
+- Choose a topic domain/group independently for each page based on the reader's question; do not place every page from one source in the same folder by default
+- Files, URLs, and substantial text also require a source summary page under wiki/sources/; source pages do not count toward business-page review thresholds
+- create requires reuse_reason; update requires a tool-verified existing path and should include document_id. Prefer updates over duplicate pages
+- More than 3 business pages or 2 concepts requires review. Filenames are stable readable canonical names without underscore word splitting
 
-For each candidate phrase, list entity candidates, concept candidates, and relation candidates separately. If a phrase looks like "entity name + abstract concept" (e.g. AppLovin组织裁剪方法论), split it into entity AppLovin, concept 组织裁剪方法论, and their case relationship instead of treating it as one concept page.
-
-You can use the search tool to find existing wiki pages and the read tool to read page content. Clearly distinguish: which knowledge is already covered by existing pages (suggest update), and which is new (suggest create). Prefer suggesting updates to existing pages.
-
-Do not rely on a single exact search. For key entities and concepts, try aliases, abbreviations, English/Chinese variants, or broader terms. Before ingestion, flag obvious credentials, private information, or material outside purpose.md scope.`;
+Use search and read tools to verify existing pages. Try aliases, abbreviations, language variants, and broader terms. Never invent existing-page results after tool failure. Ground the plan in the source and mark uncertainty explicitly.`;
     case "generation":
-      return `You are a wiki generator. Produce wiki pages from the original content and analysis in FILE blocks. The source is authoritative; analysis is organizational context only.
-- Business pages MUST be placed inside topic folders under wiki/ (e.g. wiki/AI-Engineering/Agent/harness.md), NOT as top-level wiki/*.md files.
-- Prefer reusing existing folders listed in the prompt; only create new shallow topic folders (2-3 levels max) when no existing folder fits.
-- Always set frontmatter \`type:\` accurately (entity / concept / synthesis / comparison / query / experience / ledger / source) and \`confidence: high | medium | low\`.
-- For experience, include kind: practice | pitfall | pattern and status: draft | validated | deprecated (plus symptoms for pitfall/pattern); for ledger, include status.
-- Redact credentials, secrets, personal contacts, and internal hostnames as <REDACTED>.
-
-If ingestion comes from a file, URL, or substantial text, create or update a source summary under wiki/sources/. Every new fact should trace to a source summary, source content, or existing wiki page. If new and old facts conflict, preserve the conflict context and mark uncertainty instead of silently overwriting.
-
-Concept page titles should stay neutral by default; do not embed concrete entity names in concept titles. Link entities and concepts via wikilinks. If a candidate concept title looks like "entity name + method/model/culture/framework/strategy/mechanism/theory/practice", prefer a neutral concept page and link the entity page (e.g. [[AppLovin]]) as a case in the body. Only keep a combined title when the source clearly treats the full phrase as a fixed proper term, and explain that basis in the body.
-
-You can use the read tool to read the current content of existing wiki pages. For existing pages, your output should preserve original information and incrementally add new content. Do not remove important paragraphs from existing pages unless the source explicitly contradicts them.`;
+      return `You are a wiki generator. Follow the verified page plan exactly: do not add/remove pages or change path, action, type, or title.
+- The source is authoritative. Generation has no read/search tools; use only existing-page results verified and supplied by analysis
+- Business pages live under topic domain/group folders; page_type does not determine the directory. Never create new pages under legacy type roots such as concepts/entities/devices
+- Set frontmatter type and confidence. Experience requires kind/status and pitfall/pattern symptoms; ledger requires status
+- Use pyramid writing: conclusion and applicability first, key points next, evidence and details last. Keep each conclusion in one main page and link related pages instead of copying it
+- Put planned source pages under wiki/sources/. Redact credentials, secrets, personal contacts, and internal hostnames as <REDACTED>
+- Preserve important existing content on updates. Keep conflicting claims and uncertainty instead of silently overwriting`;
     case "plan":
       return `You are a wiki ingest planner. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. Planning only — no FILE blocks. The plan should mention source summaries, entity/concept pages, cross-links, and potential conflicts.
 
@@ -313,16 +307,16 @@ You can use search to find existing wiki pages and read to load page content. Ke
     case "plan_organize":
       return `You are a wiki reorganization planner. This archive is from an "organize mode" session where the user intended to restructure existing wiki pages. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. The JSON schema supports:
 {"summary":"...","changes":[
-  {"path":"wiki/entities/Example.md","action":"update","rationale":"..."},
-  {"path":"wiki/concepts/New.md","action":"move","from_path":"wiki/concepts/Old.md","to_path":"wiki/concepts/New.md","rationale":"rename"},
-  {"path":"wiki/concepts/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/concepts/Merged.md","rationale":"deduplicate"}
+  {"path":"wiki/产品与项目/llmwiki/Example.md","action":"update","rationale":"..."},
+  {"path":"wiki/产品与项目/llmwiki/New.md","action":"move","from_path":"wiki/concepts/legacy/Old.md","to_path":"wiki/产品与项目/llmwiki/New.md","rationale":"rename"},
+  {"path":"wiki/产品与项目/llmwiki/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/产品与项目/llmwiki/Merged.md","rationale":"deduplicate"}
 ]}
 
 For move actions, fill in from_path (old path) and to_path (new path). For merge actions, fill in source_paths (all source pages) and to_path (merged destination). Focus on update/move/merge rather than create. Preserve important existing content. If audit/lint reports entity_concept_coupling, plan to rename entity-bound concept pages to neutral concepts and update wikilinks. Planning only — no FILE blocks.
 
 You can use structure, audit, search, read, and related tools to understand the wiki. Keep tool exploration to what is necessary; once you have enough context, output the plan — do not call tools indefinitely.`;
     case "plan_qa":
-      return `You are a wiki knowledge consolidation planner. This archive is from a "QA mode" session where the user explored existing wiki content through questions. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. The JSON schema supports update and merge actions: {"summary":"...","changes":[{"path":"wiki/concepts/Example.md","action":"update","rationale":"..."},{"path":"wiki/concepts/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/concepts/Merged.md","rationale":"deduplicate"}]}. For merge actions, fill in source_paths (all source pages) and to_path (merged destination). Focus on updating existing pages with new insights or corrections from the Q&A. If duplicate or highly similar pages are found, use the merge action. If an answer is worth preserving as an artifact, plan a wiki/queries/ page or update the relevant topic page. Only create new pages if genuinely needed. Planning only — no FILE blocks.
+      return `You are a wiki knowledge consolidation planner. This archive is from a "QA mode" session where the user explored existing wiki content through questions. Output a human-readable Markdown plan and a fenced JSON block with summary and changes. The JSON schema supports update and merge actions: {"summary":"...","changes":[{"path":"wiki/产品与项目/llmwiki/Example.md","action":"update","rationale":"..."},{"path":"wiki/产品与项目/llmwiki/Merged.md","action":"merge","source_paths":["wiki/concepts/A.md","wiki/concepts/B.md"],"to_path":"wiki/产品与项目/llmwiki/Merged.md","rationale":"deduplicate"}]}. For merge actions, fill in source_paths (all source pages) and to_path (merged destination). Focus on updating existing pages with new insights or corrections from the Q&A. If duplicate or highly similar pages are found, use the merge action. If an answer is worth preserving as an artifact, plan a wiki/queries/ page or update the relevant topic page. Only create new pages if genuinely needed. Planning only — no FILE blocks.
 
 You can use search, read, and references to find existing wiki pages. Keep tool exploration to what is necessary; once you have enough context, output the plan — do not call tools indefinitely.`;
     case "session_chat":

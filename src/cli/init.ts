@@ -1,5 +1,9 @@
 import path from "node:path";
-import { ensureWorkspaceStructure, writeWorkspaceScaffoldsIfMissing } from "../engine/scaffold.js";
+import {
+  ensureWorkspaceStructure,
+  SEED_TOPIC_FOLDERS,
+  writeWorkspaceScaffoldsIfMissing,
+} from "../engine/scaffold.js";
 import { engineStoreFromStore } from "../engine/adapter.js";
 import { Reindexer } from "../engine/reindex.js";
 import { writeWorkspaceScaffoldsIfMissing as writeIngestScaffolds } from "../ingest/prompts.js";
@@ -18,6 +22,17 @@ export async function runInit(dir: string | undefined, name: string | undefined,
       user_id: "default",
       created_at: "",
     });
+
+    for (const folder of SEED_TOPIC_FOLDERS) {
+      const existing = await store.getFolder(folder.path);
+      if (!existing) await store.createFolder(folder);
+      else if (!existing.display_name || !existing.description) {
+        await store.updateFolder(folder.path, {
+          display_name: existing.display_name || folder.display_name,
+          description: existing.description || folder.description,
+        });
+      }
+    }
 
     if (!dir) {
       console.log(`Initialized PostgreSQL workspace: ${wsName}`);

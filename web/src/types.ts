@@ -404,6 +404,7 @@ export interface Settings {
   ui_language: string
   doc_language: string
   rules_supplement?: string
+  structure_policy_mode?: "legacy" | "report" | "enforce"
   session_tool_loop_max_rounds_ingest?: number
   session_tool_loop_max_rounds_qa?: number
   session_tool_loop_max_rounds_organize?: number

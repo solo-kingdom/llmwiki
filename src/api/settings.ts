@@ -19,6 +19,10 @@ import {
   saveHarnixSettings,
 } from "../harness/settings.js";
 import { validateRulesSupplement } from "../ingest/prompts.js";
+import {
+  CONFIG_STRUCTURE_POLICY_MODE,
+  parseStructurePolicyMode,
+} from "../engine/placement_policy.js";
 import * as mcpConfig from "../mcp/config.js";
 import {
   CONFIG_SESSION_TOOL_LOOP_MAX_CALLS_PER_ROUND,
@@ -193,6 +197,7 @@ const ALLOWED_KEYS = new Set([
   "ui_language",
   "doc_language",
   "rules_supplement",
+  CONFIG_STRUCTURE_POLICY_MODE,
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_INGEST,
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_QA,
   CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_ORGANIZE,
@@ -247,6 +252,7 @@ export function settingsApi(ctx: ApiContext) {
       ui_language: languageForResponse(value("ui_language")),
       doc_language: languageForResponse(value("doc_language")),
       rules_supplement: value("rules_supplement"),
+      structure_policy_mode: parseStructurePolicyMode(value(CONFIG_STRUCTURE_POLICY_MODE)),
       session_tool_loop_max_rounds_ingest: sessionToolLoopMaxRoundsForResponse(
         value(CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_INGEST),
         "ingest",
@@ -380,6 +386,7 @@ export function settingsApi(ctx: ApiContext) {
             throw new Error(`${key} must be 'zh' or 'en`);
           }
           if (key === "rules_supplement") validateRulesSupplement(value);
+          if (key === CONFIG_STRUCTURE_POLICY_MODE) value = parseStructurePolicyMode(value);
           if (
             key === CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_INGEST ||
             key === CONFIG_SESSION_TOOL_LOOP_MAX_ROUNDS_QA ||

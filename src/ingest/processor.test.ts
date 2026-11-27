@@ -6,7 +6,8 @@ import type { Store } from "../store/interfaces.js";
 import type { IngestJob, NormalizedSource, ProviderInstance } from "../store/types.js";
 import { PageLockManager } from "./lock.js";
 import { Pipeline } from "./pipeline.js";
-import { JobProcessor } from "./processor.js";
+import { JobProcessor, classifyPipelineError, remediationForCode } from "./processor.js";
+import { PagePlanReviewRequiredError } from "./page_plan.js";
 
 const POLL_MS = 5;
 
@@ -302,5 +303,15 @@ describe("JobProcessor scheduling", () => {
 
     await processor.idle();
     expect(FakePipeline.peak).toBe(3);
+  });
+});
+
+
+describe("pipeline structure failures", () => {
+  it("routes excessive page creation to review and invalid plans to analysis correction", () => {
+    expect(classifyPipelineError(new PagePlanReviewRequiredError("too many pages"))).toBe("review_required");
+    expect(remediationForCode("review_required")).toContain("review");
+    expect(classifyPipelineError(new Error("analysis is empty; refusing generation and apply"))).toBe("invalid_page_plan");
+    expect(remediationForCode("invalid_page_plan")).toContain("not attempted");
   });
 });

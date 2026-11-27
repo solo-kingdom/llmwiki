@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import path from "node:path";
 import { logIngestJob, logSession, record } from "../activity/index.js";
+import { CanonicalPageConflictError } from "../engine/canonical.js";
 import { ArchiveStorageService } from "../archive/storage.js";
 import { clientFromInstance, clientFromWorkspace } from "../llm/instance_client.js";
 import type { Client } from "../llm/client.js";
@@ -18,6 +19,7 @@ import {
 import { NoWikiFilesWrittenError } from "./fileblocks.js";
 import { computeRulesHash, resolveRulesSupplement } from "./prompts.js";
 import { normalizeJobSource } from "./normalize.js";
+import { PagePlanReviewRequiredError } from "./page_plan.js";
 import { PageLockManager } from "./lock.js";
 import { Pipeline } from "./pipeline.js";
 import { formatFeedbackForPlan, parseReviewIdFromRef, reviewSourceRef } from "./review.js";
@@ -804,7 +806,10 @@ export async function resolveDocLang(db: Store): Promise<string> {
 
 export function classifyPipelineError(error: unknown): string {
   if (!error) return "";
+  if (error instanceof PagePlanReviewRequiredError) return "review_required";
+  if (error instanceof CanonicalPageConflictError) return "canonical_duplicate";
   const message = errorMessage(error);
+  if (message.includes("analysis is empty") || message.includes("page plan")) return "invalid_page_plan";
   if (
     message.includes("unsupported protocol scheme") ||
     message.includes("base URL is not configured") ||
@@ -830,6 +835,12 @@ export function classifyPipelineError(error: unknown): string {
 
 export function remediationForCode(code: string): string {
   switch (code) {
+    case "review_required":
+      return "create a reviewed ingest session, confirm each page's reuse_reason, then apply the approved plan";
+    case "canonical_duplicate":
+      return "update the existing canonical page identified in the error instead of creating another path";
+    case "invalid_page_plan":
+      return "retry analysis with a non-empty structured page plan; generation/apply was not attempted";
     case "llm_config_invalid":
       return "configure Provider and base URL in Settings (Provider instances)";
     case "llm_auth_failed":

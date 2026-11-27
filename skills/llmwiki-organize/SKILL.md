@@ -13,16 +13,20 @@ Writes go through the API so the file, the index and the graph stay consistent. 
 
 ## Page contract
 
-| Directory | `type` | Required sections |
+Use `wiki/<topic-domain>/<topic-group>/<page>.md` with two folder levels by default. Page type is independent of folders; one topic group may mix entity, concept, and experience pages. `concepts/`, `entities/`, `devices/`, and similar type roots are legacy paths for existing-page updates only.
+
+| `type` | Independent-page threshold | Required sections |
 |---|---|---|
-| `wiki/entities/` | `entity` | 概述 / 关键事实 / 相关概念 / 来源 |
-| `wiki/concepts/` | `concept` | 定义 / 核心要点 / 相关实体 / 来源 |
-| `wiki/synthesis/` | `synthesis` | 问题或目的 / 分析 / 引用 / 后续 |
-| `wiki/comparisons/` | `comparison` | 对比维度 / 异同 / 结论 |
-| `wiki/queries/` | `query` | 问题 / 回答 / 引用 |
-| `wiki/experiences/` | `experience` | 适用场景 / 触发信号 / 经验结论 / 预防与处理 / 验证方式 / 证据 / 边界与失效条件 / 来源 (+ 误判与弯路 / 最短判别 / 复发记录 for pitfall/pattern) |
-| `wiki/ledgers/` | `ledger` | 当前状态 / 历史 / 来源 |
-| `wiki/sources/` | `source` | 摘要 / 关键观点 / 相关实体或概念 |
+| `entity` | Unique identity and reusable facts | 概述 / 关键事实 / 相关概念 / 来源 |
+| `concept` | Neutral and reusable across cases | 定义 / 核心要点 / 适用边界 / 来源 |
+| `synthesis` | Relationship analysis has independent value | 问题与结论 / 分析 / 证据 / 未决项 |
+| `comparison` | At least two objects and explicit dimensions | 对比维度 / 异同 / 结论 |
+| `query` | Reusable question and answer | 问题 / 回答 / 引用 |
+| `experience` | One complete reusable experience, not one page per phrase | 现象 / 经验结论 / 最短判别 / 根因 / 处理 / 验证 / 边界 / 证据 |
+| `ledger` | Current state plus append-only history | 当前状态 / 历史 / 来源 |
+| `source` | Source summary; always under `wiki/sources/` | 摘要 / 关键观点 / 相关实体或概念 |
+
+Write content as a pyramid: conclusion and applicability, then key points, then evidence. Ordinary relationships use wikilinks/structured references, not relation pages. Filenames use stable readable names, `-` for whitespace, never `_` word splitting; old names and abbreviations belong in `aliases`.
 
 Frontmatter on every wiki page — a missing `title`, `date` or `type` is a lint error:
 
@@ -55,14 +59,14 @@ curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/documents" \
   -H 'Content-Type: application/json' \
   -d '{
     "filename": "attention-mechanism.md",
-    "path": "/wiki/concepts",
+    "path": "/wiki/AI与Agent/Skills与工具",
     "title": "注意力机制",
     "tags": ["transformer"],
     "content": "---\ntitle: 注意力机制\ntype: concept\ndate: 2025-01-31\n---\n\n# 定义\n…\n"
   }'
 ```
 
-The response is the created row: check `source_kind == "wiki"` and `relative_path == "wiki/concepts/attention-mechanism.md"`. `content` must contain the frontmatter — the API stores the body verbatim and does not invent metadata.
+The response is the created row: check `source_kind == "wiki"` and `relative_path == "wiki/AI与Agent/Skills与工具/attention-mechanism.md"`. `content` must contain the frontmatter — the API stores the body verbatim and does not invent metadata.
 
 ## Edit a page
 

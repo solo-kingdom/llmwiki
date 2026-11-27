@@ -260,3 +260,56 @@ describe("lintPages wiki-data rules", () => {
     expect(report.issues.some((i) => i.code === LINT_CODE_AMBIGUOUS_LINK)).toBe(true);
   });
 });
+
+
+describe("lintPages pyramid structure", () => {
+  it("detects global title, filename and alias duplicates across folders", () => {
+    const pages = [
+      page("wiki/A/组/MiniMax.md", "---\ntitle: MiniMax\ntype: entity\n---\n# MiniMax\n"),
+      page("wiki/B/组/mini_max.md", "---\ntitle: 另一个对象\ntype: entity\naliases: [Mini Max]\n---\n# 另一个对象\n"),
+    ];
+    const report = lintPages(pages);
+    const issues = report.issues.filter((issue) => issue.code === "global_duplicate_page");
+    expect(issues).toHaveLength(2);
+    expect(issues.every((issue) => issue.severity === "error")).toBe(true);
+  });
+
+  it("checks legacy roots, folder metadata, fanout and unapproved third-level folders", () => {
+    const pages = [
+      page("wiki/concepts/旧页面.md", "---\ntitle: 旧页面\ntype: concept\n---\n# 旧页面\n"),
+      page("wiki/系统与网络/代理与DNS/子组/页面.md", "---\ntitle: 页面\ntype: concept\n---\n# 页面\n"),
+    ];
+    const report = lintPages(pages, {
+      structurePolicyMode: "enforce",
+      folders: [
+        { path: "系统与网络", display_name: "", description: "", sort_order: 0, created_at: "", updated_at: "", direct_count: 0, total_count: 1 },
+        { path: "系统与网络/代理与DNS", display_name: "代理与 DNS", description: "边界", sort_order: 0, created_at: "", updated_at: "", direct_count: 0, total_count: 1 },
+        { path: "系统与网络/代理与DNS/子组", display_name: "子组", description: "边界", sort_order: 0, created_at: "", updated_at: "", direct_count: 1, total_count: 1 },
+      ],
+    });
+    expect(report.issues.some((issue) => issue.code === "legacy_type_root" && issue.severity === "error")).toBe(true);
+    expect(report.issues.some((issue) => issue.code === "folder_metadata_missing")).toBe(true);
+    expect(report.issues.some((issue) => issue.code === "topic_depth_exceeded")).toBe(true);
+    expect(report.issues.some((issue) => issue.code === "folder_fanout")).toBe(true);
+  });
+
+  it("checks canonical filenames, title/H1 parity and experience-shaped concepts", () => {
+    const report = lintPages([
+      page(
+        "wiki/产品与项目/llmwiki/Provider_协议.md",
+        "---\ntitle: Provider 协议\ntype: concept\n---\n# 不同标题\n\n## 症状\nA\n## 最短判别\nB\n## 根因\nC\n## 验证\nD\n",
+      ),
+    ]);
+    expect(report.issues.some((issue) => issue.code === "filename_noncanonical")).toBe(true);
+    expect(report.issues.some((issue) => issue.code === "experience_shape_mismatch")).toBe(true);
+  });
+
+  it("allows mixed page types in one topic group", () => {
+    const report = lintPages([
+      page("wiki/A/组/对象.md", "---\ntitle: 对象\ntype: entity\n---\n# 对象\n"),
+      page("wiki/A/组/机制.md", "---\ntitle: 机制\ntype: concept\n---\n# 机制\n"),
+      page("wiki/A/组/故障.md", "---\ntitle: 故障\ntype: experience\n---\n# 故障\n"),
+    ]);
+    expect(report.issues.some((issue) => issue.message.includes("混有"))).toBe(false);
+  });
+});

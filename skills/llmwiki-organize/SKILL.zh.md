@@ -14,16 +14,20 @@ metadata:
 
 ## 页面契约
 
-| 目录 | `type` | 必需章节 |
+目录统一为 `wiki/<主题域>/<主题组>/<页面>.md`，默认两层目录；page_type 与目录解耦，同一主题组可混放 entity/concept/experience。`concepts/`、`entities/`、`devices/` 等是 legacy 路径，只用于尚未迁移的旧页更新。
+
+| `type` | 独立成页门槛 | 必需章节 |
 |---|---|---|
-| `wiki/entities/` | `entity` | 概述 / 关键事实 / 相关概念 / 来源 |
-| `wiki/concepts/` | `concept` | 定义 / 核心要点 / 相关实体 / 来源 |
-| `wiki/synthesis/` | `synthesis` | 问题或目的 / 分析 / 引用 / 后续 |
-| `wiki/comparisons/` | `comparison` | 对比维度 / 异同 / 结论 |
-| `wiki/queries/` | `query` | 问题 / 回答 / 引用 |
-| `wiki/experiences/` | `experience` | 适用场景 / 触发信号 / 经验结论 / 预防与处理 / 验证方式 / 证据 / 边界与失效条件 / 来源（`pitfall`/`pattern` 另含「误判与弯路」「最短判别」；`pitfall` 另含「复发记录」） |
-| `wiki/ledgers/` | `ledger` | 当前状态 / 历史（仅追加）/ 来源 |
-| `wiki/sources/` | `source` | 摘要 / 关键观点 / 相关实体或概念 |
+| `entity` | 可唯一指代且有可复用事实 | 概述 / 关键事实 / 相关概念 / 来源 |
+| `concept` | 中性、可跨案例复用 | 定义 / 核心要点 / 适用边界 / 来源 |
+| `synthesis` | 关系分析本身有独立价值 | 问题与结论 / 分析 / 证据 / 未决项 |
+| `comparison` | 至少两个对象且有明确维度 | 对比维度 / 异同 / 结论 |
+| `query` | 问题与答案值得复用 | 问题 / 回答 / 引用 |
+| `experience` | 一组完整可复用经验，不按短语拆页 | 现象 / 经验结论 / 最短判别 / 根因 / 处理 / 验证 / 边界 / 证据 |
+| `ledger` | 需要当前状态与追加历史 | 当前状态 / 历史（仅追加）/ 来源 |
+| `source` | 保留来源摘要，固定放 `wiki/sources/` | 摘要 / 关键观点 / 相关实体或概念 |
+
+正文按金字塔组织：先结论与适用范围，再要点，最后证据细节。普通关系只写 wikilink/结构化引用，不建 relation 页面。文件名保留可读规范名，空白改为 `-`，不用 `_` 分词；旧名和缩写加入 `aliases`。
 
 每个 wiki 页面都要 frontmatter，缺 `title`、`date`、`type` 都是 lint 错误：
 
@@ -56,14 +60,14 @@ curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/documents" \
   -H 'Content-Type: application/json' \
   -d '{
     "filename": "attention-mechanism.md",
-    "path": "/wiki/concepts",
+    "path": "/wiki/AI与Agent/Skills与工具",
     "title": "注意力机制",
     "tags": ["transformer"],
     "content": "---\ntitle: 注意力机制\ntype: concept\ndate: 2025-01-31\n---\n\n# 定义\n…\n"
   }'
 ```
 
-返回创建后的整行：确认 `source_kind == "wiki"`、`relative_path == "wiki/concepts/attention-mechanism.md"`。`content` 里必须自带 frontmatter——API 原样落盘，不会替你补元数据。
+返回创建后的整行：确认 `source_kind == "wiki"`、`relative_path == "wiki/AI与Agent/Skills与工具/attention-mechanism.md"`。`content` 里必须自带 frontmatter——API 原样落盘，不会替你补元数据。
 
 ## 改写页面
 

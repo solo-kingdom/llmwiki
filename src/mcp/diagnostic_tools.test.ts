@@ -61,4 +61,23 @@ describe("diagnostic_tools structure", () => {
     expect(promptTree).toContain("wiki/AI工程/");
     expect(promptTree).toContain("wiki/AI工程/Agent/");
   });
+
+  it("marks legacy roots as update-only in report and enforce modes", () => {
+    const folders = [{
+      path: "concepts",
+      display_name: "概念",
+      description: "旧目录",
+      sort_order: 0,
+      created_at: "",
+      updated_at: "",
+      direct_count: 1,
+      total_count: 1,
+    }];
+    const docs = [{
+      source_kind: "wiki",
+      relative_path: "wiki/concepts/legacy.md",
+    }] as never[];
+    const output = formatFolderTreeForPrompt(folders, docs, 80, "enforce");
+    expect(output).toContain("legacy：仅用于存量更新");
+  });
 });

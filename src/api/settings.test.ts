@@ -57,6 +57,7 @@ describe("settings: ingest parallelism", () => {
     expect(res.status).toBe(200);
     expect(body.job_parallel_enabled).toBe("false");
     expect(body.job_max_concurrent).toBe("3");
+    expect(body.structure_policy_mode).toBe("legacy");
   });
 
   it("stores the switch canonically and reads back the new values", async () => {
@@ -93,6 +94,20 @@ describe("settings: ingest parallelism", () => {
     }
     expect(config.has("job_max_concurrent")).toBe(false);
     expect(config.has("job_parallel_enabled")).toBe(false);
+  });
+
+  it("validates and stores the structure placement policy", async () => {
+    const { store, config } = makeStore();
+    const app = makeApp(store);
+
+    const res = await putSettings(app, { structure_policy_mode: "REPORT" });
+    expect(res.status).toBe(200);
+    expect(config.get("structure_policy_mode")).toBe("report");
+    expect(((await res.json()) as Record<string, unknown>).structure_policy_mode).toBe("report");
+
+    const invalid = await putSettings(app, { structure_policy_mode: "strict" });
+    expect(invalid.status).toBe(400);
+    expect(config.get("structure_policy_mode")).toBe("report");
   });
 
   it("keeps API keys able to toggle the switch (not a credential)", async () => {

@@ -54,7 +54,9 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/settings" \
 ```
 
 - Applies to new claims immediately, no restart needed; `job_parallel_enabled:false` returns to serial.
-- Writes to the same wiki page are serialized and merged, so concurrent jobs do not overwrite each other's pages. Concurrent jobs do see a snapshot of the vault, so related sources in one batch can still create overlapping pages — a review pass after the batch is worthwhile.
+- Writes to the same wiki page are serialized and merged. Cross-path duplicates with equivalent normalized title/filename/alias are locked and rejected in PostgreSQL, so no second copy is committed.
+- Empty analysis, a missing page plan, or generation drift fails before writing. More than 3 new business pages or 2 concepts per source requires review.
+- `structure_policy_mode`: `legacy` keeps compatibility, `report` warns on legacy roots, and `enforce` rejects new automatic pages under legacy roots or unregistered topic groups. Existing updates and rollback/reindex remain compatible.
 - Rate-limited (429) and transient (5xx, network, idle stream) requests are retried with bounded backoff and show up as `llm request retry` in the job events. A provider's per-minute request cap turns high concurrency into more retries rather than more failures; lower `job_max_concurrent` if retries dominate.
 
 ## Reviewed path: session → archive → plan → approve
@@ -89,7 +91,7 @@ curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/sessions/{id}/message
 # stream a model reply (SSE)
 curl -fsS -N "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/ingest/sessions/{id}/messages?stream=1" \
   -H 'Content-Type: application/json' \
-  -d '{"content":"请把这份纪要整理成 wiki/sources 下的来源页","wiki_refs":[{"path":"wiki/concepts/foo.md"}]}'
+  -d '{"content":"请把这份纪要整理成 wiki/sources 下的来源页","wiki_refs":[{"path":"wiki/产品与项目/llmwiki/foo.md"}]}'
 ```
 
 SSE events: `user_message`, `assistant_start`, `token`, `thought`, `tool_start`, `tool_done`, `plan`, `permission`, `warning`, `done` (final message object), `error`. One stream at a time per session — a second request returns `409`. Attachment upload is `POST /ingest/sessions/{id}/attachments` (multipart `file`); attachments are archived with the session.

@@ -5,6 +5,10 @@ import { defaultToolLoopConfig, runToolLoop } from "../llm/tools.js";
 import type { Message, ToolLoopConfig } from "../llm/types.js";
 import type { McpRouter } from "../mcp/router.js";
 import type { Store } from "../store/interfaces.js";
+import {
+  CONFIG_STRUCTURE_POLICY_MODE,
+  parseStructurePolicyMode,
+} from "../engine/placement_policy.js";
 import { folderPathFromWikiRelPath } from "../engine/wiki_org.js";
 import { formatFolderTreeForPrompt } from "../mcp/diagnostic_tools.js";
 import { IngestCache } from "./cache.js";
@@ -13,6 +17,12 @@ import { applyWikiBlocks, NoWikiFilesWrittenError, normalizeWikiFileBlocks, norm
 import { llmMessagesForRecord, recordLLMRequest, recordLLMResponse, traceRetries } from "./job_events.js";
 import { PageLockManager, withPageLocks } from "./lock.js";
 import { normalizeUpload } from "./normalize.js";
+import {
+  assertGenerationMatchesPagePlan,
+  parseAnalysisPagePlan,
+  validateAnalysisPagePlanAgainstStore,
+  type AnalysisPagePlan,
+} from "./page_plan.js";
 import { composeSystemPrompt } from "./prompts.js";
 import { formatFeedbackForPlan, parsePlanActions, parsePlanResult, sourcePathsToDelete } from "./review.js";
 import {
@@ -190,7 +200,8 @@ export class Pipeline {
     }
 
     const analysis = await this.analyze(name, content);
-    const files = await this.generate(name, content, analysis);
+    const pagePlan = await this.validatedPagePlan(analysis);
+    const files = await this.generate(name, content, analysis, pagePlan);
     this.recorder?.record("apply_files", "complete", "wiki files applied", { paths_written: files });
     await this.cache.saveForSource(source, files);
     return files;
@@ -206,6 +217,7 @@ export class Pipeline {
       canonical_path: source.canonicalPath,
     });
     const analysis = await this.analyze(name, content);
+    await this.validatedPagePlan(analysis, false);
     const planRaw = await this.generatePlan(name, content, analysis, feedback);
     const result = parsePlanResult(planRaw);
     this.recorder?.record("plan", "complete", "review plan generated", {
@@ -228,6 +240,7 @@ export class Pipeline {
     this.recorder?.record("apply", "start", "regenerating FILE blocks from approved plan", null);
 
     const analysis = await this.analyze(name, content);
+    await this.validatedPagePlan(analysis, false);
     const result = await this.generateFromPlan(name, content, analysis, plan);
     this.recorder?.record("apply_files", "complete", "wiki files applied from approved plan", {
       paths_written: result.written,
@@ -239,12 +252,17 @@ export class Pipeline {
   private async folderTreeContext(): Promise<string> {
     if (!this.db) return "";
     try {
-      const [folders, docs] = await Promise.all([
+      const [folders, docs, storedMode] = await Promise.all([
         typeof this.db.listFolders === "function" ? this.db.listFolders(true) : Promise.resolve([]),
         this.db.listDocumentsFiltered({ source_kind: "wiki", exclude_hidden: true }),
+        typeof this.db.getConfig === "function" ? this.db.getConfig(CONFIG_STRUCTURE_POLICY_MODE) : Promise.resolve(""),
       ]);
-      const summary = formatFolderTreeForPrompt(folders, docs);
-      return summary ? `当前目录树（请优先复用已有匹配目录）：\n${summary}` : "";
+      const mode = parseStructurePolicyMode(storedMode);
+      const summary = formatFolderTreeForPrompt(folders, docs, 80, mode);
+      const guidance = mode === "legacy"
+        ? "当前目录树（请优先复用已有匹配目录）"
+        : "当前目录树（legacy 仅供存量 update；新页面只能选择非 legacy 的已登记主题域/主题组）";
+      return summary ? `${guidance}：\n${summary}` : "";
     } catch {
       return "";
     }
@@ -272,11 +290,29 @@ export class Pipeline {
     );
   }
 
-  private async generate(name: string, content: string, analysis: string): Promise<string[]> {
+  private async validatedPagePlan(analysis: string, enforceReviewThreshold = true): Promise<AnalysisPagePlan> {
+    const pagePlan = parseAnalysisPagePlan(analysis, { enforceReviewThreshold });
+    await validateAnalysisPagePlanAgainstStore(pagePlan, this.db);
+    this.recorder?.record("analysis", "complete", "validated analysis page plan", {
+      page_count: pagePlan.pages.length,
+      paths: pagePlan.pages.map((page) => page.path),
+    });
+    return pagePlan;
+  }
+
+  private async generate(
+    name: string,
+    content: string,
+    analysis: string,
+    pagePlan: AnalysisPagePlan,
+  ): Promise<string[]> {
     const treeCtx = await this.folderTreeContext();
     const prompt = `源文件：**${name}**
 
-${treeCtx ? `${treeCtx}\n\n` : ""}分析（仅供参考）：
+${treeCtx ? `${treeCtx}\n\n` : ""}已验证 page plan（必须逐页遵循，不得增删页面、修改路径或类型）：
+${JSON.stringify(pagePlan)}
+
+分析（用于理解依据）：
 ${analysis}
 
 原始内容：
@@ -302,6 +338,7 @@ ${content}
         adjustments: normalized.adjustments,
       });
     }
+    assertGenerationMatchesPagePlan(normalized.blocks, pagePlan);
     const applied = await this.applyBlocksLocked(normalized.blocks);
     return applied.written;
   }

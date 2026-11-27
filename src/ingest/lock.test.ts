@@ -56,9 +56,19 @@ function fakeClient(
   tag: string,
   hooks: { beforeGenerationEnds?: () => Promise<void> } = {},
 ): Client {
+  const analysis = JSON.stringify({
+    pages: [{
+      path: PAGE,
+      action: "create",
+      type: "concept",
+      title: "共享页",
+      reuse_reason: "并发测试共享同一概念页",
+    }],
+  });
   const page = `---FILE: ${PAGE}
 ---
 title: 共享页
+type: concept
 ---
 ## 来自 ${tag}
 ${tag} 写入的内容
@@ -66,7 +76,7 @@ ${tag} 写入的内容
 `;
   async function* streamChat(messages: Array<{ role: string; content?: string }>): AsyncGenerator<StreamEvent> {
     const user = messages.find((message) => message.role === "user")?.content ?? "";
-    let answer = "分析结果";
+    let answer = analysis;
     if (user.includes("请按 FILE 块格式生成 wiki 页面")) {
       await hooks.beforeGenerationEnds?.();
       answer = page;

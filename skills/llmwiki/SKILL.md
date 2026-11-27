@@ -80,7 +80,7 @@ PostgreSQL            pages, folders, revisions, search, graph, lint — the onl
 - `wiki/index.md` is rebuilt by reindex and by ingest apply. Do not write it.
 - `wiki/sources/` and `wiki/templates/` are indexed but hidden from listing, search and the graph — they exist for provenance, not for browsing.
 - `raw/` is read-only for agents. Ingest jobs write there; agents cite it, never edit it.
-- Every path in a response is workspace-relative (`wiki/concepts/foo.md`). Quote those paths when reporting.
+- Every path in a response is workspace-relative (`wiki/产品与项目/llmwiki/Page.md`). Quote those paths when reporting.
 
 ## Route the task
 

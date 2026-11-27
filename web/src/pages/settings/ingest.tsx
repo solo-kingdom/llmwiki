@@ -1,6 +1,7 @@
 import { RowsSkeleton } from "@/components/blocks/state-boundary"
 import { Panel, Rows, Section } from "@/components/blocks/surfaces"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { useApp } from "@/context/app-context"
 import { NumberSetting, SettingRow, useSettingsSave } from "./shared"
@@ -27,6 +28,23 @@ export function IngestSection() {
             label="监控来源目录"
             description="发现新文件时自动创建摄入任务"
             control={<Switch aria-label="监控来源目录" checked={settings.watch_sources} onCheckedChange={(value) => save.mutate({ watch_sources: value })} />}
+          />
+          <SettingRow
+            label="主题目录写入策略"
+            description="legacy 兼容旧结构；report 记录旧类型根告警；enforce 禁止新自动页面写入旧类型根或未登记目录"
+            control={
+              <Select
+                value={settings.structure_policy_mode ?? "legacy"}
+                onValueChange={(value: "legacy" | "report" | "enforce") => save.mutate({ structure_policy_mode: value })}
+              >
+                <SelectTrigger aria-label="主题目录写入策略" className="w-52 max-sm:w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="legacy">兼容（legacy）</SelectItem>
+                  <SelectItem value="report">仅告警（report）</SelectItem>
+                  <SelectItem value="enforce">强制主题目录（enforce）</SelectItem>
+                </SelectContent>
+              </Select>
+            }
           />
           <SettingRow
             label="并行处理摄入任务"

@@ -80,7 +80,7 @@ PostgreSQL            页面、目录树、版本、搜索、图谱、lint — �
 - `wiki/index.md` 由 reindex 和摄取落地重建，不要写。
 - `wiki/sources/`、`wiki/templates/` 会被索引，但在列表、搜索、图谱里隐藏——它们用于溯源，不是给人浏览的。
 - `raw/` 对 agent 只读：摄取作业往里写，agent 只引用、不修改。
-- 响应里的路径都是相对工作区（如 `wiki/concepts/foo.md`），汇报时照抄这个路径。
+- 响应里的路径都是相对工作区（如 `wiki/产品与项目/llmwiki/页面.md`），汇报时照抄这个路径。
 
 ## 路由
 

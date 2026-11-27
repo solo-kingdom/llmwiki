@@ -29,6 +29,13 @@ export const LINT_CODE_SYMPTOMS_MISSING = "symptoms_missing";
 export const LINT_CODE_PATTERN_INSTANCES_INSUFFICIENT = "pattern_instances_insufficient";
 export const LINT_CODE_REVIEW_OVERDUE = "review_overdue";
 export const LINT_CODE_ARCHIVED_REFERENCE = "archived_reference";
+export const LINT_CODE_LEGACY_TYPE_ROOT = "legacy_type_root";
+export const LINT_CODE_GLOBAL_DUPLICATE_PAGE = "global_duplicate_page";
+export const LINT_CODE_FOLDER_METADATA_MISSING = "folder_metadata_missing";
+export const LINT_CODE_FOLDER_FANOUT = "folder_fanout";
+export const LINT_CODE_TOPIC_DEPTH_EXCEEDED = "topic_depth_exceeded";
+export const LINT_CODE_FILENAME_NONCANONICAL = "filename_noncanonical";
+export const LINT_CODE_EXPERIENCE_SHAPE_MISMATCH = "experience_shape_mismatch";
 
 export interface LintIssue {
   severity: string;

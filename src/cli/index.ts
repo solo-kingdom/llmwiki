@@ -10,6 +10,7 @@ import { runMcp } from "./mcp.js";
 import { runMcpConfig } from "./mcp-config.js";
 import { runMigrate } from "./migrate.js";
 import { runMigrateReferences } from "./migrate_references.js";
+import { runMigrateStructure } from "./migrate_structure.js";
 import { runReindex } from "./reindex.js";
 import { runServe } from "./serve.js";
 import { runVersion } from "./version.js";
@@ -138,6 +139,15 @@ program
   .option("--dry-run", "Report what would change without writing")
   .action(async (opts: { dryRun?: boolean }) => {
     await runMigrateReferences(opts, databaseUrl());
+  });
+
+program
+  .command("migrate-structure")
+  .description("Validate a structure migration manifest against PostgreSQL without writing")
+  .requiredOption("--manifest <file>", "Migration manifest JSON (required)")
+  .option("--dry-run", "Validate only; no write mode is available", false)
+  .action(async (opts: { manifest?: string; dryRun?: boolean }) => {
+    await runMigrateStructure(opts, databaseUrl());
   });
 
 program

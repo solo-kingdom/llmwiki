@@ -12,9 +12,15 @@ import {
   LINT_CODE_DUPLICATE_PAGE,
   LINT_CODE_ENTITY_CONCEPT_COUPLING,
   LINT_CODE_EXPERIENCE_STATUS_INVALID,
+  LINT_CODE_EXPERIENCE_SHAPE_MISMATCH,
+  LINT_CODE_FILENAME_NONCANONICAL,
+  LINT_CODE_FOLDER_FANOUT,
+  LINT_CODE_FOLDER_METADATA_MISSING,
   LINT_CODE_FRONTMATTER_INVALID,
   LINT_CODE_GHOST_INDEX_ENTRY,
+  LINT_CODE_GLOBAL_DUPLICATE_PAGE,
   LINT_CODE_KIND_INVALID,
+  LINT_CODE_LEGACY_TYPE_ROOT,
   LINT_CODE_MISPLACED_WIKI_PAGE,
   LINT_CODE_MISSING_FRONTMATTER,
   LINT_CODE_ORPHAN_PAGE,
@@ -24,6 +30,7 @@ import {
   LINT_CODE_SOURCE_METADATA_MISSING,
   LINT_CODE_SOURCES_MISSING,
   LINT_CODE_SYMPTOMS_MISSING,
+  LINT_CODE_TOPIC_DEPTH_EXCEEDED,
   LINT_CODE_TYPE_DIR_MISMATCH,
   LINT_CODE_VERIFICATION_MISSING,
   LINT_SEVERITY_ERROR,
@@ -31,7 +38,8 @@ import {
   type LintReport,
 } from "../engine/lint_types.js";
 import { lintDocuments, lintGhostIndexEntries, lintWorkspace } from "../engine/lint.js";
-import { classifyWikiPath, folderPathFromWikiRelPath, isWikiSystemPath } from "../engine/wiki_org.js";
+import { LEGACY_TYPE_ROOTS, type StructurePolicyMode } from "../engine/placement_policy.js";
+import { classifyWikiPath, folderPathFromWikiRelPath, isWikiSystemPath, wikiSubdirFromPath } from "../engine/wiki_org.js";
 import type { Store } from "../store/interfaces.js";
 import type { Document, WikiFolderWithCounts } from "../store/types.js";
 import { createEngineStoreAdapter } from "./store_adapter.js";
@@ -191,7 +199,14 @@ function matchesFocus(code: string, focus: string): boolean {
         LINT_CODE_MISPLACED_WIKI_PAGE,
         LINT_CODE_ENTITY_CONCEPT_COUPLING,
         LINT_CODE_DUPLICATE_PAGE,
+        LINT_CODE_GLOBAL_DUPLICATE_PAGE,
         LINT_CODE_GHOST_INDEX_ENTRY,
+        LINT_CODE_LEGACY_TYPE_ROOT,
+        LINT_CODE_FOLDER_METADATA_MISSING,
+        LINT_CODE_FOLDER_FANOUT,
+        LINT_CODE_TOPIC_DEPTH_EXCEEDED,
+        LINT_CODE_FILENAME_NONCANONICAL,
+        LINT_CODE_EXPERIENCE_SHAPE_MISMATCH,
         LINT_CODE_PATTERN_INSTANCES_INSUFFICIENT,
       ].includes(code);
     case "links":
@@ -227,6 +242,7 @@ export function formatFolderTreeForPrompt(
   folders: WikiFolderWithCounts[],
   docs: Document[],
   maxFolders = 80,
+  policyMode: StructurePolicyMode = "legacy",
 ): string {
   const folderMeta = new Map(folders.map((f) => [f.path, f]));
   const childrenMap = new Map<string, string[]>();
@@ -252,6 +268,11 @@ export function formatFolderTreeForPrompt(
     list.sort((a, b) => {
       const sa = folderMeta.get(a)?.sort_order ?? 0;
       const sb = folderMeta.get(b)?.sort_order ?? 0;
+      if (policyMode !== "legacy") {
+        const legacyA = LEGACY_TYPE_ROOTS.has(a.split("/")[0]?.toLowerCase() ?? "") ? 1 : 0;
+        const legacyB = LEGACY_TYPE_ROOTS.has(b.split("/")[0]?.toLowerCase() ?? "") ? 1 : 0;
+        if (legacyA !== legacyB) return legacyA - legacyB;
+      }
       return sa !== sb ? sa - sb : a.localeCompare(b);
     });
   }
@@ -266,9 +287,11 @@ export function formatFolderTreeForPrompt(
       const meta = folderMeta.get(child);
       const seg = child.includes("/") ? child.slice(child.lastIndexOf("/") + 1) : child;
       const label = meta?.display_name ? `${seg}/ (${meta.display_name})` : `${seg}/`;
+      const legacy = policyMode !== "legacy" && LEGACY_TYPE_ROOTS.has(wikiSubdirFromPath(`wiki/${child}/x.md`));
+      const legacyLabel = legacy ? " [legacy：仅用于存量更新，新页面勿选]" : "";
       const counts = meta ? ` [${meta.total_count} 页]` : "";
       const desc = meta?.description ? ` — ${meta.description}` : "";
-      lines.push(`${indent}- wiki/${child}/ (${label})${counts}${desc}`);
+      lines.push(`${indent}- wiki/${child}/ (${label})${legacyLabel}${counts}${desc}`);
       walk(child, `${indent}  `);
     }
   }

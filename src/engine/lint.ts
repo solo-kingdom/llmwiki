@@ -3,7 +3,8 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "../store/interfaces.js";
 import { todayIsoDate } from "../store/postgres/doc_meta.js";
-import type { ReferenceEntryView } from "../store/types.js";
+import type { ReferenceEntryView, WikiFolderWithCounts } from "../store/types.js";
+import { normalizeCanonicalPageName } from "./canonical.js";
 import { lintEntityConceptCoupling } from "./entity_concept_coupling.js";
 import {
   isValidIsoDate,
@@ -23,9 +24,15 @@ import {
   LINT_CODE_DESCRIPTION_MISSING,
   LINT_CODE_DUPLICATE_PAGE,
   LINT_CODE_EXPERIENCE_STATUS_INVALID,
+  LINT_CODE_EXPERIENCE_SHAPE_MISMATCH,
+  LINT_CODE_FILENAME_NONCANONICAL,
+  LINT_CODE_FOLDER_FANOUT,
+  LINT_CODE_FOLDER_METADATA_MISSING,
   LINT_CODE_FRONTMATTER_INVALID,
   LINT_CODE_GHOST_INDEX_ENTRY,
+  LINT_CODE_GLOBAL_DUPLICATE_PAGE,
   LINT_CODE_KIND_INVALID,
+  LINT_CODE_LEGACY_TYPE_ROOT,
   LINT_CODE_MISPLACED_WIKI_PAGE,
   LINT_CODE_MISSING_FRONTMATTER,
   LINT_CODE_ORPHAN_PAGE,
@@ -35,6 +42,7 @@ import {
   LINT_CODE_SOURCE_METADATA_MISSING,
   LINT_CODE_SOURCES_MISSING,
   LINT_CODE_SYMPTOMS_MISSING,
+  LINT_CODE_TOPIC_DEPTH_EXCEEDED,
   LINT_CODE_VERIFICATION_MISSING,
   LINT_SEVERITY_ERROR,
   LINT_SEVERITY_WARNING,
@@ -43,6 +51,12 @@ import {
   type LintStats,
 } from "./lint_types.js";
 import { validateLogMD } from "./log_validator.js";
+import {
+  CONFIG_STRUCTURE_POLICY_MODE,
+  LEGACY_TYPE_ROOTS,
+  parseStructurePolicyMode,
+  type StructurePolicyMode,
+} from "./placement_policy.js";
 import { ReferenceParser, WIKI_DOUBLE_BRACKET_RE, WIKI_LINK_RE } from "./references.js";
 import type { EngineStore } from "./store_iface.js";
 import {
@@ -75,6 +89,9 @@ export interface LintOptions {
   workspaceRoot?: string;
   logContent?: string;
   sourceCount?: number;
+  folders?: WikiFolderWithCounts[];
+  structurePolicyMode?: StructurePolicyMode;
+  approvedDeepFolders?: Set<string>;
 }
 
 interface ParsedLintPage {
@@ -150,6 +167,42 @@ export function lintPages(pages: LintPageInput[], options: LintOptions = {}): Li
       }
 
       issues.push(...validateFrontmatter(page.relPath, fm, page.subdir));
+
+      if (!archived && LEGACY_TYPE_ROOTS.has(page.subdir.toLowerCase())) {
+        issues.push({
+          severity: options.structurePolicyMode === "enforce" ? LINT_SEVERITY_ERROR : LINT_SEVERITY_WARNING,
+          code: LINT_CODE_LEGACY_TYPE_ROOT,
+          path: page.relPath,
+          message: "活跃业务页仍位于 legacy 类型根，应迁移到主题域/主题组",
+        });
+      }
+
+      const filename = path.posix.basename(page.relPath);
+      if (!archived && (/\s/u.test(filename) || filename.includes("_"))) {
+        issues.push({
+          severity: LINT_SEVERITY_WARNING,
+          code: LINT_CODE_FILENAME_NONCANONICAL,
+          path: page.relPath,
+          message: "文件名应保留可读规范名，连续空白统一为 -，不使用 _ 分词",
+        });
+      }
+      const h1 = /^#\s+(.+)$/m.exec(page.content)?.[1]?.trim();
+      if (!archived && fm.title && h1 && normalizeCanonicalPageName(fm.title) !== normalizeCanonicalPageName(h1)) {
+        issues.push({
+          severity: LINT_SEVERITY_WARNING,
+          code: LINT_CODE_FILENAME_NONCANONICAL,
+          path: page.relPath,
+          message: `frontmatter title 与 H1 含义不一致: "${fm.title}" / "${h1}"`,
+        });
+      }
+      if (!archived && fm.type === "concept" && experienceShapeScore(page.content) >= 3) {
+        issues.push({
+          severity: LINT_SEVERITY_WARNING,
+          code: LINT_CODE_EXPERIENCE_SHAPE_MISMATCH,
+          path: page.relPath,
+          message: "concept 正文主要呈现症状、判别、根因或验证等经验结构，请复核是否应为 experience",
+        });
+      }
 
       if ((fm.type === "experience" || fm.type === "ledger") && !fm.status) {
         issues.push({
@@ -405,6 +458,8 @@ export function lintPages(pages: LintPageInput[], options: LintOptions = {}): Li
 
   issues.push(...lintEntityConceptCoupling(pages, pageContents));
   issues.push(...lintDuplicatePages(pages));
+  issues.push(...lintGlobalDuplicatePages(parsedPages));
+  issues.push(...lintPyramidFolders(parsedPages, options));
 
   for (const item of parsedPages) {
     if (item.archived || isOrphanExcluded(item.page.relPath)) continue;
@@ -569,7 +624,13 @@ export async function lintDocuments(
   store: Store,
   options: { workspace?: string; today?: string } = {},
 ): Promise<LintReport> {
-  const docs = await store.listDocumentsWithContent();
+  const [docs, folders, storedPolicyMode] = await Promise.all([
+    store.listDocumentsWithContent(),
+    typeof store.listFolders === "function" ? store.listFolders(true, true).catch(() => []) : Promise.resolve([]),
+    typeof store.getConfig === "function"
+      ? store.getConfig(CONFIG_STRUCTURE_POLICY_MODE).catch(() => "")
+      : Promise.resolve(""),
+  ]);
   const rawSources = new Set<string>();
   const pages: LintPageInput[] = [];
   let sourceCount = 0;
@@ -617,6 +678,8 @@ export async function lintDocuments(
     workspaceRoot: options.workspace,
     logContent,
     sourceCount,
+    folders,
+    structurePolicyMode: parseStructurePolicyMode(storedPolicyMode),
   });
 }
 
@@ -910,6 +973,116 @@ function lintDuplicatePages(pages: WikiPage[]): LintIssue[] {
     }
   }
   return issues;
+}
+
+function lintGlobalDuplicatePages(parsedPages: ParsedLintPage[]): LintIssue[] {
+  const groups = new Map<string, Set<string>>();
+  for (const item of parsedPages) {
+    if (item.archived || item.page.isSystem || !item.page.inTypedSubdir || item.page.subdir === "sources") continue;
+    const filename = path.posix.basename(item.page.relPath);
+    const values = [
+      item.fm.title || titleFromFilename(filename),
+      filename.slice(0, -path.posix.extname(filename).length),
+      ...(item.fm.aliases ?? []),
+    ];
+    for (const value of values) {
+      const key = normalizeCanonicalPageName(value);
+      if (!key) continue;
+      const paths = groups.get(key) ?? new Set<string>();
+      paths.add(item.page.relPath);
+      groups.set(key, paths);
+    }
+  }
+
+  const issues = new Map<string, LintIssue>();
+  for (const paths of groups.values()) {
+    if (paths.size < 2) continue;
+    const all = [...paths].sort();
+    for (const relPath of paths) {
+      if (issues.has(relPath)) continue;
+      issues.set(relPath, {
+        severity: LINT_SEVERITY_ERROR,
+        code: LINT_CODE_GLOBAL_DUPLICATE_PAGE,
+        path: relPath,
+        message: `全局规范化标题、文件名或 alias 冲突: [${all.join(" ")}]`,
+      });
+    }
+  }
+  return [...issues.values()];
+}
+
+function lintPyramidFolders(parsedPages: ParsedLintPage[], options: LintOptions): LintIssue[] {
+  const folderMeta = new Map((options.folders ?? []).map((folder) => [folder.path, folder]));
+  const allFolders = new Set<string>();
+  const directPages = new Map<string, number>();
+  for (const item of parsedPages) {
+    if (item.archived || !item.page.inTypedSubdir || item.page.isSystem) continue;
+    const folder = path.posix.dirname(item.page.relPath).replace(/^wiki\/?/, "");
+    if (!folder || folder === "." || !isTopicFolder(folder)) continue;
+    directPages.set(folder, (directPages.get(folder) ?? 0) + 1);
+    const parts = folder.split("/");
+    for (let index = 1; index <= parts.length; index += 1) {
+      const ancestor = parts.slice(0, index).join("/");
+      if (isTopicFolder(ancestor)) allFolders.add(ancestor);
+    }
+  }
+  if (options.folders) {
+    for (const folder of options.folders) {
+      if (isTopicFolder(folder.path)) allFolders.add(folder.path);
+    }
+  }
+
+  const issues: LintIssue[] = [];
+  for (const folder of [...allFolders].sort()) {
+    const depth = folder.split("/").length;
+    const meta = folderMeta.get(folder);
+    if (options.folders && (!meta?.display_name.trim() || !meta.description.trim())) {
+      issues.push({
+        severity: LINT_SEVERITY_WARNING,
+        code: LINT_CODE_FOLDER_METADATA_MISSING,
+        path: `wiki/${folder}`,
+        message: "主题域/组必须填写 display_name 与收什么/不收什么/相邻边界的 description",
+      });
+    }
+    if (depth > 3 || (depth === 3 && !options.approvedDeepFolders?.has(folder))) {
+      issues.push({
+        severity: depth > 3 ? LINT_SEVERITY_ERROR : LINT_SEVERITY_WARNING,
+        code: LINT_CODE_TOPIC_DEPTH_EXCEEDED,
+        path: `wiki/${folder}`,
+        message: depth > 3 ? "主题目录超过三层" : "第三层主题目录缺少书面复核理由",
+      });
+    }
+
+    const prefix = `${folder}/`;
+    const childGroups = [...allFolders].filter((candidate) =>
+      candidate.startsWith(prefix) && !candidate.slice(prefix.length).includes("/"),
+    ).length;
+    const pages = directPages.get(folder) ?? 0;
+    const tooSmall = depth === 1 ? childGroups < 4 : childGroups === 0 && pages < 3;
+    const tooLarge = depth === 1 ? childGroups > 10 : childGroups > 12 || pages > 50;
+    if (tooSmall || tooLarge) {
+      issues.push({
+        severity: LINT_SEVERITY_WARNING,
+        code: LINT_CODE_FOLDER_FANOUT,
+        path: `wiki/${folder}`,
+        message: `目录扇出需语义复核（主题组 ${childGroups} 个，直属页面 ${pages} 页）；不要为凑阈值自动拆并`,
+      });
+    }
+  }
+  return issues;
+}
+
+function isTopicFolder(folder: string): boolean {
+  const root = folder.split("/")[0]?.toLowerCase() ?? "";
+  return Boolean(root) && !LEGACY_TYPE_ROOTS.has(root) && !["sources", "templates", "raw"].includes(root);
+}
+
+function experienceShapeScore(content: string): number {
+  const headings = [...content.matchAll(/^#{2,3}\s+(.+)$/gm)].map((match) =>
+    (match[1] ?? "").trim().toLowerCase().replace(/[：:].*$/, ""),
+  );
+  const signals = ["症状", "现象", "最短判别", "根因", "处理", "验证", "复发记录", "symptoms", "root cause", "verification"];
+  return new Set(headings.filter((heading) => signals.some((signal) => heading.includes(signal)))).size;
 }
 
 export async function lintGhostIndexEntries(

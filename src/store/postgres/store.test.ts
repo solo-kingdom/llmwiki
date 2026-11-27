@@ -20,11 +20,15 @@ describe.skipIf(!databaseUrl)("postgres store integration", () => {
 
   afterAll(async () => {
     if (!pool) return;
-    await pool.query("DELETE FROM documents WHERE relative_path LIKE $1 OR relative_path LIKE $2", [
+    await pool.query("DELETE FROM documents WHERE relative_path LIKE $1 OR relative_path LIKE $2 OR relative_path LIKE $3", [
       `integration-${suffix}%`,
       `wiki/tree-${suffix}%`,
+      `wiki/canonical-${suffix}%`,
     ]);
-    await pool.query("DELETE FROM wiki_folders WHERE path LIKE $1", [`tree-${suffix}%`]);
+    await pool.query("DELETE FROM wiki_folders WHERE path LIKE $1 OR path LIKE $2", [
+      `tree-${suffix}%`,
+      `canonical-${suffix}%`,
+    ]);
     await pool.end();
   });
 
@@ -147,6 +151,63 @@ describe.skipIf(!databaseUrl)("postgres store integration", () => {
     expect(revisions).toHaveLength(1);
     expect(revisions[0]?.operation).toBe("create");
     expect(await store.listPageRevisions(relativePath, 10)).toHaveLength(1);
+  });
+
+  it("locks canonical names across paths and allows distinct pages together", async () => {
+    const makeDocument = (relativePath: string, title: string) => ({
+      id: "",
+      user_id: "default",
+      filename: relativePath.split("/").pop()!,
+      title,
+      path: `/${relativePath.split("/").slice(0, -1).join("/")}/`,
+      relative_path: relativePath,
+      source_kind: "wiki",
+      file_type: "md",
+      file_size: 0,
+      document_number: 0,
+      status: "ready",
+      page_count: 0,
+      content: `# ${title}`,
+      tags: [],
+      date: "",
+      metadata: "{}",
+      error_message: "",
+      version: 0,
+      parser: "",
+      content_hash: "",
+      stale_since: "",
+      highlights: "[]",
+      created_at: "",
+      updated_at: "",
+      aliases: [],
+    });
+    const write = (relativePath: string, title: string) => ({
+      relative_path: relativePath,
+      document: makeDocument(relativePath, title),
+      operation: "create" as const,
+      chunks: [],
+      refs: [],
+    });
+    const changeSet = () => ({ id: "", kind: "manual", summary: "canonical test", page_count: 1, created_at: "" });
+
+    const first = `wiki/canonical-${suffix}/race-a/Mini Max.md`;
+    const second = `wiki/canonical-${suffix}/race-b/mini_max.md`;
+    const results = await Promise.allSettled([
+      store.applyChangeSet(changeSet(), [write(first, "Mini Max")]),
+      store.applyChangeSet(changeSet(), [write(second, "MINI_MAX")]),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(Boolean(await store.getDocumentByRelativePath(first))).not.toBe(Boolean(await store.getDocumentByRelativePath(second)));
+
+    const distinctA = `wiki/canonical-${suffix}/distinct-a/Alpha.md`;
+    const distinctB = `wiki/canonical-${suffix}/distinct-b/Beta.md`;
+    await Promise.all([
+      store.applyChangeSet(changeSet(), [write(distinctA, "Alpha")]),
+      store.applyChangeSet(changeSet(), [write(distinctB, "Beta")]),
+    ]);
+    expect(await store.getDocumentByRelativePath(distinctA)).not.toBeNull();
+    expect(await store.getDocumentByRelativePath(distinctB)).not.toBeNull();
   });
 
   it("creates jobs and appends events", async () => {

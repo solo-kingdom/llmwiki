@@ -19,6 +19,7 @@ import { llmMessagesForRecord, recordLLMRequest, recordLLMResponse, traceRetries
 import { PageLockManager, withPageLocks } from "./lock.js";
 import { normalizeUpload } from "./normalize.js";
 import {
+  PagePlanReviewRequiredError,
   assertBlocksMatchApprovedPlan,
   assertGenerationMatchesPagePlan,
   parseAnalysisPagePlan,
@@ -214,8 +215,8 @@ export class Pipeline {
       return cached.written_files;
     }
 
-    const analysis = await this.analyze(name, content);
-    const pagePlan = await this.validatedPagePlan(analysis);
+    const rawAnalysis = await this.analyze(name, content);
+    const { analysis, pagePlan } = await this.resolveValidatedPagePlan(name, rawAnalysis);
     const files = await this.generate(name, content, analysis, pagePlan);
     this.recorder?.record("apply_files", "complete", "wiki files applied", { paths_written: files });
     await this.cache.saveForSource(source, files, rulesHash);
@@ -231,8 +232,8 @@ export class Pipeline {
     this.recorder?.record("plan", "start", "generating review plan", {
       canonical_path: source.canonicalPath,
     });
-    const analysis = await this.analyze(name, content);
-    await this.validatedPagePlan(analysis, false);
+    const rawAnalysis = await this.analyze(name, content);
+    const { analysis } = await this.resolveValidatedPagePlan(name, rawAnalysis, false);
     const planRaw = await this.generatePlan(name, content, analysis, feedback);
     const result = parsePlanResult(planRaw);
     this.recorder?.record("plan", "complete", "review plan generated", {
@@ -301,6 +302,65 @@ export class Pipeline {
       8192,
       { promptStep: "analysis" },
     );
+  }
+
+  private async resolveValidatedPagePlan(
+    name: string,
+    analysis: string,
+    enforceReviewThreshold = true,
+  ): Promise<{ analysis: string; pagePlan: AnalysisPagePlan }> {
+    try {
+      const pagePlan = await this.validatedPagePlan(analysis, enforceReviewThreshold);
+      return { analysis, pagePlan };
+    } catch (error) {
+      if (
+        !analysis.trim() ||
+        error instanceof PagePlanReviewRequiredError ||
+        !this.llmClient
+      ) {
+        throw error;
+      }
+      const message = errorMessage(error);
+      if (!message.includes("page plan")) {
+        throw error;
+      }
+      this.recorder?.record("analysis", "warn", "analysis page plan invalid; retrying tool-free JSON repair", {
+        error: message,
+        char_count: analysis.length,
+      });
+      const repairedAnalysis = await this.repairAnalysisPagePlan(name, analysis, message);
+      const pagePlan = await this.validatedPagePlan(repairedAnalysis, enforceReviewThreshold);
+      return { analysis: repairedAnalysis, pagePlan };
+    }
+  }
+
+  private async repairAnalysisPagePlan(
+    name: string,
+    analysis: string,
+    parseError: string,
+  ): Promise<string> {
+    if (!this.llmClient) throw new Error("LLM client not configured");
+    const truncated = analysis.length > 12000 ? `${analysis.slice(0, 12000)}\n...(truncated)` : analysis;
+    const system =
+      "你是 JSON 格式修复器。请将给定的 analysis 文本修复并只输出一个合法 RFC 8259 围栏 ```json page plan（不要调用工具，不要输出 FILE 块）。" +
+      "确保 summary 简洁（<=120字），字符串内不要有未转义半角双引号或裸换行，pages 保留原有路径、action、type、title、document_id、reuse_reason 与 relations。";
+    const user =
+      `源文件：**${name}**\n\n` +
+      `上次解析失败原因：${parseError}\n\n` +
+      `请修复以下 analysis 输出中的 JSON page plan：\n\n${truncated}`;
+    const chunks: string[] = [];
+    for await (const event of this.llmClient.streamChat(
+      [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      0,
+      4096,
+    )) {
+      if (event.type === "token") chunks.push(event.content ?? "");
+      if (event.type === "error" && event.error) throw event.error;
+    }
+    return chunks.join("");
   }
 
   private async validatedPagePlan(analysis: string, enforceReviewThreshold = true): Promise<AnalysisPagePlan> {

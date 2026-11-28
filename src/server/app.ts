@@ -6,6 +6,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { HarnessManager, hasEnabledAcpAgent, loadHarnixSettings } from "../harness/index.js";
 import { record } from "../activity/index.js";
 import { createApi, createApiContext } from "../api/index.js";
+import { notifyHelaEventAsync } from "../notify/hela.js";
 import { writeError } from "../api/context.js";
 import { rebuildDerived } from "../ingest/rebuild.js";
 import type { PageLockManager } from "../ingest/lock.js";
@@ -153,6 +154,12 @@ export function createApp(deps: AppDeps): Hono {
         source: "api",
         details: { error: message },
       });
+      notifyHelaEventAsync(deps.db, {
+        type: "server_error",
+        title: "[llmwiki] 索引重建失败",
+        content: `POST /api/v1/reindex 失败：\n\n- 错误：${message}`,
+        dedupeKey: `server_error:reindex:${message.slice(0, 80)}`,
+      });
       return c.json({ error: message }, 500);
     }
   });
@@ -203,6 +210,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/v1/capabilities", api.getCapabilities);
   app.post("/api/v1/settings/mcp/check", api.checkMcpStatus);
   app.post("/api/v1/settings/storage/check", api.checkArchiveStorage);
+  app.post("/api/v1/settings/notify/hela/test", api.testHelaNotification);
 
   // Archives (file tree & multi-format storage)
   app.get("/api/v1/archives/tree", api.getArchiveTree);

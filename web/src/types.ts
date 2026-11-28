@@ -436,6 +436,22 @@ export interface Settings {
   archive_s3_secret_access_key?: string
   archive_s3_secret_access_key_set?: boolean
   archive_s3_secret_access_key_masked?: string
+  hela_notify_enabled?: boolean
+  hela_notify_base_url?: string
+  hela_notify_base_url_effective?: string
+  hela_notify_api_key?: string
+  hela_notify_api_key_set?: boolean
+  hela_notify_api_key_masked?: string
+  hela_notify_source?: "settings" | "env" | "none"
+  hela_notify_events?: string
+}
+
+export interface HelaNotifyTestResult {
+  ok: boolean
+  status?: number
+  message_id?: string
+  target: string
+  message: string
 }
 
 export type ArchiveFileKind =

@@ -4,6 +4,7 @@ import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { lookPath } from "harnix";
 import { logSession, record } from "../activity/index.js";
+import { notifyHelaEventAsync } from "../notify/hela.js";
 import { ArchiveStorageService, ingestAutoFolder } from "../archive/storage.js";
 import {
   KIND_ACP,
@@ -202,6 +203,12 @@ export function ingestSessionsApi(ctx: ApiContext) {
           acp_agent_id: session.acp_agent_id,
           error: errorMessage(error),
         });
+        notifyHelaEventAsync(ctx.db, {
+          type: "server_error",
+          title: `[llmwiki] 会话 ${session.id} Runtime 初始化失败`,
+          content: `- 会话：\`${session.id}\`\n- Agent：\`${session.agent_kind}\`\n- 错误：${errorMessage(error)}`,
+          dedupeKey: `server_error:session_runtime:${session.id}`,
+        });
         return writeError(c, 400, runtimeErrorMessage(error));
       }
     }
@@ -268,6 +275,14 @@ export function ingestSessionsApi(ctx: ApiContext) {
           stop_reason: result.stopReason,
           stream_status: streamStatus,
         });
+        if (!c.req.raw.signal.aborted) {
+          notifyHelaEventAsync(ctx.db, {
+            type: "server_error",
+            title: `[llmwiki] 会话 ${session.id} 流式执行失败`,
+            content: `- 会话：\`${session.id}\`\n- Agent：\`${session.agent_kind}\`\n- 错误：${errorMessage(promptError)}`,
+            dedupeKey: `server_error:session_stream:${session.id}:${assistantMsg.id}`,
+          });
+        }
       }
       if (promptError && !c.req.raw.signal.aborted) {
         send("error", { message: errorMessage(promptError) });
@@ -291,6 +306,12 @@ export function ingestSessionsApi(ctx: ApiContext) {
         agent_kind: session.agent_kind,
         acp_agent_id: session.acp_agent_id,
         error: errorMessage(error),
+      });
+      notifyHelaEventAsync(ctx.db, {
+        type: "server_error",
+        title: `[llmwiki] 会话 ${session.id} Runtime 初始化失败`,
+        content: `- 会话：\`${session.id}\`\n- Agent：\`${session.agent_kind}\`\n- 错误：${errorMessage(error)}`,
+        dedupeKey: `server_error:session_runtime:${session.id}`,
       });
       return writeError(c, 400, runtimeErrorMessage(error));
     }

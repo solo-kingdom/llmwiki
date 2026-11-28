@@ -1,9 +1,10 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Store } from "../store/interfaces.js";
 import type { IngestJob, NormalizedSource, ProviderInstance } from "../store/types.js";
+import { resetHelaNotifyDedupeForTests } from "../notify/hela.js";
 import { PageLockManager } from "./lock.js";
 import { Pipeline } from "./pipeline.js";
 import { JobProcessor, classifyPipelineError, remediationForCode } from "./processor.js";
@@ -15,6 +16,8 @@ const workspaces: string[] = [];
 const processors: JobProcessor[] = [];
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
+  resetHelaNotifyDedupeForTests();
   for (const processor of processors.splice(0)) processor.stop();
   await Promise.all(workspaces.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -318,5 +321,55 @@ describe("pipeline structure failures", () => {
         new Error("analysis tool loop failed; refusing blind generation: tool loop exceeded max rounds (16)"),
       ),
     ).toBe("analysis_failed");
+  });
+
+  it("dispatches Hela notifications for ingest_failed and review_required without blocking on Hela 500", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("hela down", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const workspace = await tempWorkspace(2);
+    const fake = fakeStore({ parallel: false, maxConcurrent: 1, count: 2 });
+    const baseGetConfig = fake.store.getConfig;
+    fake.store.getConfig = async (key: string) => {
+      if (key === "hela_notify_enabled") return "true";
+      if (key === "hela_notify_base_url") return "http://hela.example.com";
+      if (key === "hela_notify_api_key") return "hela_sk_test";
+      return baseGetConfig(key);
+    };
+
+    const processor = new JobProcessor(fake.store, workspace, {
+      createPipeline: (lockManager) =>
+        ({
+          setJobRecorder: () => undefined,
+          setToolLoopConfig: () => undefined,
+          setLLMClient: () => undefined,
+          setMcpRouter: () => undefined,
+          setDocLanguage: () => undefined,
+          setWorkspaceRules: () => undefined,
+          setChangeSetMeta: () => undefined,
+          currentRecorder: () => null,
+          ingestNormalized: async (source: NormalizedSource) => {
+            if (source.canonicalPath.includes("job-01")) {
+              throw new PagePlanReviewRequiredError("exceeded threshold");
+            }
+            throw new Error("generation: failed");
+          },
+          lockManager: () => lockManager,
+        }) as unknown as Pipeline,
+    });
+    processors.push(processor);
+    processor.start(POLL_MS);
+    await waitFor(() => fake.jobs.every((job) => job.status === "failed"));
+    await processor.idle();
+    await sleep(20);
+
+    expect(fake.jobs.find((j) => j.id === "job-01")?.error_code).toBe("review_required");
+    expect(fake.jobs.find((j) => j.id === "job-02")?.error_code).toBe("generation_failed");
+    expect(fetchMock).toHaveBeenCalled();
+    const bodies = fetchMock.mock.calls.map(([, init]) =>
+      JSON.parse(String((init as RequestInit).body)) as { title: string; content: string },
+    );
+    expect(bodies.some((b) => b.title.includes("审阅"))).toBe(true);
+    expect(bodies.some((b) => b.title.includes("失败"))).toBe(true);
   });
 });

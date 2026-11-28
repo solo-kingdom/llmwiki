@@ -486,6 +486,12 @@ export interface PageWrite {
 
 export const CONFIG_API_TOKEN = "api_token";
 
+export const CONFIG_HELA_NOTIFY_ENABLED = "hela_notify_enabled";
+export const CONFIG_HELA_NOTIFY_BASE_URL = "hela_notify_base_url";
+export const CONFIG_HELA_NOTIFY_API_KEY = "hela_notify_api_key";
+export const CONFIG_HELA_NOTIFY_EVENTS = "hela_notify_events";
+export const DEFAULT_HELA_NOTIFY_EVENTS = "ingest_failed,review_required,server_error";
+
 export const DEFAULT_ARCHIVE_INLINE_MAX_BYTES = 131072; // 128 KB
 export const CONFIG_ARCHIVE_INLINE_MAX_BYTES = "archive_inline_max_bytes";
 export const CONFIG_ARCHIVE_STORAGE_BACKEND = "archive_storage_backend";

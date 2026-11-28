@@ -9,6 +9,7 @@ import { ArchiveStorageService } from "../archive/storage.js";
 import { clientFromInstance } from "../llm/instance_client.js";
 import type { Client } from "../llm/client.js";
 import { logger } from "../logger.js";
+import { notifyHelaEventAsync } from "../notify/hela.js";
 import { McpRegistry } from "../mcp/registry.js";
 import { toolLoopConfigForModeFromStore } from "../mcp/tool_loop_settings.js";
 import { McpRouter } from "../mcp/router.js";
@@ -127,6 +128,12 @@ export class JobProcessor {
       }
     } catch (error) {
       logger.error({ error }, "ingest processor: dispatch");
+      notifyHelaEventAsync(this.db, {
+        type: "server_error",
+        title: "[llmwiki] 摄入调度循环异常",
+        content: `JobProcessor claimLoop 发生异常：\n\n- 错误：${errorMessage(error)}`,
+        dedupeKey: `server_error:claim_loop:${errorMessage(error).slice(0, 80)}`,
+      });
     }
   }
 
@@ -319,6 +326,14 @@ export class JobProcessor {
         threshold_seconds: STALE_HEARTBEAT_SECONDS,
       });
     }
+    if (ids.length > 0) {
+      notifyHelaEventAsync(this.db, {
+        type: "server_error",
+        title: `[llmwiki] 恢复 ${ids.length} 个心跳超时任务`,
+        content: `检测到心跳超时（>${STALE_HEARTBEAT_SECONDS}s），已重新入队以下任务：\n\n- ${ids.join(", ")}`,
+        dedupeKey: `server_error:stale_recovered:${ids.join(",")}`,
+      });
+    }
   }
 
   private startHeartbeat(jobId: string): () => void {
@@ -343,6 +358,23 @@ export class JobProcessor {
     if (!failed) return;
     logIngestJob(this.db, failed, "failed", "processor");
     this.logSessionArchiveOutcome(failed, "archive_failed", "failure");
+    const isReviewRequired = failed.error_code === "review_required";
+    const summaryLines = [
+      `- 任务 ID：\`${failed.id}\``,
+      `- 类型：\`${failed.input_type}\``,
+      failed.source_path ? `- 来源：\`${failed.source_path}\`` : "",
+      failed.error_code ? `- 错误码：\`${failed.error_code}\`` : "",
+      failed.error_message ? `- 详情：${failed.error_message}` : "",
+      failed.remediation ? `- 建议：${failed.remediation}` : "",
+    ].filter(Boolean);
+    notifyHelaEventAsync(this.db, {
+      type: isReviewRequired ? "review_required" : "ingest_failed",
+      title: isReviewRequired
+        ? `[llmwiki] 摄入转入人工审阅：${failed.source_path || failed.id}`
+        : `[llmwiki] 摄入任务失败：${failed.source_path || failed.id}`,
+      content: summaryLines.join("\n"),
+      dedupeKey: `${isReviewRequired ? "review" : "ingest"}:${failed.id}:${failed.error_code || "failed"}`,
+    });
     if (failed.input_type === "rollback") {
       const changeSetId = failed.source_ref;
       record(this.db, {

@@ -157,4 +157,95 @@ describe("Pipeline page plan gate", () => {
     expect(streamCalls).toHaveLength(1);
     expect(streamCalls[0]).toContain("已批准计划");
   });
+
+  it("parses analysis with unescaped double quotes without triggering LLM repair retry", async () => {
+    let analysisCalls = 0;
+    const dirtyAnalysis = `\`\`\`json
+{
+  "summary": "修复 "wiki 页面写入探针" 顺序问题",
+  "pages": [{
+    "path": "${pagePath}",
+    "action": "create",
+    "type": "experience",
+    "title": "Provider协议错配导致401",
+    "reuse_reason": "相同症状可复用"
+  }]
+}
+\`\`\``;
+    const customClient = {
+      model: "fake",
+      onRetry: null,
+      chat: async () => ({ content: "", reasoningContent: "", toolCalls: [] }),
+      streamChat: async function* (messages: Array<{ role: string; content?: string }>): AsyncGenerator<StreamEvent> {
+        const user = messages.find((m) => m.role === "user")?.content ?? "";
+        const isGeneration = user.includes("请按 FILE 块格式生成 wiki 页面");
+        if (!isGeneration) analysisCalls += 1;
+        yield { type: "token", content: isGeneration ? file : dirtyAnalysis };
+        yield { type: "done" };
+      },
+    } as unknown as Client;
+    const pipeline = new Pipeline("", mockStore(), customClient);
+    pipeline.setToolLoopConfig({ maxRounds: 0, maxToolCallsPerRound: 0 });
+
+    await expect(pipeline.ingestNormalized(source)).resolves.toEqual([pagePath]);
+    expect(analysisCalls).toBe(1);
+  });
+
+  it("retries once tool-free when non-empty analysis JSON cannot be deterministically repaired", async () => {
+    const streamPrompts: string[] = [];
+    const brokenTruncated = `\`\`\`json\n{"summary": "broken", "pages": [{"path": "${pagePath}"`;
+    const customClient = {
+      model: "fake",
+      onRetry: null,
+      chat: async () => ({ content: "", reasoningContent: "", toolCalls: [] }),
+      streamChat: async function* (messages: Array<{ role: string; content?: string }>): AsyncGenerator<StreamEvent> {
+        const user = messages.find((m) => m.role === "user")?.content ?? "";
+        streamPrompts.push(user);
+        if (user.includes("请按 FILE 块格式生成 wiki 页面")) {
+          yield { type: "token", content: file };
+        } else if (user.includes("请修复以下 analysis 输出中的 JSON page plan")) {
+          yield { type: "token", content: `\`\`\`json\n${plan}\n\`\`\`` };
+        } else {
+          yield { type: "token", content: brokenTruncated };
+        }
+        yield { type: "done" };
+      },
+    } as unknown as Client;
+    const pipeline = new Pipeline("", mockStore(), customClient);
+    pipeline.setToolLoopConfig({ maxRounds: 0, maxToolCallsPerRound: 0 });
+
+    await expect(pipeline.ingestNormalized(source)).resolves.toEqual([pagePath]);
+    expect(streamPrompts).toHaveLength(3);
+    expect(streamPrompts[1]).toContain("请修复以下 analysis 输出中的 JSON page plan");
+  });
+
+  it("does not trigger JSON repair retry when PagePlanReviewRequiredError is thrown", async () => {
+    let repairCalled = false;
+    const manyPages = JSON.stringify({
+      summary: "too many pages",
+      pages: [1, 2, 3, 4].map((index) => ({
+        path: `wiki/system-network/proxy-dns/exp-${index}.md`,
+        action: "create",
+        type: "experience",
+        title: `经验${index}`,
+        reuse_reason: "可复用",
+      })),
+    });
+    const customClient = {
+      model: "fake",
+      onRetry: null,
+      chat: async () => ({ content: "", reasoningContent: "", toolCalls: [] }),
+      streamChat: async function* (messages: Array<{ role: string; content?: string }>): AsyncGenerator<StreamEvent> {
+        const user = messages.find((m) => m.role === "user")?.content ?? "";
+        if (user.includes("请修复以下 analysis 输出中的 JSON page plan")) repairCalled = true;
+        yield { type: "token", content: manyPages };
+        yield { type: "done" };
+      },
+    } as unknown as Client;
+    const pipeline = new Pipeline("", mockStore(), customClient);
+    pipeline.setToolLoopConfig({ maxRounds: 0, maxToolCallsPerRound: 0 });
+
+    await expect(pipeline.ingestNormalized(source)).rejects.toThrow("必须转入 review");
+    expect(repairCalled).toBe(false);
+  });
 });

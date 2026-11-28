@@ -61,6 +61,7 @@ import type {
   ArchiveFileDetail,
   ArchiveSearchResponse,
   ArchiveStorageCheckResult,
+  HelaNotifyTestResult,
 } from "@/types"
 
 const BASE = ""
@@ -1132,6 +1133,13 @@ export function deleteArchiveFile(id: string): Promise<{ deleted: boolean; id: s
 
 export function checkArchiveStorage(body?: Record<string, unknown>): Promise<ArchiveStorageCheckResult> {
   return request("/api/v1/settings/storage/check", {
+    method: "POST",
+    body: JSON.stringify(body ?? {}),
+  })
+}
+
+export function testHelaNotification(body?: Record<string, unknown>): Promise<HelaNotifyTestResult> {
+  return request("/api/v1/settings/notify/hela/test", {
     method: "POST",
     body: JSON.stringify(body ?? {}),
   })

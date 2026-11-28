@@ -100,4 +100,17 @@ describe("analysis page plan", () => {
     });
     expect(() => assertBlocksMatchApprovedPlan(blocks, approved)).toThrow("未包含在已批准计划中");
   });
+
+  it("repairs unescaped double quotes in long 2.8KB analysis summary", () => {
+    const longPrefix = "诊断背景：".repeat(350);
+    const raw = `${longPrefix}\n\n\`\`\`json\n{\n  "summary": "汇总 "wiki 页面写入探针的清理顺序" 与 "超时预算" 两个问题",\n  "pages": [\n    {\n      "path": "wiki/system-network/reverse-proxy-diagnostics/probe-order.md",\n      "action": "create",\n      "type": "experience",\n      "title": "探针清理顺序",\n      "reuse_reason": "含 "probe" 场景可复用",\n      "relations": [],\n    },\n  ]\n}\n\`\`\``;
+    const plan = parseAnalysisPagePlan(raw);
+    expect(plan.summary).toContain('"wiki 页面写入探针的清理顺序"');
+    expect(plan.pages).toHaveLength(1);
+    expect(plan.pages[0]?.path).toBe("wiki/system-network/reverse-proxy-diagnostics/probe-order.md");
+  });
+
+  it("still rejects completely unrecoverable invalid JSON", () => {
+    expect(() => parseAnalysisPagePlan("```json\n{not-json-at-all\n```")).toThrow("analysis page plan is invalid JSON");
+  });
 });

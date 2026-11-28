@@ -2,6 +2,7 @@ import { parseFrontmatter } from "../engine/frontmatter.js";
 import { isValidPageType, normalizeWikiRelPath, validateWikiWritePath } from "../engine/wiki_org.js";
 import type { Store } from "../store/interfaces.js";
 import { normalizeWikiFilePath } from "./fileblocks.js";
+import { extractJsonCandidates, parseJsonWithRepair } from "./json_repair.js";
 
 export interface PagePlanRelation {
   target: string;
@@ -51,14 +52,22 @@ export function parseAnalysisPagePlan(
   options: { enforceReviewThreshold?: boolean } = {},
 ): AnalysisPagePlan {
   if (!raw.trim()) throw new Error("analysis is empty; refusing generation and apply");
-  const json = extractPlanJson(raw);
-  if (!json) throw new Error("analysis has no valid page plan; refusing generation and apply");
-  let parsed: RawPagePlan;
-  try {
-    parsed = JSON.parse(json) as RawPagePlan;
-  } catch (error) {
-    throw new Error(`analysis page plan is invalid JSON: ${errorMessage(error)}`);
+  const candidates = extractJsonCandidates(raw);
+  if (candidates.length === 0) throw new Error("analysis has no valid page plan; refusing generation and apply");
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const result =
+    parseJsonWithRepair<RawPagePlan>(raw, (value) => isObject(value) && "pages" in value) ??
+    parseJsonWithRepair<RawPagePlan>(raw, isObject);
+  if (!result) {
+    try {
+      JSON.parse(candidates[0]!);
+    } catch (error) {
+      throw new Error(`analysis page plan is invalid JSON: ${errorMessage(error)}`);
+    }
+    throw new Error("analysis has no valid page plan; refusing generation and apply");
   }
+  const parsed = result.value;
   if (!Array.isArray(parsed.pages) || parsed.pages.length === 0) {
     throw new Error("analysis page plan must contain at least one page");
   }
@@ -259,19 +268,6 @@ function assertPagePlanReviewThreshold(plan: AnalysisPagePlan): void {
       plan,
     );
   }
-}
-
-function extractPlanJson(raw: string): string {
-  for (const marker of ["```json", "```"]) {
-    const start = raw.indexOf(marker);
-    if (start < 0) continue;
-    const rest = raw.slice(start + marker.length);
-    const end = rest.indexOf("```");
-    if (end >= 0) return rest.slice(0, end).trim();
-  }
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  return start >= 0 && end > start ? raw.slice(start, end + 1).trim() : "";
 }
 
 function stringField(value: unknown): string {

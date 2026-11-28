@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../server/app.js";
 import type { Store } from "../store/interfaces.js";
 
@@ -116,5 +116,112 @@ describe("settings: ingest parallelism", () => {
 
     const res = await putSettings(app, { job_parallel_enabled: true });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("settings: hela notifications", () => {
+  const savedEnv = {
+    LLMWIKI_HELA_API_BASE: process.env.LLMWIKI_HELA_API_BASE,
+    LLMWIKI_HELA_API_KEY: process.env.LLMWIKI_HELA_API_KEY,
+    LLMWIKI_HELA_NOTIFY_ENABLED: process.env.LLMWIKI_HELA_NOTIFY_ENABLED,
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("saves and masks hela settings, rejects invalid URLs, and keeps blank secret", async () => {
+    delete process.env.LLMWIKI_HELA_API_BASE;
+    delete process.env.LLMWIKI_HELA_API_KEY;
+    delete process.env.LLMWIKI_HELA_NOTIFY_ENABLED;
+
+    const { store, config } = makeStore();
+    const app = makeApp(store);
+
+    const badUrl = await putSettings(app, { hela_notify_base_url: "ftp://hela.example.com" });
+    expect(badUrl.status).toBe(400);
+
+    const saved = await putSettings(app, {
+      hela_notify_enabled: true,
+      hela_notify_base_url: "http://hela.example.com/",
+      hela_notify_api_key: "hela_sk_secret1234",
+      hela_notify_events: "ingest_failed,server_error",
+    });
+    expect(saved.status).toBe(200);
+    const savedBody = (await saved.json()) as Record<string, unknown>;
+    expect(savedBody.hela_notify_enabled).toBe(true);
+    expect(savedBody.hela_notify_base_url).toBe("http://hela.example.com");
+    expect(savedBody.hela_notify_api_key_set).toBe(true);
+    expect(savedBody.hela_notify_api_key_masked).not.toContain("secret1234");
+    expect(savedBody.hela_notify_events).toBe("ingest_failed,server_error");
+
+    // Blank secret keeps existing stored value
+    const keepSecret = await putSettings(app, { hela_notify_api_key: "" });
+    expect(keepSecret.status).toBe(200);
+    expect(config.get("hela_notify_api_key")).toBe("hela_sk_secret1234");
+  });
+
+  it("forbids API key requests from modifying hela_notify_api_key and tests connectivity", async () => {
+    delete process.env.LLMWIKI_HELA_API_BASE;
+    delete process.env.LLMWIKI_HELA_API_KEY;
+    delete process.env.LLMWIKI_HELA_NOTIFY_ENABLED;
+
+    const { store } = makeStore();
+    const storeWithApiKey = {
+      ...store,
+      findApiKeyByHash: vi.fn(async () => ({
+        id: "ak-1",
+        name: "agent",
+        prefix: "llmwiki_sk_",
+        created_at: "",
+        last_used_at: null,
+      })),
+      touchApiKey: vi.fn(async () => undefined),
+    } as unknown as Store;
+    const app = createApp({
+      db: storeWithApiKey,
+      token: "",
+      publicWiki: true,
+      noMcp: true,
+      mcpAllowWrite: false,
+      workspace: "",
+      webRoot: "/tmp/nonexistent-web",
+      skillsRoot: path.resolve(process.cwd(), "skills"),
+    });
+
+    const forbidden = await app.request("/api/v1/settings", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer llmwiki_sk_0123456789abcdef0123456789",
+      },
+      body: JSON.stringify({ hela_notify_api_key: "new-secret" }),
+    });
+    expect(forbidden.status).toBe(403);
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "hela-msg-99" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const testRes = await app.request("/api/v1/settings/notify/hela/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        hela_notify_base_url: "http://hela.example.com",
+        hela_notify_api_key: "hela_sk_draft",
+      }),
+    });
+    expect(testRes.status).toBe(200);
+    const body = (await testRes.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    expect(body.message_id).toBe("hela-msg-99");
   });
 });

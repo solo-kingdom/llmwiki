@@ -45,7 +45,18 @@ import {
   parseArchiveInlineMaxBytes,
 } from "../archive/storage.js";
 import {
+  formatHelaNotifyEvents,
+  normalizeHelaBaseUrl,
+  parseHelaNotifyEvents,
+  resolveHelaConfig,
+  sendHelaTestNotification,
+} from "../notify/hela.js";
+import {
   CONFIG_API_TOKEN,
+  CONFIG_HELA_NOTIFY_API_KEY,
+  CONFIG_HELA_NOTIFY_BASE_URL,
+  CONFIG_HELA_NOTIFY_ENABLED,
+  CONFIG_HELA_NOTIFY_EVENTS,
   CONFIG_ARCHIVE_INLINE_MAX_BYTES,
   CONFIG_ARCHIVE_LOCAL_DIR,
   CONFIG_ARCHIVE_S3_ACCESS_KEY_ID,
@@ -204,6 +215,10 @@ const ALLOWED_KEYS = new Set([
   CONFIG_EMBEDDING_MODEL,
   CONFIG_EMBEDDING_DIM,
   CONFIG_API_TOKEN,
+  CONFIG_HELA_NOTIFY_ENABLED,
+  CONFIG_HELA_NOTIFY_BASE_URL,
+  CONFIG_HELA_NOTIFY_API_KEY,
+  CONFIG_HELA_NOTIFY_EVENTS,
   CONFIG_ARCHIVE_INLINE_MAX_BYTES,
   CONFIG_ARCHIVE_STORAGE_BACKEND,
   CONFIG_ARCHIVE_LOCAL_DIR,
@@ -226,6 +241,7 @@ export function settingsApi(ctx: ApiContext) {
     } catch (error) {
       return writeError(c, 500, errorMessage(error));
     }
+    const helaConfig = await resolveHelaConfig(ctx.db);
     const value = (key: string) => all[key] ?? "";
     return writeJson(c, 200, {
       last_instance_id: value("last_instance_id"),
@@ -292,6 +308,13 @@ export function settingsApi(ctx: ApiContext) {
       archive_s3_access_key_id_masked: maskKey(value(CONFIG_ARCHIVE_S3_ACCESS_KEY_ID)),
       archive_s3_secret_access_key_set: value(CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY) !== "",
       archive_s3_secret_access_key_masked: maskKey(value(CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY)),
+      hela_notify_enabled: helaConfig.enabled,
+      hela_notify_base_url: value(CONFIG_HELA_NOTIFY_BASE_URL),
+      hela_notify_base_url_effective: helaConfig.baseUrl,
+      hela_notify_api_key_set: helaConfig.apiKey !== "",
+      hela_notify_api_key_masked: maskKey(helaConfig.apiKey),
+      hela_notify_source: helaConfig.source,
+      hela_notify_events: formatHelaNotifyEvents(helaConfig.events),
     });
   }
 
@@ -305,7 +328,8 @@ export function settingsApi(ctx: ApiContext) {
         isApiKeyRequest(c) &&
         (CONFIG_API_TOKEN in req ||
           CONFIG_ARCHIVE_S3_ACCESS_KEY_ID in req ||
-          CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY in req)
+          CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY in req ||
+          CONFIG_HELA_NOTIFY_API_KEY in req)
       ) {
         return writeError(c, 403, "api key cannot manage credentials");
       }
@@ -429,11 +453,27 @@ export function settingsApi(ctx: ApiContext) {
             value = String(parsed);
           }
           if (
-            (key === CONFIG_ARCHIVE_S3_ACCESS_KEY_ID || key === CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY) &&
+            (key === CONFIG_ARCHIVE_S3_ACCESS_KEY_ID ||
+              key === CONFIG_ARCHIVE_S3_SECRET_ACCESS_KEY ||
+              key === CONFIG_HELA_NOTIFY_API_KEY) &&
             !value.trim()
           ) {
             // Keep existing secret when form leaves password field blank unless explicitly cleared via separate action.
             continue;
+          }
+          if (key === CONFIG_HELA_NOTIFY_ENABLED) {
+            const flag = value.trim().toLowerCase();
+            if (flag !== "true" && flag !== "false" && flag !== "1" && flag !== "0") {
+              throw new Error("hela_notify_enabled must be true or false");
+            }
+            value = flag === "true" || flag === "1" ? "true" : "false";
+          }
+          if (key === CONFIG_HELA_NOTIFY_BASE_URL) {
+            value = normalizeHelaBaseUrl(value);
+          }
+          if (key === CONFIG_HELA_NOTIFY_EVENTS) {
+            const eventsRaw = Array.isArray(raw) ? raw.map((item) => String(item)).join(",") : value;
+            value = formatHelaNotifyEvents(parseHelaNotifyEvents(eventsRaw));
           }
         } catch (error) {
           return writeError(c, 400, errorMessage(error));
@@ -758,6 +798,34 @@ export function settingsApi(ctx: ApiContext) {
       try {
         const storage = new ArchiveStorageService(ctx.db, ctx.workspace);
         const result = await storage.checkConnectivity(override);
+        return writeJson(c, 200, result);
+      } catch (error) {
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
+    async testHelaNotification(c: Context): Promise<Response> {
+      if (isApiKeyRequest(c)) {
+        return writeError(c, 403, "api key cannot test notification credentials");
+      }
+      const body = (await readJsonBody<Record<string, unknown>>(c)) ?? {};
+      const override: { baseUrl?: string; apiKey?: string } = {};
+      if (CONFIG_HELA_NOTIFY_BASE_URL in body && body[CONFIG_HELA_NOTIFY_BASE_URL] !== undefined) {
+        const rawUrl = parseSettingsValue(body[CONFIG_HELA_NOTIFY_BASE_URL]).trim();
+        if (rawUrl) {
+          try {
+            override.baseUrl = normalizeHelaBaseUrl(rawUrl);
+          } catch (error) {
+            return writeError(c, 400, errorMessage(error));
+          }
+        }
+      }
+      if (CONFIG_HELA_NOTIFY_API_KEY in body && body[CONFIG_HELA_NOTIFY_API_KEY] !== undefined) {
+        const rawKey = parseSettingsValue(body[CONFIG_HELA_NOTIFY_API_KEY]).trim();
+        if (rawKey) override.apiKey = rawKey;
+      }
+      try {
+        const result = await sendHelaTestNotification(ctx.db, override);
         return writeJson(c, 200, result);
       } catch (error) {
         return writeError(c, 500, errorMessage(error));

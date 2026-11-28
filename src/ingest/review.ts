@@ -1,5 +1,6 @@
 import { logger } from "../logger.js";
 import { normalizeWikiFilePath } from "./fileblocks.js";
+import { extractJsonCandidates, parseJsonWithRepair } from "./json_repair.js";
 import type { PlanAction, PlanResult } from "./types.js";
 
 export const REVIEW_REF_PREFIX = "review:";
@@ -17,25 +18,27 @@ export function parseReviewIdFromRef(sourceRef: string): string | null {
 export function parsePlanResult(raw: string): PlanResult {
   const trimmed = raw.trim();
   if (!trimmed) throw new Error("empty plan response");
-  let planJson = extractJsonFromPlan(trimmed);
-  if (!planJson) planJson = '{"summary":"","changes":[]}';
-  const probe = JSON.parse(planJson) as Record<string, unknown>;
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const repaired =
+    parseJsonWithRepair<Record<string, unknown>>(
+      trimmed,
+      (value) => isObject(value) && ("changes" in value || "summary" in value),
+    ) ?? parseJsonWithRepair<Record<string, unknown>>(trimmed, isObject);
+
+  let planJson: string;
+  let probe: Record<string, unknown>;
+  if (repaired) {
+    planJson = repaired.json;
+    probe = repaired.value;
+  } else {
+    const candidates = extractJsonCandidates(trimmed);
+    planJson = candidates[0] ?? '{"summary":"","changes":[]}';
+    probe = JSON.parse(planJson) as Record<string, unknown>;
+  }
   let markdown = stripJsonFence(trimmed).trim();
   if (!markdown && typeof probe.summary === "string") markdown = probe.summary;
   return { planMarkdown: markdown, planJson };
-}
-
-function extractJsonFromPlan(raw: string): string {
-  for (const marker of ["```json", "```"]) {
-    const index = raw.indexOf(marker);
-    if (index < 0) continue;
-    const rest = raw.slice(index + marker.length);
-    const end = rest.indexOf("```");
-    if (end > 0) return rest.slice(0, end).trim();
-  }
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  return start >= 0 && end > start ? raw.slice(start, end + 1) : "";
 }
 
 function stripJsonFence(raw: string): string {

@@ -34,7 +34,10 @@ export class ArchiveNotFoundError extends Error {
 }
 
 export class ArchiveConflictError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    public readonly conflicts?: string[],
+  ) {
     super(message);
     this.name = "ArchiveConflictError";
   }
@@ -266,9 +269,14 @@ export function archivesRepo(pool: Pool): ArchiveStore {
       return row ? scanFolder(row) : null;
     },
 
-    async moveArchiveFolder(fromPathRaw: string, toPathRaw: string): Promise<MoveArchiveFolderResult> {
+    async moveArchiveFolder(
+      fromPathRaw: string,
+      toPathRaw: string,
+      options: { onConflict?: "fail" | "merge" } = {},
+    ): Promise<MoveArchiveFolderResult> {
       const fromPath = validateArchiveFolderPath(fromPathRaw);
       const toPath = validateArchiveFolderPath(toPathRaw);
+      const onConflict = options.onConflict ?? "fail";
       if (fromPath === toPath) {
         return { from_path: fromPath, to_path: toPath, moved_folders: 0, moved_files: 0 };
       }
@@ -280,29 +288,24 @@ export function archivesRepo(pool: Pool): ArchiveStore {
         const src = await queryOne(client, `SELECT path FROM archive_folders WHERE path = $1 FOR UPDATE`, [fromPath]);
         if (!src) throw new ArchiveNotFoundError(`folder not found: ${fromPath}`);
 
-        const conflict = await queryOne(
-          client,
-          `SELECT path FROM archive_folders WHERE path = $1 OR path LIKE $2 LIMIT 1`,
-          [toPath, `${toPath}/%`],
-        );
-        if (conflict) throw new ArchiveConflictError(`target folder already exists: ${toPath}`);
+        if (onConflict === "fail") {
+          const conflict = await queryOne(
+            client,
+            `SELECT path FROM archive_folders WHERE path = $1 OR path LIKE $2 LIMIT 1`,
+            [toPath, `${toPath}/%`],
+          );
+          if (conflict) throw new ArchiveConflictError(`target folder already exists: ${toPath}`);
+        }
 
         const parent = parentFolderOf(toPath);
         if (parent) await ensureArchiveFoldersTx(client, [parent]);
 
-        const subFolders = await queryRows<[string]>(
+        const subFolders = await queryRows<[string, string, string, number, string]>(
           client,
-          `SELECT path FROM archive_folders WHERE path = $1 OR path LIKE $2 ORDER BY length(path) ASC`,
+          `SELECT path, display_name, description, sort_order, created_at
+           FROM archive_folders WHERE path = $1 OR path LIKE $2 ORDER BY length(path) ASC`,
           [fromPath, `${fromPath}/%`],
         );
-        for (const [oldFolder] of subFolders) {
-          const suffix = oldFolder.slice(fromPath.length);
-          const nextFolder = `${toPath}${suffix}`;
-          await client.query(
-            `UPDATE archive_folders SET path = $2, updated_at = ${NOW_TEXT} WHERE path = $1`,
-            [oldFolder, nextFolder],
-          );
-        }
 
         const files = await queryRows<[string, string, string]>(
           client,
@@ -310,6 +313,37 @@ export function archivesRepo(pool: Pool): ArchiveStore {
            WHERE folder_path = $1 OR folder_path LIKE $2 FOR UPDATE`,
           [fromPath, `${fromPath}/%`],
         );
+
+        if (onConflict === "merge" && files.length > 0) {
+          const nextRels = files.map(([, oldFolder, filename]) => {
+            const suffix = oldFolder.slice(fromPath.length);
+            return buildArchiveRelativePath(`${toPath}${suffix}`, filename);
+          });
+          const conflictRows = await queryRows<[string]>(
+            client,
+            `SELECT relative_path FROM archive_files WHERE relative_path = ANY($1::text[])`,
+            [nextRels],
+          );
+          if (conflictRows.length > 0) {
+            const conflicts = conflictRows.map((r) => asString(r[0]));
+            throw new ArchiveConflictError(
+              `target folder merge conflict on ${conflicts.length} file(s)`,
+              conflicts,
+            );
+          }
+        }
+
+        for (const [oldFolder, displayName, description, sortOrder, createdAt] of subFolders) {
+          const suffix = oldFolder.slice(fromPath.length);
+          const nextFolder = `${toPath}${suffix}`;
+          await client.query(
+            `INSERT INTO archive_folders (path, display_name, description, sort_order, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, ${NOW_TEXT})
+             ON CONFLICT (path) DO NOTHING`,
+            [nextFolder, displayName, description, sortOrder, createdAt],
+          );
+        }
+
         for (const [fileId, oldFolder, filename] of files) {
           const suffix = oldFolder.slice(fromPath.length);
           const nextFolder = `${toPath}${suffix}`;
@@ -323,11 +357,16 @@ export function archivesRepo(pool: Pool): ArchiveStore {
             );
           } catch (error) {
             if (isPgUniqueViolation(error)) {
-              throw new ArchiveConflictError(`target file path conflict: ${nextRel}`);
+              throw new ArchiveConflictError(`target file path conflict: ${nextRel}`, [nextRel]);
             }
             throw error;
           }
         }
+
+        await client.query(
+          `DELETE FROM archive_folders WHERE path = $1 OR path LIKE $2`,
+          [fromPath, `${fromPath}/%`],
+        );
 
         return {
           from_path: fromPath,
@@ -359,9 +398,9 @@ export function archivesRepo(pool: Pool): ArchiveStore {
           `SELECT path FROM archive_folders WHERE path = $1 OR path LIKE $2`,
           [folderPath, `${folderPath}/%`],
         );
-        const files = await queryRows<[string, string, string, string]>(
+        const files = await queryRows<[string, string, string, string, string]>(
           client,
-          `SELECT id, filename, storage_backend, storage_key FROM archive_files
+          `SELECT id, folder_path, filename, storage_backend, storage_key FROM archive_files
            WHERE folder_path = $1 OR folder_path LIKE $2 FOR UPDATE`,
           [folderPath, `${folderPath}/%`],
         );
@@ -386,21 +425,64 @@ export function archivesRepo(pool: Pool): ArchiveStore {
             throw new ArchiveValidationError("target_folder cannot be inside the deleted folder");
           }
           if (targetFolder) await ensureArchiveFoldersTx(client, [targetFolder]);
-          for (const [fileId, filename] of files) {
-            const nextRel = buildArchiveRelativePath(targetFolder, filename);
-            try {
-              await client.query(
-                `UPDATE archive_files
-                 SET folder_path = $2, relative_path = $3, updated_at = ${NOW_TEXT}
-                 WHERE id = $1`,
-                [fileId, targetFolder, nextRel],
+
+          // Pre-check all target file paths before mutating
+          const nextMoves: Array<{ fileId: string; nextFolder: string; nextRel: string }> = [];
+          for (const [fileId, oldFolder, filename] of files) {
+            const subTail = oldFolder === folderPath ? "" : oldFolder.slice(folderPath.length + 1);
+            const nextFolder = subTail ? (targetFolder ? `${targetFolder}/${subTail}` : subTail) : targetFolder;
+            const nextRel = buildArchiveRelativePath(nextFolder, filename);
+            nextMoves.push({ fileId, nextFolder, nextRel });
+          }
+          if (nextMoves.length > 0) {
+            const conflictRows = await queryRows<[string]>(
+              client,
+              `SELECT relative_path FROM archive_files WHERE relative_path = ANY($1::text[])`,
+              [nextMoves.map((m) => m.nextRel)],
+            );
+            if (conflictRows.length > 0) {
+              const conflicts = conflictRows.map((r) => asString(r[0]));
+              throw new ArchiveConflictError(
+                `file already exists at target: ${conflicts[0]}`,
+                conflicts,
               );
-            } catch (error) {
-              if (isPgUniqueViolation(error)) {
-                throw new ArchiveConflictError(`file already exists at target: ${nextRel}`);
-              }
-              throw error;
             }
+          }
+
+          // Preserve child subfolder hierarchy under targetFolder
+          const childSubFolders = subFolders
+            .map(([p]) => p)
+            .filter((p) => p !== folderPath)
+            .sort((a, b) => a.length - b.length);
+          for (const oldChild of childSubFolders) {
+            const subTail = oldChild.slice(folderPath.length + 1);
+            const nextChild = targetFolder ? `${targetFolder}/${subTail}` : subTail;
+            const metaRow = await queryOne<[string, string, number, string]>(
+              client,
+              `SELECT display_name, description, sort_order, created_at FROM archive_folders WHERE path = $1`,
+              [oldChild],
+            );
+            await client.query(
+              `INSERT INTO archive_folders (path, display_name, description, sort_order, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, ${NOW_TEXT})
+               ON CONFLICT (path) DO NOTHING`,
+              [
+                nextChild,
+                asString(metaRow?.[0]) || path.posix.basename(nextChild),
+                asString(metaRow?.[1]),
+                asNumber(metaRow?.[2]),
+                asString(metaRow?.[3]),
+              ],
+            );
+          }
+
+          for (const m of nextMoves) {
+            await client.query(
+              `UPDATE archive_files
+               SET folder_path = $2, relative_path = $3, updated_at = ${NOW_TEXT}
+               WHERE id = $1`,
+              [m.fileId, m.nextFolder, m.nextRel],
+            );
           }
           const deletedFolders = await exec(
             client,
@@ -419,9 +501,9 @@ export function archivesRepo(pool: Pool): ArchiveStore {
 
         // cascade
         const removedRefs: Array<{ storage_backend: ArchiveStorageBackend; storage_key: string }> = [];
-        for (const [, , backend, key] of files) {
+        for (const [, , , backend, key] of files) {
           if ((backend === "local" || backend === "s3") && key) {
-            removedRefs.push({ storage_backend: backend, storage_key: key });
+            removedRefs.push({ storage_backend: backend as ArchiveStorageBackend, storage_key: key });
           }
         }
         const deletedFiles = await exec(

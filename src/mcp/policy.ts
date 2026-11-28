@@ -62,6 +62,7 @@ export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
       "reopen",
       "archive_mkdir",
       "archive_upload",
+      "archive_patch",
       "archive_move",
       "archive_delete",
       "archive_link",

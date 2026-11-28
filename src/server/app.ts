@@ -174,6 +174,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/v1/documents", api.listDocuments);
   app.post("/api/v1/documents", api.createDocument);
   app.post("/api/v1/documents/bulk-delete", api.bulkDeleteDocuments);
+  app.get("/api/v1/documents/by-path", api.getDocumentByPath);
   app.get("/api/v1/documents/:id", api.getDocument);
   app.get("/api/v1/documents/:id/content", api.getDocumentContent);
   app.put("/api/v1/documents/:id/content", api.updateDocumentContent);

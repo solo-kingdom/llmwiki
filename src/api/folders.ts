@@ -71,6 +71,7 @@ export function foldersApi(ctx: ApiContext) {
         display_name?: string;
         description?: string;
         sort_order?: number;
+        exist_ok?: boolean;
       }>(c);
       if (!req || !req.path) return writeError(c, 400, "path is required");
       try {
@@ -91,6 +92,10 @@ export function foldersApi(ctx: ApiContext) {
         });
         return writeJson(c, 201, folder);
       } catch (error) {
+        if (req.exist_ok && error instanceof FolderConflictError) {
+          const existing = await ctx.db.getFolder(req.path);
+          if (existing) return writeJson(c, 200, existing);
+        }
         return mapFolderError(c, error);
       }
     },

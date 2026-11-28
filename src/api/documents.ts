@@ -114,6 +114,17 @@ export function documentsApi(ctx: ApiContext) {
           : c.req.query("include_archived") === "true"
             ? "include"
             : "exclude";
+      const folder = (c.req.query("folder") ?? "").trim();
+      const tags = c.req.queries("tags") ?? c.req.queries("tag") ?? [];
+      const tagMode = (c.req.query("tag_mode") ?? "").trim().toLowerCase() === "all" ? "all" : "any";
+      const updatedAfter = (c.req.query("updated_after") ?? "").trim();
+      const updatedBefore = (c.req.query("updated_before") ?? "").trim();
+      const paginated = c.req.query("paginated") === "true";
+      const rawLimit = Number.parseInt(c.req.query("limit") ?? "", 10);
+      const rawOffset = Number.parseInt(c.req.query("offset") ?? "", 10);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(500, rawLimit) : undefined;
+      const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+
       const filter = {
         source_kind: c.req.query("source_kind") ?? "",
         page_types: c.req.queries("types") ?? c.req.queries("type") ?? [],
@@ -123,10 +134,84 @@ export function documentsApi(ctx: ApiContext) {
         confidences: c.req.queries("confidences") ?? c.req.queries("confidence") ?? [],
         archived,
         review_overdue: c.req.query("review_overdue") === "true",
+        ...(folder ? { folder } : {}),
+        ...(tags.length > 0 ? { tags, tag_mode: tagMode as "any" | "all" } : {}),
+        ...(updatedAfter ? { updated_after: updatedAfter } : {}),
+        ...(updatedBefore ? { updated_before: updatedBefore } : {}),
+        ...(!paginated && limit !== undefined ? { limit } : {}),
+        ...(!paginated && offset > 0 ? { offset } : {}),
       };
       try {
-        const docs = await ctx.db.listDocumentsFiltered(filter);
+        let docs = await ctx.db.listDocumentsFiltered(filter);
+        // Apply folder/tag/date filtering in-memory too so mock stores in tests stay consistent
+        if (folder) {
+          const cleanFolder = folder.replace(/^\/+|\/+$/g, "").replace(/^wiki\//, "");
+          if (cleanFolder) {
+            docs = docs.filter((d) => d.relative_path.startsWith(`wiki/${cleanFolder}/`));
+          }
+        }
+        if (tags.length > 0) {
+          const wanted = tags.map((t) => t.trim().toLowerCase()).filter(Boolean);
+          if (wanted.length > 0) {
+            docs = docs.filter((d) => {
+              const docTags = new Set((d.tags ?? []).map((t) => t.trim().toLowerCase()));
+              return tagMode === "all"
+                ? wanted.every((t) => docTags.has(t))
+                : wanted.some((t) => docTags.has(t));
+            });
+          }
+        }
+        if (updatedAfter) {
+          docs = docs.filter((d) => (d.updated_at || "") >= updatedAfter);
+        }
+        if (updatedBefore) {
+          docs = docs.filter((d) => (d.updated_at || "") <= updatedBefore);
+        }
+
+        if (paginated) {
+          const total = docs.length;
+          const pageLimit = limit ?? 50;
+          const items = docs.slice(offset, offset + pageLimit);
+          return writeJson(c, 200, {
+            items,
+            total,
+            limit: pageLimit,
+            offset,
+            has_more: offset + items.length < total,
+          });
+        }
+        if (offset > 0 || limit !== undefined) {
+          const end = limit !== undefined ? offset + limit : undefined;
+          docs = docs.slice(offset, end);
+        }
         return writeJson(c, 200, docs);
+      } catch (error) {
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
+    async getDocumentByPath(c: Context): Promise<Response> {
+      const rawPath = (c.req.query("path") ?? "").trim();
+      if (!rawPath) return writeError(c, 400, "query parameter 'path' is required");
+      const cleanPath = rawPath.replace(/^\/+/, "");
+      const includeContent = c.req.query("include_content") !== "false";
+      try {
+        let doc = await ctx.db.getDocumentByRelativePath(cleanPath);
+        if (!doc && !cleanPath.startsWith("wiki/")) {
+          doc = await ctx.db.getDocumentByRelativePath(`wiki/${cleanPath}`);
+        }
+        if (!doc) return writeError(c, 404, "document not found");
+        const [refs, archiveSources] = await Promise.all([
+          buildReferencesPayload(ctx.db, doc),
+          typeof ctx.db.listDocumentArchiveSources === "function"
+            ? ctx.db.listDocumentArchiveSources(doc.id)
+            : Promise.resolve([]),
+        ]);
+        const contentLength = [...(doc.content ?? "")].length;
+        const payload = includeContent
+          ? { ...doc, ...refs, archive_sources: archiveSources, content_length: contentLength }
+          : { ...doc, content: "", ...refs, archive_sources: archiveSources, content_length: contentLength };
+        return writeJson(c, 200, payload);
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }

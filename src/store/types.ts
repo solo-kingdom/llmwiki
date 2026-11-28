@@ -65,6 +65,13 @@ export interface ListDocumentsFilter {
   archived?: ArchiveFilter;
   review_overdue?: boolean;
   today?: string;
+  folder?: string;
+  tags?: string[];
+  tag_mode?: "any" | "all";
+  updated_after?: string;
+  updated_before?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface SearchOptions {

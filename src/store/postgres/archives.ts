@@ -622,6 +622,26 @@ export function archivesRepo(pool: Pool): ArchiveStore {
       return row ? scanArchiveFile(row) : null;
     },
 
+    async updateArchiveFileMeta(
+      id: string,
+      patch: { title?: string; source_ref?: string },
+    ): Promise<ArchiveFile | null> {
+      const existing = await this.getArchiveFile(id);
+      if (!existing) return null;
+      const nextTitle = patch.title !== undefined ? patch.title.trim() : (existing.title ?? "");
+      const nextSourceRef =
+        patch.source_ref !== undefined ? patch.source_ref.trim() : (existing.source_ref ?? "");
+      const row = await queryOne(
+        pool,
+        `UPDATE archive_files
+         SET title = $2, source_ref = $3, updated_at = ${NOW_TEXT}
+         WHERE id = $1
+         RETURNING ${ARCHIVE_FILE_COLUMNS}`,
+        [id, nextTitle, nextSourceRef],
+      );
+      return row ? scanArchiveFile(row) : null;
+    },
+
     async mergeDuplicateArchiveFiles(
       keepId: string,
       dropIds: string[],

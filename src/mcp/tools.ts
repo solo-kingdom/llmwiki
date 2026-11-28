@@ -3,6 +3,7 @@ import path from "node:path";
 import { buildArchivedDocument, buildReopenedDocument } from "../engine/archive.js";
 import { refreshFolderOverviews } from "../engine/folder_overview.js";
 import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
+import { applyTextEdits, TextPatchError, type TextEdit } from "../engine/text_patch.js";
 import {
   folderPathFromWikiRelPath,
   isWikiSystemPath,
@@ -156,16 +157,30 @@ export function registerTools(
     {
       name: "write",
       description:
-        "Create or edit a wiki page. Use create for new pages, edit for str_replace modification, append to add content.",
+        "Create, replace, patch, or append a wiki page. Supports id/relative_path targeting, atomic edits[], expected_version/expected_content_hash optimistic locking, and dry_run.",
       inputSchema: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Page title" },
-          content: { type: "string", description: "Page content with YAML frontmatter" },
-          path: { type: "string", description: "Target path (default /wiki/)" },
+          id: { type: "string", description: "Existing document ID or relative_path (for replace/patch/append)" },
+          mode: {
+            type: "string",
+            enum: ["create", "replace", "patch", "append"],
+            description: "Write mode (default create; auto-patch if edits is provided)",
+          },
+          title: { type: "string", description: "Page title (for create/replace)" },
+          content: { type: "string", description: "Full markdown content (create/replace) or text to append" },
+          edits: {
+            type: "array",
+            description: "Atomic text edit operations for patch mode",
+            items: { type: "object" },
+          },
+          path: { type: "string", description: "Target directory path (for create, default /wiki/) or document path" },
           tags: { type: "array", items: { type: "string" } },
+          expected_version: { type: "integer", description: "Optimistic lock expected version" },
+          expected_content_hash: { type: "string", description: "Optimistic lock expected content_hash" },
+          dry_run: { type: "boolean", description: "Preview patch without persisting" },
         },
-        required: ["title", "content"],
+        required: [],
       },
     },
     async (args) => writeToolHandler(workspace, db, args, activity),
@@ -221,6 +236,12 @@ export function registerTools(
           sort_order: { type: "integer" },
           mode: { type: "string", enum: ["empty", "move_to_parent", "cascade"], default: "empty" },
           target_folder: { type: "string" },
+          on_conflict: {
+            type: "string",
+            enum: ["fail", "merge"],
+            default: "fail",
+            description: "Conflict policy for move action (fail or merge)",
+          },
         },
         required: ["action"],
       },
@@ -345,32 +366,126 @@ async function writeToolHandler(
   activity?: McpActivity,
 ): Promise<string> {
   if (!db) return "Error: database not connected";
+  const idOrPath = typeof args["id"] === "string" ? args["id"].trim() : "";
+  const requestedPath = typeof args["path"] === "string" ? args["path"].trim() : "";
+  const rawMode = typeof args["mode"] === "string" ? args["mode"].trim().toLowerCase() : "";
+  const edits = Array.isArray(args["edits"]) ? (args["edits"] as TextEdit[]) : undefined;
+  const mode = rawMode || (edits ? "patch" : "create");
+  const expectedVersion =
+    typeof args["expected_version"] === "number" && Number.isFinite(args["expected_version"])
+      ? args["expected_version"]
+      : undefined;
+  const expectedHash =
+    typeof args["expected_content_hash"] === "string" ? args["expected_content_hash"].trim() : "";
+  const dryRun = args["dry_run"] === true;
+
+  if (mode === "patch" || mode === "append") {
+    const targetRef = idOrPath || requestedPath;
+    if (!targetRef) return "Error: id or path is required for patch/append mode";
+    const existing = await resolveDocumentByIdOrPath(db, targetRef);
+    if (!existing) return `Document not found: ${targetRef}`;
+    if (expectedVersion !== undefined && existing.version !== expectedVersion) {
+      return `Error: VERSION_CONFLICT (expected ${expectedVersion}, current ${existing.version}, content_hash=${existing.content_hash})`;
+    }
+    if (expectedHash && existing.content_hash !== expectedHash) {
+      return `Error: VERSION_CONFLICT (expected hash ${expectedHash}, current ${existing.content_hash}, version=${existing.version})`;
+    }
+    const patchEdits: TextEdit[] =
+      mode === "append"
+        ? [{ op: "append", text: typeof args["content"] === "string" ? args["content"] : "" }]
+        : (edits ?? []);
+    let patched;
+    try {
+      patched = applyTextEdits(existing.content ?? "", patchEdits);
+    } catch (error) {
+      if (error instanceof TextPatchError) {
+        return `Error: ${error.code} (${error.status}) - ${error.message}`;
+      }
+      return `Error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (dryRun) {
+      return `Dry-run OK: ${existing.relative_path} (applied_edits=${patched.applied_edits}, changed=${patched.changed}, line_delta=${patched.line_delta})\n---\n${patched.content}`;
+    }
+    const norm = normalizeWikiContent(patched.content, existing.source_kind || "wiki", existing.file_type || "md");
+    const doc = await pageDocument(db, existing.relative_path, Buffer.from(norm.content, "utf8"));
+    doc.id = existing.id;
+    doc.version = existing.version;
+    await db.applyChangeSet(
+      {
+        id: randomUUID(),
+        kind: "manual",
+        summary: `mcp ${mode} ${existing.relative_path}`,
+        page_count: 1,
+        created_at: "",
+      },
+      [
+        {
+          relative_path: existing.relative_path,
+          document: doc,
+          operation: "update",
+          chunks: buildPageChunks(doc.id, norm.content),
+          refs: [],
+        },
+      ],
+    );
+    const extracted = new Map<string, ExtractedReferenceEntry[]>([[existing.relative_path, norm.entries]]);
+    await storeReferenceEntries(db, extracted, new Set([existing.relative_path])).catch(() => {});
+    await rebuildReferences(db, [existing.relative_path]).catch(() => {});
+    await activity?.logDocument(db, "updated", doc.id, existing.relative_path, "mcp");
+    return `Patched: ${doc.title || doc.filename} (ID: ${doc.id}, path: ${existing.relative_path}, applied_edits=${patched.applied_edits}, line_delta=${patched.line_delta})`;
+  }
+
   const title = typeof args["title"] === "string" ? args["title"] : "";
   const content = typeof args["content"] === "string" ? args["content"] : "";
-  let dirPath = "/wiki/";
-  const requestedPath = typeof args["path"] === "string" ? args["path"] : "";
-  if (requestedPath) {
-    let normalized = requestedPath;
-    if (!normalized.startsWith("/")) normalized = `/${normalized}`;
-    if (!normalized.endsWith("/")) normalized = `${normalized}/`;
-    dirPath = normalized;
-  }
   const tags = Array.isArray(args["tags"])
     ? args["tags"].filter((item): item is string => typeof item === "string")
     : [];
-  const filename = `${title.toLowerCase().replace(/ /g, "-")}.md`;
-  const relPath = `${dirPath.replace(/^\/+/, "")}${filename}`;
-  try {
-    validateWikiWritePath(relPath);
-  } catch (error) {
-    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+
+  let relPath = "";
+  let existing: Document | null = null;
+  if (mode === "replace" && idOrPath) {
+    existing = await resolveDocumentByIdOrPath(db, idOrPath);
+    if (!existing) return `Document not found: ${idOrPath}`;
+    if (expectedVersion !== undefined && existing.version !== expectedVersion) {
+      return `Error: VERSION_CONFLICT (expected ${expectedVersion}, current ${existing.version})`;
+    }
+    if (expectedHash && existing.content_hash !== expectedHash) {
+      return `Error: VERSION_CONFLICT (expected hash ${expectedHash}, current ${existing.content_hash})`;
+    }
+    relPath = existing.relative_path;
+  } else {
+    if (!title.trim()) return "Error: title is required for create mode";
+    let dirPath = "/wiki/";
+    if (requestedPath) {
+      let normalized = requestedPath;
+      if (!normalized.startsWith("/")) normalized = `/${normalized}`;
+      if (!normalized.endsWith("/")) normalized = `${normalized}/`;
+      dirPath = normalized;
+    }
+    const filename = `${title.toLowerCase().replace(/ /g, "-")}.md`;
+    relPath = `${dirPath.replace(/^\/+/, "")}${filename}`;
+    try {
+      validateWikiWritePath(relPath);
+    } catch (error) {
+      return `Error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    existing = (await db.getDocumentByRelativePath(relPath)) ?? (await db.getDocumentByPath(filename, dirPath));
+    if (existing) {
+      if (expectedVersion !== undefined && existing.version !== expectedVersion) {
+        return `Error: VERSION_CONFLICT (expected ${expectedVersion}, current ${existing.version})`;
+      }
+      if (expectedHash && existing.content_hash !== expectedHash) {
+        return `Error: VERSION_CONFLICT (expected hash ${expectedHash}, current ${existing.content_hash})`;
+      }
+    }
   }
 
-  const existing = await db.getDocumentByRelativePath(relPath) ?? (await db.getDocumentByPath(filename, dirPath));
   const norm = normalizeWikiContent(content, "wiki", "md");
   const doc = await pageDocument(db, relPath, Buffer.from(norm.content, "utf8"));
   if (title.trim()) doc.title = title.trim();
+  else if (existing?.title) doc.title = existing.title;
   if (tags.length > 0) doc.tags = tags;
+  else if (existing?.tags?.length) doc.tags = existing.tags;
   if (!doc.id) doc.id = existing?.id || randomUUID();
 
   const operation = existing ? "update" : "create";
@@ -509,7 +624,13 @@ async function folderToolHandler(
       case "move": {
         const toPath = typeof args["to_path"] === "string" ? args["to_path"].trim() : "";
         if (!folderPath || !toPath) return "Error: path and to_path are required";
-        const result = await db.moveFolder(folderPath, toPath, "mcp");
+        const rawConflict = typeof args["on_conflict"] === "string" ? args["on_conflict"].trim().toLowerCase() : "fail";
+        if (rawConflict !== "fail" && rawConflict !== "merge") {
+          return "Error: on_conflict must be fail or merge";
+        }
+        const result = await db.moveFolder(folderPath, toPath, "mcp", {
+          onConflict: rawConflict as "fail" | "merge",
+        });
         const toRebuild = [...new Set([...result.moved_doc_paths, ...result.updated_link_paths])].filter(Boolean);
         if (toRebuild.length > 0) {
           await rebuildReferences(db, toRebuild).catch(() => undefined);

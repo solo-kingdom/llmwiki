@@ -178,6 +178,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/v1/documents/:id", api.getDocument);
   app.get("/api/v1/documents/:id/content", api.getDocumentContent);
   app.put("/api/v1/documents/:id/content", api.updateDocumentContent);
+  app.patch("/api/v1/documents/:id/content", api.patchDocumentContent);
   app.patch("/api/v1/documents/:id", api.updateDocumentMetadata);
   app.post("/api/v1/documents/:id/move", api.moveDocument);
   app.post("/api/v1/documents/:id/archive", api.archiveDocument);
@@ -228,6 +229,7 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/api/v1/archives/files/:id/ingest", api.ingestArchiveFile);
   app.patch("/api/v1/archives/files/:id", api.updateArchiveFileLocation);
   app.put("/api/v1/archives/files/:id/content", api.updateArchiveFileContent);
+  app.patch("/api/v1/archives/files/:id/content", api.patchArchiveFileContent);
   app.delete("/api/v1/archives/files/:id", api.deleteArchiveFile);
 
   // History and revisions

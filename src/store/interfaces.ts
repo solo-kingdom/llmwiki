@@ -287,7 +287,12 @@ export interface FolderStore {
     folderPath: string,
     patch: { display_name?: string; description?: string; sort_order?: number },
   ): Promise<WikiFolder | null>;
-  moveFolder(fromPath: string, toPath: string, actor?: string): Promise<MoveFolderResult>;
+  moveFolder(
+    fromPath: string,
+    toPath: string,
+    actor?: string,
+    options?: { onConflict?: "fail" | "merge" },
+  ): Promise<MoveFolderResult>;
   deleteFolder(
     folderPath: string,
     mode: FolderDeleteMode,
@@ -325,7 +330,11 @@ export interface ArchiveStore {
     folderPath: string,
     patch: { display_name?: string; description?: string; sort_order?: number },
   ): Promise<ArchiveFolder | null>;
-  moveArchiveFolder(fromPath: string, toPath: string): Promise<MoveArchiveFolderResult>;
+  moveArchiveFolder(
+    fromPath: string,
+    toPath: string,
+    options?: { onConflict?: "fail" | "merge" },
+  ): Promise<MoveArchiveFolderResult>;
   deleteArchiveFolder(
     folderPath: string,
     mode: FolderDeleteMode,

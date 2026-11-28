@@ -1,7 +1,8 @@
 import path from "node:path";
 import type { Context } from "hono";
 import { logIngestJob, record } from "../activity/index.js";
-import { ArchiveStorageService } from "../archive/storage.js";
+import { ArchiveStorageService, isTextEditableKind } from "../archive/storage.js";
+import { applyTextEdits, TextPatchError, type TextEdit } from "../engine/text_patch.js";
 import { recordRulesSnapshot } from "../ingest/processor.js";
 import {
   ArchiveConflictError,
@@ -17,8 +18,43 @@ function mapArchiveError(c: Context, error: unknown): Response {
   const message = error instanceof Error ? error.message : String(error);
   if (error instanceof ArchiveValidationError) return writeError(c, 400, message);
   if (error instanceof ArchiveNotFoundError) return writeError(c, 404, message);
-  if (error instanceof ArchiveConflictError) return writeError(c, 409, message);
+  if (error instanceof ArchiveConflictError) {
+    return writeJson(c, 409, {
+      error: message,
+      ...(error.conflicts?.length ? { conflicts: error.conflicts } : {}),
+    });
+  }
   return writeError(c, 500, message);
+}
+
+function parseArchiveIfMatch(header?: string): string {
+  if (!header) return "";
+  let cleaned = header.trim();
+  if (cleaned.startsWith("W/")) cleaned = cleaned.slice(2).trim();
+  if (cleaned.startsWith('"') && cleaned.endsWith('"') && cleaned.length >= 2) {
+    cleaned = cleaned.slice(1, -1);
+  }
+  return cleaned.trim();
+}
+
+function checkArchiveConcurrency(
+  c: Context,
+  file: ArchiveFile,
+  expectedSha256?: string,
+): Response | null {
+  let target = (expectedSha256 ?? "").trim();
+  if (!target) {
+    const ifMatch = parseArchiveIfMatch(c.req.header("if-match"));
+    if (ifMatch && ifMatch !== "*") target = ifMatch;
+  }
+  if (target && file.sha256 !== target) {
+    return writeJson(c, 409, {
+      error: "archive content conflict",
+      code: "CONTENT_CONFLICT",
+      current_sha256: file.sha256,
+    });
+  }
+  return null;
 }
 
 function isSandboxedMedia(file: ArchiveFile): boolean {
@@ -179,12 +215,18 @@ export function archivesApi(ctx: ApiContext) {
     },
 
     async moveArchiveFolder(c: Context): Promise<Response> {
-      const req = await readJsonBody<{ from_path?: string; to_path?: string }>(c);
+      const req = await readJsonBody<{ from_path?: string; to_path?: string; on_conflict?: string }>(c);
       if (!req || !req.from_path || !req.to_path) {
         return writeError(c, 400, "from_path and to_path are required");
       }
+      const rawConflict = (req.on_conflict ?? "fail").trim().toLowerCase();
+      if (rawConflict !== "fail" && rawConflict !== "merge") {
+        return writeError(c, 400, "on_conflict must be fail or merge");
+      }
       try {
-        const result = await ctx.db.moveArchiveFolder(req.from_path, req.to_path);
+        const result = await ctx.db.moveArchiveFolder(req.from_path, req.to_path, {
+          onConflict: rawConflict as "fail" | "merge",
+        });
         record(ctx.db, {
           level: "info",
           category: "archive",
@@ -520,13 +562,15 @@ export function archivesApi(ctx: ApiContext) {
     async updateArchiveFileContent(c: Context): Promise<Response> {
       const id = getID(c);
       if (!id) return writeError(c, 400, "missing archive file id");
-      const req = await readJsonBody<{ content?: string }>(c);
+      const req = await readJsonBody<{ content?: string; expected_sha256?: string }>(c);
       if (!req || typeof req.content !== "string") {
         return writeError(c, 400, "content is required");
       }
       try {
         const existing = await ctx.db.getArchiveFile(id);
         if (!existing) return writeError(c, 404, "archive file not found");
+        const conflict = checkArchiveConcurrency(c, existing, req.expected_sha256);
+        if (conflict) return conflict;
         const bytes = Buffer.from(req.content, "utf8");
         const result = await storage().replaceFileBytes(existing, bytes);
         return writeJson(c, 200, {
@@ -535,6 +579,61 @@ export function archivesApi(ctx: ApiContext) {
           previous_backend: result.previousBackend,
         });
       } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
+
+    async patchArchiveFileContent(c: Context): Promise<Response> {
+      const id = getID(c);
+      if (!id) return writeError(c, 400, "missing archive file id");
+      const req = await readJsonBody<{
+        edits?: TextEdit[];
+        expected_sha256?: string;
+        dry_run?: boolean;
+      }>(c);
+      if (!req) return writeError(c, 400, "invalid request body");
+      try {
+        const existing = await ctx.db.getArchiveFile(id);
+        if (!existing) return writeError(c, 404, "archive file not found");
+        if (!isTextEditableKind(existing.kind)) {
+          return writeError(c, 400, `archive file kind "${existing.kind}" is not text-patchable`);
+        }
+        const conflict = checkArchiveConcurrency(c, existing, req.expected_sha256);
+        if (conflict) return conflict;
+
+        const rawBytes = await storage().readFullBytes(existing);
+        const text = new TextDecoder("utf-8", { fatal: false }).decode(rawBytes);
+        const patched = applyTextEdits(text, req.edits ?? []);
+        if (req.dry_run) {
+          return writeJson(c, 200, {
+            dry_run: true,
+            file_id: existing.id,
+            relative_path: existing.relative_path,
+            applied_edits: patched.applied_edits,
+            changed: patched.changed,
+            line_delta: patched.line_delta,
+            current_sha256: existing.sha256,
+            preview_content: patched.content,
+          });
+        }
+        const bytes = Buffer.from(patched.content, "utf8");
+        const result = await storage().replaceFileBytes(existing, bytes);
+        return writeJson(c, 200, {
+          file: result.file,
+          promoted: result.promoted,
+          previous_backend: result.previousBackend,
+          applied_edits: patched.applied_edits,
+          changed: patched.changed,
+          line_delta: patched.line_delta,
+        });
+      } catch (error) {
+        if (error instanceof TextPatchError) {
+          return writeJson(c, error.status, {
+            error: error.message,
+            code: error.code,
+            ...(error.details ? { details: error.details } : {}),
+          });
+        }
         return mapArchiveError(c, error);
       }
     },

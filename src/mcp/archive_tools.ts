@@ -2,6 +2,7 @@ import path from "node:path";
 import { logIngestJob } from "../activity/index.js";
 import { SUPPORTED_INGEST_EXTENSIONS } from "../api/ingest_jobs.js";
 import { ArchiveStorageService, isTextEditableKind } from "../archive/storage.js";
+import { applyTextEdits, TextPatchError, type TextEdit } from "../engine/text_patch.js";
 import { recordRulesSnapshot } from "../ingest/processor.js";
 import type { Store } from "../store/interfaces.js";
 import type { FolderDeleteMode, IngestJob } from "../store/types.js";
@@ -190,6 +191,61 @@ export function registerArchiveTools(
 
   register(
     {
+      name: "archive_patch",
+      description:
+        "Apply atomic text edits (replace, replace_lines, append, prepend, insert_after) to a text-editable archive file.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Archive file ID" },
+          path: { type: "string", description: "Archive relative_path (alternative to id)" },
+          edits: {
+            type: "array",
+            description: "Atomic text edit operations",
+            items: { type: "object" },
+          },
+          expected_sha256: { type: "string", description: "Optimistic lock expected sha256" },
+          dry_run: { type: "boolean", description: "Preview patch without persisting" },
+        },
+        required: ["edits"],
+      },
+    },
+    async (args) => {
+      if (!db) return "Error: database not connected";
+      const id = typeof args["id"] === "string" ? args["id"].trim() : "";
+      const relPath = typeof args["path"] === "string" ? args["path"].trim() : "";
+      if (!id && !relPath) return "Error: id or path is required";
+      const file = id ? await db.getArchiveFile(id) : await db.getArchiveFileByRelativePath(relPath);
+      if (!file) return `Archive file not found: ${id || relPath}`;
+      if (!isTextEditableKind(file.kind)) {
+        return `Error: archive file kind "${file.kind}" is not text-patchable`;
+      }
+      const expectedSha = typeof args["expected_sha256"] === "string" ? args["expected_sha256"].trim() : "";
+      if (expectedSha && file.sha256 !== expectedSha) {
+        return `Error: CONTENT_CONFLICT (expected ${expectedSha}, current ${file.sha256})`;
+      }
+      const edits = Array.isArray(args["edits"]) ? (args["edits"] as TextEdit[]) : [];
+      const bytes = await storage().readFullBytes(file);
+      const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+      let patched;
+      try {
+        patched = applyTextEdits(text, edits);
+      } catch (error) {
+        if (error instanceof TextPatchError) {
+          return `Error: ${error.code} (${error.status}) - ${error.message}`;
+        }
+        return `Error: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      if (args["dry_run"] === true) {
+        return `Dry-run OK: ${file.relative_path} (applied_edits=${patched.applied_edits}, changed=${patched.changed}, line_delta=${patched.line_delta})\n---\n${patched.content}`;
+      }
+      const result = await storage().replaceFileBytes(file, Buffer.from(patched.content, "utf8"));
+      return `Patched archive [${result.file.id}] ${result.file.relative_path} (sha256=${result.file.sha256}, applied_edits=${patched.applied_edits})`;
+    },
+  );
+
+  register(
+    {
       name: "archive_move",
       description: "Move or rename an archive file or folder.",
       inputSchema: {
@@ -201,6 +257,12 @@ export function registerArchiveTools(
           to_folder: { type: "string", description: "Destination folder for file" },
           new_filename: { type: "string", description: "New filename for file" },
           to_path: { type: "string", description: "Destination folder path (when target_type=folder)" },
+          on_conflict: {
+            type: "string",
+            enum: ["fail", "merge"],
+            default: "fail",
+            description: "Conflict policy for folder move (fail or merge)",
+          },
         },
         required: ["target_type"],
       },
@@ -212,7 +274,13 @@ export function registerArchiveTools(
         const fromPath = typeof args["from_path"] === "string" ? args["from_path"] : "";
         const toPath = typeof args["to_path"] === "string" ? args["to_path"] : "";
         if (!fromPath || !toPath) return "Error: from_path and to_path are required";
-        const res = await db.moveArchiveFolder(fromPath, toPath);
+        const rawConflict = typeof args["on_conflict"] === "string" ? args["on_conflict"].trim().toLowerCase() : "fail";
+        if (rawConflict !== "fail" && rawConflict !== "merge") {
+          return "Error: on_conflict must be fail or merge";
+        }
+        const res = await db.moveArchiveFolder(fromPath, toPath, {
+          onConflict: rawConflict as "fail" | "merge",
+        });
         return `Moved folder ${res.from_path} -> ${res.to_path} (${res.moved_files} files)`;
       }
       if (targetType === "file") {

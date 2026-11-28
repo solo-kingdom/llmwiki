@@ -11,6 +11,7 @@ import {
   parseFrontmatter,
   upsertFrontmatterFields,
 } from "../engine/frontmatter.js";
+import { applyTextEdits, TextPatchError, type TextEdit } from "../engine/text_patch.js";
 import {
   isValidConfidence,
   isValidExperienceKind,
@@ -54,6 +55,15 @@ interface CreateDocumentRequest {
 
 interface UpdateContentRequest {
   content?: string;
+  expected_version?: number;
+  expected_content_hash?: string;
+}
+
+interface PatchContentRequest {
+  edits?: TextEdit[];
+  expected_version?: number;
+  expected_content_hash?: string;
+  dry_run?: boolean;
 }
 
 interface UpdateMetadataRequest {
@@ -69,12 +79,16 @@ interface UpdateMetadataRequest {
   review_after?: string;
   aliases?: string[];
   symptoms?: string[];
+  expected_version?: number;
+  expected_content_hash?: string;
 }
 
 interface ArchiveDocumentRequest {
   reason?: string;
   superseded_by?: string;
   date?: string;
+  expected_version?: number;
+  expected_content_hash?: string;
 }
 
 interface ReopenDocumentRequest {
@@ -83,6 +97,53 @@ interface ReopenDocumentRequest {
   last_verified?: string;
   review_after?: string;
   date?: string;
+  expected_version?: number;
+  expected_content_hash?: string;
+}
+
+function parseIfMatch(header?: string): string {
+  if (!header) return "";
+  let cleaned = header.trim();
+  if (cleaned.startsWith("W/")) cleaned = cleaned.slice(2).trim();
+  if (cleaned.startsWith('"') && cleaned.endsWith('"') && cleaned.length >= 2) {
+    cleaned = cleaned.slice(1, -1);
+  }
+  return cleaned.trim();
+}
+
+function checkDocumentConcurrency(
+  c: Context,
+  doc: Document,
+  expectedVersion?: number,
+  expectedHash?: string,
+): Response | null {
+  let targetVersion = expectedVersion;
+  let targetHash = (expectedHash ?? "").trim();
+  const ifMatch = parseIfMatch(c.req.header("if-match"));
+  if (ifMatch && ifMatch !== "*") {
+    if (/^\d+$/.test(ifMatch)) {
+      if (targetVersion === undefined) targetVersion = Number.parseInt(ifMatch, 10);
+    } else if (!targetHash) {
+      targetHash = ifMatch;
+    }
+  }
+  if (targetVersion !== undefined && doc.version !== targetVersion) {
+    return writeJson(c, 409, {
+      error: "document version conflict",
+      code: "VERSION_CONFLICT",
+      current_version: doc.version,
+      current_content_hash: doc.content_hash,
+    });
+  }
+  if (targetHash && doc.content_hash !== targetHash) {
+    return writeJson(c, 409, {
+      error: "document content hash conflict",
+      code: "VERSION_CONFLICT",
+      current_version: doc.version,
+      current_content_hash: doc.content_hash,
+    });
+  }
+  return null;
 }
 
 interface MoveDocumentRequest {
@@ -327,6 +388,9 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const doc = await ctx.db.getDocument(id);
         if (!doc) return writeError(c, 404, "document not found");
+        const conflict = checkDocumentConcurrency(c, doc, req.expected_version, req.expected_content_hash);
+        if (conflict) return conflict;
+
         doc.content = req.content ?? "";
         doc.content_hash = contentHash(doc.content);
         if (doc.source_kind === "wiki") {
@@ -346,6 +410,64 @@ export function documentsApi(ctx: ApiContext) {
       }
     },
 
+    async patchDocumentContent(c: Context): Promise<Response> {
+      const id = getID(c);
+      if (!id) return writeError(c, 400, "missing document id");
+      const req = await readJsonBody<PatchContentRequest>(c);
+      if (!req) return writeError(c, 400, "invalid request body");
+
+      try {
+        const doc = await ctx.db.getDocument(id);
+        if (!doc) return writeError(c, 404, "document not found");
+        const conflict = checkDocumentConcurrency(c, doc, req.expected_version, req.expected_content_hash);
+        if (conflict) return conflict;
+
+        const patched = applyTextEdits(doc.content ?? "", req.edits ?? []);
+        if (req.dry_run) {
+          return writeJson(c, 200, {
+            dry_run: true,
+            document_id: doc.id,
+            relative_path: doc.relative_path,
+            applied_edits: patched.applied_edits,
+            changed: patched.changed,
+            line_delta: patched.line_delta,
+            current_version: doc.version,
+            content_hash: contentHash(patched.content),
+            preview_content: patched.content,
+          });
+        }
+
+        doc.content = patched.content;
+        doc.content_hash = contentHash(doc.content);
+        if (doc.source_kind === "wiki") {
+          const fm = parseFrontmatter(doc.content);
+          if (fm.type) {
+            doc.page_type = resolvePageType(fm.type, doc.page_type ?? "", doc.relative_path);
+          }
+        }
+        await withPageLock(ctx, doc.relative_path, () =>
+          applyPageWrite(ctx, "manual", "patch page content", doc, "update"),
+        );
+        const updated = await ctx.db.getDocument(id);
+        logDocument(ctx.db, "updated", id, doc.relative_path, "api");
+        return writeJson(c, 200, {
+          ...(updated ?? doc),
+          applied_edits: patched.applied_edits,
+          changed: patched.changed,
+          line_delta: patched.line_delta,
+        });
+      } catch (error) {
+        if (error instanceof TextPatchError) {
+          return writeJson(c, error.status, {
+            error: error.message,
+            code: error.code,
+            ...(error.details ? { details: error.details } : {}),
+          });
+        }
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
     async updateDocumentMetadata(c: Context): Promise<Response> {
       const id = getID(c);
       if (!id) return writeError(c, 400, "missing document id");
@@ -355,6 +477,13 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const existing = await ctx.db.getDocument(id);
         if (!existing) return writeError(c, 404, "document not found");
+        const conflict = checkDocumentConcurrency(
+          c,
+          existing,
+          req.expected_version,
+          req.expected_content_hash,
+        );
+        if (conflict) return conflict;
 
         const fmUpdates: Record<string, string | string[] | undefined> = {};
         if (req.page_type !== undefined) {
@@ -450,6 +579,13 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const existing = await ctx.db.getDocument(id);
         if (!existing) return writeError(c, 404, "document not found");
+        const conflict = checkDocumentConcurrency(
+          c,
+          existing,
+          req.expected_version,
+          req.expected_content_hash,
+        );
+        if (conflict) return conflict;
         if (isSystemDocument(existing)) {
           return writeError(c, 400, `system page cannot be archived: ${existing.relative_path}`);
         }
@@ -477,6 +613,13 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const existing = await ctx.db.getDocument(id);
         if (!existing) return writeError(c, 404, "document not found");
+        const conflict = checkDocumentConcurrency(
+          c,
+          existing,
+          req.expected_version,
+          req.expected_content_hash,
+        );
+        if (conflict) return conflict;
         const reopened = buildReopenedDocument(existing, {
           reason: req.reason,
           confidence: req.confidence,

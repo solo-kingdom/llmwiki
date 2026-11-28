@@ -56,6 +56,8 @@ export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
     writeTools: new Set([
       "write",
       "delete",
+      "move",
+      "folder",
       "archive",
       "reopen",
       "archive_mkdir",
@@ -71,7 +73,7 @@ export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
 export function toolPolicyAllows(policy: ToolPolicy, name: string): boolean {
   if (policy.readonlyTools.has(name)) return true;
   if (policy.writeTools.has(name)) return policy.allowWriteTools;
-  return true;
+  return false;
 }
 
 export function toolPolicyFilter(policy: ToolPolicy, tools: Tool[]): Tool[] {

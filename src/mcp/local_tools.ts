@@ -43,11 +43,15 @@ export const searchTool: Tool = {
 
 export const readTool: Tool = {
   name: "read",
-  description: "Read a document from the knowledge vault by path or document id.",
+  description:
+    "Read a document from the knowledge vault by path or document id. Supports optional line range (line_start/line_end) and outline_only mode.",
   inputSchema: {
     type: "object",
     properties: {
-      path: { type: "string", description: "Path to the document to read" },
+      path: { type: "string", description: "Path or document ID to read" },
+      line_start: { type: "integer", description: "Optional 1-based start line (inclusive)" },
+      line_end: { type: "integer", description: "Optional 1-based end line (inclusive)" },
+      outline_only: { type: "boolean", description: "Return only Markdown headings with line numbers" },
     },
     required: ["path"],
   },
@@ -307,18 +311,88 @@ export async function executeLocalReferences(
   return output;
 }
 
+export interface ReadFormatOptions {
+  lineStart?: number;
+  lineEnd?: number;
+  outlineOnly?: boolean;
+}
+
+function extractMarkdownOutline(content: string): string[] {
+  const lines = content.split(/\r?\n/);
+  const headings: string[] = [];
+  let inFrontmatter = false;
+  let inFence = false;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trim();
+    if (i === 0 && trimmed === "---") {
+      inFrontmatter = true;
+      continue;
+    }
+    if (inFrontmatter) {
+      if (trimmed === "---") inFrontmatter = false;
+      continue;
+    }
+    if (/^(```|~~~)/.test(trimmed)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (/^#{1,6}\s+/.test(line)) {
+      headings.push(`L${i + 1}: ${line.trim()}`);
+    }
+  }
+  return headings;
+}
+
+export function formatDocumentRead(doc: Document, opts: ReadFormatOptions = {}): string {
+  const lines = (doc.content ?? "").split(/\r?\n/);
+  const totalLines = lines.length;
+  let output = `# ${doc.title}\n`;
+  output += `Document ID: ${doc.id}\n`;
+  output += `Path: ${doc.relative_path}\n`;
+  output += `Type: ${doc.file_type}  Status: ${doc.status}  Version: ${doc.version}\n`;
+  if (doc.tags.length > 0) output += `Tags: ${doc.tags.join(", ")}\n`;
+
+  if (opts.outlineOnly) {
+    const headings = extractMarkdownOutline(doc.content ?? "");
+    output += `Lines: ${totalLines} (outline_only)\n\n---\n\n`;
+    output += headings.length > 0 ? headings.join("\n") : "(no markdown headings)";
+    return output;
+  }
+
+  if (opts.lineStart !== undefined || opts.lineEnd !== undefined) {
+    const start = Math.max(1, Math.floor(opts.lineStart ?? 1));
+    const end = Math.min(totalLines, Math.floor(opts.lineEnd ?? totalLines));
+    const slice = start <= end ? lines.slice(start - 1, end).join("\n") : "";
+    output += `Lines: ${start}-${Math.max(start - 1, end)} / ${totalLines}\n\n---\n\n${slice}`;
+    return output;
+  }
+
+  output += `\n---\n\n${doc.content}`;
+  return output;
+}
+
+export function parseReadFormatOptions(args: Record<string, unknown>): ReadFormatOptions {
+  const lineStart =
+    typeof args["line_start"] === "number" && Number.isFinite(args["line_start"])
+      ? args["line_start"]
+      : undefined;
+  const lineEnd =
+    typeof args["line_end"] === "number" && Number.isFinite(args["line_end"])
+      ? args["line_end"]
+      : undefined;
+  const outlineOnly = args["outline_only"] === true;
+  return { lineStart, lineEnd, outlineOnly };
+}
+
 export async function executeLocalRead(db: Store, args: Record<string, unknown>): Promise<string> {
   const requested = typeof args["path"] === "string" ? args["path"] : "";
   if (!requested.trim()) return "Error: path is required";
   const doc = await resolveDocumentByIdOrPath(db, requested);
   if (!doc) return `Document not found: ${requested}`;
-  let output = `# ${doc.title}\n`;
-  output += `Document ID: ${doc.id}\n`;
-  output += `Path: ${doc.relative_path}\n`;
-  output += `Type: ${doc.file_type}  Status: ${doc.status}  Version: ${doc.version}\n\n`;
-  if (doc.tags.length > 0) output += `Tags: ${doc.tags.join(", ")}\n`;
-  output += `---\n\n${doc.content}`;
-  return output;
+  return formatDocumentRead(doc, parseReadFormatOptions(args));
 }
 
 export function formatLintMcp(report: LintReport): string {

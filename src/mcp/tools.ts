@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { buildArchivedDocument, buildReopenedDocument } from "../engine/archive.js";
+import { refreshFolderOverviews } from "../engine/folder_overview.js";
 import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
-import { validateWikiWritePath } from "../engine/wiki_org.js";
+import {
+  folderPathFromWikiRelPath,
+  isWikiSystemPath,
+  RESERVED_TOP_LEVEL_WIKI_PAGES,
+  validateWikiWritePath,
+} from "../engine/wiki_org.js";
 import { workspaceLayoutSummary } from "../engine/workspace_layout.js";
 import {
   buildPageChunks,
@@ -12,7 +18,12 @@ import {
 } from "../ingest/dbapply.js";
 import type { Store } from "../store/interfaces.js";
 import type { Document } from "../store/types.js";
-import { executeLocalSearch, resolveDocumentByIdOrPath } from "./local_tools.js";
+import {
+  executeLocalSearch,
+  formatDocumentRead,
+  parseReadFormatOptions,
+  resolveDocumentByIdOrPath,
+} from "./local_tools.js";
 import { registerArchiveTools } from "./archive_tools.js";
 import type { AuditDb } from "./server.js";
 import { McpServer } from "./server.js";
@@ -119,12 +130,14 @@ export function registerTools(
     {
       name: "read",
       description:
-        "Read a document from the knowledge vault. Supports markdown, PDF (by page), images, and batch glob reads.",
+        "Read a document from the knowledge vault by path or document ID. Supports optional line range (line_start/line_end) and outline_only mode.",
       inputSchema: {
         type: "object",
         properties: {
-          path: { type: "string", description: "Path to the document to read" },
-          pages: { type: "string", description: "Page range (e.g. '1-5,10')" },
+          path: { type: "string", description: "Path or document ID to read" },
+          line_start: { type: "integer", description: "Optional 1-based start line (inclusive)" },
+          line_end: { type: "integer", description: "Optional 1-based end line (inclusive)" },
+          outline_only: { type: "boolean", description: "Return only Markdown headings with line numbers" },
         },
         required: ["path"],
       },
@@ -135,7 +148,7 @@ export function registerTools(
       if (!requested) return "Error: path is required";
       const doc = await resolveDocumentByIdOrPath(db, requested);
       if (!doc) return `Document not found: ${requested}`;
-      return formatDocument(doc);
+      return formatDocumentRead(doc, parseReadFormatOptions(args));
     },
   );
 
@@ -162,11 +175,11 @@ export function registerTools(
     {
       name: "delete",
       description:
-        "Delete a document from the knowledge vault. Protected pages (overview.md) cannot be deleted.",
+        "Delete a single document from the knowledge vault (recorded in change_sets for rollback). Protected system pages cannot be deleted.",
       inputSchema: {
         type: "object",
         properties: {
-          path: { type: "string", description: "Path or glob pattern to delete" },
+          path: { type: "string", description: "Document ID, relative_path, or title to delete" },
         },
         required: ["path"],
       },
@@ -394,18 +407,31 @@ async function deleteToolHandler(
   activity?: McpActivity,
 ): Promise<string> {
   if (!db) return "Error: database not connected";
-  const requested = typeof args["path"] === "string" ? args["path"] : "";
+  const requested = typeof args["path"] === "string" ? args["path"].trim() : "";
   if (!requested) return "Error: path is required";
-  const base = path.basename(requested);
-  if (base === "overview.md") {
-    return `Error: cannot delete protected page: ${base}`;
-  }
-  let doc = await db.findDocumentByName(requested);
-  if (!doc) doc = await db.getDocument(requested);
+  const doc = await resolveDocumentByIdOrPath(db, requested);
   if (!doc) return `Document not found: ${requested}`;
-  const affected = await db.archiveDocuments([doc.id]);
-  await activity?.logDocument(db, "deleted", doc.id, doc.relative_path, "mcp");
-  return `Deleted ${affected} document(s): ${doc.title} (ID: ${doc.id})`;
+  const relPath =
+    doc.relative_path || `${doc.path.replace(/\/+$/, "")}/${doc.filename}`.replace(/^\/+/, "");
+  if (RESERVED_TOP_LEVEL_WIKI_PAGES.has(relPath) || isWikiSystemPath(relPath)) {
+    return `Error: cannot delete protected system page: ${relPath}`;
+  }
+  await db.applyChangeSet(
+    {
+      id: randomUUID(),
+      kind: "manual",
+      summary: `mcp delete ${relPath}`,
+      page_count: 1,
+      created_at: "",
+    },
+    [{ relative_path: relPath, document: null, operation: "delete", chunks: [], refs: [] }],
+  );
+  const folder = folderPathFromWikiRelPath(relPath);
+  if (folder) {
+    await refreshFolderOverviews(db, [folder]).catch(() => undefined);
+  }
+  await activity?.logDocument(db, "deleted", doc.id, relPath, "mcp");
+  return `Deleted document: ${doc.title || doc.filename} (ID: ${doc.id}, path: ${relPath})`;
 }
 
 async function moveToolHandler(
@@ -419,13 +445,22 @@ async function moveToolHandler(
   const filename = typeof args["filename"] === "string" ? args["filename"].trim() : undefined;
   if (!idOrPath || !targetFolder) return "Error: id and target_folder are required";
 
-  let doc = await db.getDocument(idOrPath);
-  if (!doc) doc = await db.getDocumentByRelativePath(idOrPath.replace(/^\/+/, ""));
-  if (!doc) doc = await db.findDocumentByName(idOrPath);
+  const doc = await resolveDocByRef(db, idOrPath);
   if (!doc) return `Document not found: ${idOrPath}`;
 
   try {
     const result = await db.moveDocument(doc.id, targetFolder, filename, "mcp");
+    const toRebuild = [...new Set([result.document.relative_path, ...result.updated_link_paths])].filter(Boolean);
+    if (toRebuild.length > 0) {
+      await rebuildReferences(db, toRebuild).catch(() => undefined);
+    }
+    const affectedFolders = [
+      folderPathFromWikiRelPath(result.old_relative_path),
+      folderPathFromWikiRelPath(result.document.relative_path),
+    ].filter(Boolean);
+    if (affectedFolders.length > 0) {
+      await refreshFolderOverviews(db, [...new Set(affectedFolders)]).catch(() => undefined);
+    }
     await activity?.logDocument(db, "moved", doc.id, result.document.relative_path, "mcp");
     return `Moved: ${result.old_relative_path} -> ${result.document.relative_path} (updated ${result.updated_link_paths.length} backlink(s))`;
   } catch (error) {
@@ -475,6 +510,11 @@ async function folderToolHandler(
         const toPath = typeof args["to_path"] === "string" ? args["to_path"].trim() : "";
         if (!folderPath || !toPath) return "Error: path and to_path are required";
         const result = await db.moveFolder(folderPath, toPath, "mcp");
+        const toRebuild = [...new Set([...result.moved_doc_paths, ...result.updated_link_paths])].filter(Boolean);
+        if (toRebuild.length > 0) {
+          await rebuildReferences(db, toRebuild).catch(() => undefined);
+        }
+        await refreshFolderOverviews(db, [result.to_path]).catch(() => undefined);
         return `Moved folder: ${result.from_path} -> ${result.to_path} (${result.moved_folders} folders, ${result.moved_documents} docs)`;
       }
       case "delete": {
@@ -482,6 +522,12 @@ async function folderToolHandler(
         const mode = (typeof args["mode"] === "string" ? args["mode"] : "empty") as "empty" | "move_to_parent" | "cascade";
         const targetFolder = typeof args["target_folder"] === "string" ? args["target_folder"] : "";
         const result = await db.deleteFolder(folderPath, mode, targetFolder, "mcp");
+        if (mode === "move_to_parent") {
+          const fallbackTarget = targetFolder.trim() || (folderPath.includes("/") ? folderPath.slice(0, folderPath.lastIndexOf("/")) : "");
+          if (fallbackTarget) {
+            await refreshFolderOverviews(db, [fallbackTarget]).catch(() => undefined);
+          }
+        }
         await activity?.logDocument(db, "folder_deleted", folderPath, `wiki/${result.path}`, "mcp");
         return `Deleted folder: ${result.path} (mode=${result.mode}, moved=${result.moved_documents}, deleted=${result.deleted_documents})`;
       }

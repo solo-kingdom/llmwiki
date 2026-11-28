@@ -7,6 +7,7 @@ import {
   ArchiveConflictError,
   ArchiveNotFoundError,
   ArchiveValidationError,
+  normalizeArchiveFolderPath,
 } from "../store/postgres/archives.js";
 import type { ArchiveFile, FolderDeleteMode, IngestJob } from "../store/types.js";
 import { getID, readJsonBody, writeError, writeJson, type ApiContext } from "./context.js";
@@ -83,13 +84,18 @@ export function archivesApi(ctx: ApiContext) {
 
   return {
     async getArchiveTree(c: Context): Promise<Response> {
+      const folder = (c.req.query("folder") ?? "").trim();
       const kind = (c.req.query("kind") ?? "").trim();
       const q = (c.req.query("q") ?? "").trim();
       try {
-        const [folders, files] = await Promise.all([
+        const normFolder = folder ? normalizeArchiveFolderPath(folder) : "";
+        const [allFolders, files] = await Promise.all([
           ctx.db.listArchiveFolders(),
-          ctx.db.listArchiveFiles({ kind, q }),
+          ctx.db.listArchiveFiles({ folder_path: normFolder, kind, q }),
         ]);
+        const folders = normFolder
+          ? allFolders.filter((f) => f.path === normFolder || f.path.startsWith(`${normFolder}/`))
+          : allFolders;
         return writeJson(c, 200, { folders, files });
       } catch (error) {
         return mapArchiveError(c, error);
@@ -122,6 +128,7 @@ export function archivesApi(ctx: ApiContext) {
         display_name?: string;
         description?: string;
         sort_order?: number;
+        exist_ok?: boolean;
       }>(c);
       if (!req || !req.path) return writeError(c, 400, "path is required");
       try {
@@ -142,6 +149,10 @@ export function archivesApi(ctx: ApiContext) {
         });
         return writeJson(c, 201, folder);
       } catch (error) {
+        if (req.exist_ok && error instanceof ArchiveConflictError) {
+          const existing = await ctx.db.getArchiveFolder(req.path);
+          if (existing) return writeJson(c, 200, existing);
+        }
         return mapArchiveError(c, error);
       }
     },
@@ -219,6 +230,55 @@ export function archivesApi(ctx: ApiContext) {
     },
 
     async uploadArchiveFiles(c: Context): Promise<Response> {
+      const contentType = (c.req.header("content-type") ?? "").toLowerCase();
+      if (contentType.includes("application/json")) {
+        const req = await readJsonBody<{
+          filename?: string;
+          folder_path?: string;
+          content?: string;
+          content_base64?: string;
+          title?: string;
+          media_type?: string;
+          source_ref?: string;
+          overwrite?: boolean;
+        }>(c);
+        if (!req) return writeError(c, 400, "invalid request body");
+        const filename = (req.filename ?? "").trim();
+        if (!filename) return writeError(c, 400, "filename is required");
+        if (req.content === undefined && req.content_base64 === undefined) {
+          return writeError(c, 400, "either content or content_base64 is required");
+        }
+        const bytes =
+          req.content_base64 !== undefined
+            ? new Uint8Array(Buffer.from(req.content_base64, "base64"))
+            : new Uint8Array(Buffer.from(req.content ?? "", "utf8"));
+        try {
+          const saved = await storage().storeNewFile({
+            folderPath: (req.folder_path ?? "").trim(),
+            filename,
+            title: req.title,
+            bytes,
+            mediaType: req.media_type,
+            origin: "upload",
+            sourceRef: req.source_ref,
+            overwrite: Boolean(req.overwrite),
+            autoRename: false,
+          });
+          record(ctx.db, {
+            level: "info",
+            category: "archive",
+            action: "file_uploaded",
+            message: `上传档案文件 ${saved.relative_path}`,
+            resourceType: "archive_file",
+            resourceId: saved.id,
+            source: "api",
+          });
+          return writeJson(c, 201, { file: saved, files: [saved] });
+        } catch (error) {
+          return mapArchiveError(c, error);
+        }
+      }
+
       let form: FormData;
       try {
         form = await c.req.formData();
@@ -415,16 +475,42 @@ export function archivesApi(ctx: ApiContext) {
     async updateArchiveFileLocation(c: Context): Promise<Response> {
       const id = getID(c);
       if (!id) return writeError(c, 400, "missing archive file id");
-      const req = await readJsonBody<{ folder_path?: string; filename?: string }>(c);
-      if (!req || (req.folder_path === undefined && req.filename === undefined)) {
-        return writeError(c, 400, "folder_path or filename is required");
+      const req = await readJsonBody<{
+        folder_path?: string;
+        filename?: string;
+        title?: string;
+        source_ref?: string;
+      }>(c);
+      if (
+        !req ||
+        (req.folder_path === undefined &&
+          req.filename === undefined &&
+          req.title === undefined &&
+          req.source_ref === undefined)
+      ) {
+        return writeError(c, 400, "folder_path, filename, title, or source_ref is required");
       }
       try {
         const existing = await ctx.db.getArchiveFile(id);
         if (!existing) return writeError(c, 404, "archive file not found");
-        const nextFolder = req.folder_path !== undefined ? req.folder_path : existing.folder_path;
-        const nextFilename = req.filename !== undefined ? req.filename : existing.filename;
-        const updated = await ctx.db.updateArchiveFileLocation(id, nextFolder, nextFilename);
+        let updated = existing;
+        if (req.folder_path !== undefined || req.filename !== undefined) {
+          const nextFolder = req.folder_path !== undefined ? req.folder_path : existing.folder_path;
+          const nextFilename = req.filename !== undefined ? req.filename : existing.filename;
+          updated = await ctx.db.updateArchiveFileLocation(id, nextFolder, nextFilename);
+        }
+        if (req.title !== undefined || req.source_ref !== undefined) {
+          if (typeof ctx.db.updateArchiveFileMeta === "function") {
+            const metaUpdated = await ctx.db.updateArchiveFileMeta(id, {
+              title: req.title,
+              source_ref: req.source_ref,
+            });
+            if (metaUpdated) updated = metaUpdated;
+          } else if (req.title !== undefined && typeof ctx.db.updateArchiveFileTitle === "function") {
+            const titleUpdated = await ctx.db.updateArchiveFileTitle(id, req.title);
+            if (titleUpdated) updated = titleUpdated;
+          }
+        }
         return writeJson(c, 200, updated);
       } catch (error) {
         return mapArchiveError(c, error);

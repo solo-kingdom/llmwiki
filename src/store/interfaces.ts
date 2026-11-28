@@ -345,6 +345,10 @@ export interface ArchiveStore {
   updateArchiveFileLocation(id: string, folderPath: string, filename: string): Promise<ArchiveFile>;
   setArchiveFileIngestJobId?(id: string, jobId: string): Promise<void>;
   updateArchiveFileTitle?(id: string, title: string): Promise<ArchiveFile | null>;
+  updateArchiveFileMeta?(
+    id: string,
+    patch: { title?: string; source_ref?: string },
+  ): Promise<ArchiveFile | null>;
   mergeDuplicateArchiveFiles?(
     keepId: string,
     dropIds: string[],

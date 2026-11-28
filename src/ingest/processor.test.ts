@@ -313,5 +313,10 @@ describe("pipeline structure failures", () => {
     expect(remediationForCode("review_required")).toContain("review");
     expect(classifyPipelineError(new Error("analysis is empty; refusing generation and apply"))).toBe("invalid_page_plan");
     expect(remediationForCode("invalid_page_plan")).toContain("not attempted");
+    expect(
+      classifyPipelineError(
+        new Error("analysis tool loop failed; refusing blind generation: tool loop exceeded max rounds (16)"),
+      ),
+    ).toBe("analysis_failed");
   });
 });

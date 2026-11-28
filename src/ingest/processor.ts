@@ -936,7 +936,9 @@ export function classifyPipelineError(error: unknown): string {
   }
   if (message.includes("timeout") || message.includes("deadline exceeded")) return "llm_timeout";
   if (message.includes("unsupported format") || message.includes("unsupported file")) return "unsupported_format";
-  if (message.includes("analysis:") || message.includes("analyze")) return "analysis_failed";
+  if (message.includes("analysis:") || message.includes("analysis tool loop") || message.includes("analyze")) {
+    return "analysis_failed";
+  }
   if (message.includes("generation:") || message.includes("generate")) return "generation_failed";
   if (error instanceof NoWikiFilesWrittenError || message.includes("no wiki files written")) {
     return "no_wiki_files_written";

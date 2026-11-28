@@ -181,7 +181,7 @@ function defaultTaskInstructionZH(step: PromptStep): string {
 - create 必须写 reuse_reason；update 必须使用工具确认已有 path 并尽量带 document_id。优先 update 而非复制新页
 - 新增超过 3 个业务页或超过 2 个 concept 会转入 review，不要以凑数量为目标
 
-你可以使用 search 搜索、read 读取已有页面。对关键名称尝试别名、缩写、中英文变体或更宽泛关键词；工具失败或无结果时不得编造 existing-page 结论。分析必须紧扣源文档，不确定内容标为「待证实」。`;
+你可以使用 search 搜索、read 读取已有页面。可将多个核心实体的 search 合并到同一轮并行调用；仅对最相关的 2-5 个候选页执行 read（直接传 search 返回的完整路径或 document_id）。对关键名称可尝试别名、缩写或中英文变体，但探索必须控制在必要范围，不要逐个穷举文档中顺带提及的术语；信息足够后必须立即停止调用工具并输出围栏 JSON page plan。工具失败或无结果时不得编造 existing-page 结论。分析必须紧扣源文档，不确定内容标为「待证实」。`;
     case "generation":
       return `你是 wiki 页面生成器。严格按用户消息中的「已验证 page plan」生成 FILE 块，不得增删页面或改变 path/action/type/title。
 - 原始内容是事实依据；不要添加源中未支持的内容。generation 没有 read/search 能力，只能使用 analysis 已验证并提供的 existing-page 结果
@@ -291,7 +291,7 @@ function defaultTaskInstructionEN(step: PromptStep): string {
 - create requires reuse_reason; update requires a tool-verified existing path and should include document_id. Prefer updates over duplicate pages
 - More than 3 business pages or 2 concepts requires review. Filenames are stable readable canonical names without underscore word splitting
 
-Use search and read tools to verify existing pages. Try aliases, abbreviations, language variants, and broader terms. Never invent existing-page results after tool failure. Ground the plan in the source and mark uncertainty explicitly.`;
+Use search and read tools to verify existing pages. Batch searches for core entities in parallel and only read the 2-5 most relevant candidate pages (pass the full path or document_id returned by search). Keep tool exploration focused — do not exhaustively look up every incidental term; once you have enough context, stop calling tools and output the fenced JSON page plan immediately. Never invent existing-page results after tool failure. Ground the plan in the source and mark uncertainty explicitly.`;
     case "generation":
       return `You are a wiki generator. Follow the verified page plan exactly: do not add/remove pages or change path, action, type, or title.
 - The source is authoritative. Generation has no read/search tools; use only existing-page results verified and supplied by analysis

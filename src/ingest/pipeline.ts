@@ -569,7 +569,10 @@ ${content}
       try {
         const tools = await executor.listTools();
         if (tools.length > 0) {
-          const result = await runToolLoop(this.llmClient, executor, messages, tools, temperature, maxTokens, config);
+          const result = await runToolLoop(this.llmClient, executor, messages, tools, temperature, maxTokens, config, {
+            step,
+            recorder: this.recorder,
+          });
           recordLLMResponse(this.recorder, step, result, Date.now() - started);
           return this.ensureGenerationBlocks(step, result, messages, temperature, maxTokens);
         }
@@ -593,7 +596,10 @@ ${content}
       try {
         const tools = await this.mcpExecutor.listTools();
         if (tools.length > 0) {
-          const result = await runToolLoop(this.llmClient, this.mcpExecutor, messages, tools, temperature, maxTokens, mcpConfig);
+          const result = await runToolLoop(this.llmClient, this.mcpExecutor, messages, tools, temperature, maxTokens, mcpConfig, {
+            step,
+            recorder: this.recorder,
+          });
           recordLLMResponse(this.recorder, step, result, Date.now() - started);
           return this.ensureGenerationBlocks(step, result, messages, temperature, maxTokens);
         }

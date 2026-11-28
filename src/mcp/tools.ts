@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { buildArchivedDocument, buildReopenedDocument } from "../engine/archive.js";
-import { lintDocuments } from "../engine/lint.js";
 import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
 import { validateWikiWritePath } from "../engine/wiki_org.js";
 import { workspaceLayoutSummary } from "../engine/workspace_layout.js";
@@ -12,8 +11,8 @@ import {
   storeReferenceEntries,
 } from "../ingest/dbapply.js";
 import type { Store } from "../store/interfaces.js";
-import type { ArchiveFilter, Document, SearchOptions } from "../store/types.js";
-import { formatLintMcp } from "./local_tools.js";
+import type { Document } from "../store/types.js";
+import { executeLocalSearch, resolveDocumentByIdOrPath } from "./local_tools.js";
 import { registerArchiveTools } from "./archive_tools.js";
 import type { AuditDb } from "./server.js";
 import { McpServer } from "./server.js";
@@ -134,8 +133,7 @@ export function registerTools(
       if (!db) return "Error: database not connected";
       const requested = typeof args["path"] === "string" ? args["path"] : "";
       if (!requested) return "Error: path is required";
-      let doc = await db.getDocument(requested);
-      if (!doc) doc = await db.findDocumentByName(requested);
+      const doc = await resolveDocumentByIdOrPath(db, requested);
       if (!doc) return `Document not found: ${requested}`;
       return formatDocument(doc);
     },
@@ -314,88 +312,12 @@ async function searchToolHandler(
   args: Record<string, unknown>,
 ): Promise<string> {
   if (!db) return "Error: database not connected";
-  const mode = typeof args["mode"] === "string" && args["mode"] ? args["mode"] : "list";
-  const limit = typeof args["limit"] === "number" ? args["limit"] : 10;
-  let pathFilter = "";
-  const rawPath = typeof args["path"] === "string" ? args["path"] : "";
-  if (rawPath === "wiki" || rawPath === "wiki/") pathFilter = "wiki";
-  else if (rawPath === "sources" || rawPath === "raw/sources") pathFilter = "sources";
-
-  const strArray = (key: string): string[] =>
-    Array.isArray(args[key])
-      ? (args[key] as unknown[]).filter((v): v is string => typeof v === "string" && v.trim() !== "")
-      : [];
-  const rawArchived = typeof args["archived"] === "string" ? args["archived"].trim().toLowerCase() : "";
-  const archived: ArchiveFilter =
-    rawArchived === "include" || rawArchived === "only" || rawArchived === "exclude"
-      ? rawArchived
-      : "exclude";
-  const searchOptions: SearchOptions = {
-    page_types: strArray("types"),
-    experience_kinds: strArray("kinds"),
-    statuses: strArray("statuses"),
-    confidences: strArray("confidences"),
-    archived,
-  };
-
-  switch (mode) {
-    case "list": {
-      const docs = await db.listDocumentsFiltered({
-        page_types: searchOptions.page_types,
-        experience_kinds: searchOptions.experience_kinds,
-        statuses: searchOptions.statuses,
-        confidences: searchOptions.confidences,
-        archived,
-      });
-      if (docs.length === 0) return "No documents found.";
-      let output = `Found ${docs.length} documents:\n\n`;
-      for (const doc of docs) {
-        const meta = [doc.page_type, doc.experience_kind, doc.page_status, doc.confidence]
-          .filter(Boolean)
-          .join("/");
-        output += `- **${doc.title || doc.filename}** — \`${doc.relative_path}\` [${meta || doc.file_type}]\n`;
-      }
-      return output;
-    }
-    case "search": {
-      const query = typeof args["query"] === "string" ? args["query"] : "";
-      if (!query) return "Error: query is required for search mode";
-      const results = await db.searchChunks(query, limit, pathFilter, searchOptions);
-      if (results.length === 0) return `No results found for: ${query}`;
-      let output = `Found ${results.length} results for "${query}":\n\n`;
-      for (const result of results) {
-        output += `### ${result.title || result.filename} (${result.path}) [score: ${result.score.toFixed(2)}]\n`;
-        if (result.header_breadcrumb) output += `Section: ${result.header_breadcrumb}\n`;
-        if (result.symptoms && result.symptoms.length > 0) {
-          output += `Symptoms: ${result.symptoms.join(", ")}\n`;
-        }
-        output += `${result.content}\n\n---\n\n`;
-      }
-      return output;
-    }
-    case "references": {
-      const query = typeof args["query"] === "string" ? args["query"] : "";
-      if (!query) return "Error: query (document ID) is required for references mode";
-      const backlinks = await db.getBacklinks(query);
-      const forward = await db.getForwardReferences(query);
-      let output = `Backlinks (${backlinks.length}):\n`;
-      for (const link of backlinks) output += `  ← ${link.title} [${link.path}] (${link.reference_type})\n`;
-      output += `\nForward references (${forward.length}):\n`;
-      for (const link of forward) output += `  → ${link.title} [${link.path}] (${link.reference_type})\n`;
-      return output;
-    }
-    case "lint": {
-      if (!db) return "Error: database not connected";
-      const report = await lintDocuments(db);
-      return formatLintMcp(report);
-    }
-    default:
-      return `Unknown mode: ${mode}`;
-  }
+  return executeLocalSearch(workspace, db, args);
 }
 
 function formatDocument(doc: Document): string {
   let output = `# ${doc.title}\n`;
+  output += `Document ID: ${doc.id}\n`;
   output += `Path: ${doc.relative_path}\n`;
   output += `Type: ${doc.file_type}  Status: ${doc.status}  Version: ${doc.version}\n\n`;
   if (doc.tags.length > 0) output += `Tags: ${doc.tags.join(", ")}\n`;

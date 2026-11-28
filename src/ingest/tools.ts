@@ -4,6 +4,7 @@ import { isWriteToolName } from "../mcp/config.js";
 import {
   builtinToolDefinitionsForMode,
   executeLocalReadonlyTool,
+  resolveDocumentByIdOrPath,
   toolChoiceForMode,
 } from "../mcp/local_tools.js";
 import type { McpRouter } from "../mcp/router.js";
@@ -176,8 +177,7 @@ export class ChatWikiExecutor implements ToolExecutor {
     const value = args.path;
     const docPath = typeof value === "string" ? value.trim() : "";
     if (!docPath) return;
-    let doc = await this.db.getDocument(docPath);
-    if (!doc) doc = await this.db.findDocumentByName(docPath);
+    const doc = await resolveDocumentByIdOrPath(this.db, docPath);
     if (!doc || doc.source_kind !== "wiki") return;
     this.onToolRead(doc.id, doc.relative_path, doc.title);
   }

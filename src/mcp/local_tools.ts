@@ -7,7 +7,7 @@ import {
 import { lintDocuments, lintWorkspace } from "../engine/lint.js";
 import type { ToolLoopConfig } from "../llm/types.js";
 import type { Store } from "../store/interfaces.js";
-import type { ArchiveFilter, SearchOptions } from "../store/types.js";
+import type { ArchiveFilter, Document, SearchOptions } from "../store/types.js";
 import type { Tool } from "./types.js";
 import {
   executeLocalAudit,
@@ -147,17 +147,65 @@ export async function executeLocalReadonlyTool(
   }
 }
 
+const MAX_SEARCH_CHUNK_PREVIEW_CHARS = 1200;
+const DEFAULT_LIST_LIMIT = 50;
+
+export function formatSearchResultPath(dirPath: string, filename: string): string {
+  const cleanDir = dirPath.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+  const cleanFile = filename.trim().replace(/^\/+/, "");
+  if (!cleanDir) return cleanFile;
+  if (!cleanFile) return cleanDir;
+  if (cleanDir === cleanFile || cleanDir.endsWith(`/${cleanFile}`)) return cleanDir;
+  return `${cleanDir}/${cleanFile}`;
+}
+
+export async function resolveDocumentByIdOrPath(db: Store, requested: string): Promise<Document | null> {
+  const trimmed = requested.trim();
+  if (!trimmed) return null;
+  let doc = await db.getDocument(trimmed);
+  if (doc) return doc;
+  if (typeof db.getDocumentByRelativePath === "function") {
+    const normalized = trimmed.replace(/^\/+/, "");
+    if (normalized) {
+      doc = await db.getDocumentByRelativePath(normalized);
+      if (doc) return doc;
+      if (!normalized.startsWith("wiki/")) {
+        doc = await db.getDocumentByRelativePath(`wiki/${normalized}`);
+        if (doc) return doc;
+      }
+    }
+  }
+  return db.findDocumentByName(trimmed);
+}
+
+function normalizeListPathPrefix(rawPath: string): string {
+  const trimmed = rawPath.trim();
+  if (!trimmed || trimmed === "*" || trimmed === "/") return "";
+  return trimmed.replace(/^\/+/, "");
+}
+
+function truncateSearchChunk(content: string, maxChars = MAX_SEARCH_CHUNK_PREVIEW_CHARS): string {
+  const trimmed = content.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, maxChars)}…(truncated, use read for full content)`;
+}
+
 export async function executeLocalSearch(
   workspace: string,
   db: Store,
   args: Record<string, unknown>,
 ): Promise<string> {
   const mode = typeof args["mode"] === "string" && args["mode"] ? args["mode"] : "list";
-  const limit = typeof args["limit"] === "number" ? args["limit"] : 10;
+  const hasExplicitLimit = typeof args["limit"] === "number" && Number.isFinite(args["limit"]) && args["limit"] > 0;
+  const limit = hasExplicitLimit ? Math.floor(args["limit"] as number) : 10;
+  const listLimit = hasExplicitLimit ? Math.floor(args["limit"] as number) : DEFAULT_LIST_LIMIT;
   let pathFilter = "";
-  const rawPath = typeof args["path"] === "string" ? args["path"] : "";
-  if (rawPath === "wiki" || rawPath === "wiki/") pathFilter = "wiki";
-  else if (rawPath === "sources" || rawPath === "raw/sources") pathFilter = "sources";
+  const rawPath = typeof args["path"] === "string" ? args["path"].trim() : "";
+  if (rawPath === "wiki" || rawPath === "wiki/" || rawPath.startsWith("wiki/") || rawPath.startsWith("/wiki/")) {
+    pathFilter = "wiki";
+  } else if (rawPath === "sources" || rawPath === "raw/sources") {
+    pathFilter = "sources";
+  }
 
   const strArray = (key: string): string[] =>
     Array.isArray(args[key])
@@ -178,21 +226,32 @@ export async function executeLocalSearch(
 
   switch (mode) {
     case "list": {
-      const docs = await db.listDocumentsFiltered({
+      const allDocs = await db.listDocumentsFiltered({
         page_types: searchOptions.page_types,
         experience_kinds: searchOptions.experience_kinds,
         statuses: searchOptions.statuses,
         confidences: searchOptions.confidences,
         archived,
       });
-      if (docs.length === 0) return "No documents found.";
-      let output = `Found ${docs.length} documents:\n\n`;
-      for (const doc of docs) {
+      const prefix = normalizeListPathPrefix(rawPath);
+      const filtered = prefix
+        ? allDocs.filter((doc) => {
+            const rel = doc.relative_path.replace(/^\/+/, "");
+            return rel === prefix || rel.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`);
+          })
+        : allDocs;
+      if (filtered.length === 0) return "No documents found.";
+      const shown = filtered.slice(0, listLimit);
+      let output =
+        shown.length < filtered.length
+          ? `Found ${filtered.length} documents (showing first ${shown.length}; narrow with path or increase limit):\n\n`
+          : `Found ${filtered.length} documents:\n\n`;
+      for (const doc of shown) {
         const meta = [doc.page_type, doc.experience_kind, doc.page_status, doc.confidence]
           .filter(Boolean)
           .join("/");
         const archivedTag = doc.archived_at ? ` [archived:${doc.archived_at}]` : "";
-        output += `- **${doc.title || doc.filename}** — \`${doc.relative_path}\` [${meta || doc.file_type}]${archivedTag}\n`;
+        output += `- **${doc.title || doc.filename}** — \`${doc.relative_path}\` (id: \`${doc.id}\`) [${meta || doc.file_type}]${archivedTag}\n`;
       }
       return output;
     }
@@ -206,12 +265,14 @@ export async function executeLocalSearch(
         const meta = [result.page_type, result.experience_kind, result.page_status, result.confidence]
           .filter(Boolean)
           .join("/");
-        output += `### ${result.title || result.filename} (${result.path}) [${meta ? `${meta} · ` : ""}score: ${result.score.toFixed(2)}]\n`;
+        const fullPath = formatSearchResultPath(result.path, result.filename);
+        const idPart = result.document_id ? `, id: \`${result.document_id}\`` : "";
+        output += `### ${result.title || result.filename} (\`${fullPath}\`${idPart}) [${meta ? `${meta} · ` : ""}score: ${result.score.toFixed(2)}]\n`;
         if (result.header_breadcrumb) output += `Section: ${result.header_breadcrumb}\n`;
         if (result.symptoms && result.symptoms.length > 0) {
           output += `Symptoms: ${result.symptoms.join(", ")}\n`;
         }
-        output += `${result.content}\n\n---\n\n`;
+        output += `${truncateSearchChunk(result.content)}\n\n---\n\n`;
       }
       return output;
     }
@@ -249,10 +310,10 @@ export async function executeLocalReferences(
 export async function executeLocalRead(db: Store, args: Record<string, unknown>): Promise<string> {
   const requested = typeof args["path"] === "string" ? args["path"] : "";
   if (!requested.trim()) return "Error: path is required";
-  let doc = await db.getDocument(requested);
-  if (!doc) doc = await db.findDocumentByName(requested);
+  const doc = await resolveDocumentByIdOrPath(db, requested);
   if (!doc) return `Document not found: ${requested}`;
   let output = `# ${doc.title}\n`;
+  output += `Document ID: ${doc.id}\n`;
   output += `Path: ${doc.relative_path}\n`;
   output += `Type: ${doc.file_type}  Status: ${doc.status}  Version: ${doc.version}\n\n`;
   if (doc.tags.length > 0) output += `Tags: ${doc.tags.join(", ")}\n`;

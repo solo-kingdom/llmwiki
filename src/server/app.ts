@@ -173,6 +173,8 @@ export function createApp(deps: AppDeps): Hono {
   app.delete("/api/v1/folders", api.deleteFolder);
   app.get("/api/v1/documents", api.listDocuments);
   app.post("/api/v1/documents", api.createDocument);
+  app.post("/api/v1/documents/batch", api.batchDocuments);
+  app.post("/api/v1/documents/batch-get", api.batchGetDocuments);
   app.post("/api/v1/documents/bulk-delete", api.bulkDeleteDocuments);
   app.get("/api/v1/documents/by-path", api.getDocumentByPath);
   app.get("/api/v1/documents/:id", api.getDocument);
@@ -222,6 +224,11 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/api/v1/archives/folders/move", api.moveArchiveFolder);
   app.delete("/api/v1/archives/folders", api.deleteArchiveFolder);
   app.post("/api/v1/archives/files", api.uploadArchiveFiles);
+  app.post("/api/v1/archives/files/batch-get", api.batchGetArchiveFiles);
+  app.post("/api/v1/archives/files/bulk-move", api.bulkMoveArchiveFiles);
+  app.post("/api/v1/archives/files/bulk-delete", api.bulkDeleteArchiveFiles);
+  app.post("/api/v1/archives/files/bulk-ingest", api.bulkIngestArchiveFiles);
+  app.post("/api/v1/archives/files/bulk-link", api.bulkLinkArchiveFiles);
   app.get("/api/v1/archives/files/by-path", api.getArchiveFileByPath);
   app.get("/api/v1/archives/files/by-path/raw", api.getArchiveFileRawByPath);
   app.get("/api/v1/archives/files/:id", api.getArchiveFile);

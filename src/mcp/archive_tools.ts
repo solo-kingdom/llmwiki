@@ -4,6 +4,7 @@ import { SUPPORTED_INGEST_EXTENSIONS } from "../api/ingest_jobs.js";
 import { ArchiveStorageService, isTextEditableKind } from "../archive/storage.js";
 import { applyTextEdits, TextPatchError, type TextEdit } from "../engine/text_patch.js";
 import { recordRulesSnapshot } from "../ingest/processor.js";
+import { buildArchiveRelativePath, normalizeArchiveFolderPath, validateArchiveFilename } from "../store/postgres/archives.js";
 import type { Store } from "../store/interfaces.js";
 import type { FolderDeleteMode, IngestJob } from "../store/types.js";
 import type { Tool, ToolHandler } from "./types.js";
@@ -441,6 +442,149 @@ export function registerArchiveTools(
       await recordRulesSnapshot(db, job.id, workspace);
       logIngestJob(db, job, "queued", "mcp");
       return `Queued ingest job [${job.id}] from archive [${file.id}] ${file.relative_path}`;
+    },
+  );
+
+  register(
+    {
+      name: "archive_batch",
+      description:
+        "Batch archive operations: get, move, delete, ingest, link, or unlink multiple archive files.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["get", "move", "delete", "ingest", "link", "unlink"] },
+          ids: { type: "array", items: { type: "string" } },
+          paths: { type: "array", items: { type: "string" } },
+          items: { type: "array", items: { type: "object" } },
+          dry_run: { type: "boolean", default: false },
+          include_text: { type: "boolean", default: false },
+        },
+        required: ["action"],
+      },
+    },
+    async (args) => {
+      if (!db) return "Error: database not connected";
+      const action = typeof args["action"] === "string" ? args["action"].trim() : "";
+      const ids = Array.isArray(args["ids"]) ? (args["ids"] as unknown[]).map((v) => String(v).trim()).filter(Boolean) : [];
+      const paths = Array.isArray(args["paths"]) ? (args["paths"] as unknown[]).map((v) => String(v).trim()).filter(Boolean) : [];
+      const items = Array.isArray(args["items"]) ? (args["items"] as Array<Record<string, unknown>>) : [];
+
+      switch (action) {
+        case "get": {
+          const found: string[] = [];
+          const includeText = args["include_text"] === true;
+          for (const id of ids) {
+            const f = await db.getArchiveFile(id);
+            if (f) found.push(`- [${f.id}] ${f.relative_path} (${f.size}B)`);
+          }
+          for (const p of paths) {
+            const f = await db.getArchiveFileByRelativePath(p.replace(/^\/+/, ""));
+            if (f) {
+              let extra = "";
+              if (includeText && isTextEditableKind(f.kind) && f.size <= MAX_MCP_TEXT_READ_BYTES) {
+                extra = `\n${new TextDecoder().decode(await storage().readFullBytes(f))}`;
+              }
+              found.push(`- [${f.id}] ${f.relative_path} (${f.size}B)${extra}`);
+            }
+          }
+          return `Archive batch get (${found.length}):\n${found.join("\n")}`;
+        }
+        case "move": {
+          if (items.length === 0) return "Error: items is required for move";
+          const dryRun = args["dry_run"] === true;
+          const planned: Array<{ id: string; nextFolder: string; nextFilename: string; nextRel: string }> = [];
+          for (const item of items) {
+            const id = typeof item["id"] === "string" ? item["id"].trim() : "";
+            const rel = typeof item["path"] === "string" ? item["path"].trim().replace(/^\/+/, "") : "";
+            const f = id ? await db.getArchiveFile(id) : rel ? await db.getArchiveFileByRelativePath(rel) : null;
+            if (!f) return `Error: archive file not found (${id || rel})`;
+            const nextFolder =
+              typeof item["folder_path"] === "string" ? normalizeArchiveFolderPath(item["folder_path"]) : f.folder_path;
+            const nextFilename =
+              typeof item["filename"] === "string" ? validateArchiveFilename(item["filename"]) : f.filename;
+            planned.push({
+              id: f.id,
+              nextFolder,
+              nextFilename,
+              nextRel: buildArchiveRelativePath(nextFolder, nextFilename),
+            });
+          }
+          if (dryRun) return `Dry-run OK: ${planned.length} file(s) ready to move`;
+          for (const p of planned) {
+            await db.updateArchiveFileLocation(p.id, p.nextFolder, p.nextFilename);
+          }
+          return `Moved ${planned.length} archive file(s)`;
+        }
+        case "delete": {
+          let deleted = 0;
+          for (const id of ids) {
+            if (await storage().deleteFile(id)) deleted += 1;
+          }
+          for (const p of paths) {
+            const f = await db.getArchiveFileByRelativePath(p.replace(/^\/+/, ""));
+            if (f && (await storage().deleteFile(f.id))) deleted += 1;
+          }
+          return `Deleted ${deleted} archive file(s)`;
+        }
+        case "ingest": {
+          let queued = 0;
+          const allTargets = [
+            ...(await Promise.all(ids.map((id) => db.getArchiveFile(id)))),
+            ...(await Promise.all(paths.map((p) => db.getArchiveFileByRelativePath(p.replace(/^\/+/, ""))))),
+          ];
+          for (const f of allTargets) {
+            if (!f) continue;
+            const ext = path.extname(f.filename).toLowerCase();
+            if (!SUPPORTED_INGEST_EXTENSIONS.has(ext)) continue;
+            const job: IngestJob = {
+              id: "",
+              parent_job_id: "",
+              input_type: "upload",
+              source_path: f.relative_path,
+              source_ref: `archive:${f.relative_path}`,
+              archive_file_id: f.id,
+              status: "queued",
+              retries: 0,
+              max_retries: 3,
+              error: "",
+              error_code: "",
+              error_message: "",
+              missing_dependency: "",
+              remediation: "",
+              result_summary: "",
+              created_at: "",
+              updated_at: "",
+            };
+            await db.createIngestJob(job);
+            await recordRulesSnapshot(db, job.id, workspace);
+            logIngestJob(db, job, "queued", "mcp");
+            queued += 1;
+          }
+          return `Queued ${queued} ingest job(s)`;
+        }
+        case "link":
+        case "unlink": {
+          let processed = 0;
+          for (const item of items) {
+            const docId = typeof item["document_id"] === "string" ? item["document_id"].trim() : "";
+            const afId = typeof item["archive_file_id"] === "string" ? item["archive_file_id"].trim() : "";
+            const rel = typeof item["path"] === "string" ? item["path"].trim().replace(/^\/+/, "") : "";
+            if (!docId) continue;
+            const file = afId ? await db.getArchiveFile(afId) : rel ? await db.getArchiveFileByRelativePath(rel) : null;
+            if (!file) continue;
+            if (action === "link") {
+              await db.linkDocumentArchiveSource(docId, file.id, "", typeof item["relation"] === "string" ? item["relation"] : "manual_link");
+              processed += 1;
+            } else {
+              if (await db.unlinkDocumentArchiveSource(docId, file.id)) processed += 1;
+            }
+          }
+          return `${action === "link" ? "Linked" : "Unlinked"} ${processed} pair(s)`;
+        }
+        default:
+          return `Error: unsupported archive_batch action: ${action}`;
+      }
     },
   );
 }

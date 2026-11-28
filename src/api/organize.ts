@@ -1,5 +1,7 @@
+import path from "node:path";
 import type { Context } from "hono";
 import { buildDeterministicClusterPlan, detectOvercrowdedFolders } from "../engine/auto_cluster.js";
+import { folderPathFromWikiRelPath } from "../engine/wiki_org.js";
 import { readJsonBody, writeError, writeJson, type ApiContext } from "./context.js";
 
 export function organizeApi(ctx: ApiContext) {
@@ -27,7 +29,13 @@ export function organizeApi(ctx: ApiContext) {
         const plan = buildDeterministicClusterPlan(docs, folder, {
           minClusterSize: req.min_cluster_size ?? 3,
         });
-        return writeJson(c, 200, plan);
+        const batch_ops = plan.entries.map((entry) => ({
+          op: "move" as const,
+          id: entry.document_id,
+          target_folder: folderPathFromWikiRelPath(entry.new_path),
+          filename: path.posix.basename(entry.new_path),
+        }));
+        return writeJson(c, 200, { ...plan, batch_ops });
       } catch (error) {
         return writeError(c, 500, error instanceof Error ? error.message : String(error));
       }

@@ -71,17 +71,35 @@ curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/documents" \
 
 ## 改写页面
 
+局部改动优先使用 `PATCH /api/v1/documents/{id}/content`，并带上乐观锁（`expected_version`、`expected_content_hash` 或 `If-Match` 请求头，不匹配返回 `409 Conflict`）：
+
 ```bash
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents/{id}/content"    # {"content": "…"}
-# 本地改好 markdown，再整体回写
-curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/documents/{id}/content" \
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents/by-path?path=wiki/topic/page.md&include_content=false"
+curl -fsS "${AUTH[@]}" -X PATCH "$LLMWIKI_URL/api/v1/documents/{id}/content" \
   -H 'Content-Type: application/json' \
-  -d '{"content": "<完整 markdown，含 frontmatter>"}'
+  -d '{
+    "expected_version": 3,
+    "dry_run": false,
+    "edits": [
+      {"op": "replace", "old_text": "旧文本", "new_text": "新文本"},
+      {"op": "insert_after", "anchor": "## 摘要", "text": "\n补充条目"}
+    ]
+  }'
 ```
 
-`PUT /content` 是全量替换：只发片段会删掉其余内容。保留你没打算改的章节；实质内容变化时更新 `date`。
+`edits[]` 支持 `replace`（可选 `replace_all`）、`replace_lines`（1-based `start_line` / `end_line`）、`append`、`prepend`、`insert_after`。整篇重写走 `PUT /api/v1/documents/{id}/content`。`PATCH /api/v1/documents/{id}` 支持更新 `title` / `tags` / `date` / `metadata` 及乐观锁校验。
 
-不要用 `PATCH /api/v1/documents/{id}`（`title`、`tags`、`date`、`metadata`）：它只改索引行，文件 frontmatter 与索引会一直漂移，直到下次 reindex。改元数据统一走 `PUT /content`。
+## 批量操作与 `dry_run` 预演
+
+使用 `POST /api/v1/documents/batch`（单批上限 100）在单个 `change_set` 内原子执行混合操作（`create`、`replace`、`patch`、`update_meta`、`move`、`archive`、`reopen`、`delete`），合并链接重写并支持 `dry_run: true` 预检：
+
+```bash
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/documents/batch" \
+  -H 'Content-Type: application/json' \
+  -d '{"dry_run": true, "summary": "目录整理", "ops": [{"op": "move", "path": "wiki/a/p.md", "target_folder": "b"}]}'
+```
+
+批量读取走 `POST /api/v1/documents/batch-get`（`{"ids": [...], "paths": [...], "fields": "meta|content|outline"}`）。`POST /api/v1/organize/auto-cluster` 返回的 `batch_ops` 可直接传给 `POST /api/v1/documents/batch`。
 
 ## 合并重复页
 
@@ -93,7 +111,7 @@ curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/documents/{id}/content" \
 
 ## 移动/改名
 
-使用 `POST /api/v1/documents/{id}/move`（`{"target_folder": "AI工程/Agent", "filename": "new-name.md"}`）或 `POST /api/v1/folders/move`（`{"from_path": "旧目录", "to_path": "新目录"}`）。移动会保留 `document_id` 与历史链，并自动重写显式路径链接。可通过 `GET /api/v1/tree` 与 `POST/PATCH/DELETE /api/v1/folders` 管理目录树。
+使用 `POST /api/v1/documents/{id}/move`（`{"target_folder": "AI工程/Agent", "filename": "new-name.md"}`）或 `POST /api/v1/folders/move`（`{"from_path": "旧目录", "to_path": "新目录", "on_conflict": "fail|merge"}`）。`on_conflict: "merge"` 支持原子合并目录与子目录，同名文件冲突整事务回滚并返回 `409` 及 `conflicts[]`。移动会保留 `document_id` 与历史链，并自动重写显式路径链接。可通过 `GET /api/v1/tree` 与 `POST/PATCH/DELETE /api/v1/folders`（`exist_ok: true` 幂等建目录）管理目录树。
 
 ## 归档与重开（原地标记，区别于删除）
 

@@ -14,7 +14,12 @@ function mapFolderError(c: Context, error: unknown): Response {
   const message = error instanceof Error ? error.message : String(error);
   if (error instanceof FolderValidationError) return writeError(c, 400, message);
   if (error instanceof FolderNotFoundError) return writeError(c, 404, message);
-  if (error instanceof FolderConflictError) return writeError(c, 409, message);
+  if (error instanceof FolderConflictError) {
+    return writeJson(c, 409, {
+      error: message,
+      ...(error.conflicts?.length ? { conflicts: error.conflicts } : {}),
+    });
+  }
   return writeError(c, 500, message);
 }
 
@@ -71,6 +76,7 @@ export function foldersApi(ctx: ApiContext) {
         display_name?: string;
         description?: string;
         sort_order?: number;
+        exist_ok?: boolean;
       }>(c);
       if (!req || !req.path) return writeError(c, 400, "path is required");
       try {
@@ -91,6 +97,10 @@ export function foldersApi(ctx: ApiContext) {
         });
         return writeJson(c, 201, folder);
       } catch (error) {
+        if (req.exist_ok && error instanceof FolderConflictError) {
+          const existing = await ctx.db.getFolder(req.path);
+          if (existing) return writeJson(c, 200, existing);
+        }
         return mapFolderError(c, error);
       }
     },
@@ -117,12 +127,18 @@ export function foldersApi(ctx: ApiContext) {
     },
 
     async moveFolder(c: Context): Promise<Response> {
-      const req = await readJsonBody<{ from_path?: string; to_path?: string }>(c);
+      const req = await readJsonBody<{ from_path?: string; to_path?: string; on_conflict?: string }>(c);
       if (!req || !req.from_path || !req.to_path) {
         return writeError(c, 400, "from_path and to_path are required");
       }
+      const rawConflict = (req.on_conflict ?? "fail").trim().toLowerCase();
+      if (rawConflict !== "fail" && rawConflict !== "merge") {
+        return writeError(c, 400, "on_conflict must be fail or merge");
+      }
       try {
-        const result = await ctx.db.moveFolder(req.from_path, req.to_path, "api");
+        const result = await ctx.db.moveFolder(req.from_path, req.to_path, "api", {
+          onConflict: rawConflict as "fail" | "merge",
+        });
         const toRebuild = [...new Set([...result.moved_doc_paths, ...result.updated_link_paths])];
         if (toRebuild.length > 0) {
           await rebuildReferences(ctx.db, toRebuild).catch(() => undefined);

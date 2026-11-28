@@ -40,7 +40,10 @@ export class FolderNotFoundError extends Error {
 }
 
 export class FolderConflictError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    public readonly conflicts?: string[],
+  ) {
     super(message);
     this.name = "FolderConflictError";
   }
@@ -528,9 +531,15 @@ export function foldersRepo(pool: Pool): FolderStore {
       });
     },
 
-    async moveFolder(fromPath, toPath, actor = "api"): Promise<MoveFolderResult> {
+    async moveFolder(
+      fromPath,
+      toPath,
+      actor = "api",
+      options: { onConflict?: "fail" | "merge" } = {},
+    ): Promise<MoveFolderResult> {
       const from = validateFolderOrThrow(fromPath);
       const to = validateFolderOrThrow(toPath);
+      const onConflict = options.onConflict ?? "fail";
       if (from === to) {
         throw new FolderValidationError("source and target folder paths are identical");
       }
@@ -554,14 +563,15 @@ export function foldersRepo(pool: Pool): FolderStore {
         }
         const movingFolders = folderRows.map(scanFolder);
 
-        // Ensure target folder and its descendants don't conflict with existing folders
-        const targetConflict = await queryOne(
-          client,
-          `SELECT path FROM wiki_folders WHERE path = $1 OR path LIKE $2 LIMIT 1`,
-          [to, `${to}/%`],
-        );
-        if (targetConflict) {
-          throw new FolderConflictError(`target folder already exists: ${asString(targetConflict[0])}`);
+        if (onConflict === "fail") {
+          const targetConflict = await queryOne(
+            client,
+            `SELECT path FROM wiki_folders WHERE path = $1 OR path LIKE $2 LIMIT 1`,
+            [to, `${to}/%`],
+          );
+          if (targetConflict) {
+            throw new FolderConflictError(`target folder already exists: ${asString(targetConflict[0])}`);
+          }
         }
 
         const docRows = await queryRows(
@@ -575,17 +585,37 @@ export function foldersRepo(pool: Pool): FolderStore {
         );
         const movingDocs = docRows.map(scanFullDocument);
 
+        if (onConflict === "merge" && movingDocs.length > 0) {
+          const targetRelPaths = movingDocs.map((doc) => {
+            const tail = doc.relative_path.slice(`wiki/${from}/`.length);
+            return `wiki/${to}/${tail}`;
+          });
+          const conflictRows = await queryRows<[string]>(
+            client,
+            `SELECT relative_path FROM documents
+             WHERE relative_path = ANY($1::text[]) AND COALESCE(deleted_at, '') = ''`,
+            [targetRelPaths],
+          );
+          if (conflictRows.length > 0) {
+            const conflicts = conflictRows.map((r) => asString(r[0]));
+            throw new FolderConflictError(
+              `target folder merge conflict on ${conflicts.length} document(s)`,
+              conflicts,
+            );
+          }
+        }
+
         const parentOfTo = to.includes("/") ? to.slice(0, to.lastIndexOf("/")) : "";
         if (parentOfTo) await ensureFolderAncestorsTx(client, parentOfTo);
 
-        // Insert new folder rows (preserving metadata) then delete old folder rows
         for (const folder of movingFolders) {
           const suffix = folder.path.slice(from.length);
           const nextPath = `${to}${suffix}`;
           validateFolderOrThrow(nextPath);
           await client.query(
             `INSERT INTO wiki_folders (path, display_name, description, sort_order, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, ${NOW_TEXT})`,
+             VALUES ($1, $2, $3, $4, $5, ${NOW_TEXT})
+             ON CONFLICT (path) DO NOTHING`,
             [nextPath, folder.display_name, folder.description, folder.sort_order, toDbUtcTimestamp(folder.created_at)],
           );
         }

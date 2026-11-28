@@ -17,19 +17,21 @@ metadata:
 ```bash
 curl -fsS -G "${AUTH[@]}" "$LLMWIKI_URL/api/v1/search" \
   --data-urlencode "q=注意力机制" \
+  --data-urlencode "scope=wiki" \
   --data-urlencode "limit=10" \
+  --data-urlencode "offset=0" \
   --data-urlencode "filter=wiki" \
+  --data-urlencode "match=fuzzy" \
   --data-urlencode "types=concept"
 ```
 
 - `q` 必填，空值返回 `400`。
-- `filter=wiki`（默认）只查 wiki 页面，并跳过隐藏目录（`wiki/sources/`）。
-- `filter=sources` 只查原始材料（`raw/…`、摄取原件）。
-- 其他值表示全库检索。
-- `types` 可重复（`types=concept&types=entity&types=experience`），按页面类型缩小范围；还支持 `kinds`（`practice|pitfall|pattern`）、`statuses`（`draft|validated|deprecated`）、`confidences`（`high|medium|low`）、`archived`（`exclude|include|only`，默认排除已归档）、`review_overdue=true`。
-- 检索会匹配 `aliases` 与 `symptoms`（现象检索词）；排障或相似任务预检时，先用现象/报错词查 `types=experience`，命中 `pitfall`/`pattern` 时先看「最短判别」与「误判与弯路」。
-- 结果是片段：`{document_id, content, header_breadcrumb, chunk_index, filename, title, path, file_type, score, page_type, confidence, page_status, experience_kind, last_verified, review_after, symptoms}`。
-- `path` 是**目录**（前后都带斜杠，如 `/wiki/concepts/`），引用页面时用 `path + filename` → `wiki/concepts/attention.md`。
+- `scope`（`wiki|archives|all`，默认 `wiki`）：可只查 Wiki、只查档案（返回 `archive_results` / `archive_total`）或并行联合检索。
+- `filter=wiki`（默认）只查 wiki 页面并跳过 `wiki/sources/`；`filter=sources` 只查原始材料；`filter=wiki/<子目录>` 或 `folder=<子目录>` 按目录前缀缩小范围。
+- `match`（`fuzzy|all_terms|phrase|regex`，默认 `fuzzy`）与 `case_sensitive=true|false`：`phrase` 与 `regex`（非法正则返回 `400`）会返回 `matched_lines: [{line, text}]`。
+- 富筛选与排序：`types`、`kinds`、`statuses`、`confidences`、`tags` + `tag_mode=any|all`、`updated_after`、`updated_before`、`archived`（`exclude|include|only`）、`review_overdue=true`、`sort`（`relevance|updated_desc|updated_asc`）、`group_by`（`document|chunk`，默认按文档去重）。
+- 分页与可观测降级：`limit`（1–100）、`offset`、`total`、`has_more`，以及 `effective_mode` 与 `degraded_reason`（hybrid 降级为 keyword 时透出原因）。
+- 检索会匹配 `aliases`、`symptoms` 与 `tags`，结果直接附带 `relative_path`、`tags`、`updated_at`、`snippet` 及可选 `matched_lines`。
 
 会影响结论的检索特性：
 
@@ -40,12 +42,14 @@ curl -fsS -G "${AUTH[@]}" "$LLMWIKI_URL/api/v1/search" \
 ## 读页面
 
 ```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents/by-path?path=wiki/concepts/attention.md&include_content=false"
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents/{id}/content"
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents?source_kind=wiki&exclude_hidden=true"
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents?source_kind=wiki&types=entity&types=concept"
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/documents/batch-get" \
+  -H 'Content-Type: application/json' -d '{"paths":["wiki/concepts/attention.md"],"fields":"outline"}'
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents?source_kind=wiki&exclude_hidden=true&paginated=true&limit=50"
 ```
 
-`GET /api/v1/documents` 返回整行（含 `content`）；只要正文时用 `/documents/{id}/content`。枚举时加 `exclude_hidden=true`，除非你确实要 `wiki/sources/` 下的溯源页。
+`GET /api/v1/documents/by-path` 支持按逻辑路径直查（`include_content=false` 只取元信息）；`POST /api/v1/documents/batch-get` 批量读取多个页面（`fields=meta|content|outline`）；`GET /api/v1/documents` 支持 `folder`、`tags`、`tag_mode`、`updated_after`、`updated_before`、`limit`、`offset`、`paginated=true`。
 
 ## 结构与关系
 

@@ -16,19 +16,21 @@ Answer from the vault, never from memory. `$LLMWIKI_URL` and the optional auth h
 ```bash
 curl -fsS -G "${AUTH[@]}" "$LLMWIKI_URL/api/v1/search" \
   --data-urlencode "q=attention mechanism" \
+  --data-urlencode "scope=wiki" \
   --data-urlencode "limit=10" \
+  --data-urlencode "offset=0" \
   --data-urlencode "filter=wiki" \
+  --data-urlencode "match=fuzzy" \
   --data-urlencode "types=concept"
 ```
 
 - `q` is required; an empty `q` returns `400`.
-- `filter=wiki` (default) searches wiki pages only and skips hidden dirs (`wiki/sources/`).
-- `filter=sources` searches source material (`raw/…`, ingested originals).
-- `filter` with any other value searches everything.
-- `types` is repeatable (`types=concept&types=entity&types=experience`) and narrows by page type; also supports `kinds` (`practice|pitfall|pattern`), `statuses` (`draft|validated|deprecated`), `confidences` (`high|medium|low`), `archived` (`exclude|include|only`, default `exclude`), and `review_overdue=true`.
-- Search also matches `aliases` and `symptoms`. For troubleshooting or pre-task checks, query `types=experience` by error/symptom text first and surface shortest discrimination and known misconceptions.
-- Results are chunks: `{document_id, content, header_breadcrumb, chunk_index, filename, title, path, file_type, score, page_type, confidence, page_status, experience_kind, last_verified, review_after, symptoms}`.
-- `path` is the **directory** with leading and trailing slash (`/wiki/concepts/`). The page path you cite is `path + filename` → `wiki/concepts/attention.md`.
+- `scope` (`wiki|archives|all`, default `wiki`): searches Wiki pages, raw Archives (`archive_results` / `archive_total`), or both in parallel.
+- `filter=wiki` (default) searches wiki pages only and skips hidden dirs (`wiki/sources/`); `filter=sources` searches source material; `filter=wiki/<subpath>` or `folder=<subpath>` narrows to a folder prefix.
+- `match` (`fuzzy|all_terms|phrase|regex`, default `fuzzy`) and `case_sensitive=true|false`: exact `phrase` and `regex` (invalid regex returns `400`) return `matched_lines: [{line, text}]`.
+- Rich filters: `types`, `kinds`, `statuses`, `confidences`, `tags` + `tag_mode=any|all`, `updated_after`, `updated_before`, `archived` (`exclude|include|only`, default `exclude`), `review_overdue=true`, `sort` (`relevance|updated_desc|updated_asc`), `group_by` (`document|chunk`, default `document`).
+- Pagination & mode observability: `limit` (1–100), `offset`, `total`, `has_more`, plus `effective_mode` and `degraded_reason` when hybrid falls back to keyword.
+- Search also matches `aliases`, `symptoms`, and `tags`. Each chunk carries `relative_path`, `tags`, `updated_at`, `snippet`, and optional `matched_lines`.
 
 Search behaviour that matters:
 
@@ -39,12 +41,14 @@ Search behaviour that matters:
 ## Read pages
 
 ```bash
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents/by-path?path=wiki/concepts/attention.md&include_content=false"
 curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents/{id}/content"
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents?source_kind=wiki&exclude_hidden=true"
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents?source_kind=wiki&types=entity&types=concept"
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/documents/batch-get" \
+  -H 'Content-Type: application/json' -d '{"paths":["wiki/concepts/attention.md"],"fields":"outline"}'
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents?source_kind=wiki&exclude_hidden=true&paginated=true&limit=50"
 ```
 
-`GET /api/v1/documents` returns full rows (including `content`) — prefer `/documents/{id}/content` when you only need the body. Enumerate with `exclude_hidden=true` unless you specifically want `wiki/sources/` provenance pages.
+`GET /api/v1/documents/by-path` addresses directly by path (`include_content=false` omits body). `POST /api/v1/documents/batch-get` fetches multiple pages (`fields=meta|content|outline`). `GET /api/v1/documents` supports `folder`, `tags`, `tag_mode`, `updated_after`, `updated_before`, `limit`, `offset`, `paginated=true`.
 
 ## Structure and relations
 

@@ -290,7 +290,7 @@ export function documentsRepo(pool: Pool): DocumentStore {
           COALESCE(confidence, ''), COALESCE(page_status, ''), COALESCE(experience_kind, ''),
           COALESCE(last_verified, ''), COALESCE(review_after, ''), COALESCE(archived_at, ''),
           COALESCE(archive_reason, ''), COALESCE(superseded_by, ''),
-          COALESCE(aliases, '[]'), COALESCE(symptoms, '[]')
+          COALESCE(aliases, '[]'), COALESCE(symptoms, '[]'), COALESCE(tags, '[]')
         FROM documents WHERE status != 'failed' AND COALESCE(deleted_at, '') = '' `;
       const args: unknown[] = [];
 
@@ -308,6 +308,13 @@ export function documentsRepo(pool: Pool): DocumentStore {
       if (filter.exclude_hidden) {
         sql += `AND NOT (${hiddenSubdirsWhere("relative_path")}) `;
       }
+      if (filter.folder && filter.folder.trim()) {
+        const cleanFolder = filter.folder.trim().replace(/^\/+|\/+$/g, "").replace(/^wiki\//, "");
+        if (cleanFolder) {
+          args.push(`wiki/${cleanFolder}/%`);
+          sql += `AND relative_path LIKE $${args.length} `;
+        }
+      }
       if (filter.experience_kinds?.length) {
         args.push(filter.experience_kinds);
         sql += `AND experience_kind = ANY($${args.length}::text[]) `;
@@ -324,12 +331,24 @@ export function documentsRepo(pool: Pool): DocumentStore {
         args.push(filter.today || todayIsoDate());
         sql += `AND COALESCE(archived_at, '') = '' AND COALESCE(review_after, '') != '' AND review_after < $${args.length} `;
       }
+      if (filter.updated_after && filter.updated_after.trim()) {
+        args.push(filter.updated_after.trim());
+        sql += `AND COALESCE(updated_at, '') >= $${args.length} `;
+      }
+      if (filter.updated_before && filter.updated_before.trim()) {
+        args.push(filter.updated_before.trim());
+        sql += `AND COALESCE(updated_at, '') <= $${args.length} `;
+      }
       sql += "ORDER BY path, filename";
+
+      const filterTags = (filter.tags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean);
+      const tagMode = filter.tag_mode === "all" ? "all" : "any";
 
       const rows = await queryRows(pool, sql, args);
       const docs: Document[] = [];
       for (const row of rows) {
         const storedType = asString(row[9]);
+        const tags = parseStringArrayJson(asString(row[20]));
         const doc: Document = {
           id: asString(row[0]),
           filename: asString(row[1]),
@@ -345,7 +364,7 @@ export function documentsRepo(pool: Pool): DocumentStore {
           file_size: 0,
           status: "",
           content: "",
-          tags: [],
+          tags,
           date: "",
           metadata: "",
           error_message: "",
@@ -368,7 +387,22 @@ export function documentsRepo(pool: Pool): DocumentStore {
         };
         doc.page_type = storedType || wikiPageTypeFromPaths(doc.relative_path, doc.path);
         if (filter.page_types?.length && !filter.page_types.includes(doc.page_type)) continue;
+        if (filterTags.length > 0) {
+          const docTagSet = new Set(tags.map((t) => t.trim().toLowerCase()));
+          const matched =
+            tagMode === "all"
+              ? filterTags.every((t) => docTagSet.has(t))
+              : filterTags.some((t) => docTagSet.has(t));
+          if (!matched) continue;
+        }
         docs.push(doc);
+      }
+
+      const offset = typeof filter.offset === "number" && Number.isFinite(filter.offset) && filter.offset > 0 ? Math.floor(filter.offset) : 0;
+      const hasLimit = typeof filter.limit === "number" && Number.isFinite(filter.limit) && filter.limit > 0;
+      if (offset > 0 || hasLimit) {
+        const end = hasLimit ? offset + Math.floor(filter.limit!) : undefined;
+        return docs.slice(offset, end);
       }
       return docs;
     },

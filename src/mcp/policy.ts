@@ -52,18 +52,25 @@ export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
       "ping",
       "archive_list",
       "archive_read",
+      "archive_search",
+      "batch_read",
     ]),
     writeTools: new Set([
       "write",
       "delete",
+      "move",
+      "folder",
       "archive",
       "reopen",
+      "batch_write",
       "archive_mkdir",
       "archive_upload",
+      "archive_patch",
       "archive_move",
       "archive_delete",
       "archive_link",
       "archive_ingest",
+      "archive_batch",
     ]),
   };
 }
@@ -71,7 +78,7 @@ export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
 export function toolPolicyAllows(policy: ToolPolicy, name: string): boolean {
   if (policy.readonlyTools.has(name)) return true;
   if (policy.writeTools.has(name)) return policy.allowWriteTools;
-  return true;
+  return false;
 }
 
 export function toolPolicyFilter(policy: ToolPolicy, tools: Tool[]): Tool[] {

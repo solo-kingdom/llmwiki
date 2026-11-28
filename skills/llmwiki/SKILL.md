@@ -50,15 +50,15 @@ If a file-based `llm-wiki` skill is also installed, the two cover different targ
 | System | `GET /api/v1/health` | Health check (public) |
 | Workspace | `GET /api/v1/workspace` | Vault layout, counts, page types, directories |
 | Index | `POST /api/v1/reindex` | Rebuild derived index from store/vault |
-| Tree & Folders | `GET /api/v1/tree`, `GET/POST/PATCH/DELETE /api/v1/folders`, `POST /api/v1/folders/move` | Topic tree and folder management |
-| Documents | `GET/POST /api/v1/documents`, `GET/PATCH/DELETE /api/v1/documents/:id` | List/create/read/update metadata/delete pages |
-| Content | `GET/PUT /api/v1/documents/:id/content` | Read or replace full markdown body (including frontmatter) |
-| Lifecycle | `POST /api/v1/documents/:id/{move,archive,reopen}`, `POST /api/v1/documents/bulk-delete` | Move, archive, reopen, bulk delete |
-| Search | `GET /api/v1/search?q=&mode=&limit=` | Full-text / hybrid search across chunks & metadata |
+| Tree & Folders | `GET /api/v1/tree`, `GET/POST/PATCH/DELETE /api/v1/folders`, `POST /api/v1/folders/move` | Topic tree, idempotent `exist_ok`, folder move/merge (`on_conflict=merge`) |
+| Documents | `GET/POST /api/v1/documents`, `GET /api/v1/documents/by-path`, `GET/PATCH/DELETE /api/v1/documents/:id` | List (with `folder`/`tags`/`updated_*`/`paginated`), path addressing, CRUD |
+| Content | `GET/PUT/PATCH /api/v1/documents/:id/content` | Read, full replace, or atomic `edits[]` patch (`dry_run` + optimistic lock) |
+| Lifecycle & Batch | `POST /api/v1/documents/:id/{move,archive,reopen}`, `POST /api/v1/documents/{batch,batch-get,bulk-delete}` | Atomic multi-op `batch` (single `change_set`, `dry_run`) & `batch-get` |
+| Search | `GET /api/v1/search?q=&scope=&mode=&match=&limit=` | Unified Wiki/Archive/All search (`fuzzy\|all_terms\|phrase\|regex`, pagination, `effective_mode`) |
 | Graph & Lint | `GET /api/v1/graph`, `GET /api/v1/graph/{backlinks/:id,forward/:id,uncited,stale}`, `GET /api/v1/lint` | Knowledge graph and vault health checks |
 | Ingest | `GET/POST /api/v1/ingest/jobs*`, `GET/POST /api/v1/ingest/sessions*`, `GET/POST /api/v1/ingest/reviews*` | Ingest jobs, interactive sessions, review plans |
 | History | `GET /api/v1/history?kind=&from=&to=&q=&limit=&offset=`, `GET /api/v1/history/:id{,/diff}`, `POST /api/v1/history/:id/rollback`, `GET /api/v1/pages/history`, `POST /api/v1/revisions/:id/restore` | Change sets, diffs, rollback, revision restore |
-| Archives | `GET /api/v1/archives/tree`, `GET /api/v1/archives/search`, `POST/PATCH/DELETE /api/v1/archives/folders`, `POST /api/v1/archives/folders/move`, `POST /api/v1/archives/files`, `GET /api/v1/archives/files/by-path{,/raw}`, `GET/PATCH/DELETE /api/v1/archives/files/:id`, `GET /api/v1/archives/files/:id/raw`, `PUT /api/v1/archives/files/:id/content`, `POST /api/v1/archives/files/:id/ingest`, `POST/DELETE /api/v1/documents/:id/archive-sources` | File tree & raw file storage (md/html/image/video/etc.), content search, Range streaming, Wiki linking & ingest |
+| Archives | `GET /api/v1/archives/tree`, `GET /api/v1/archives/search`, `POST/PATCH/DELETE /api/v1/archives/folders`, `POST /api/v1/archives/folders/move`, `POST /api/v1/archives/files`, `GET /api/v1/archives/files/by-path{,/raw}`, `GET/PATCH/DELETE /api/v1/archives/files/:id`, `PUT/PATCH /api/v1/archives/files/:id/content`, `POST /api/v1/archives/files/{batch-get,bulk-move,bulk-delete,bulk-ingest,bulk-link}`, `POST /api/v1/archives/files/:id/ingest`, `POST/DELETE /api/v1/documents/:id/archive-sources` | File tree & raw storage, JSON/multipart upload, `PATCH /content`, bulk ops, Range streaming, Wiki linking & ingest |
 | Settings | `GET/PUT /api/v1/settings`, `POST /api/v1/settings/storage/check`, `GET/PUT /api/v1/workspace/rule-files` | Runtime settings (`api_token` and S3 credentials blocked for API Keys) and `purpose.md` / `rules.md` |
 
 ## Vault model
@@ -90,7 +90,7 @@ Read the stage skill before starting its task; each one lists the exact payloads
 ## Hard rules
 
 1. **Read before you write.** `GET /api/v1/documents?source_kind=wiki` and the search endpoint tell you what exists; never create a page that duplicates an existing one without merging.
-2. **One page, one truth.** Content edits go to `PUT /api/v1/documents/{id}/content` with the full markdown body including frontmatter.
+2. **One page, one truth.** Prefer `PATCH /api/v1/documents/{id}/content` (`edits[]` + `expected_version`/`expected_content_hash` or `If-Match`) for targeted edits; use `PUT /api/v1/documents/{id}/content` for full rewrites, and `POST /api/v1/documents/batch` (`dry_run: true` first) for multi-page changes.
 3. **Frontmatter is mandatory** on wiki pages: `title`, `date` (`YYYY-MM-DD`), `type`; `status` is required for `experience`/`ledger`; include `confidence` (`high|medium|low`) and `sources`.
 4. **No silent inventing.** If the vault lacks the evidence, say so and ingest a source instead of guessing; never present `draft`, `deprecated`, or archived pages as current truth.
 5. **Confirm destructive changes.** Confirm with the user before deleting, overwriting, or bulk-modifying pages.

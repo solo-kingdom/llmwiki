@@ -11,6 +11,15 @@ import {
   parseFrontmatter,
   upsertFrontmatterFields,
 } from "../engine/frontmatter.js";
+import { CanonicalPageConflictError } from "../engine/canonical.js";
+import { applyTextEdits, TextPatchError, type TextEdit } from "../engine/text_patch.js";
+import {
+  BatchOperationError,
+  executeWikiBatch,
+  MAX_BATCH_GET,
+  type BatchDocOp,
+} from "../engine/wiki_batch.js";
+import { extractMarkdownOutline } from "../mcp/local_tools.js";
 import {
   isValidConfidence,
   isValidExperienceKind,
@@ -54,6 +63,15 @@ interface CreateDocumentRequest {
 
 interface UpdateContentRequest {
   content?: string;
+  expected_version?: number;
+  expected_content_hash?: string;
+}
+
+interface PatchContentRequest {
+  edits?: TextEdit[];
+  expected_version?: number;
+  expected_content_hash?: string;
+  dry_run?: boolean;
 }
 
 interface UpdateMetadataRequest {
@@ -69,12 +87,16 @@ interface UpdateMetadataRequest {
   review_after?: string;
   aliases?: string[];
   symptoms?: string[];
+  expected_version?: number;
+  expected_content_hash?: string;
 }
 
 interface ArchiveDocumentRequest {
   reason?: string;
   superseded_by?: string;
   date?: string;
+  expected_version?: number;
+  expected_content_hash?: string;
 }
 
 interface ReopenDocumentRequest {
@@ -83,6 +105,53 @@ interface ReopenDocumentRequest {
   last_verified?: string;
   review_after?: string;
   date?: string;
+  expected_version?: number;
+  expected_content_hash?: string;
+}
+
+function parseIfMatch(header?: string): string {
+  if (!header) return "";
+  let cleaned = header.trim();
+  if (cleaned.startsWith("W/")) cleaned = cleaned.slice(2).trim();
+  if (cleaned.startsWith('"') && cleaned.endsWith('"') && cleaned.length >= 2) {
+    cleaned = cleaned.slice(1, -1);
+  }
+  return cleaned.trim();
+}
+
+function checkDocumentConcurrency(
+  c: Context,
+  doc: Document,
+  expectedVersion?: number,
+  expectedHash?: string,
+): Response | null {
+  let targetVersion = expectedVersion;
+  let targetHash = (expectedHash ?? "").trim();
+  const ifMatch = parseIfMatch(c.req.header("if-match"));
+  if (ifMatch && ifMatch !== "*") {
+    if (/^\d+$/.test(ifMatch)) {
+      if (targetVersion === undefined) targetVersion = Number.parseInt(ifMatch, 10);
+    } else if (!targetHash) {
+      targetHash = ifMatch;
+    }
+  }
+  if (targetVersion !== undefined && doc.version !== targetVersion) {
+    return writeJson(c, 409, {
+      error: "document version conflict",
+      code: "VERSION_CONFLICT",
+      current_version: doc.version,
+      current_content_hash: doc.content_hash,
+    });
+  }
+  if (targetHash && doc.content_hash !== targetHash) {
+    return writeJson(c, 409, {
+      error: "document content hash conflict",
+      code: "VERSION_CONFLICT",
+      current_version: doc.version,
+      current_content_hash: doc.content_hash,
+    });
+  }
+  return null;
 }
 
 interface MoveDocumentRequest {
@@ -114,6 +183,17 @@ export function documentsApi(ctx: ApiContext) {
           : c.req.query("include_archived") === "true"
             ? "include"
             : "exclude";
+      const folder = (c.req.query("folder") ?? "").trim();
+      const tags = c.req.queries("tags") ?? c.req.queries("tag") ?? [];
+      const tagMode = (c.req.query("tag_mode") ?? "").trim().toLowerCase() === "all" ? "all" : "any";
+      const updatedAfter = (c.req.query("updated_after") ?? "").trim();
+      const updatedBefore = (c.req.query("updated_before") ?? "").trim();
+      const paginated = c.req.query("paginated") === "true";
+      const rawLimit = Number.parseInt(c.req.query("limit") ?? "", 10);
+      const rawOffset = Number.parseInt(c.req.query("offset") ?? "", 10);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(500, rawLimit) : undefined;
+      const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+
       const filter = {
         source_kind: c.req.query("source_kind") ?? "",
         page_types: c.req.queries("types") ?? c.req.queries("type") ?? [],
@@ -123,10 +203,84 @@ export function documentsApi(ctx: ApiContext) {
         confidences: c.req.queries("confidences") ?? c.req.queries("confidence") ?? [],
         archived,
         review_overdue: c.req.query("review_overdue") === "true",
+        ...(folder ? { folder } : {}),
+        ...(tags.length > 0 ? { tags, tag_mode: tagMode as "any" | "all" } : {}),
+        ...(updatedAfter ? { updated_after: updatedAfter } : {}),
+        ...(updatedBefore ? { updated_before: updatedBefore } : {}),
+        ...(!paginated && limit !== undefined ? { limit } : {}),
+        ...(!paginated && offset > 0 ? { offset } : {}),
       };
       try {
-        const docs = await ctx.db.listDocumentsFiltered(filter);
+        let docs = await ctx.db.listDocumentsFiltered(filter);
+        // Apply folder/tag/date filtering in-memory too so mock stores in tests stay consistent
+        if (folder) {
+          const cleanFolder = folder.replace(/^\/+|\/+$/g, "").replace(/^wiki\//, "");
+          if (cleanFolder) {
+            docs = docs.filter((d) => d.relative_path.startsWith(`wiki/${cleanFolder}/`));
+          }
+        }
+        if (tags.length > 0) {
+          const wanted = tags.map((t) => t.trim().toLowerCase()).filter(Boolean);
+          if (wanted.length > 0) {
+            docs = docs.filter((d) => {
+              const docTags = new Set((d.tags ?? []).map((t) => t.trim().toLowerCase()));
+              return tagMode === "all"
+                ? wanted.every((t) => docTags.has(t))
+                : wanted.some((t) => docTags.has(t));
+            });
+          }
+        }
+        if (updatedAfter) {
+          docs = docs.filter((d) => (d.updated_at || "") >= updatedAfter);
+        }
+        if (updatedBefore) {
+          docs = docs.filter((d) => (d.updated_at || "") <= updatedBefore);
+        }
+
+        if (paginated) {
+          const total = docs.length;
+          const pageLimit = limit ?? 50;
+          const items = docs.slice(offset, offset + pageLimit);
+          return writeJson(c, 200, {
+            items,
+            total,
+            limit: pageLimit,
+            offset,
+            has_more: offset + items.length < total,
+          });
+        }
+        if (offset > 0 || limit !== undefined) {
+          const end = limit !== undefined ? offset + limit : undefined;
+          docs = docs.slice(offset, end);
+        }
         return writeJson(c, 200, docs);
+      } catch (error) {
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
+    async getDocumentByPath(c: Context): Promise<Response> {
+      const rawPath = (c.req.query("path") ?? "").trim();
+      if (!rawPath) return writeError(c, 400, "query parameter 'path' is required");
+      const cleanPath = rawPath.replace(/^\/+/, "");
+      const includeContent = c.req.query("include_content") !== "false";
+      try {
+        let doc = await ctx.db.getDocumentByRelativePath(cleanPath);
+        if (!doc && !cleanPath.startsWith("wiki/")) {
+          doc = await ctx.db.getDocumentByRelativePath(`wiki/${cleanPath}`);
+        }
+        if (!doc) return writeError(c, 404, "document not found");
+        const [refs, archiveSources] = await Promise.all([
+          buildReferencesPayload(ctx.db, doc),
+          typeof ctx.db.listDocumentArchiveSources === "function"
+            ? ctx.db.listDocumentArchiveSources(doc.id)
+            : Promise.resolve([]),
+        ]);
+        const contentLength = [...(doc.content ?? "")].length;
+        const payload = includeContent
+          ? { ...doc, ...refs, archive_sources: archiveSources, content_length: contentLength }
+          : { ...doc, content: "", ...refs, archive_sources: archiveSources, content_length: contentLength };
+        return writeJson(c, 200, payload);
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }
@@ -242,6 +396,9 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const doc = await ctx.db.getDocument(id);
         if (!doc) return writeError(c, 404, "document not found");
+        const conflict = checkDocumentConcurrency(c, doc, req.expected_version, req.expected_content_hash);
+        if (conflict) return conflict;
+
         doc.content = req.content ?? "";
         doc.content_hash = contentHash(doc.content);
         if (doc.source_kind === "wiki") {
@@ -261,6 +418,64 @@ export function documentsApi(ctx: ApiContext) {
       }
     },
 
+    async patchDocumentContent(c: Context): Promise<Response> {
+      const id = getID(c);
+      if (!id) return writeError(c, 400, "missing document id");
+      const req = await readJsonBody<PatchContentRequest>(c);
+      if (!req) return writeError(c, 400, "invalid request body");
+
+      try {
+        const doc = await ctx.db.getDocument(id);
+        if (!doc) return writeError(c, 404, "document not found");
+        const conflict = checkDocumentConcurrency(c, doc, req.expected_version, req.expected_content_hash);
+        if (conflict) return conflict;
+
+        const patched = applyTextEdits(doc.content ?? "", req.edits ?? []);
+        if (req.dry_run) {
+          return writeJson(c, 200, {
+            dry_run: true,
+            document_id: doc.id,
+            relative_path: doc.relative_path,
+            applied_edits: patched.applied_edits,
+            changed: patched.changed,
+            line_delta: patched.line_delta,
+            current_version: doc.version,
+            content_hash: contentHash(patched.content),
+            preview_content: patched.content,
+          });
+        }
+
+        doc.content = patched.content;
+        doc.content_hash = contentHash(doc.content);
+        if (doc.source_kind === "wiki") {
+          const fm = parseFrontmatter(doc.content);
+          if (fm.type) {
+            doc.page_type = resolvePageType(fm.type, doc.page_type ?? "", doc.relative_path);
+          }
+        }
+        await withPageLock(ctx, doc.relative_path, () =>
+          applyPageWrite(ctx, "manual", "patch page content", doc, "update"),
+        );
+        const updated = await ctx.db.getDocument(id);
+        logDocument(ctx.db, "updated", id, doc.relative_path, "api");
+        return writeJson(c, 200, {
+          ...(updated ?? doc),
+          applied_edits: patched.applied_edits,
+          changed: patched.changed,
+          line_delta: patched.line_delta,
+        });
+      } catch (error) {
+        if (error instanceof TextPatchError) {
+          return writeJson(c, error.status, {
+            error: error.message,
+            code: error.code,
+            ...(error.details ? { details: error.details } : {}),
+          });
+        }
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
     async updateDocumentMetadata(c: Context): Promise<Response> {
       const id = getID(c);
       if (!id) return writeError(c, 400, "missing document id");
@@ -270,6 +485,13 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const existing = await ctx.db.getDocument(id);
         if (!existing) return writeError(c, 404, "document not found");
+        const conflict = checkDocumentConcurrency(
+          c,
+          existing,
+          req.expected_version,
+          req.expected_content_hash,
+        );
+        if (conflict) return conflict;
 
         const fmUpdates: Record<string, string | string[] | undefined> = {};
         if (req.page_type !== undefined) {
@@ -365,6 +587,13 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const existing = await ctx.db.getDocument(id);
         if (!existing) return writeError(c, 404, "document not found");
+        const conflict = checkDocumentConcurrency(
+          c,
+          existing,
+          req.expected_version,
+          req.expected_content_hash,
+        );
+        if (conflict) return conflict;
         if (isSystemDocument(existing)) {
           return writeError(c, 400, `system page cannot be archived: ${existing.relative_path}`);
         }
@@ -392,6 +621,13 @@ export function documentsApi(ctx: ApiContext) {
       try {
         const existing = await ctx.db.getDocument(id);
         if (!existing) return writeError(c, 404, "document not found");
+        const conflict = checkDocumentConcurrency(
+          c,
+          existing,
+          req.expected_version,
+          req.expected_content_hash,
+        );
+        if (conflict) return conflict;
         const reopened = buildReopenedDocument(existing, {
           reason: req.reason,
           confidence: req.confidence,
@@ -491,6 +727,111 @@ export function documentsApi(ctx: ApiContext) {
           details: { deleted_count: deleted, ids: req.ids },
         });
         return writeJson(c, 200, { deleted });
+      } catch (error) {
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
+    async batchDocuments(c: Context): Promise<Response> {
+      const req = await readJsonBody<{
+        ops?: BatchDocOp[];
+        summary?: string;
+        dry_run?: boolean;
+      }>(c);
+      if (!req) return writeError(c, 400, "invalid request body");
+      try {
+        const result = await executeWikiBatch(ctx.db, req, "api");
+        if (!result.dry_run) {
+          record(ctx.db, {
+            level: "info",
+            category: "document",
+            action: "batch_applied",
+            message: `批量执行 ${result.op_count} 个文档操作（影响 ${result.affected_pages} 页）`,
+            source: "api",
+            details: {
+              change_set_id: result.change_set_id,
+              op_count: result.op_count,
+              affected_pages: result.affected_pages,
+            },
+          });
+        }
+        return writeJson(c, 200, result);
+      } catch (error) {
+        if (error instanceof BatchOperationError) {
+          return writeJson(c, error.status, {
+            error: error.message,
+            code: error.code,
+            ...(error.opIndex !== undefined ? { op_index: error.opIndex } : {}),
+            ...(error.details ? { details: error.details } : {}),
+          });
+        }
+        if (error instanceof CanonicalPageConflictError) {
+          return writeJson(c, 409, { error: error.message, code: "CANONICAL_CONFLICT" });
+        }
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
+    async batchGetDocuments(c: Context): Promise<Response> {
+      const req = await readJsonBody<{
+        ids?: string[];
+        paths?: string[];
+        fields?: "meta" | "content" | "outline";
+      }>(c);
+      if (!req) return writeError(c, 400, "invalid request body");
+      const ids = Array.isArray(req.ids) ? req.ids.map((s) => String(s).trim()).filter(Boolean) : [];
+      const paths = Array.isArray(req.paths) ? req.paths.map((s) => String(s).trim()).filter(Boolean) : [];
+      if (ids.length === 0 && paths.length === 0) {
+        return writeError(c, 400, "ids or paths is required");
+      }
+      if (ids.length + paths.length > MAX_BATCH_GET) {
+        return writeError(c, 400, `batch-get total items exceeds maximum ${MAX_BATCH_GET}`);
+      }
+      const fields = req.fields ?? "content";
+      if (fields !== "meta" && fields !== "content" && fields !== "outline") {
+        return writeError(c, 400, "fields must be meta, content, or outline");
+      }
+      try {
+        const seenIds = new Set<string>();
+        const documents: Array<Record<string, unknown>> = [];
+        const notFound: string[] = [];
+
+        const pushDoc = (doc: Document) => {
+          if (seenIds.has(doc.id)) return;
+          seenIds.add(doc.id);
+          const content = doc.content ?? "";
+          const contentLength = [...content].length;
+          if (fields === "meta") {
+            documents.push({ ...doc, content: "", content_length: contentLength });
+          } else if (fields === "outline") {
+            documents.push({
+              ...doc,
+              content: "",
+              content_length: contentLength,
+              line_count: content.split(/\r?\n/).length,
+              outline: extractMarkdownOutline(content),
+            });
+          } else {
+            documents.push({ ...doc, content_length: contentLength });
+          }
+        };
+
+        for (const id of ids) {
+          const doc = await ctx.db.getDocument(id);
+          if (!doc) notFound.push(id);
+          else pushDoc(doc);
+        }
+        for (const rawPath of paths) {
+          const clean = rawPath.replace(/^\/+/, "");
+          let doc = await ctx.db.getDocumentByRelativePath(clean);
+          if (!doc && !clean.startsWith("wiki/")) {
+            doc = await ctx.db.getDocumentByRelativePath(`wiki/${clean}`);
+          }
+          if (!doc) notFound.push(rawPath);
+          else pushDoc(doc);
+        }
+
+        return writeJson(c, 200, { documents, not_found: notFound });
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }

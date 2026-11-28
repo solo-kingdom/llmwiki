@@ -11,12 +11,20 @@ import type {
   ArchiveLinkedDocument,
   ArchiveSearchHit,
   ArchiveSearchMatchType,
+  ArchiveSearchOptions,
   ArchiveSourceSummary,
   ArchiveStorageBackend,
   DeleteArchiveFolderResult,
   FolderDeleteMode,
+  MatchedLine,
   MoveArchiveFolderResult,
 } from "../types.js";
+import {
+  buildTokenGroupMatchSql,
+  extractMatchedLines,
+  tokenizeSearchQuery,
+  validateSearchRegex,
+} from "./chunks.js";
 import { NOW_TEXT, asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
 export class ArchiveValidationError extends Error {
@@ -34,7 +42,10 @@ export class ArchiveNotFoundError extends Error {
 }
 
 export class ArchiveConflictError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    public readonly conflicts?: string[],
+  ) {
     super(message);
     this.name = "ArchiveConflictError";
   }
@@ -266,9 +277,14 @@ export function archivesRepo(pool: Pool): ArchiveStore {
       return row ? scanFolder(row) : null;
     },
 
-    async moveArchiveFolder(fromPathRaw: string, toPathRaw: string): Promise<MoveArchiveFolderResult> {
+    async moveArchiveFolder(
+      fromPathRaw: string,
+      toPathRaw: string,
+      options: { onConflict?: "fail" | "merge" } = {},
+    ): Promise<MoveArchiveFolderResult> {
       const fromPath = validateArchiveFolderPath(fromPathRaw);
       const toPath = validateArchiveFolderPath(toPathRaw);
+      const onConflict = options.onConflict ?? "fail";
       if (fromPath === toPath) {
         return { from_path: fromPath, to_path: toPath, moved_folders: 0, moved_files: 0 };
       }
@@ -280,29 +296,24 @@ export function archivesRepo(pool: Pool): ArchiveStore {
         const src = await queryOne(client, `SELECT path FROM archive_folders WHERE path = $1 FOR UPDATE`, [fromPath]);
         if (!src) throw new ArchiveNotFoundError(`folder not found: ${fromPath}`);
 
-        const conflict = await queryOne(
-          client,
-          `SELECT path FROM archive_folders WHERE path = $1 OR path LIKE $2 LIMIT 1`,
-          [toPath, `${toPath}/%`],
-        );
-        if (conflict) throw new ArchiveConflictError(`target folder already exists: ${toPath}`);
+        if (onConflict === "fail") {
+          const conflict = await queryOne(
+            client,
+            `SELECT path FROM archive_folders WHERE path = $1 OR path LIKE $2 LIMIT 1`,
+            [toPath, `${toPath}/%`],
+          );
+          if (conflict) throw new ArchiveConflictError(`target folder already exists: ${toPath}`);
+        }
 
         const parent = parentFolderOf(toPath);
         if (parent) await ensureArchiveFoldersTx(client, [parent]);
 
-        const subFolders = await queryRows<[string]>(
+        const subFolders = await queryRows<[string, string, string, number, string]>(
           client,
-          `SELECT path FROM archive_folders WHERE path = $1 OR path LIKE $2 ORDER BY length(path) ASC`,
+          `SELECT path, display_name, description, sort_order, created_at
+           FROM archive_folders WHERE path = $1 OR path LIKE $2 ORDER BY length(path) ASC`,
           [fromPath, `${fromPath}/%`],
         );
-        for (const [oldFolder] of subFolders) {
-          const suffix = oldFolder.slice(fromPath.length);
-          const nextFolder = `${toPath}${suffix}`;
-          await client.query(
-            `UPDATE archive_folders SET path = $2, updated_at = ${NOW_TEXT} WHERE path = $1`,
-            [oldFolder, nextFolder],
-          );
-        }
 
         const files = await queryRows<[string, string, string]>(
           client,
@@ -310,6 +321,37 @@ export function archivesRepo(pool: Pool): ArchiveStore {
            WHERE folder_path = $1 OR folder_path LIKE $2 FOR UPDATE`,
           [fromPath, `${fromPath}/%`],
         );
+
+        if (onConflict === "merge" && files.length > 0) {
+          const nextRels = files.map(([, oldFolder, filename]) => {
+            const suffix = oldFolder.slice(fromPath.length);
+            return buildArchiveRelativePath(`${toPath}${suffix}`, filename);
+          });
+          const conflictRows = await queryRows<[string]>(
+            client,
+            `SELECT relative_path FROM archive_files WHERE relative_path = ANY($1::text[])`,
+            [nextRels],
+          );
+          if (conflictRows.length > 0) {
+            const conflicts = conflictRows.map((r) => asString(r[0]));
+            throw new ArchiveConflictError(
+              `target folder merge conflict on ${conflicts.length} file(s)`,
+              conflicts,
+            );
+          }
+        }
+
+        for (const [oldFolder, displayName, description, sortOrder, createdAt] of subFolders) {
+          const suffix = oldFolder.slice(fromPath.length);
+          const nextFolder = `${toPath}${suffix}`;
+          await client.query(
+            `INSERT INTO archive_folders (path, display_name, description, sort_order, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, ${NOW_TEXT})
+             ON CONFLICT (path) DO NOTHING`,
+            [nextFolder, displayName, description, sortOrder, createdAt],
+          );
+        }
+
         for (const [fileId, oldFolder, filename] of files) {
           const suffix = oldFolder.slice(fromPath.length);
           const nextFolder = `${toPath}${suffix}`;
@@ -323,11 +365,16 @@ export function archivesRepo(pool: Pool): ArchiveStore {
             );
           } catch (error) {
             if (isPgUniqueViolation(error)) {
-              throw new ArchiveConflictError(`target file path conflict: ${nextRel}`);
+              throw new ArchiveConflictError(`target file path conflict: ${nextRel}`, [nextRel]);
             }
             throw error;
           }
         }
+
+        await client.query(
+          `DELETE FROM archive_folders WHERE path = $1 OR path LIKE $2`,
+          [fromPath, `${fromPath}/%`],
+        );
 
         return {
           from_path: fromPath,
@@ -359,9 +406,9 @@ export function archivesRepo(pool: Pool): ArchiveStore {
           `SELECT path FROM archive_folders WHERE path = $1 OR path LIKE $2`,
           [folderPath, `${folderPath}/%`],
         );
-        const files = await queryRows<[string, string, string, string]>(
+        const files = await queryRows<[string, string, string, string, string]>(
           client,
-          `SELECT id, filename, storage_backend, storage_key FROM archive_files
+          `SELECT id, folder_path, filename, storage_backend, storage_key FROM archive_files
            WHERE folder_path = $1 OR folder_path LIKE $2 FOR UPDATE`,
           [folderPath, `${folderPath}/%`],
         );
@@ -386,21 +433,64 @@ export function archivesRepo(pool: Pool): ArchiveStore {
             throw new ArchiveValidationError("target_folder cannot be inside the deleted folder");
           }
           if (targetFolder) await ensureArchiveFoldersTx(client, [targetFolder]);
-          for (const [fileId, filename] of files) {
-            const nextRel = buildArchiveRelativePath(targetFolder, filename);
-            try {
-              await client.query(
-                `UPDATE archive_files
-                 SET folder_path = $2, relative_path = $3, updated_at = ${NOW_TEXT}
-                 WHERE id = $1`,
-                [fileId, targetFolder, nextRel],
+
+          // Pre-check all target file paths before mutating
+          const nextMoves: Array<{ fileId: string; nextFolder: string; nextRel: string }> = [];
+          for (const [fileId, oldFolder, filename] of files) {
+            const subTail = oldFolder === folderPath ? "" : oldFolder.slice(folderPath.length + 1);
+            const nextFolder = subTail ? (targetFolder ? `${targetFolder}/${subTail}` : subTail) : targetFolder;
+            const nextRel = buildArchiveRelativePath(nextFolder, filename);
+            nextMoves.push({ fileId, nextFolder, nextRel });
+          }
+          if (nextMoves.length > 0) {
+            const conflictRows = await queryRows<[string]>(
+              client,
+              `SELECT relative_path FROM archive_files WHERE relative_path = ANY($1::text[])`,
+              [nextMoves.map((m) => m.nextRel)],
+            );
+            if (conflictRows.length > 0) {
+              const conflicts = conflictRows.map((r) => asString(r[0]));
+              throw new ArchiveConflictError(
+                `file already exists at target: ${conflicts[0]}`,
+                conflicts,
               );
-            } catch (error) {
-              if (isPgUniqueViolation(error)) {
-                throw new ArchiveConflictError(`file already exists at target: ${nextRel}`);
-              }
-              throw error;
             }
+          }
+
+          // Preserve child subfolder hierarchy under targetFolder
+          const childSubFolders = subFolders
+            .map(([p]) => p)
+            .filter((p) => p !== folderPath)
+            .sort((a, b) => a.length - b.length);
+          for (const oldChild of childSubFolders) {
+            const subTail = oldChild.slice(folderPath.length + 1);
+            const nextChild = targetFolder ? `${targetFolder}/${subTail}` : subTail;
+            const metaRow = await queryOne<[string, string, number, string]>(
+              client,
+              `SELECT display_name, description, sort_order, created_at FROM archive_folders WHERE path = $1`,
+              [oldChild],
+            );
+            await client.query(
+              `INSERT INTO archive_folders (path, display_name, description, sort_order, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, ${NOW_TEXT})
+               ON CONFLICT (path) DO NOTHING`,
+              [
+                nextChild,
+                asString(metaRow?.[0]) || path.posix.basename(nextChild),
+                asString(metaRow?.[1]),
+                asNumber(metaRow?.[2]),
+                asString(metaRow?.[3]),
+              ],
+            );
+          }
+
+          for (const m of nextMoves) {
+            await client.query(
+              `UPDATE archive_files
+               SET folder_path = $2, relative_path = $3, updated_at = ${NOW_TEXT}
+               WHERE id = $1`,
+              [m.fileId, m.nextFolder, m.nextRel],
+            );
           }
           const deletedFolders = await exec(
             client,
@@ -419,9 +509,9 @@ export function archivesRepo(pool: Pool): ArchiveStore {
 
         // cascade
         const removedRefs: Array<{ storage_backend: ArchiveStorageBackend; storage_key: string }> = [];
-        for (const [, , backend, key] of files) {
+        for (const [, , , backend, key] of files) {
           if ((backend === "local" || backend === "s3") && key) {
-            removedRefs.push({ storage_backend: backend, storage_key: key });
+            removedRefs.push({ storage_backend: backend as ArchiveStorageBackend, storage_key: key });
           }
         }
         const deletedFiles = await exec(
@@ -622,6 +712,26 @@ export function archivesRepo(pool: Pool): ArchiveStore {
       return row ? scanArchiveFile(row) : null;
     },
 
+    async updateArchiveFileMeta(
+      id: string,
+      patch: { title?: string; source_ref?: string },
+    ): Promise<ArchiveFile | null> {
+      const existing = await this.getArchiveFile(id);
+      if (!existing) return null;
+      const nextTitle = patch.title !== undefined ? patch.title.trim() : (existing.title ?? "");
+      const nextSourceRef =
+        patch.source_ref !== undefined ? patch.source_ref.trim() : (existing.source_ref ?? "");
+      const row = await queryOne(
+        pool,
+        `UPDATE archive_files
+         SET title = $2, source_ref = $3, updated_at = ${NOW_TEXT}
+         WHERE id = $1
+         RETURNING ${ARCHIVE_FILE_COLUMNS}`,
+        [id, nextTitle, nextSourceRef],
+      );
+      return row ? scanArchiveFile(row) : null;
+    },
+
     async mergeDuplicateArchiveFiles(
       keepId: string,
       dropIds: string[],
@@ -727,13 +837,18 @@ export function archivesRepo(pool: Pool): ArchiveStore {
 
     async searchArchiveFiles(
       query: string,
-      options: { kind?: string; folder_path?: string; limit?: number } = {},
+      options: ArchiveSearchOptions = {},
     ): Promise<ArchiveSearchHit[]> {
       const trimmed = query.trim();
       if (!trimmed) return [];
-      const safeLimit = Math.max(1, Math.min(50, options.limit ?? 20));
-      const likePattern = `%${escapeLikePattern(trimmed)}%`;
+      const safeLimit = Math.max(1, Math.min(100, options.limit ?? 20));
+      const matchMode = options.match ?? "fuzzy";
+      const caseSensitive = Boolean(options.case_sensitive);
+      if (matchMode === "regex") {
+        validateSearchRegex(trimmed);
+      }
 
+      const likePattern = `%${escapeLikePattern(trimmed)}%`;
       const clauses: string[] = [];
       const baseArgs: unknown[] = [trimmed, likePattern];
       if (options.kind && options.kind.trim() && options.kind.trim().toLowerCase() !== "all") {
@@ -745,65 +860,153 @@ export function archivesRepo(pool: Pool): ArchiveStore {
         baseArgs.push(norm, `${norm}/%`);
         clauses.push(`(folder_path = $${baseArgs.length - 1} OR folder_path LIKE $${baseArgs.length})`);
       }
-      const filterSql = clauses.length > 0 ? `AND ${clauses.join(" AND ")}` : "";
-      const limitParam = `$${baseArgs.length + 1}`;
-      const args = [...baseArgs, safeLimit];
-
-      const ftsSql = `
-        SELECT ${ARCHIVE_FILE_COLUMNS},
-          COALESCE(searchable_text, ''),
-          (ts_rank_cd(to_tsvector('simple', COALESCE(searchable_text, '')), websearch_to_tsquery('simple', $1))
-           + similarity(COALESCE(searchable_text, ''), $1)
-           + CASE WHEN filename ILIKE $2 ESCAPE '\\' THEN 2.0
-                  WHEN relative_path ILIKE $2 ESCAPE '\\' THEN 1.0
-                  ELSE 0.0 END) AS score,
-          (CASE
-             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\')
-              AND (to_tsvector('simple', COALESCE(searchable_text, '')) @@ websearch_to_tsquery('simple', $1)
-                   OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\') THEN 3
-             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\') THEN 2
-             ELSE 1
-           END) AS tier
-        FROM archive_files
-        WHERE (
-          filename ILIKE $2 ESCAPE '\\'
-          OR relative_path ILIKE $2 ESCAPE '\\'
-          OR to_tsvector('simple', COALESCE(searchable_text, '')) @@ websearch_to_tsquery('simple', $1)
-          OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\'
-        )
-        ${filterSql}
-        ORDER BY tier DESC, score DESC, updated_at DESC
-        LIMIT ${limitParam}`;
-
-      const likeSql = `
-        SELECT ${ARCHIVE_FILE_COLUMNS},
-          COALESCE(searchable_text, ''),
-          (CASE WHEN filename ILIKE $2 ESCAPE '\\' THEN 2.0
-                WHEN relative_path ILIKE $2 ESCAPE '\\' THEN 1.0
-                ELSE 0.5 END) AS score,
-          (CASE
-             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\')
-              AND COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\' THEN 3
-             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\') THEN 2
-             ELSE 1
-           END) AS tier
-        FROM archive_files
-        WHERE (
-          filename ILIKE $2 ESCAPE '\\'
-          OR relative_path ILIKE $2 ESCAPE '\\'
-          OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\'
-        )
-        ${filterSql}
-        ORDER BY tier DESC, score DESC, updated_at DESC
-        LIMIT ${limitParam}`;
-
-      let rows: unknown[][];
-      try {
-        rows = await queryRows(pool, ftsSql, args);
-      } catch {
-        rows = await queryRows(pool, likeSql, args);
+      if (options.origin && options.origin.trim()) {
+        baseArgs.push(options.origin.trim());
+        clauses.push(`origin = $${baseArgs.length}`);
+      }
+      if (options.media_type && options.media_type.trim()) {
+        baseArgs.push(`%${escapeLikePattern(options.media_type.trim())}%`);
+        clauses.push(`media_type ILIKE $${baseArgs.length} ESCAPE '\\'`);
+      }
+      if (options.unlinked_only) {
+        clauses.push(
+          `NOT EXISTS (SELECT 1 FROM document_archive_sources das WHERE das.archive_file_id = archive_files.id)`,
+        );
+      }
+      if (options.updated_after && options.updated_after.trim()) {
+        baseArgs.push(options.updated_after.trim());
+        clauses.push(`updated_at >= $${baseArgs.length}`);
+      }
+      if (options.updated_before && options.updated_before.trim()) {
+        baseArgs.push(options.updated_before.trim());
+        clauses.push(`updated_at <= $${baseArgs.length}`);
       }
 
+      const buildQueryRows = async (): Promise<unknown[][]> => {
+        const metaHitExpr = `(filename ILIKE $2 ESCAPE '\\' OR COALESCE(title, '') ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\')`;
+
+        if (matchMode === "phrase" || matchMode === "regex") {
+          const op =
+            matchMode === "regex"
+              ? caseSensitive
+                ? "~"
+                : "~*"
+              : caseSensitive
+                ? "LIKE"
+                : "ILIKE";
+          const patternArg = matchMode === "regex" ? trimmed : likePattern;
+          const esc = matchMode === "phrase" ? " ESCAPE '\\'" : "";
+          const exactArgs: unknown[] = [patternArg, ...baseArgs.slice(2)];
+          // Re-index clauses? Wait: baseArgs had [trimmed, likePattern, ...filters]
+          // Simpler: keep baseArgs = [trimmed, likePattern, ...filters] and use $1 for regex or $2 for phrase!
+          void exactArgs;
+          const patParam = matchMode === "regex" ? "$1" : "$2";
+          const exactWhere = `(filename ${op} ${patParam}${esc} OR COALESCE(title, '') ${op} ${patParam}${esc} OR relative_path ${op} ${patParam}${esc} OR COALESCE(searchable_text, '') ${op} ${patParam}${esc})`;
+          const filterSql = clauses.length > 0 ? `AND ${clauses.join(" AND ")}` : "";
+          const limitParam = `$${baseArgs.length + 1}`;
+          const sql = `
+            SELECT ${ARCHIVE_FILE_COLUMNS},
+              COALESCE(searchable_text, ''),
+              (CASE WHEN filename ${op} ${patParam}${esc} THEN 2.0
+                    WHEN COALESCE(title, '') ${op} ${patParam}${esc} THEN 1.5
+                    WHEN relative_path ${op} ${patParam}${esc} THEN 1.0
+                    ELSE 0.5 END) AS score,
+              (CASE
+                 WHEN (filename ${op} ${patParam}${esc} OR COALESCE(title, '') ${op} ${patParam}${esc} OR relative_path ${op} ${patParam}${esc})
+                  AND COALESCE(searchable_text, '') ${op} ${patParam}${esc} THEN 3
+                 WHEN (filename ${op} ${patParam}${esc} OR COALESCE(title, '') ${op} ${patParam}${esc} OR relative_path ${op} ${patParam}${esc}) THEN 2
+                 ELSE 1
+               END) AS tier
+            FROM archive_files
+            WHERE ${exactWhere}
+            ${filterSql}
+            ORDER BY tier DESC, score DESC, updated_at DESC
+            LIMIT ${limitParam}`;
+          return queryRows(pool, sql, [...baseArgs, safeLimit]);
+        }
+
+        const tokenCols = ["filename", "COALESCE(title, '')", "relative_path", "COALESCE(searchable_text, '')"];
+        const tokens = tokenizeSearchQuery(trimmed);
+        const requireAll = matchMode === "all_terms";
+        const tokenArgs = [...baseArgs];
+        const tokenMatch = buildTokenGroupMatchSql(tokens.groups, tokenCols, tokenArgs, requireAll);
+        const filterSql = clauses.length > 0 ? `AND ${clauses.join(" AND ")}` : "";
+        const limitParam = `$${tokenArgs.length + 1}`;
+        const args = [...tokenArgs, safeLimit];
+
+        const groupScore = tokenMatch.whereSql ? `(${tokenMatch.groupHitExpr}) * 0.25 + ` : "";
+        const ftsWhere =
+          requireAll && tokenMatch.whereSql
+            ? tokenMatch.whereSql
+            : `(
+                filename ILIKE $2 ESCAPE '\\'
+                OR COALESCE(title, '') ILIKE $2 ESCAPE '\\'
+                OR relative_path ILIKE $2 ESCAPE '\\'
+                OR to_tsvector('simple', COALESCE(searchable_text, '')) @@ websearch_to_tsquery('simple', $1)
+                OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\'
+                ${tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : ""}
+              )`;
+
+        const ftsSql = `
+          SELECT ${ARCHIVE_FILE_COLUMNS},
+            COALESCE(searchable_text, ''),
+            (${groupScore}ts_rank_cd(to_tsvector('simple', COALESCE(searchable_text, '')), websearch_to_tsquery('simple', $1))
+             + similarity(COALESCE(searchable_text, ''), $1)
+             + CASE WHEN filename ILIKE $2 ESCAPE '\\' THEN 2.0
+                    WHEN COALESCE(title, '') ILIKE $2 ESCAPE '\\' THEN 1.5
+                    WHEN relative_path ILIKE $2 ESCAPE '\\' THEN 1.0
+                    ELSE 0.0 END) AS score,
+            (CASE
+               WHEN ${metaHitExpr}
+                AND (to_tsvector('simple', COALESCE(searchable_text, '')) @@ websearch_to_tsquery('simple', $1)
+                     OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\') THEN 3
+               WHEN ${metaHitExpr} THEN 2
+               ELSE 1
+             END) AS tier
+          FROM archive_files
+          WHERE ${ftsWhere}
+          ${filterSql}
+          ORDER BY tier DESC, score DESC, updated_at DESC
+          LIMIT ${limitParam}`;
+
+        const likeWhere =
+          requireAll && tokenMatch.whereSql
+            ? tokenMatch.whereSql
+            : `(
+                filename ILIKE $2 ESCAPE '\\'
+                OR COALESCE(title, '') ILIKE $2 ESCAPE '\\'
+                OR relative_path ILIKE $2 ESCAPE '\\'
+                OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\'
+                ${tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : ""}
+              )`;
+
+        const likeSql = `
+          SELECT ${ARCHIVE_FILE_COLUMNS},
+            COALESCE(searchable_text, ''),
+            (${groupScore}CASE WHEN filename ILIKE $2 ESCAPE '\\' THEN 2.0
+                  WHEN COALESCE(title, '') ILIKE $2 ESCAPE '\\' THEN 1.5
+                  WHEN relative_path ILIKE $2 ESCAPE '\\' THEN 1.0
+                  ELSE 0.5 END) AS score,
+            (CASE
+               WHEN ${metaHitExpr}
+                AND COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\' THEN 3
+               WHEN ${metaHitExpr} THEN 2
+               ELSE 1
+             END) AS tier
+          FROM archive_files
+          WHERE ${likeWhere}
+          ${filterSql}
+          ORDER BY tier DESC, score DESC, updated_at DESC
+          LIMIT ${limitParam}`;
+
+        try {
+          return await queryRows(pool, ftsSql, args);
+        } catch {
+          return await queryRows(pool, likeSql, args);
+        }
+      };
+
+      const rows = await buildQueryRows();
       const lowerQ = trimmed.toLowerCase();
       return rows.map((row) => {
         const file = scanArchiveFile(row);
@@ -811,17 +1014,29 @@ export function archivesRepo(pool: Pool): ArchiveStore {
         const score = Number(row[17] ?? 0);
         const tier = asNumber(row[18]);
         const nameHit = file.filename.toLowerCase().includes(lowerQ);
+        const titleHit = (file.title ?? "").toLowerCase().includes(lowerQ);
         const pathHit = file.relative_path.toLowerCase().includes(lowerQ);
-        const contentHit = tier === 3 || (!nameHit && !pathHit);
+        const contentHit = tier === 3 || (!nameHit && !titleHit && !pathHit);
         let matchType: ArchiveSearchMatchType = "content";
-        if ((nameHit || pathHit) && contentHit) matchType = "both";
+        if ((nameHit || titleHit || pathHit) && contentHit) matchType = "both";
         else if (nameHit) matchType = "filename";
+        else if (titleHit) matchType = "title";
         else if (pathHit) matchType = "path";
 
         const snippet = contentHit
           ? extractSearchSnippet(searchableText, trimmed, 180)
           : extractSearchSnippet(searchableText, "", 140);
-        return { file, match_type: matchType, snippet, score };
+        let matchedLines: MatchedLine[] | undefined;
+        if (matchMode === "phrase" || matchMode === "regex") {
+          matchedLines = extractMatchedLines(searchableText, trimmed, matchMode, caseSensitive);
+        }
+        return {
+          file,
+          match_type: matchType,
+          snippet,
+          score,
+          ...(matchedLines && matchedLines.length > 0 ? { matched_lines: matchedLines } : {}),
+        };
       });
     },
 

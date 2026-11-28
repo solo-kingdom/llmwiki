@@ -51,14 +51,15 @@ curl -fsS "$APP_API_BASE/skills/<name>.zh.md" # 各阶段中文文档（英文�
 | 系统 | `GET /api/v1/health` | 健康检查（免鉴权） |
 | 工作区 | `GET /api/v1/workspace` | 布局、统计、页面类型与目录 |
 | 索引 | `POST /api/v1/reindex` | 重建派生索引 |
-| 目录树 | `GET /api/v1/tree`、`GET/POST/PATCH/DELETE /api/v1/folders`、`POST /api/v1/folders/move` | 主题目录树与文件夹管理 |
-| 文档 | `GET/POST /api/v1/documents`、`GET/PATCH/DELETE /api/v1/documents/:id` | 列出/新建/读取/更新元信息/删除页面 |
-| 正文 | `GET/PUT /api/v1/documents/:id/content` | 读取或整篇替换 markdown（含 frontmatter） |
-| 生命周期 | `POST /api/v1/documents/:id/{move,archive,reopen}`、`POST /api/v1/documents/bulk-delete` | 移动、归档、重开、批量删除 |
-| 搜索 | `GET /api/v1/search?q=&mode=&limit=` | 全文/混合检索（每条结果含聚焦命中上下文的 `snippet` 及完整 `content`） |
+| 目录树 | `GET /api/v1/tree`、`GET/POST/PATCH/DELETE /api/v1/folders`、`POST /api/v1/folders/move` | 主题目录树、幂等 `exist_ok`、目录移动/合并（`on_conflict=merge`） |
+| 文档 | `GET/POST /api/v1/documents`、`GET /api/v1/documents/by-path`、`GET/PATCH/DELETE /api/v1/documents/:id` | 列出（支持 `folder`/`tags`/`updated_*`/`paginated`）、按路径寻址、CRUD |
+| 正文 | `GET/PUT/PATCH /api/v1/documents/:id/content` | 读取、整篇替换或局部原子 `edits[]` 补丁（支持 `dry_run` 与乐观锁） |
+| 生命周期与批量 | `POST /api/v1/documents/:id/{move,archive,reopen}`、`POST /api/v1/documents/{batch,batch-get,bulk-delete}` | 单 `change_set` 原子批处理（支持 `dry_run`）与批量读 `batch-get` |
+| 搜索 | `GET /api/v1/search?q=&scope=&mode=&match=&limit=` | Wiki/档案/联合检索（`fuzzy\|all_terms\|phrase\|regex`、分页、`effective_mode` 降级透出） |
 | 图谱与检查 | `GET /api/v1/graph`、`GET /api/v1/graph/{backlinks/:id,forward/:id,uncited,stale}`、`GET /api/v1/lint` | 知识图谱与健康检查 |
 | 摄取 | `GET/POST /api/v1/ingest/jobs*`（`/text`、`/conversation` 支持 `?wait=30s` 短等待同步返回终态，上限 55s）、`GET/POST /api/v1/ingest/sessions*`、`GET/POST /api/v1/ingest/reviews*` | 摄取任务、对话会话、审阅计划 |
 | 历史 | `GET /api/v1/history?kind=&from=&to=&q=&limit=&offset=`、`GET /api/v1/history/:id{,/diff}`、`POST /api/v1/history/:id/rollback`、`GET /api/v1/pages/history`、`POST /api/v1/revisions/:id/restore` | 变更集、差异、回滚、版本恢复 |
+| 档案 | `GET /api/v1/archives/tree`、`GET /api/v1/archives/search`、`POST/PATCH/DELETE /api/v1/archives/folders`、`POST /api/v1/archives/folders/move`、`POST /api/v1/archives/files`、`GET /api/v1/archives/files/by-path{,/raw}`、`GET/PATCH/DELETE /api/v1/archives/files/:id`、`PUT/PATCH /api/v1/archives/files/:id/content`、`POST /api/v1/archives/files/{batch-get,bulk-move,bulk-delete,bulk-ingest,bulk-link}`、`POST /api/v1/archives/files/:id/ingest`、`POST/DELETE /api/v1/documents/:id/archive-sources` | 原始档案目录与文件存储（JSON/multipart 上传、`PATCH /content`、批量操作、Range 流、Wiki 关联与摄取） |
 | 设置 | `GET/PUT /api/v1/settings`、`GET/PUT /api/v1/workspace/rule-files` | 运行设置（API Key 不可改 `api_token`）与 `purpose.md` / `rules.md` |
 
 ## 知识库模型
@@ -89,7 +90,7 @@ PostgreSQL            页面、目录树、版本、规则、搜索、图谱、l
 ## 硬规则
 
 1. **先读后写。** 用 `GET /api/v1/documents?source_kind=wiki` 和搜索接口确认现状，不要新建与已有页面重复的内容。
-2. **一个页面一个真相。** 正文改动走 `PUT /api/v1/documents/{id}/content`，提交完整 markdown（含 frontmatter）。
+2. **一个页面一个真相。** 局部修改优先走 `PATCH /api/v1/documents/{id}/content`（`edits[]` + `expected_version`/`expected_content_hash` 或 `If-Match`）；整篇重写走 `PUT /api/v1/documents/{id}/content`；多页协同改动走 `POST /api/v1/documents/batch`（先 `dry_run: true`）。
 3. **frontmatter 必填**：`title`、`date`（`YYYY-MM-DD`）、`type`；`experience`/`ledger` 必填 `status`；建议填 `confidence`（`high|medium|low`）与 `sources`。
 4. **不编造。** 知识库没有依据就明说，改为摄取来源，不要靠猜填空；`draft` / `deprecated` / 已归档页不作为现行真理。
 5. **高风险先确认。** 删除、覆盖、批量修改前向用户复述目标并等待确认。

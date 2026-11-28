@@ -65,6 +65,22 @@ export interface ListDocumentsFilter {
   archived?: ArchiveFilter;
   review_overdue?: boolean;
   today?: string;
+  folder?: string;
+  tags?: string[];
+  tag_mode?: "any" | "all";
+  updated_after?: string;
+  updated_before?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export type SearchMatchMode = "fuzzy" | "all_terms" | "phrase" | "regex";
+
+export type SearchSortMode = "relevance" | "updated_desc" | "updated_asc";
+
+export interface MatchedLine {
+  line: number;
+  text: string;
 }
 
 export interface SearchOptions {
@@ -75,6 +91,30 @@ export interface SearchOptions {
   archived?: ArchiveFilter;
   review_overdue?: boolean;
   today?: string;
+  folder?: string;
+  tags?: string[];
+  tag_mode?: "any" | "all";
+  updated_after?: string;
+  updated_before?: string;
+  sort?: SearchSortMode;
+  match?: SearchMatchMode;
+  case_sensitive?: boolean;
+  offset?: number;
+  group_by?: "document" | "chunk";
+}
+
+export interface ArchiveSearchOptions {
+  kind?: string;
+  folder_path?: string;
+  limit?: number;
+  offset?: number;
+  match?: SearchMatchMode;
+  case_sensitive?: boolean;
+  origin?: string;
+  media_type?: string;
+  unlinked_only?: boolean;
+  updated_after?: string;
+  updated_before?: string;
 }
 
 export interface Chunk {
@@ -98,6 +138,7 @@ export interface SearchChunk {
   filename: string;
   title: string;
   path: string;
+  relative_path?: string;
   file_type: string;
   page_type?: string;
   score: number;
@@ -108,7 +149,10 @@ export interface SearchChunk {
   last_verified?: string;
   review_after?: string;
   archived_at?: string;
+  tags?: string[];
+  updated_at?: string;
   symptoms?: string[];
+  matched_lines?: MatchedLine[];
 }
 
 export interface Reference {
@@ -579,13 +623,14 @@ export interface ArchiveSourceSummary {
   created_at: string;
 }
 
-export type ArchiveSearchMatchType = "filename" | "path" | "content" | "both";
+export type ArchiveSearchMatchType = "filename" | "title" | "path" | "content" | "both";
 
 export interface ArchiveSearchHit {
   file: ArchiveFile;
   match_type: ArchiveSearchMatchType;
   snippet: string;
   score: number;
+  matched_lines?: MatchedLine[];
 }
 
 export interface MoveArchiveFolderResult {

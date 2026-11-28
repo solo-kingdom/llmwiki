@@ -11,7 +11,15 @@ import {
   parseFrontmatter,
   upsertFrontmatterFields,
 } from "../engine/frontmatter.js";
+import { CanonicalPageConflictError } from "../engine/canonical.js";
 import { applyTextEdits, TextPatchError, type TextEdit } from "../engine/text_patch.js";
+import {
+  BatchOperationError,
+  executeWikiBatch,
+  MAX_BATCH_GET,
+  type BatchDocOp,
+} from "../engine/wiki_batch.js";
+import { extractMarkdownOutline } from "../mcp/local_tools.js";
 import {
   isValidConfidence,
   isValidExperienceKind,
@@ -719,6 +727,111 @@ export function documentsApi(ctx: ApiContext) {
           details: { deleted_count: deleted, ids: req.ids },
         });
         return writeJson(c, 200, { deleted });
+      } catch (error) {
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
+    async batchDocuments(c: Context): Promise<Response> {
+      const req = await readJsonBody<{
+        ops?: BatchDocOp[];
+        summary?: string;
+        dry_run?: boolean;
+      }>(c);
+      if (!req) return writeError(c, 400, "invalid request body");
+      try {
+        const result = await executeWikiBatch(ctx.db, req, "api");
+        if (!result.dry_run) {
+          record(ctx.db, {
+            level: "info",
+            category: "document",
+            action: "batch_applied",
+            message: `批量执行 ${result.op_count} 个文档操作（影响 ${result.affected_pages} 页）`,
+            source: "api",
+            details: {
+              change_set_id: result.change_set_id,
+              op_count: result.op_count,
+              affected_pages: result.affected_pages,
+            },
+          });
+        }
+        return writeJson(c, 200, result);
+      } catch (error) {
+        if (error instanceof BatchOperationError) {
+          return writeJson(c, error.status, {
+            error: error.message,
+            code: error.code,
+            ...(error.opIndex !== undefined ? { op_index: error.opIndex } : {}),
+            ...(error.details ? { details: error.details } : {}),
+          });
+        }
+        if (error instanceof CanonicalPageConflictError) {
+          return writeJson(c, 409, { error: error.message, code: "CANONICAL_CONFLICT" });
+        }
+        return writeError(c, 500, errorMessage(error));
+      }
+    },
+
+    async batchGetDocuments(c: Context): Promise<Response> {
+      const req = await readJsonBody<{
+        ids?: string[];
+        paths?: string[];
+        fields?: "meta" | "content" | "outline";
+      }>(c);
+      if (!req) return writeError(c, 400, "invalid request body");
+      const ids = Array.isArray(req.ids) ? req.ids.map((s) => String(s).trim()).filter(Boolean) : [];
+      const paths = Array.isArray(req.paths) ? req.paths.map((s) => String(s).trim()).filter(Boolean) : [];
+      if (ids.length === 0 && paths.length === 0) {
+        return writeError(c, 400, "ids or paths is required");
+      }
+      if (ids.length + paths.length > MAX_BATCH_GET) {
+        return writeError(c, 400, `batch-get total items exceeds maximum ${MAX_BATCH_GET}`);
+      }
+      const fields = req.fields ?? "content";
+      if (fields !== "meta" && fields !== "content" && fields !== "outline") {
+        return writeError(c, 400, "fields must be meta, content, or outline");
+      }
+      try {
+        const seenIds = new Set<string>();
+        const documents: Array<Record<string, unknown>> = [];
+        const notFound: string[] = [];
+
+        const pushDoc = (doc: Document) => {
+          if (seenIds.has(doc.id)) return;
+          seenIds.add(doc.id);
+          const content = doc.content ?? "";
+          const contentLength = [...content].length;
+          if (fields === "meta") {
+            documents.push({ ...doc, content: "", content_length: contentLength });
+          } else if (fields === "outline") {
+            documents.push({
+              ...doc,
+              content: "",
+              content_length: contentLength,
+              line_count: content.split(/\r?\n/).length,
+              outline: extractMarkdownOutline(content),
+            });
+          } else {
+            documents.push({ ...doc, content_length: contentLength });
+          }
+        };
+
+        for (const id of ids) {
+          const doc = await ctx.db.getDocument(id);
+          if (!doc) notFound.push(id);
+          else pushDoc(doc);
+        }
+        for (const rawPath of paths) {
+          const clean = rawPath.replace(/^\/+/, "");
+          let doc = await ctx.db.getDocumentByRelativePath(clean);
+          if (!doc && !clean.startsWith("wiki/")) {
+            doc = await ctx.db.getDocumentByRelativePath(`wiki/${clean}`);
+          }
+          if (!doc) notFound.push(rawPath);
+          else pushDoc(doc);
+        }
+
+        return writeJson(c, 200, { documents, not_found: notFound });
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }

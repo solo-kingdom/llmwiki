@@ -317,7 +317,7 @@ export interface ReadFormatOptions {
   outlineOnly?: boolean;
 }
 
-function extractMarkdownOutline(content: string): string[] {
+export function extractMarkdownOutline(content: string): string[] {
   const lines = content.split(/\r?\n/);
   const headings: string[] = [];
   let inFrontmatter = false;

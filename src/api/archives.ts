@@ -8,8 +8,14 @@ import {
   ArchiveConflictError,
   ArchiveNotFoundError,
   ArchiveValidationError,
+  buildArchiveRelativePath,
   normalizeArchiveFolderPath,
+  validateArchiveFilename,
 } from "../store/postgres/archives.js";
+
+const MAX_ARCHIVE_BATCH = 100;
+const MAX_ARCHIVE_BULK_INGEST = 50;
+const MAX_BATCH_TEXT_BYTES = 256 * 1024;
 import type { ArchiveFile, FolderDeleteMode, IngestJob } from "../store/types.js";
 import { getID, readJsonBody, writeError, writeJson, type ApiContext } from "./context.js";
 import { SUPPORTED_INGEST_EXTENSIONS } from "./ingest_jobs.js";
@@ -335,17 +341,76 @@ export function archivesApi(ctx: ApiContext) {
       const rawOverwrite = String(form.get("overwrite") ?? "").trim().toLowerCase();
       const overwrite = rawOverwrite === "true" || rawOverwrite === "1";
 
-      const uploaded: ArchiveFile[] = [];
+      // Parse optional relative_paths (repeated form field or single JSON array string)
+      const relPathEntries = form.getAll("relative_paths").map((v) => String(v).trim());
+      let parsedRelPaths: string[] = [];
+      if (relPathEntries.length === 1 && relPathEntries[0]?.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(relPathEntries[0]);
+          if (Array.isArray(parsed)) parsedRelPaths = parsed.map((v) => String(v).trim());
+        } catch {
+          parsedRelPaths = relPathEntries;
+        }
+      } else {
+        parsedRelPaths = relPathEntries;
+      }
+
       const svc = storage();
+      const planned: Array<{
+        item: File;
+        targetFolder: string;
+        filename: string;
+        relPath: string;
+      }> = [];
       try {
-        for (const item of entries) {
-          const filename = item.name.trim();
-          const bytes = new Uint8Array(await item.arrayBuffer());
+        for (let i = 0; i < entries.length; i += 1) {
+          const item = entries[i]!;
+          const rawRel = parsedRelPaths[i] || "";
+          let targetFolder = folderPath;
+          let filename = item.name.trim();
+          if (rawRel) {
+            const cleanRel = rawRel.replace(/\\/g, "/").replace(/^\/+/, "");
+            const dir = path.posix.dirname(cleanRel);
+            const base = path.posix.basename(cleanRel);
+            if (base && base !== "." && base !== "..") filename = base;
+            if (dir && dir !== ".") {
+              targetFolder = targetFolder ? `${normalizeArchiveFolderPath(targetFolder)}/${dir}` : dir;
+            }
+          }
+          targetFolder = normalizeArchiveFolderPath(targetFolder);
+          filename = validateArchiveFilename(filename);
+          const relPath = buildArchiveRelativePath(targetFolder, filename);
+          planned.push({ item, targetFolder, filename, relPath });
+        }
+
+        if (!overwrite) {
+          const conflicts: string[] = [];
+          const seenBatchPaths = new Set<string>();
+          for (const p of planned) {
+            if (seenBatchPaths.has(p.relPath)) {
+              conflicts.push(p.relPath);
+              continue;
+            }
+            seenBatchPaths.add(p.relPath);
+            const existing = await ctx.db.getArchiveFileByRelativePath(p.relPath);
+            if (existing) conflicts.push(p.relPath);
+          }
+          if (conflicts.length > 0) {
+            return writeJson(c, 409, {
+              error: `archive upload conflict on ${conflicts.length} file(s)`,
+              conflicts: [...new Set(conflicts)],
+            });
+          }
+        }
+
+        const uploaded: ArchiveFile[] = [];
+        for (const p of planned) {
+          const bytes = new Uint8Array(await p.item.arrayBuffer());
           const saved = await svc.storeNewFile({
-            folderPath,
-            filename,
+            folderPath: p.targetFolder,
+            filename: p.filename,
             bytes,
-            mediaType: item.type || undefined,
+            mediaType: p.item.type || undefined,
             origin: "upload",
             overwrite,
             autoRename: false,
@@ -654,6 +719,312 @@ export function archivesApi(ctx: ApiContext) {
           source: "api",
         });
         return writeJson(c, 200, { deleted: true, id: deleted.id });
+      } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
+
+    async batchGetArchiveFiles(c: Context): Promise<Response> {
+      const req = await readJsonBody<{
+        ids?: string[];
+        paths?: string[];
+        include_text?: boolean;
+      }>(c);
+      if (!req) return writeError(c, 400, "invalid request body");
+      const ids = Array.isArray(req.ids) ? req.ids.map((s) => String(s).trim()).filter(Boolean) : [];
+      const paths = Array.isArray(req.paths) ? req.paths.map((s) => String(s).trim()).filter(Boolean) : [];
+      if (ids.length === 0 && paths.length === 0) {
+        return writeError(c, 400, "ids or paths is required");
+      }
+      if (ids.length + paths.length > MAX_ARCHIVE_BATCH) {
+        return writeError(c, 400, `batch-get total items exceeds maximum ${MAX_ARCHIVE_BATCH}`);
+      }
+      const includeText = req.include_text === true;
+      try {
+        const seenIds = new Set<string>();
+        const files: Array<Record<string, unknown>> = [];
+        const notFound: string[] = [];
+
+        const pushFile = async (file: ArchiveFile) => {
+          if (seenIds.has(file.id)) return;
+          seenIds.add(file.id);
+          if (includeText && isTextEditableKind(file.kind) && file.size <= MAX_BATCH_TEXT_BYTES) {
+            const bytes = await storage().readFullBytes(file);
+            files.push({ ...file, text: new TextDecoder("utf-8", { fatal: false }).decode(bytes) });
+          } else {
+            files.push({ ...file });
+          }
+        };
+
+        for (const id of ids) {
+          const f = await ctx.db.getArchiveFile(id);
+          if (!f) notFound.push(id);
+          else await pushFile(f);
+        }
+        for (const rawPath of paths) {
+          const f = await ctx.db.getArchiveFileByRelativePath(rawPath.replace(/^\/+/, ""));
+          if (!f) notFound.push(rawPath);
+          else await pushFile(f);
+        }
+        return writeJson(c, 200, { files, not_found: notFound });
+      } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
+
+    async bulkMoveArchiveFiles(c: Context): Promise<Response> {
+      const req = await readJsonBody<{
+        items?: Array<{ id?: string; path?: string; folder_path?: string; filename?: string }>;
+        dry_run?: boolean;
+      }>(c);
+      if (!req || !Array.isArray(req.items) || req.items.length === 0) {
+        return writeError(c, 400, "items array is required");
+      }
+      if (req.items.length > MAX_ARCHIVE_BATCH) {
+        return writeError(c, 400, `items count exceeds maximum ${MAX_ARCHIVE_BATCH}`);
+      }
+      try {
+        const resolved: Array<{
+          file: ArchiveFile;
+          nextFolder: string;
+          nextFilename: string;
+          nextRel: string;
+        }> = [];
+        const movingIds = new Set<string>();
+        const targetPaths = new Set<string>();
+        const conflicts: string[] = [];
+
+        for (let i = 0; i < req.items.length; i += 1) {
+          const item = req.items[i]!;
+          const file = await resolveArchiveByIdOrPath(item.id, item.path);
+          if (!file) {
+            return writeError(c, 404, `archive file not found at item[${i}]`);
+          }
+          if (item.folder_path === undefined && item.filename === undefined) {
+            return writeError(c, 400, `item[${i}] requires folder_path or filename`);
+          }
+          const nextFolder =
+            item.folder_path !== undefined ? normalizeArchiveFolderPath(item.folder_path) : file.folder_path;
+          const nextFilename =
+            item.filename !== undefined ? validateArchiveFilename(item.filename) : file.filename;
+          const nextRel = buildArchiveRelativePath(nextFolder, nextFilename);
+          if (targetPaths.has(nextRel)) {
+            conflicts.push(nextRel);
+          }
+          targetPaths.add(nextRel);
+          movingIds.add(file.id);
+          resolved.push({ file, nextFolder, nextFilename, nextRel });
+        }
+
+        for (const r of resolved) {
+          if (r.nextRel === r.file.relative_path) continue;
+          const existing = await ctx.db.getArchiveFileByRelativePath(r.nextRel);
+          if (existing && !movingIds.has(existing.id)) {
+            conflicts.push(r.nextRel);
+          }
+        }
+        if (conflicts.length > 0) {
+          return writeJson(c, 409, {
+            error: `bulk move conflict on ${conflicts.length} path(s)`,
+            conflicts: [...new Set(conflicts)],
+          });
+        }
+
+        if (req.dry_run) {
+          return writeJson(c, 200, {
+            dry_run: true,
+            ok: true,
+            count: resolved.length,
+            moves: resolved.map((r) => ({
+              id: r.file.id,
+              from: r.file.relative_path,
+              to: r.nextRel,
+            })),
+          });
+        }
+
+        const updatedFiles: ArchiveFile[] = [];
+        for (const r of resolved) {
+          const updated = await ctx.db.updateArchiveFileLocation(r.file.id, r.nextFolder, r.nextFilename);
+          updatedFiles.push(updated);
+        }
+        return writeJson(c, 200, { ok: true, moved: updatedFiles.length, files: updatedFiles });
+      } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
+
+    async bulkDeleteArchiveFiles(c: Context): Promise<Response> {
+      const req = await readJsonBody<{ ids?: string[]; paths?: string[] }>(c);
+      if (!req) return writeError(c, 400, "invalid request body");
+      const ids = Array.isArray(req.ids) ? req.ids.map((s) => String(s).trim()).filter(Boolean) : [];
+      const paths = Array.isArray(req.paths) ? req.paths.map((s) => String(s).trim()).filter(Boolean) : [];
+      if (ids.length === 0 && paths.length === 0) {
+        return writeError(c, 400, "ids or paths is required");
+      }
+      if (ids.length + paths.length > MAX_ARCHIVE_BATCH) {
+        return writeError(c, 400, `bulk-delete total items exceeds maximum ${MAX_ARCHIVE_BATCH}`);
+      }
+      try {
+        const svc = storage();
+        const deletedIds: string[] = [];
+        const notFound: string[] = [];
+        const seen = new Set<string>();
+
+        for (const id of ids) {
+          if (seen.has(id)) continue;
+          const deleted = await svc.deleteFile(id);
+          if (!deleted) notFound.push(id);
+          else {
+            seen.add(deleted.id);
+            deletedIds.push(deleted.id);
+          }
+        }
+        for (const rawPath of paths) {
+          const found = await ctx.db.getArchiveFileByRelativePath(rawPath.replace(/^\/+/, ""));
+          if (!found) {
+            notFound.push(rawPath);
+            continue;
+          }
+          if (seen.has(found.id)) continue;
+          const deleted = await svc.deleteFile(found.id);
+          if (deleted) {
+            seen.add(deleted.id);
+            deletedIds.push(deleted.id);
+          }
+        }
+        return writeJson(c, 200, { deleted: deletedIds.length, deleted_ids: deletedIds, not_found: notFound });
+      } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
+
+    async bulkIngestArchiveFiles(c: Context): Promise<Response> {
+      const req = await readJsonBody<{
+        ids?: string[];
+        paths?: string[];
+        source_ref_prefix?: string;
+      }>(c);
+      if (!req) return writeError(c, 400, "invalid request body");
+      const ids = Array.isArray(req.ids) ? req.ids.map((s) => String(s).trim()).filter(Boolean) : [];
+      const paths = Array.isArray(req.paths) ? req.paths.map((s) => String(s).trim()).filter(Boolean) : [];
+      if (ids.length === 0 && paths.length === 0) {
+        return writeError(c, 400, "ids or paths is required");
+      }
+      if (ids.length + paths.length > MAX_ARCHIVE_BULK_INGEST) {
+        return writeError(c, 400, `bulk-ingest total items exceeds maximum ${MAX_ARCHIVE_BULK_INGEST}`);
+      }
+      const prefix = (req.source_ref_prefix ?? "").trim();
+      try {
+        const jobs: IngestJob[] = [];
+        const skipped: Array<{ target: string; reason: string }> = [];
+        const seen = new Set<string>();
+
+        const enqueueFile = async (file: ArchiveFile) => {
+          if (seen.has(file.id)) return;
+          seen.add(file.id);
+          const ext = path.extname(file.filename).toLowerCase();
+          if (!SUPPORTED_INGEST_EXTENSIONS.has(ext)) {
+            skipped.push({ target: file.relative_path, reason: `unsupported extension: ${ext || "(none)"}` });
+            return;
+          }
+          const job: IngestJob = {
+            id: "",
+            parent_job_id: "",
+            input_type: "upload",
+            source_path: file.relative_path,
+            source_ref: prefix ? `${prefix}:${file.relative_path}` : `archive:${file.relative_path}`,
+            archive_file_id: file.id,
+            status: "queued",
+            retries: 0,
+            max_retries: 3,
+            error: "",
+            error_code: "",
+            error_message: "",
+            missing_dependency: "",
+            remediation: "",
+            result_summary: "",
+            created_at: "",
+            updated_at: "",
+          };
+          await ctx.db.createIngestJob(job);
+          await recordRulesSnapshot(ctx.db, job.id, ctx.workspace);
+          logIngestJob(ctx.db, job, "queued", "api");
+          jobs.push(job);
+        };
+
+        for (const id of ids) {
+          const f = await ctx.db.getArchiveFile(id);
+          if (!f) skipped.push({ target: id, reason: "not_found" });
+          else await enqueueFile(f);
+        }
+        for (const rawPath of paths) {
+          const f = await ctx.db.getArchiveFileByRelativePath(rawPath.replace(/^\/+/, ""));
+          if (!f) skipped.push({ target: rawPath, reason: "not_found" });
+          else await enqueueFile(f);
+        }
+        return writeJson(c, 201, { queued: jobs.length, jobs, skipped });
+      } catch (error) {
+        return mapArchiveError(c, error);
+      }
+    },
+
+    async bulkLinkArchiveFiles(c: Context): Promise<Response> {
+      const req = await readJsonBody<{
+        action?: "link" | "unlink";
+        items?: Array<{ document_id: string; archive_file_id?: string; path?: string; relation?: string }>;
+      }>(c);
+      if (!req || !Array.isArray(req.items) || req.items.length === 0) {
+        return writeError(c, 400, "items array is required");
+      }
+      if (req.items.length > MAX_ARCHIVE_BATCH) {
+        return writeError(c, 400, `items count exceeds maximum ${MAX_ARCHIVE_BATCH}`);
+      }
+      const action = req.action ?? "link";
+      if (action !== "link" && action !== "unlink") {
+        return writeError(c, 400, "action must be link or unlink");
+      }
+      try {
+        const results: Array<{ document_id: string; archive_file_id: string; status: string }> = [];
+        const errors: Array<{ index: number; error: string }> = [];
+
+        for (let i = 0; i < req.items.length; i += 1) {
+          const item = req.items[i]!;
+          const docId = (item.document_id ?? "").trim();
+          if (!docId) {
+            errors.push({ index: i, error: "document_id is required" });
+            continue;
+          }
+          const doc = await ctx.db.getDocument(docId);
+          if (!doc) {
+            errors.push({ index: i, error: `document not found: ${docId}` });
+            continue;
+          }
+          const file = await resolveArchiveByIdOrPath(item.archive_file_id, item.path);
+          if (!file) {
+            errors.push({ index: i, error: `archive file not found: ${item.archive_file_id || item.path || ""}` });
+            continue;
+          }
+          if (action === "link") {
+            const relation = (item.relation ?? "").trim() || "manual_link";
+            await ctx.db.linkDocumentArchiveSource(doc.id, file.id, "", relation);
+            results.push({ document_id: doc.id, archive_file_id: file.id, status: "linked" });
+          } else {
+            const ok = await ctx.db.unlinkDocumentArchiveSource(doc.id, file.id);
+            results.push({
+              document_id: doc.id,
+              archive_file_id: file.id,
+              status: ok ? "unlinked" : "not_linked",
+            });
+          }
+        }
+        return writeJson(c, 200, {
+          ok: errors.length === 0,
+          action,
+          processed: results.length,
+          results,
+          errors,
+        });
       } catch (error) {
         return mapArchiveError(c, error);
       }

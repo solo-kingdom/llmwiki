@@ -5,6 +5,12 @@ import { refreshFolderOverviews } from "../engine/folder_overview.js";
 import { normalizeWikiContent, type ExtractedReferenceEntry } from "../engine/ref_sections.js";
 import { applyTextEdits, TextPatchError, type TextEdit } from "../engine/text_patch.js";
 import {
+  BatchOperationError,
+  executeWikiBatch,
+  MAX_BATCH_GET,
+  type BatchDocOp,
+} from "../engine/wiki_batch.js";
+import {
   folderPathFromWikiRelPath,
   isWikiSystemPath,
   RESERVED_TOP_LEVEL_WIKI_PAGES,
@@ -21,6 +27,7 @@ import type { Store } from "../store/interfaces.js";
 import type { Document } from "../store/types.js";
 import {
   executeLocalSearch,
+  extractMarkdownOutline,
   formatDocumentRead,
   parseReadFormatOptions,
   resolveDocumentByIdOrPath,
@@ -285,6 +292,42 @@ export function registerTools(
       },
     },
     async (args) => reopenToolHandler(db, args, activity),
+  );
+
+  register(
+    {
+      name: "batch_read",
+      description:
+        "Batch read multiple wiki documents by IDs or relative paths (fields: meta, content, or outline).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ids: { type: "array", items: { type: "string" } },
+          paths: { type: "array", items: { type: "string" } },
+          fields: { type: "string", enum: ["meta", "content", "outline"], default: "content" },
+        },
+        required: [],
+      },
+    },
+    async (args) => batchReadToolHandler(db, args),
+  );
+
+  register(
+    {
+      name: "batch_write",
+      description:
+        "Execute up to 100 wiki document operations (create, replace, patch, update_meta, move, archive, reopen, delete) atomically in a single change_set, with optional dry_run.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ops: { type: "array", items: { type: "object" } },
+          summary: { type: "string" },
+          dry_run: { type: "boolean", default: false },
+        },
+        required: ["ops"],
+      },
+    },
+    async (args) => batchWriteToolHandler(db, args),
   );
 
   registerArchiveTools(register, workspace, db);
@@ -716,6 +759,71 @@ async function reopenToolHandler(
     await activity?.logDocument(db, "reopened", reopened.id, reopened.relative_path, "mcp");
     return `Reopened: ${reopened.relative_path}`;
   } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+async function batchReadToolHandler(db: Store, args: Record<string, unknown>): Promise<string> {
+  if (!db) return "Error: database not connected";
+  const ids = Array.isArray(args["ids"]) ? (args["ids"] as unknown[]).map((v) => String(v).trim()).filter(Boolean) : [];
+  const paths = Array.isArray(args["paths"]) ? (args["paths"] as unknown[]).map((v) => String(v).trim()).filter(Boolean) : [];
+  if (ids.length === 0 && paths.length === 0) return "Error: ids or paths is required";
+  if (ids.length + paths.length > MAX_BATCH_GET) return `Error: total items exceeds ${MAX_BATCH_GET}`;
+  const fields = typeof args["fields"] === "string" ? args["fields"] : "content";
+
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  const notFound: string[] = [];
+
+  const appendDoc = (doc: Document) => {
+    if (seen.has(doc.id)) return;
+    seen.add(doc.id);
+    const content = doc.content ?? "";
+    if (fields === "meta") {
+      lines.push(`- [${doc.id}] ${doc.relative_path} (v${doc.version}, ${[...content].length} chars) — ${doc.title}`);
+    } else if (fields === "outline") {
+      const headings = extractMarkdownOutline(content);
+      lines.push(`## [${doc.id}] ${doc.relative_path}\n${headings.join("\n") || "(no headings)"}`);
+    } else {
+      lines.push(`## [${doc.id}] ${doc.relative_path} (v${doc.version})\n\n${content}`);
+    }
+  };
+
+  for (const id of ids) {
+    const doc = await db.getDocument(id);
+    if (!doc) notFound.push(id);
+    else appendDoc(doc);
+  }
+  for (const p of paths) {
+    const clean = p.replace(/^\/+/, "");
+    let doc = await db.getDocumentByRelativePath(clean);
+    if (!doc && !clean.startsWith("wiki/")) doc = await db.getDocumentByRelativePath(`wiki/${clean}`);
+    if (!doc) notFound.push(p);
+    else appendDoc(doc);
+  }
+
+  return [
+    `Found ${seen.size} document(s)${notFound.length ? `, not_found: ${notFound.join(", ")}` : ""}`,
+    "",
+    ...lines,
+  ].join("\n");
+}
+
+async function batchWriteToolHandler(db: Store, args: Record<string, unknown>): Promise<string> {
+  if (!db) return "Error: database not connected";
+  const ops = Array.isArray(args["ops"]) ? (args["ops"] as BatchDocOp[]) : [];
+  const summary = typeof args["summary"] === "string" ? args["summary"] : undefined;
+  const dryRun = args["dry_run"] === true;
+  try {
+    const res = await executeWikiBatch(db, { ops, summary, dry_run: dryRun }, "mcp");
+    if (res.dry_run) {
+      return `Dry-run OK: ${res.op_count} op(s), ${res.affected_pages} affected page(s), rewritten_links=${res.rewritten_link_pages.length}`;
+    }
+    return `Batch applied: change_set=${res.change_set_id}, ops=${res.op_count}, affected=${res.affected_pages}, rewritten_links=${res.rewritten_link_pages.length}`;
+  } catch (error) {
+    if (error instanceof BatchOperationError) {
+      return `Error: ${error.code} (${error.status}) - ${error.message}`;
+    }
     return `Error: ${error instanceof Error ? error.message : String(error)}`;
   }
 }

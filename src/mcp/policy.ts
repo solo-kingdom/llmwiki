@@ -52,6 +52,7 @@ export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
       "ping",
       "archive_list",
       "archive_read",
+      "batch_read",
     ]),
     writeTools: new Set([
       "write",
@@ -60,6 +61,7 @@ export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
       "folder",
       "archive",
       "reopen",
+      "batch_write",
       "archive_mkdir",
       "archive_upload",
       "archive_patch",
@@ -67,6 +69,7 @@ export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
       "archive_delete",
       "archive_link",
       "archive_ingest",
+      "archive_batch",
     ]),
   };
 }

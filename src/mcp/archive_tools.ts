@@ -5,8 +5,9 @@ import { ArchiveStorageService, isTextEditableKind } from "../archive/storage.js
 import { applyTextEdits, TextPatchError, type TextEdit } from "../engine/text_patch.js";
 import { recordRulesSnapshot } from "../ingest/processor.js";
 import { buildArchiveRelativePath, normalizeArchiveFolderPath, validateArchiveFilename } from "../store/postgres/archives.js";
+import { SearchValidationError, validateSearchRegex } from "../store/postgres/chunks.js";
 import type { Store } from "../store/interfaces.js";
-import type { FolderDeleteMode, IngestJob } from "../store/types.js";
+import type { FolderDeleteMode, IngestJob, SearchMatchMode } from "../store/types.js";
 import type { Tool, ToolHandler } from "./types.js";
 
 const MAX_MCP_TEXT_READ_BYTES = 256 * 1024;
@@ -64,6 +65,76 @@ export function registerArchiveTools(
         `## Archive Files (${files.length})`,
         ...fileLines,
       ].join("\n");
+    },
+  );
+
+  register(
+    {
+      name: "archive_search",
+      description:
+        "Search Archive files across filename, title, relative_path, and searchable_text (supports fuzzy, all_terms, phrase, regex).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query text or regex pattern" },
+          kind: {
+            type: "string",
+            enum: ["all", "markdown", "html", "image", "video", "audio", "pdf", "text", "other"],
+          },
+          folder: { type: "string", description: "Filter by folder path prefix" },
+          match: { type: "string", enum: ["fuzzy", "all_terms", "phrase", "regex"], default: "fuzzy" },
+          case_sensitive: { type: "boolean", default: false },
+          origin: { type: "string" },
+          media_type: { type: "string" },
+          unlinked_only: { type: "boolean", default: false },
+          limit: { type: "integer", default: 20 },
+        },
+        required: ["query"],
+      },
+    },
+    async (args) => {
+      if (!db) return "Error: database not connected";
+      const query = typeof args["query"] === "string" ? args["query"].trim() : "";
+      if (!query) return "Error: query is required";
+      const rawMatch = typeof args["match"] === "string" ? args["match"].trim().toLowerCase() : "fuzzy";
+      const match: SearchMatchMode =
+        rawMatch === "all_terms" || rawMatch === "phrase" || rawMatch === "regex" ? rawMatch : "fuzzy";
+      if (match === "regex") {
+        try {
+          validateSearchRegex(query);
+        } catch (error) {
+          return `Error: ${error instanceof SearchValidationError ? error.message : String(error)}`;
+        }
+      }
+      const limit =
+        typeof args["limit"] === "number" && Number.isFinite(args["limit"]) && args["limit"] > 0
+          ? Math.min(100, Math.floor(args["limit"]))
+          : 20;
+      const hits = await db.searchArchiveFiles(query, {
+        kind: typeof args["kind"] === "string" ? args["kind"] : undefined,
+        folder_path: typeof args["folder"] === "string" ? args["folder"] : undefined,
+        match,
+        case_sensitive: args["case_sensitive"] === true,
+        origin: typeof args["origin"] === "string" ? args["origin"] : undefined,
+        media_type: typeof args["media_type"] === "string" ? args["media_type"] : undefined,
+        unlinked_only: args["unlinked_only"] === true,
+        limit,
+      });
+      if (hits.length === 0) return `No archive files found for: ${query}`;
+      const lines = [`Found ${hits.length} archive result(s) for "${query}":`, ""];
+      for (const hit of hits) {
+        const titlePart = hit.file.title ? ` (${hit.file.title})` : "";
+        lines.push(
+          `- [${hit.file.id}] \`${hit.file.relative_path}\`${titlePart} [${hit.match_type}, score=${hit.score.toFixed(2)}]`,
+        );
+        if (hit.snippet) lines.push(`  ${hit.snippet}`);
+        if (hit.matched_lines?.length) {
+          lines.push(
+            `  Matched lines: ${hit.matched_lines.map((ml) => `L${ml.line}: ${ml.text}`).join(" | ")}`,
+          );
+        }
+      }
+      return lines.join("\n");
     },
   );
 

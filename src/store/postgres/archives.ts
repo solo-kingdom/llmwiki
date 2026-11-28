@@ -11,12 +11,20 @@ import type {
   ArchiveLinkedDocument,
   ArchiveSearchHit,
   ArchiveSearchMatchType,
+  ArchiveSearchOptions,
   ArchiveSourceSummary,
   ArchiveStorageBackend,
   DeleteArchiveFolderResult,
   FolderDeleteMode,
+  MatchedLine,
   MoveArchiveFolderResult,
 } from "../types.js";
+import {
+  buildTokenGroupMatchSql,
+  extractMatchedLines,
+  tokenizeSearchQuery,
+  validateSearchRegex,
+} from "./chunks.js";
 import { NOW_TEXT, asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
 export class ArchiveValidationError extends Error {
@@ -829,13 +837,18 @@ export function archivesRepo(pool: Pool): ArchiveStore {
 
     async searchArchiveFiles(
       query: string,
-      options: { kind?: string; folder_path?: string; limit?: number } = {},
+      options: ArchiveSearchOptions = {},
     ): Promise<ArchiveSearchHit[]> {
       const trimmed = query.trim();
       if (!trimmed) return [];
-      const safeLimit = Math.max(1, Math.min(50, options.limit ?? 20));
-      const likePattern = `%${escapeLikePattern(trimmed)}%`;
+      const safeLimit = Math.max(1, Math.min(100, options.limit ?? 20));
+      const matchMode = options.match ?? "fuzzy";
+      const caseSensitive = Boolean(options.case_sensitive);
+      if (matchMode === "regex") {
+        validateSearchRegex(trimmed);
+      }
 
+      const likePattern = `%${escapeLikePattern(trimmed)}%`;
       const clauses: string[] = [];
       const baseArgs: unknown[] = [trimmed, likePattern];
       if (options.kind && options.kind.trim() && options.kind.trim().toLowerCase() !== "all") {
@@ -847,65 +860,153 @@ export function archivesRepo(pool: Pool): ArchiveStore {
         baseArgs.push(norm, `${norm}/%`);
         clauses.push(`(folder_path = $${baseArgs.length - 1} OR folder_path LIKE $${baseArgs.length})`);
       }
-      const filterSql = clauses.length > 0 ? `AND ${clauses.join(" AND ")}` : "";
-      const limitParam = `$${baseArgs.length + 1}`;
-      const args = [...baseArgs, safeLimit];
-
-      const ftsSql = `
-        SELECT ${ARCHIVE_FILE_COLUMNS},
-          COALESCE(searchable_text, ''),
-          (ts_rank_cd(to_tsvector('simple', COALESCE(searchable_text, '')), websearch_to_tsquery('simple', $1))
-           + similarity(COALESCE(searchable_text, ''), $1)
-           + CASE WHEN filename ILIKE $2 ESCAPE '\\' THEN 2.0
-                  WHEN relative_path ILIKE $2 ESCAPE '\\' THEN 1.0
-                  ELSE 0.0 END) AS score,
-          (CASE
-             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\')
-              AND (to_tsvector('simple', COALESCE(searchable_text, '')) @@ websearch_to_tsquery('simple', $1)
-                   OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\') THEN 3
-             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\') THEN 2
-             ELSE 1
-           END) AS tier
-        FROM archive_files
-        WHERE (
-          filename ILIKE $2 ESCAPE '\\'
-          OR relative_path ILIKE $2 ESCAPE '\\'
-          OR to_tsvector('simple', COALESCE(searchable_text, '')) @@ websearch_to_tsquery('simple', $1)
-          OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\'
-        )
-        ${filterSql}
-        ORDER BY tier DESC, score DESC, updated_at DESC
-        LIMIT ${limitParam}`;
-
-      const likeSql = `
-        SELECT ${ARCHIVE_FILE_COLUMNS},
-          COALESCE(searchable_text, ''),
-          (CASE WHEN filename ILIKE $2 ESCAPE '\\' THEN 2.0
-                WHEN relative_path ILIKE $2 ESCAPE '\\' THEN 1.0
-                ELSE 0.5 END) AS score,
-          (CASE
-             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\')
-              AND COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\' THEN 3
-             WHEN (filename ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\') THEN 2
-             ELSE 1
-           END) AS tier
-        FROM archive_files
-        WHERE (
-          filename ILIKE $2 ESCAPE '\\'
-          OR relative_path ILIKE $2 ESCAPE '\\'
-          OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\'
-        )
-        ${filterSql}
-        ORDER BY tier DESC, score DESC, updated_at DESC
-        LIMIT ${limitParam}`;
-
-      let rows: unknown[][];
-      try {
-        rows = await queryRows(pool, ftsSql, args);
-      } catch {
-        rows = await queryRows(pool, likeSql, args);
+      if (options.origin && options.origin.trim()) {
+        baseArgs.push(options.origin.trim());
+        clauses.push(`origin = $${baseArgs.length}`);
+      }
+      if (options.media_type && options.media_type.trim()) {
+        baseArgs.push(`%${escapeLikePattern(options.media_type.trim())}%`);
+        clauses.push(`media_type ILIKE $${baseArgs.length} ESCAPE '\\'`);
+      }
+      if (options.unlinked_only) {
+        clauses.push(
+          `NOT EXISTS (SELECT 1 FROM document_archive_sources das WHERE das.archive_file_id = archive_files.id)`,
+        );
+      }
+      if (options.updated_after && options.updated_after.trim()) {
+        baseArgs.push(options.updated_after.trim());
+        clauses.push(`updated_at >= $${baseArgs.length}`);
+      }
+      if (options.updated_before && options.updated_before.trim()) {
+        baseArgs.push(options.updated_before.trim());
+        clauses.push(`updated_at <= $${baseArgs.length}`);
       }
 
+      const buildQueryRows = async (): Promise<unknown[][]> => {
+        const metaHitExpr = `(filename ILIKE $2 ESCAPE '\\' OR COALESCE(title, '') ILIKE $2 ESCAPE '\\' OR relative_path ILIKE $2 ESCAPE '\\')`;
+
+        if (matchMode === "phrase" || matchMode === "regex") {
+          const op =
+            matchMode === "regex"
+              ? caseSensitive
+                ? "~"
+                : "~*"
+              : caseSensitive
+                ? "LIKE"
+                : "ILIKE";
+          const patternArg = matchMode === "regex" ? trimmed : likePattern;
+          const esc = matchMode === "phrase" ? " ESCAPE '\\'" : "";
+          const exactArgs: unknown[] = [patternArg, ...baseArgs.slice(2)];
+          // Re-index clauses? Wait: baseArgs had [trimmed, likePattern, ...filters]
+          // Simpler: keep baseArgs = [trimmed, likePattern, ...filters] and use $1 for regex or $2 for phrase!
+          void exactArgs;
+          const patParam = matchMode === "regex" ? "$1" : "$2";
+          const exactWhere = `(filename ${op} ${patParam}${esc} OR COALESCE(title, '') ${op} ${patParam}${esc} OR relative_path ${op} ${patParam}${esc} OR COALESCE(searchable_text, '') ${op} ${patParam}${esc})`;
+          const filterSql = clauses.length > 0 ? `AND ${clauses.join(" AND ")}` : "";
+          const limitParam = `$${baseArgs.length + 1}`;
+          const sql = `
+            SELECT ${ARCHIVE_FILE_COLUMNS},
+              COALESCE(searchable_text, ''),
+              (CASE WHEN filename ${op} ${patParam}${esc} THEN 2.0
+                    WHEN COALESCE(title, '') ${op} ${patParam}${esc} THEN 1.5
+                    WHEN relative_path ${op} ${patParam}${esc} THEN 1.0
+                    ELSE 0.5 END) AS score,
+              (CASE
+                 WHEN (filename ${op} ${patParam}${esc} OR COALESCE(title, '') ${op} ${patParam}${esc} OR relative_path ${op} ${patParam}${esc})
+                  AND COALESCE(searchable_text, '') ${op} ${patParam}${esc} THEN 3
+                 WHEN (filename ${op} ${patParam}${esc} OR COALESCE(title, '') ${op} ${patParam}${esc} OR relative_path ${op} ${patParam}${esc}) THEN 2
+                 ELSE 1
+               END) AS tier
+            FROM archive_files
+            WHERE ${exactWhere}
+            ${filterSql}
+            ORDER BY tier DESC, score DESC, updated_at DESC
+            LIMIT ${limitParam}`;
+          return queryRows(pool, sql, [...baseArgs, safeLimit]);
+        }
+
+        const tokenCols = ["filename", "COALESCE(title, '')", "relative_path", "COALESCE(searchable_text, '')"];
+        const tokens = tokenizeSearchQuery(trimmed);
+        const requireAll = matchMode === "all_terms";
+        const tokenArgs = [...baseArgs];
+        const tokenMatch = buildTokenGroupMatchSql(tokens.groups, tokenCols, tokenArgs, requireAll);
+        const filterSql = clauses.length > 0 ? `AND ${clauses.join(" AND ")}` : "";
+        const limitParam = `$${tokenArgs.length + 1}`;
+        const args = [...tokenArgs, safeLimit];
+
+        const groupScore = tokenMatch.whereSql ? `(${tokenMatch.groupHitExpr}) * 0.25 + ` : "";
+        const ftsWhere =
+          requireAll && tokenMatch.whereSql
+            ? tokenMatch.whereSql
+            : `(
+                filename ILIKE $2 ESCAPE '\\'
+                OR COALESCE(title, '') ILIKE $2 ESCAPE '\\'
+                OR relative_path ILIKE $2 ESCAPE '\\'
+                OR to_tsvector('simple', COALESCE(searchable_text, '')) @@ websearch_to_tsquery('simple', $1)
+                OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\'
+                ${tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : ""}
+              )`;
+
+        const ftsSql = `
+          SELECT ${ARCHIVE_FILE_COLUMNS},
+            COALESCE(searchable_text, ''),
+            (${groupScore}ts_rank_cd(to_tsvector('simple', COALESCE(searchable_text, '')), websearch_to_tsquery('simple', $1))
+             + similarity(COALESCE(searchable_text, ''), $1)
+             + CASE WHEN filename ILIKE $2 ESCAPE '\\' THEN 2.0
+                    WHEN COALESCE(title, '') ILIKE $2 ESCAPE '\\' THEN 1.5
+                    WHEN relative_path ILIKE $2 ESCAPE '\\' THEN 1.0
+                    ELSE 0.0 END) AS score,
+            (CASE
+               WHEN ${metaHitExpr}
+                AND (to_tsvector('simple', COALESCE(searchable_text, '')) @@ websearch_to_tsquery('simple', $1)
+                     OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\') THEN 3
+               WHEN ${metaHitExpr} THEN 2
+               ELSE 1
+             END) AS tier
+          FROM archive_files
+          WHERE ${ftsWhere}
+          ${filterSql}
+          ORDER BY tier DESC, score DESC, updated_at DESC
+          LIMIT ${limitParam}`;
+
+        const likeWhere =
+          requireAll && tokenMatch.whereSql
+            ? tokenMatch.whereSql
+            : `(
+                filename ILIKE $2 ESCAPE '\\'
+                OR COALESCE(title, '') ILIKE $2 ESCAPE '\\'
+                OR relative_path ILIKE $2 ESCAPE '\\'
+                OR COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\'
+                ${tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : ""}
+              )`;
+
+        const likeSql = `
+          SELECT ${ARCHIVE_FILE_COLUMNS},
+            COALESCE(searchable_text, ''),
+            (${groupScore}CASE WHEN filename ILIKE $2 ESCAPE '\\' THEN 2.0
+                  WHEN COALESCE(title, '') ILIKE $2 ESCAPE '\\' THEN 1.5
+                  WHEN relative_path ILIKE $2 ESCAPE '\\' THEN 1.0
+                  ELSE 0.5 END) AS score,
+            (CASE
+               WHEN ${metaHitExpr}
+                AND COALESCE(searchable_text, '') ILIKE $2 ESCAPE '\\' THEN 3
+               WHEN ${metaHitExpr} THEN 2
+               ELSE 1
+             END) AS tier
+          FROM archive_files
+          WHERE ${likeWhere}
+          ${filterSql}
+          ORDER BY tier DESC, score DESC, updated_at DESC
+          LIMIT ${limitParam}`;
+
+        try {
+          return await queryRows(pool, ftsSql, args);
+        } catch {
+          return await queryRows(pool, likeSql, args);
+        }
+      };
+
+      const rows = await buildQueryRows();
       const lowerQ = trimmed.toLowerCase();
       return rows.map((row) => {
         const file = scanArchiveFile(row);
@@ -913,17 +1014,29 @@ export function archivesRepo(pool: Pool): ArchiveStore {
         const score = Number(row[17] ?? 0);
         const tier = asNumber(row[18]);
         const nameHit = file.filename.toLowerCase().includes(lowerQ);
+        const titleHit = (file.title ?? "").toLowerCase().includes(lowerQ);
         const pathHit = file.relative_path.toLowerCase().includes(lowerQ);
-        const contentHit = tier === 3 || (!nameHit && !pathHit);
+        const contentHit = tier === 3 || (!nameHit && !titleHit && !pathHit);
         let matchType: ArchiveSearchMatchType = "content";
-        if ((nameHit || pathHit) && contentHit) matchType = "both";
+        if ((nameHit || titleHit || pathHit) && contentHit) matchType = "both";
         else if (nameHit) matchType = "filename";
+        else if (titleHit) matchType = "title";
         else if (pathHit) matchType = "path";
 
         const snippet = contentHit
           ? extractSearchSnippet(searchableText, trimmed, 180)
           : extractSearchSnippet(searchableText, "", 140);
-        return { file, match_type: matchType, snippet, score };
+        let matchedLines: MatchedLine[] | undefined;
+        if (matchMode === "phrase" || matchMode === "regex") {
+          matchedLines = extractMatchedLines(searchableText, trimmed, matchMode, caseSensitive);
+        }
+        return {
+          file,
+          match_type: matchType,
+          snippet,
+          score,
+          ...(matchedLines && matchedLines.length > 0 ? { matched_lines: matchedLines } : {}),
+        };
       });
     },
 

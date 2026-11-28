@@ -24,25 +24,31 @@ Archives store raw files and media independently from the Wiki abstraction layer
 
 | Method & Path | Body / Query | Notes |
 |---|---|---|
-| `GET /api/v1/archives/tree` | `?kind=&q=` | Returns `{ folders, files }` |
-| `GET /api/v1/archives/search` | `?q=&kind=&folder=&limit=` | Searches filename, path, and text content (`markdown`/`html`/`text`); returns `{ query, results }` with `match_type` and `snippet` |
-| `POST /api/v1/archives/folders` | `{ path, display_name?, description?, sort_order? }` | Auto-creates missing parent folders |
+| `GET /api/v1/archives/tree` | `?folder=&kind=&q=` | Returns `{ folders, files }` filtered by optional `folder` subtree |
+| `GET /api/v1/archives/search` | `?q=&kind=&folder=&match=&origin=&media_type=&unlinked_only=&limit=&offset=` | Searches `filename`, `title`, `relative_path`, and `searchable_text` (`fuzzy\|all_terms\|phrase\|regex`); returns `{ query, results, total, limit, offset, has_more }` |
+| `POST /api/v1/archives/folders` | `{ path, display_name?, description?, sort_order?, exist_ok? }` | Auto-creates missing parent folders (`exist_ok: true` returns existing folder idempotently) |
 | `PATCH /api/v1/archives/folders` | `{ path, display_name?, description?, sort_order? }` | Updates folder metadata |
-| `POST /api/v1/archives/folders/move` | `{ from_path, to_path }` | Moves folder tree and updates child file paths |
-| `DELETE /api/v1/archives/folders` | `?path=&mode=empty\|move_to_parent\|cascade&target_folder=` | `cascade` also deletes external blobs |
+| `POST /api/v1/archives/folders/move` | `{ from_path, to_path, on_conflict?: "fail" \| "merge" }` | Moves/merges folder tree (`merge` rolls back with `409 conflicts[]` on filename collision) |
+| `DELETE /api/v1/archives/folders` | `?path=&mode=empty\|move_to_parent\|cascade&target_folder=` | `move_to_parent` preserves subfolder hierarchy; `cascade` deletes external blobs |
 
 ### Files (by ID or relative path)
 
 | Method & Path | Body / Query | Notes |
 |---|---|---|
-| `POST /api/v1/archives/files` | `multipart/form-data`: `files` (or `file`), `folder_path?`, `overwrite?` | Supports multiple files; `overwrite=true` replaces content in-place keeping ID and Wiki links |
+| `POST /api/v1/archives/files` | `multipart/form-data` (`files`, `folder_path?`, `relative_paths?`, `overwrite?`) or `application/json` (`{ filename, folder_path?, content? \| content_base64?, title?, source_ref?, overwrite? }`) | Supports subtree `relative_paths` (`!overwrite` conflicts pre-checked atomically) and JSON creation |
 | `GET /api/v1/archives/files/:id` | — | Returns file metadata + `wiki_documents` |
 | `GET /api/v1/archives/files/by-path` | `?path=<relative_path>` | Lookup file metadata + `wiki_documents` by path |
 | `GET /api/v1/archives/files/:id/raw` | `Range` header, `?download=1` | Streams raw bytes (`200` / `206 Partial Content`) |
 | `GET /api/v1/archives/files/by-path/raw` | `?path=<relative_path>&download=1` | Streams raw bytes by path |
-| `PATCH /api/v1/archives/files/:id` | `{ folder_path?, filename? }` | Move or rename file |
-| `PUT /api/v1/archives/files/:id/content` | `{ content }` | Replace UTF-8 text content; returns `{ file, promoted, previous_backend }` |
-| `DELETE /api/v1/archives/files/:id` | — | Deletes DB row and external blob |
+| `PATCH /api/v1/archives/files/:id` | `{ folder_path?, filename?, title?, source_ref?, expected_sha256? }` | Move/rename or update `title`/`source_ref` with optional `expected_sha256` / `If-Match` |
+| `PUT /api/v1/archives/files/:id/content` | `{ content, expected_sha256? }` | Replace UTF-8 text content (`409` on sha256 mismatch); returns `{ file, promoted, previous_backend }` |
+| `PATCH /api/v1/archives/files/:id/content` | `{ edits, expected_sha256?, dry_run? }` | Atomic text patch (`replace`/`replace_lines`/`append`/`prepend`/`insert_after`) on text-editable files |
+| `POST /api/v1/archives/files/batch-get` | `{ ids?, paths?, include_text? }` | Batch read metadata and optional UTF-8 text |
+| `POST /api/v1/archives/files/bulk-move` | `{ items: [{ id?\|path?, folder_path?, filename? }], dry_run? }` | Pre-checks conflicts and moves multiple files |
+| `POST /api/v1/archives/files/bulk-delete` | `{ ids?, paths? }` | Deletes multiple archive files & external blobs |
+| `POST /api/v1/archives/files/bulk-ingest` | `{ ids?, paths? }` | Queues ingest jobs for multiple archive files |
+| `POST /api/v1/archives/files/bulk-link` | `{ action: "link"\|"unlink", items }` | Links/unlinks multiple archive files to Wiki documents |
+| `DELETE /api/v1/archives/files/:id` | `?expected_sha256=` | Deletes DB row and external blob |
 
 ### Wiki integration & ingest
 
@@ -60,8 +66,8 @@ Archives store raw files and media independently from the Wiki abstraction layer
 
 ## MCP Tools
 
-- Readonly: `archive_list`, `archive_read`
-- Write (requires `--mcp-allow-write`): `archive_mkdir`, `archive_upload`, `archive_move`, `archive_delete`, `archive_link`, `archive_ingest`
+- Readonly: `archive_list`, `archive_read`, `archive_search`
+- Write (requires `--mcp-allow-write`): `archive_mkdir`, `archive_upload`, `archive_patch`, `archive_move`, `archive_delete`, `archive_link`, `archive_ingest`, `archive_batch`
 
 ## Examples
 

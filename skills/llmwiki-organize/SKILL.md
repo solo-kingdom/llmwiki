@@ -70,17 +70,35 @@ The response is the created row: check `source_kind == "wiki"` and `relative_pat
 
 ## Edit a page
 
+Prefer atomic partial edits (`PATCH /content`) with optimistic locking (`expected_version`, `expected_content_hash`, or `If-Match` header — returns `409 Conflict` on mismatch):
+
 ```bash
-curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents/{id}/content"    # {"content": "…"}
-# edit the markdown locally, then send the whole body back
-curl -fsS "${AUTH[@]}" -X PUT "$LLMWIKI_URL/api/v1/documents/{id}/content" \
+curl -fsS "${AUTH[@]}" "$LLMWIKI_URL/api/v1/documents/by-path?path=wiki/topic/page.md&include_content=false"
+curl -fsS "${AUTH[@]}" -X PATCH "$LLMWIKI_URL/api/v1/documents/{id}/content" \
   -H 'Content-Type: application/json' \
-  -d '{"content": "<full markdown, frontmatter included>"}'
+  -d '{
+    "expected_version": 3,
+    "dry_run": false,
+    "edits": [
+      {"op": "replace", "old_text": "old line", "new_text": "new line"},
+      {"op": "insert_after", "anchor": "## Summary", "text": "\nNew bullet"}
+    ]
+  }'
 ```
 
-`PUT /content` is a full replace: partial text deletes the rest. Preserve sections you did not intend to change, and bump `date` when the substance changes.
+Supported `edits[]` ops: `replace` (`replace_all?`), `replace_lines` (`start_line`, `end_line`, `text`), `append`, `prepend`, `insert_after`. Use `PUT /api/v1/documents/{id}/content` when rewriting the whole body. `PATCH /api/v1/documents/{id}` syncs `title` / `tags` / `date` / `metadata` and supports optimistic locking (`expected_version` / `If-Match`).
 
-Avoid `PATCH /api/v1/documents/{id}` (`title`, `tags`, `date`, `metadata`): it updates only the index row, so the file's frontmatter and the index drift apart until the next reindex. Change frontmatter through `PUT /content`.
+## Batch operations & dry_run
+
+Use `POST /api/v1/documents/batch` (max 100 ops) to run mixed `create`, `replace`, `patch`, `update_meta`, `move`, `archive`, `reopen`, `delete` atomically in a single `change_set` (with merged link-rewriting and `dry_run: true` preflight):
+
+```bash
+curl -fsS "${AUTH[@]}" -X POST "$LLMWIKI_URL/api/v1/documents/batch" \
+  -H 'Content-Type: application/json' \
+  -d '{"dry_run": true, "summary": "reorganize topic", "ops": [{"op": "move", "path": "wiki/a/p.md", "target_folder": "b"}]}'
+```
+
+Read many pages at once with `POST /api/v1/documents/batch-get` (`{"ids": [...], "paths": [...], "fields": "meta|content|outline"}`). `POST /api/v1/organize/auto-cluster` also emits `batch_ops` ready for `POST /api/v1/documents/batch`.
 
 ## Merge duplicates
 
@@ -92,7 +110,7 @@ Avoid `PATCH /api/v1/documents/{id}` (`title`, `tags`, `date`, `metadata`): it u
 
 ## Move or rename
 
-Use `POST /api/v1/documents/{id}/move` (`{"target_folder": "AI-Engineering/Agent", "filename": "new-name.md"}`) or `POST /api/v1/folders/move` (`{"from_path": "old", "to_path": "new"}`). Moves preserve `document_id`, version history, and automatically rewrite explicit path-qualified wikilinks/markdown links. Use `GET /api/v1/tree` and `POST/PATCH/DELETE /api/v1/folders` to inspect and manage the folder tree.
+Use `POST /api/v1/documents/{id}/move` (`{"target_folder": "AI-Engineering/Agent", "filename": "new-name.md"}`) or `POST /api/v1/folders/move` (`{"from_path": "old", "to_path": "new", "on_conflict": "fail|merge"}`). `on_conflict: "merge"` merges folders/subfolders transactionally and returns `409` with `conflicts[]` on filename collision. Moves preserve `document_id`, version history, and automatically rewrite explicit path-qualified wikilinks/markdown links. Use `GET /api/v1/tree` and `POST/PATCH/DELETE /api/v1/folders` (`exist_ok: true` for idempotent mkdir) to inspect and manage the folder tree.
 
 ## Archive and reopen (in-place, distinct from delete)
 

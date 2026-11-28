@@ -52,6 +52,7 @@ export function defaultToolPolicy(allowWrite: boolean): ToolPolicy {
       "ping",
       "archive_list",
       "archive_read",
+      "archive_search",
       "batch_read",
     ]),
     writeTools: new Set([

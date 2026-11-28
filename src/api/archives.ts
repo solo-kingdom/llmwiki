@@ -16,13 +16,16 @@ import {
 const MAX_ARCHIVE_BATCH = 100;
 const MAX_ARCHIVE_BULK_INGEST = 50;
 const MAX_BATCH_TEXT_BYTES = 256 * 1024;
-import type { ArchiveFile, FolderDeleteMode, IngestJob } from "../store/types.js";
+import { SearchValidationError, validateSearchRegex } from "../store/postgres/chunks.js";
+import type { ArchiveFile, FolderDeleteMode, IngestJob, SearchMatchMode } from "../store/types.js";
 import { getID, readJsonBody, writeError, writeJson, type ApiContext } from "./context.js";
 import { SUPPORTED_INGEST_EXTENSIONS } from "./ingest_jobs.js";
 
 function mapArchiveError(c: Context, error: unknown): Response {
   const message = error instanceof Error ? error.message : String(error);
-  if (error instanceof ArchiveValidationError) return writeError(c, 400, message);
+  if (error instanceof ArchiveValidationError || error instanceof SearchValidationError) {
+    return writeError(c, 400, message);
+  }
   if (error instanceof ArchiveNotFoundError) return writeError(c, 404, message);
   if (error instanceof ArchiveConflictError) {
     return writeJson(c, 409, {
@@ -149,16 +152,53 @@ export function archivesApi(ctx: ApiContext) {
       if (!q) return writeError(c, 400, "query parameter 'q' is required");
       const kind = (c.req.query("kind") ?? "").trim();
       const folderPath = (c.req.query("folder") ?? "").trim();
+      const origin = (c.req.query("origin") ?? "").trim();
+      const mediaType = (c.req.query("media_type") ?? "").trim();
+      const unlinkedOnly =
+        c.req.query("unlinked_only") === "true" || c.req.query("unlinked_only") === "1";
+      const updatedAfter = (c.req.query("updated_after") ?? "").trim();
+      const updatedBefore = (c.req.query("updated_before") ?? "").trim();
+      const rawMatch = (c.req.query("match") ?? "fuzzy").trim().toLowerCase() as SearchMatchMode;
+      if (rawMatch !== "fuzzy" && rawMatch !== "all_terms" && rawMatch !== "phrase" && rawMatch !== "regex") {
+        return writeError(c, 400, "match must be fuzzy, all_terms, phrase, or regex");
+      }
+      const caseSensitive =
+        c.req.query("case_sensitive") === "true" || c.req.query("case_sensitive") === "1";
       const rawLimit = Number.parseInt(c.req.query("limit") ?? "20", 10);
-      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(50, rawLimit)) : 20;
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(100, rawLimit)) : 20;
+      const rawOffset = Number.parseInt(c.req.query("offset") ?? "0", 10);
+      const offset = Number.isFinite(rawOffset) ? Math.max(0, rawOffset) : 0;
+
+      if (rawMatch === "regex") {
+        try {
+          validateSearchRegex(q);
+        } catch (error) {
+          return mapArchiveError(c, error);
+        }
+      }
+
       try {
-        await storage().backfillSearchableText(50).catch(() => 0);
-        const results = await ctx.db.searchArchiveFiles(q, {
+        const all = await ctx.db.searchArchiveFiles(q, {
           kind: kind || undefined,
           folder_path: folderPath || undefined,
-          limit,
+          origin: origin || undefined,
+          media_type: mediaType || undefined,
+          unlinked_only: unlinkedOnly || undefined,
+          updated_after: updatedAfter || undefined,
+          updated_before: updatedBefore || undefined,
+          match: rawMatch,
+          case_sensitive: caseSensitive,
+          limit: Math.min(500, Math.max(offset + limit + 1, 100)),
         });
-        return writeJson(c, 200, { query: q, results });
+        const page = all.slice(offset, offset + limit);
+        return writeJson(c, 200, {
+          query: q,
+          results: page,
+          total: all.length,
+          limit,
+          offset,
+          has_more: offset + page.length < all.length,
+        });
       } catch (error) {
         return mapArchiveError(c, error);
       }

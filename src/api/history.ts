@@ -1,6 +1,15 @@
 import type { Context } from "hono";
 import { logIngestJob, record } from "../activity/index.js";
 import { rebuildDerived } from "../ingest/rebuild.js";
+import {
+  HISTORY_LIST_DEFAULT_LIMIT,
+  clampHistoryListLimit,
+  clampHistoryListOffset,
+  parseHistoryKindFilter,
+  parseHistoryTimeBound,
+  validateHistoryTimeRange,
+  type ChangeSetListFilter,
+} from "../store/history_list.js";
 import type { IngestJob } from "../store/types.js";
 import {
   getID,
@@ -50,11 +59,30 @@ export function historyApi(ctx: ApiContext) {
 
   return {
     async listHistory(c: Context): Promise<Response> {
-      const limit = parseQueryInt(c, "limit", 50);
-      const before = (c.req.query("before") ?? "").trim();
+      let kinds: string[];
+      let from: string;
+      let to: string;
+      let before: string;
       try {
-        const changes = await ctx.db.listChangeSets(limit, before);
-        return writeJson(c, 200, { changes });
+        kinds = parseHistoryKindFilter(c.req.query("kind") ?? "");
+        from = parseHistoryTimeBound(c.req.query("from") ?? "", "from");
+        to = parseHistoryTimeBound(c.req.query("to") ?? "", "to");
+        before = parseHistoryTimeBound(c.req.query("before") ?? "", "before");
+        validateHistoryTimeRange(from, to);
+      } catch (error) {
+        return writeError(c, 400, errorMessage(error));
+      }
+      const filter: ChangeSetListFilter = {
+        kinds,
+        query: (c.req.query("q") ?? "").trim(),
+        from,
+        to,
+        before,
+        limit: clampHistoryListLimit(parseQueryInt(c, "limit", HISTORY_LIST_DEFAULT_LIMIT)),
+        offset: clampHistoryListOffset(parseQueryInt(c, "offset", 0)),
+      };
+      try {
+        return writeJson(c, 200, await ctx.db.listChangeSets(filter));
       } catch (error) {
         return writeError(c, 500, errorMessage(error));
       }

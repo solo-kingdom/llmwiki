@@ -17,7 +17,7 @@ import type {
   FolderDeleteMode,
   MoveArchiveFolderResult,
 } from "../types.js";
-import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
+import { NOW_TEXT, asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
 export class ArchiveValidationError extends Error {
   constructor(message: string) {
@@ -147,8 +147,8 @@ function scanFolder(row: unknown[]): ArchiveFolder {
     display_name: asString(row[1]),
     description: asString(row[2]),
     sort_order: asNumber(row[3]),
-    created_at: asString(row[4]),
-    updated_at: asString(row[5]),
+    created_at: asUtcTimestamp(row[4]),
+    updated_at: asUtcTimestamp(row[5]),
   };
 }
 
@@ -168,8 +168,8 @@ function scanArchiveFile(row: unknown[]): ArchiveFile {
     origin: asString(row[11]) as ArchiveFileOrigin,
     source_ref: asString(row[12]),
     ingest_job_id: asString(row[13]),
-    created_at: asString(row[14]),
-    updated_at: asString(row[15]),
+    created_at: asUtcTimestamp(row[14]),
+    updated_at: asUtcTimestamp(row[15]),
   };
 }
 
@@ -877,7 +877,7 @@ export function archivesRepo(pool: Pool): ArchiveStore {
         size: asNumber(row[6]),
         origin: asString(row[7]) as ArchiveFileOrigin,
         relation: asString(row[8]),
-        created_at: asString(row[9]),
+        created_at: asUtcTimestamp(row[9]),
       }));
     },
 
@@ -899,7 +899,7 @@ export function archivesRepo(pool: Pool): ArchiveStore {
         relative_path: asString(row[2]),
         page_type: asString(row[3]),
         relation: asString(row[4]),
-        created_at: asString(row[5]),
+        created_at: asUtcTimestamp(row[5]),
       }));
     },
   };

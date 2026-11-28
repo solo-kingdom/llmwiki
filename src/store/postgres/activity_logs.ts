@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
 import type { ActivityStore } from "../interfaces.js";
 import type { ActivityLog, ActivityLogListFilter } from "../types.js";
-import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows } from "./sql.js";
+import { NOW_TEXT, asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows } from "./sql.js";
 
 const VALID_LEVELS = new Set(["debug", "info", "warn", "error"]);
 
@@ -19,7 +19,7 @@ const ACTIVITY_LOG_SELECT = `
 function scanActivityLog(row: unknown[]): ActivityLog {
   return {
     id: asNumber(row[0]),
-    created_at: asString(row[1]),
+    created_at: asUtcTimestamp(row[1]),
     level: asString(row[2]),
     category: asString(row[3]),
     action: asString(row[4]),

@@ -9,10 +9,29 @@ import {
 } from "../../engine/canonical.js";
 import { folderPathFromWikiRelPath, resolvePageType } from "../../engine/wiki_org.js";
 import type { RevisionStore } from "../interfaces.js";
+import {
+  buildChangeSetListWhere,
+  clampHistoryListLimit,
+  clampHistoryListOffset,
+  emptyChangeSetKindCounts,
+  isListedChangeSetKind,
+  type ChangeSetListFilter,
+  type ChangeSetListResult,
+} from "../history_list.js";
 import type { ChangeSet, Chunk, Document, PageRevision, PageWrite, RefEdge, RevisionOperation } from "../types.js";
 import { parseStringArrayJson, stringArrayJson, syncDocumentMetaFromContent } from "./doc_meta.js";
 import { ensureFolderAncestorsTx, releaseSoftDeletedPath } from "./folders.js";
-import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
+import {
+  NOW_TEXT,
+  asNumber,
+  asString,
+  asUtcTimestamp,
+  exec,
+  queryOne,
+  queryRows,
+  toDbUtcTimestamp,
+  withTransaction,
+} from "./sql.js";
 
 const REVISION_COLUMNS = `
   r.id, r.document_id, r.relative_path, r.revision_no, r.parent_revision_id,
@@ -55,7 +74,7 @@ function scanRevision(row: unknown[]): PageRevision {
     source_kind: asString(row[11]),
     file_type: asString(row[12]),
     actor: asString(row[13]),
-    created_at: asString(row[14]),
+    created_at: asUtcTimestamp(row[14]),
   };
 }
 
@@ -71,7 +90,7 @@ function scanChangeSet(row: unknown[]): ChangeSet {
     normalized_content: asString(row[7]),
     summary: asString(row[8]),
     rollback_of: asString(row[9]),
-    created_at: asString(row[10]),
+    created_at: asUtcTimestamp(row[10]),
     page_count: asNumber(row[11]),
   };
 }
@@ -108,11 +127,11 @@ function scanRevisionDocument(row: unknown[]): Document {
     version: asNumber(row[17]),
     parser: asString(row[18]),
     content_hash: asString(row[19]),
-    stale_since: asString(row[20]),
+    stale_since: asUtcTimestamp(row[20]),
     highlights: asString(row[21]),
-    created_at: asString(row[22]),
-    updated_at: asString(row[23]),
-    deleted_at: asString(row[24]),
+    created_at: asUtcTimestamp(row[22]),
+    updated_at: asUtcTimestamp(row[23]),
+    deleted_at: asUtcTimestamp(row[24]),
     page_type: asString(row[25]),
     confidence: asString(row[26]),
     page_status: asString(row[27]),
@@ -390,7 +409,7 @@ async function applyPageWrite(
         doc.version,
         doc.parser,
         doc.content_hash,
-        doc.stale_since,
+        toDbUtcTimestamp(doc.stale_since),
         doc.highlights,
         doc.page_type,
         doc.confidence ?? "",
@@ -441,7 +460,7 @@ async function applyPageWrite(
         existing.version + 1,
         doc.parser,
         doc.content_hash,
-        doc.stale_since,
+        toDbUtcTimestamp(doc.stale_since),
         doc.highlights,
         doc.page_type,
         doc.confidence ?? "",
@@ -533,15 +552,52 @@ export function revisionsRepo(pool: Pool): RevisionStore {
       return row ? scanChangeSet(row) : null;
     },
 
-    async listChangeSets(limit: number, before: string): Promise<ChangeSet[]> {
-      const effectiveLimit = limit <= 0 || limit > 200 ? 50 : limit;
-      const rows = await queryRows(
-        pool,
-        `SELECT ${CHANGE_SET_COLUMNS} FROM change_sets cs
-         WHERE ($1 = '' OR cs.created_at < $1) ORDER BY cs.created_at DESC, cs.id DESC LIMIT $2`,
-        [before, effectiveLimit],
-      );
-      return rows.map(scanChangeSet);
+    async listChangeSets(filter: ChangeSetListFilter): Promise<ChangeSetListResult> {
+      const limit = clampHistoryListLimit(filter.limit);
+      const offset = clampHistoryListOffset(filter.offset);
+      const filteredWhere = buildChangeSetListWhere(filter, { includeKinds: true });
+      const countsWhere = buildChangeSetListWhere(filter, { includeKinds: false });
+      const limitParam = filteredWhere.params.length + 1;
+      const offsetParam = filteredWhere.params.length + 2;
+
+      const [rows, totalRow, countRows] = await Promise.all([
+        queryRows(
+          pool,
+          `SELECT ${CHANGE_SET_COLUMNS} FROM change_sets cs
+           ${filteredWhere.clause}
+           ORDER BY cs.created_at DESC, cs.id DESC
+           LIMIT $${limitParam} OFFSET $${offsetParam}`,
+          [...filteredWhere.params, limit, offset],
+        ),
+        queryOne<[number | string]>(
+          pool,
+          `SELECT COUNT(*)::int FROM change_sets cs ${filteredWhere.clause}`,
+          filteredWhere.params,
+        ),
+        queryRows<[string, number | string]>(
+          pool,
+          `SELECT cs.kind, COUNT(*)::int FROM change_sets cs ${countsWhere.clause} GROUP BY cs.kind`,
+          countsWhere.params,
+        ),
+      ]);
+
+      const changes = rows.map(scanChangeSet);
+      const total = asNumber(totalRow?.[0]);
+      const counts = emptyChangeSetKindCounts();
+      for (const row of countRows) {
+        const kind = asString(row[0]).trim().toLowerCase();
+        if (!isListedChangeSetKind(kind)) continue;
+        counts[kind] = asNumber(row[1]);
+      }
+
+      return {
+        changes,
+        total,
+        limit,
+        offset,
+        has_more: offset + changes.length < total,
+        counts,
+      };
     },
 
     async listChangeSetRevisions(changeSetID: string): Promise<PageRevision[]> {
@@ -769,6 +825,6 @@ export function revisionsRepo(pool: Pool): RevisionStore {
 function nowString(): string {
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, "0");
-  return `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
+  return `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}T${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}Z`;
 }
 

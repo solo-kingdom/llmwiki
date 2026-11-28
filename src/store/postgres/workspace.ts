@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
 import type { WorkspaceStore } from "../interfaces.js";
 import type { Workspace } from "../types.js";
-import { asString, queryOne } from "./sql.js";
+import { asString, asUtcTimestamp, queryOne } from "./sql.js";
 
 export function workspaceRepo(pool: Pool): WorkspaceStore {
   return {
@@ -18,7 +18,7 @@ export function workspaceRepo(pool: Pool): WorkspaceStore {
         name: asString(row[1]),
         description: asString(row[2]),
         user_id: asString(row[3]),
-        created_at: asString(row[4]),
+        created_at: asUtcTimestamp(row[4]),
       };
     },
 
@@ -36,7 +36,7 @@ export function workspaceRepo(pool: Pool): WorkspaceStore {
       );
       if (!rows) throw new Error("upsert workspace: no row returned");
       workspace.id = asString(rows[0]);
-      workspace.created_at = asString(rows[1]);
+      workspace.created_at = asUtcTimestamp(rows[1]);
     },
   };
 }

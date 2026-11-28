@@ -8,6 +8,7 @@ import {
   getDocument,
   getWikiTree,
   listDocuments,
+  listHistory,
   moveDocument,
   moveFolder,
   reopenDocument,
@@ -123,5 +124,28 @@ describe("api client", () => {
     await searchArchiveFiles({ q: "rag", kind: "markdown", limit: 15 });
     const [url] = fetchMock.mock.calls[0] as unknown as [string];
     expect(url).toBe("/api/v1/archives/search?q=rag&kind=markdown&limit=15");
+  });
+
+  it("builds timeline history filters and paging as query params", async () => {
+    const fetchMock = mockFetch({
+      changes: [],
+      total: 0,
+      limit: 20,
+      offset: 20,
+      has_more: false,
+      counts: { ingest: 0, review_apply: 0, rollback: 0, manual: 0, delete: 0, import: 0 },
+    });
+    await listHistory({
+      limit: 20,
+      offset: 20,
+      kind: "ingest",
+      from: "2026-11-27T16:00:00.000Z",
+      to: "2026-11-28T15:59:59.000Z",
+      q: "wiki/ai",
+    });
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toBe(
+      "/api/v1/history?limit=20&offset=20&kind=ingest&from=2026-11-27T16%3A00%3A00.000Z&to=2026-11-28T15%3A59%3A59.000Z&q=wiki%2Fai",
+    );
   });
 });

@@ -4,7 +4,7 @@ import { wikiPageTypeFromPaths, WIKI_HIDDEN_SUBDIRS } from "../../engine/wiki_or
 import type { IndexStore } from "../interfaces.js";
 import type { Chunk, SearchChunk, SearchOptions } from "../types.js";
 import { parseStringArrayJson, todayIsoDate } from "./doc_meta.js";
-import { asNumber, asString, exec, queryRows } from "./sql.js";
+import { asNumber, asString, asUtcTimestamp, exec, queryRows } from "./sql.js";
 
 const MAX_SEARCH_TOKENS = 12;
 const CJK_SEQ_RE = /[\u4e00-\u9fff]+/g;
@@ -449,7 +449,7 @@ export function chunksRepo(
         filename: asString(row[0]),
         title: asString(row[1]),
         path: asString(row[2]),
-        stale_since: asString(row[3]),
+        stale_since: asUtcTimestamp(row[3]),
       }));
     },
 

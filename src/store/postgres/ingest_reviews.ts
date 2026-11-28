@@ -6,7 +6,7 @@ import type {
   IngestReviewMessage,
   IngestReviewPlan,
 } from "../types.js";
-import { NOW_TEXT, asBoolean, asNumber, asString, exec, queryOne, queryRows } from "./sql.js";
+import { NOW_TEXT, asBoolean, asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows } from "./sql.js";
 
 const REVIEW_COLUMNS = `
   COALESCE(id, ''), COALESCE(session_id, ''), COALESCE(archive_source_path, ''),
@@ -64,8 +64,8 @@ function scanReview(row: unknown[]): IngestReview {
     approved_plan_version: asNumber(row[5]),
     final_job_id: asString(row[6]),
     change_set_id: asString(row[7]),
-    created_at: asString(row[8]),
-    updated_at: asString(row[9]),
+    created_at: asUtcTimestamp(row[8]),
+    updated_at: asUtcTimestamp(row[9]),
     deep_organize: asBoolean(row[10]),
     archive_file_id: asString(row[11]),
   };
@@ -78,7 +78,7 @@ function scanReviewMessage(row: unknown[]): IngestReviewMessage {
     role: asString(row[2]),
     message_type: asString(row[3]),
     content: asString(row[4]),
-    created_at: asString(row[5]),
+    created_at: asUtcTimestamp(row[5]),
   };
 }
 
@@ -89,7 +89,7 @@ function scanReviewPlan(row: unknown[]): IngestReviewPlan {
     version: asNumber(row[2]),
     plan_markdown: asString(row[3]),
     plan_json: asString(row[4]),
-    created_at: asString(row[5]),
+    created_at: asUtcTimestamp(row[5]),
   };
 }
 

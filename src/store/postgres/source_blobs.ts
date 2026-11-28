@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type { SourceStore } from "../interfaces.js";
 import type { SourceBlob } from "../types.js";
-import { asNumber, asString, exec, queryOne, queryRows } from "./sql.js";
+import { asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows } from "./sql.js";
 
 function scanBlob(row: unknown[]): SourceBlob {
   return {
@@ -12,7 +12,7 @@ function scanBlob(row: unknown[]): SourceBlob {
     media_type: asString(row[3]),
     size: asNumber(row[4]),
     sha256: asString(row[5]),
-    created_at: asString(row[6]),
+    created_at: asUtcTimestamp(row[6]),
   };
 }
 
@@ -44,7 +44,7 @@ export function sourceBlobsRepo(pool: Pool): SourceStore {
         ],
       );
       if (created) {
-        blob.created_at = asString(created[0]);
+        blob.created_at = asUtcTimestamp(created[0]);
         return;
       }
 

@@ -14,7 +14,7 @@ import {
   SESSION_REF_SOURCE_TOOL_READ,
   SESSION_REF_SOURCE_USER_MENTION,
 } from "../types.js";
-import { NOW_TEXT, asBoolean, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
+import { NOW_TEXT, asBoolean, asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
 const SESSION_COLUMNS = `
   COALESCE(id, ''), COALESCE(title, ''), COALESCE(status, ''),
@@ -44,8 +44,8 @@ function scanSession(row: unknown[]): IngestSession {
     mode: asString(row[6]),
     agent_kind: asString(row[7]),
     acp_agent_id: asString(row[8]),
-    created_at: asString(row[9]),
-    updated_at: asString(row[10]),
+    created_at: asUtcTimestamp(row[9]),
+    updated_at: asUtcTimestamp(row[10]),
   };
 }
 
@@ -60,7 +60,7 @@ function scanMessage(row: unknown[]): IngestSessionMessage {
     stream_status: asString(row[6]),
     wiki_refs_json: asString(row[7]),
     exclude_from_archive: asBoolean(row[8]),
-    created_at: asString(row[9]),
+    created_at: asUtcTimestamp(row[9]),
   };
 }
 
@@ -72,7 +72,7 @@ function scanReference(row: unknown[]): IngestSessionReference {
     relative_path: asString(row[3]),
     title: asString(row[4]),
     source: asString(row[5]),
-    first_seen_at: asString(row[6]),
+    first_seen_at: asUtcTimestamp(row[6]),
   };
 }
 
@@ -427,7 +427,7 @@ export function ingestSessionsRepo(pool: Pool): SessionStore {
         phase: asString(row[3]),
         message: asString(row[4]),
         payload: asString(row[5]),
-        created_at: asString(row[6]),
+        created_at: asUtcTimestamp(row[6]),
       }));
     },
 

@@ -1,15 +1,15 @@
 import type { Pool } from "pg";
 import type { ApiKeyStore } from "../interfaces.js";
 import type { ApiKeyRecord } from "../types.js";
-import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows } from "./sql.js";
+import { NOW_TEXT, asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows } from "./sql.js";
 
 function mapRow(row: unknown[]): ApiKeyRecord {
   return {
     id: asString(row[0]),
     name: asString(row[1]),
     prefix: asString(row[2]),
-    created_at: asString(row[3]),
-    last_used_at: row[4] == null ? null : asString(row[4]),
+    created_at: asUtcTimestamp(row[3]),
+    last_used_at: row[4] == null || asString(row[4]).trim() === "" ? null : asUtcTimestamp(row[4]),
   };
 }
 

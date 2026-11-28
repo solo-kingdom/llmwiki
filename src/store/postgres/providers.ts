@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type { ProviderStore } from "../interfaces.js";
 import type { ModelInfo, ProviderInfo, ProviderInstance, ProviderInstanceUpdatePatch } from "../types.js";
-import { NOW_TEXT, asBoolean, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
+import { NOW_TEXT, asBoolean, asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
 const INSTANCE_COLUMNS = `
   COALESCE(id,''), COALESCE(name,''), COALESCE(catalog_id,''),
@@ -33,8 +33,8 @@ function scanInstance(row: unknown[]): ProviderInstance {
     catalog_id: asString(row[2]),
     api_key: asString(row[3]),
     base_url: asString(row[4]),
-    created_at: asString(row[5]),
-    updated_at: asString(row[6]),
+    created_at: asUtcTimestamp(row[5]),
+    updated_at: asUtcTimestamp(row[6]),
     api_format: asString(row[7]),
     models: parseModelsJson(asString(row[8])),
   };
@@ -96,8 +96,8 @@ export function providersRepo(pool: Pool): ProviderStore {
         ],
       );
       if (!row) throw new Error("create provider instance: no row returned");
-      instance.created_at = asString(row[0]);
-      instance.updated_at = asString(row[1]);
+      instance.created_at = asUtcTimestamp(row[0]);
+      instance.updated_at = asUtcTimestamp(row[1]);
     },
 
     async getProviderInstance(id: string): Promise<ProviderInstance | null> {

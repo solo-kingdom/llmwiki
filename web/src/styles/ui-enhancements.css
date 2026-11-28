@@ -378,6 +378,7 @@ button.llmwiki-stat-pill:focus-visible {
 .llmwiki-stat-pill--emerald { background: var(--llmwiki-tone-emerald-soft); color: var(--llmwiki-tone-emerald); }
 .llmwiki-stat-pill--rose { background: var(--llmwiki-tone-rose-soft); color: var(--llmwiki-tone-rose); }
 .llmwiki-stat-pill--amber { background: var(--llmwiki-tone-amber-soft); color: var(--llmwiki-tone-amber); }
+.llmwiki-stat-pill--indigo { background: var(--llmwiki-tone-indigo-soft); color: var(--llmwiki-tone-indigo); }
 .llmwiki-stat-pill--muted { background: color-mix(in srgb, var(--muted-foreground) 12%, transparent); color: var(--muted-foreground); }
 
 .llmwiki-cell-lead {

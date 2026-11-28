@@ -933,13 +933,24 @@ export function deleteIngestSession(
 
 // Revision history API (PostgreSQL-backed change sets)
 
-export function listHistory(
-  limit = 50,
-  before?: string,
-): Promise<HistoryListResponse> {
-  const params = new URLSearchParams({ limit: String(limit) })
-  if (before) params.set("before", before)
-  return request<HistoryListResponse>(`/api/v1/history?${params.toString()}`)
+export function listHistory(params: {
+  limit?: number
+  offset?: number
+  before?: string
+  kind?: string
+  from?: string
+  to?: string
+  q?: string
+} = {}): Promise<HistoryListResponse> {
+  const search = new URLSearchParams()
+  search.set("limit", String(params.limit ?? 50))
+  search.set("offset", String(params.offset ?? 0))
+  if (params.before) search.set("before", params.before)
+  if (params.kind) search.set("kind", params.kind)
+  if (params.from) search.set("from", params.from)
+  if (params.to) search.set("to", params.to)
+  if (params.q) search.set("q", params.q)
+  return request<HistoryListResponse>(`/api/v1/history?${search.toString()}`)
 }
 
 export function getHistory(id: string): Promise<HistoryDetailResponse> {

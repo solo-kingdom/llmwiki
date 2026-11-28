@@ -15,6 +15,7 @@ COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
 FROM node:24-alpine
+RUN apk add --no-cache tzdata
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/node_modules ./node_modules

@@ -18,7 +18,7 @@ import {
   MIN_JOB_EVENTS_MAX_COUNT,
   STALE_HEARTBEAT_SECONDS,
 } from "../types.js";
-import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
+import { NOW_TEXT, asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
 const JOB_COLUMNS = `
   COALESCE(id, ''), COALESCE(parent_job_id, ''), COALESCE(input_type, ''),
@@ -84,10 +84,10 @@ function scanJob(row: unknown[]): IngestJob {
     remediation: asString(row[12]),
     result_summary: asString(row[13]),
     runner_id: asString(row[14]),
-    heartbeat_at: asString(row[15]),
+    heartbeat_at: asUtcTimestamp(row[15]),
     archive_file_id: asString(row[16]),
-    created_at: asString(row[17]),
-    updated_at: asString(row[18]),
+    created_at: asUtcTimestamp(row[17]),
+    updated_at: asUtcTimestamp(row[18]),
   };
 }
 
@@ -436,7 +436,7 @@ export function ingestJobsRepo(pool: Pool): JobStore {
         phase: asString(row[3]),
         message: asString(row[4]),
         payload: asString(row[5]),
-        created_at: asString(row[6]),
+        created_at: asUtcTimestamp(row[6]),
       }));
     },
 

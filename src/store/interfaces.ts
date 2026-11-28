@@ -1,3 +1,4 @@
+import type { ChangeSetListFilter, ChangeSetListResult } from "./history_list.js";
 import type { IngestJobListFilter, IngestJobListResult } from "./job_list.js";
 import type { CacheEntry } from "../ingest/types.js";
 import type {
@@ -113,7 +114,7 @@ export interface IndexStore {
 export interface RevisionStore {
   applyChangeSet(cs: ChangeSet, writes: PageWrite[]): Promise<void>;
   getChangeSet(id: string): Promise<ChangeSet | null>;
-  listChangeSets(limit: number, before: string): Promise<ChangeSet[]>;
+  listChangeSets(filter: ChangeSetListFilter): Promise<ChangeSetListResult>;
   listChangeSetRevisions(changeSetID: string): Promise<PageRevision[]>;
   listPageRevisions(relativePath: string, limit: number): Promise<PageRevision[]>;
   latestRevision(documentID: string): Promise<PageRevision | null>;

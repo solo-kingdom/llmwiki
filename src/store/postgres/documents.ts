@@ -17,7 +17,7 @@ import {
   todayIsoDate,
 } from "./doc_meta.js";
 import { ensureFolderAncestorsTx } from "./folders.js";
-import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
+import { NOW_TEXT, asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows, withTransaction } from "./sql.js";
 
 const DOCUMENT_SELECT = `
   COALESCE(d.id, ''), COALESCE(d.user_id, ''), COALESCE(d.filename, ''),
@@ -60,11 +60,11 @@ function scanDocument(row: unknown[]): Document {
     version: asNumber(row[17]),
     parser: asString(row[18]),
     content_hash: asString(row[19]),
-    stale_since: asString(row[20]),
+    stale_since: asUtcTimestamp(row[20]),
     highlights: asString(row[21]),
-    created_at: asString(row[22]),
-    updated_at: asString(row[23]),
-    deleted_at: asString(row[24]),
+    created_at: asUtcTimestamp(row[22]),
+    updated_at: asUtcTimestamp(row[23]),
+    deleted_at: asUtcTimestamp(row[24]),
     page_type: storedPageType || wikiPageTypeFromPaths(relPath, filePath),
     confidence: asString(row[26]),
     page_status: asString(row[27]),
@@ -337,7 +337,7 @@ export function documentsRepo(pool: Pool): DocumentStore {
           path: asString(row[3]),
           file_type: asString(row[4]),
           page_count: asNumber(row[5]),
-          updated_at: asString(row[6]),
+          updated_at: asUtcTimestamp(row[6]),
           relative_path: asString(row[7]),
           source_kind: asString(row[8]),
           user_id: "",

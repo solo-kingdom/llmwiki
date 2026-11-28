@@ -293,6 +293,63 @@ describe.skipIf(!databaseUrl)("postgres store integration", () => {
     }
   });
 
+  it("filters, pages, and counts change_sets with ISO-8601 UTC timestamps", async () => {
+    const tag = `hist-${suffix}`;
+    const cs1Id = randomUUID();
+    const cs2Id = randomUUID();
+    const cs3Id = randomUUID();
+    const docId = randomUUID();
+    await pool.query(
+      `INSERT INTO change_sets (id, kind, summary, created_at) VALUES
+       ($1, 'ingest', $4, '2026-11-26 10:00:00'),
+       ($2, 'manual', $5, '2026-11-27 16:00:00'),
+       ($3, 'delete', $6, '2026-11-28 12:00:00')`,
+      [cs1Id, cs2Id, cs3Id, `${tag} ingest summary`, `${tag} manual summary`, `${tag} delete summary`],
+    );
+    await pool.query(
+      `INSERT INTO page_revisions (id, document_id, relative_path, revision_no, parent_revision_id, change_set_id, operation, title, content, metadata, content_hash, source_kind, file_type, actor, created_at)
+       VALUES ($1, $2, $3, 1, '', $4, 'update', 'Target Title', '', '', '', 'wiki', 'md', 'api', '2026-11-27 16:00:00')`,
+      [randomUUID(), docId, `wiki/topics/${tag}-page.md`, cs2Id],
+    );
+    try {
+      const base = { kinds: [] as string[], query: tag, from: "", to: "", before: "", limit: 50, offset: 0 };
+      const all = await store.listChangeSets(base);
+      expect(all.total).toBe(3);
+      expect(all.changes.map((c) => c.id)).toEqual([cs3Id, cs2Id, cs1Id]);
+      expect(all.changes[0]?.created_at).toBe("2026-11-28T12:00:00Z");
+      expect(all.counts).toEqual({
+        ingest: 1,
+        review_apply: 0,
+        rollback: 0,
+        manual: 1,
+        delete: 1,
+        import: 0,
+      });
+
+      const ranged = await store.listChangeSets({
+        ...base,
+        from: "2026-11-27 16:00:00",
+        to: "2026-11-28 23:59:59",
+      });
+      expect(ranged.total).toBe(2);
+      expect(ranged.changes.map((c) => c.id)).toEqual([cs3Id, cs2Id]);
+      expect(ranged.counts.manual).toBe(1);
+      expect(ranged.counts.delete).toBe(1);
+      expect(ranged.counts.ingest).toBe(0);
+
+      const byPagePath = await store.listChangeSets({ ...base, query: `${tag}-page.md` });
+      expect(byPagePath.total).toBe(1);
+      expect(byPagePath.changes[0]?.id).toBe(cs2Id);
+
+      const paged = await store.listChangeSets({ ...base, limit: 2, offset: 1 });
+      expect(paged.total).toBe(3);
+      expect(paged.has_more).toBe(false);
+      expect(paged.changes.map((c) => c.id)).toEqual([cs2Id, cs1Id]);
+    } finally {
+      await pool.query(`DELETE FROM change_sets WHERE id = ANY($1::text[])`, [[cs1Id, cs2Id, cs3Id]]);
+    }
+  });
+
   it("verifies migration v4 backfill regex and folder creation on live PostgreSQL", async () => {
     const legacyId = randomUUID();
     const topicId = randomUUID();

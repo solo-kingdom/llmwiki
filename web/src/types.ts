@@ -870,8 +870,22 @@ export interface PageRevision {
   created_at: string
 }
 
+export interface ChangeSetKindCounts {
+  ingest: number
+  review_apply: number
+  rollback: number
+  manual: number
+  delete: number
+  import: number
+}
+
 export interface HistoryListResponse {
   changes: ChangeSet[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+  counts: ChangeSetKindCounts
 }
 
 export interface HistoryDetailResponse {

@@ -22,7 +22,7 @@ import type {
   WikiFolder,
   WikiFolderWithCounts,
 } from "../types.js";
-import { NOW_TEXT, asNumber, asString, exec, queryOne, queryRows, withTransaction } from "./sql.js";
+import { NOW_TEXT, asNumber, asString, asUtcTimestamp, exec, queryOne, queryRows, toDbUtcTimestamp, withTransaction } from "./sql.js";
 import { parseStringArrayJson } from "./doc_meta.js";
 
 export class FolderValidationError extends Error {
@@ -73,8 +73,8 @@ function scanFolder(row: unknown[]): WikiFolder {
     display_name: asString(row[1]),
     description: asString(row[2]),
     sort_order: asNumber(row[3]),
-    created_at: asString(row[4]),
-    updated_at: asString(row[5]),
+    created_at: asUtcTimestamp(row[4]),
+    updated_at: asUtcTimestamp(row[5]),
   };
 }
 
@@ -264,11 +264,11 @@ function scanFullDocument(row: unknown[]): Document {
     version: asNumber(row[17]),
     parser: asString(row[18]),
     content_hash: asString(row[19]),
-    stale_since: asString(row[20]),
+    stale_since: asUtcTimestamp(row[20]),
     highlights: asString(row[21]),
-    created_at: asString(row[22]),
-    updated_at: asString(row[23]),
-    deleted_at: asString(row[24]),
+    created_at: asUtcTimestamp(row[22]),
+    updated_at: asUtcTimestamp(row[23]),
+    deleted_at: asUtcTimestamp(row[24]),
     page_type: asString(row[25]),
     confidence: asString(row[26]),
     page_status: asString(row[27]),
@@ -586,7 +586,7 @@ export function foldersRepo(pool: Pool): FolderStore {
           await client.query(
             `INSERT INTO wiki_folders (path, display_name, description, sort_order, created_at, updated_at)
              VALUES ($1, $2, $3, $4, $5, ${NOW_TEXT})`,
-            [nextPath, folder.display_name, folder.description, folder.sort_order, folder.created_at],
+            [nextPath, folder.display_name, folder.description, folder.sort_order, toDbUtcTimestamp(folder.created_at)],
           );
         }
         await client.query(`DELETE FROM wiki_folders WHERE path = $1 OR path LIKE $2`, [from, `${from}/%`]);

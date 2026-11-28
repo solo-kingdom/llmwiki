@@ -62,6 +62,13 @@ import type {
   ArchiveSearchResponse,
   ArchiveStorageCheckResult,
   HelaNotifyTestResult,
+  ApiStatsQuery,
+  ApiStatsRouteSort,
+  ApiStatsOverviewResponse,
+  ApiStatsRoutesResponse,
+  ApiStatsErrorsResponse,
+  ApiStatsApiKeysResponse,
+  ApiStatsApiKeyDetailResponse,
 } from "@/types"
 
 const BASE = ""
@@ -1171,4 +1178,51 @@ export function checkHarness(body: {
     method: "POST",
     body: JSON.stringify(body),
   })
+}
+
+function buildApiStatsSearch(query?: ApiStatsQuery, extra?: Record<string, string | number | undefined>): string {
+  const q = new URLSearchParams()
+  if (query?.range) q.set("range", query.range)
+  if (query?.from) q.set("from", query.from)
+  if (query?.to) q.set("to", query.to)
+  if (query?.method) q.set("method", query.method)
+  if (query?.route) q.set("route", query.route)
+  if (query?.status_class) q.set("status_class", query.status_class)
+  if (query?.auth_type) q.set("auth_type", query.auth_type)
+  if (query?.api_key_id) q.set("api_key_id", query.api_key_id)
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      if (v !== undefined && v !== "") q.set(k, String(v))
+    }
+  }
+  const s = q.toString()
+  return s ? `?${s}` : ""
+}
+
+export function getApiStatsOverview(query?: ApiStatsQuery): Promise<ApiStatsOverviewResponse> {
+  return request(`/api/v1/api-stats/overview${buildApiStatsSearch(query)}`)
+}
+
+export function getApiStatsRoutes(
+  query?: ApiStatsQuery,
+  options?: { sort?: ApiStatsRouteSort; limit?: number },
+): Promise<ApiStatsRoutesResponse> {
+  return request(
+    `/api/v1/api-stats/routes${buildApiStatsSearch(query, { sort: options?.sort, limit: options?.limit })}`,
+  )
+}
+
+export function getApiStatsErrors(query?: ApiStatsQuery, limit?: number): Promise<ApiStatsErrorsResponse> {
+  return request(`/api/v1/api-stats/errors${buildApiStatsSearch(query, { limit })}`)
+}
+
+export function getApiStatsApiKeys(query?: ApiStatsQuery): Promise<ApiStatsApiKeysResponse> {
+  return request(`/api/v1/api-stats/api-keys${buildApiStatsSearch(query)}`)
+}
+
+export function getApiStatsApiKeyDetail(
+  keyId: string,
+  query?: ApiStatsQuery,
+): Promise<ApiStatsApiKeyDetailResponse> {
+  return request(`/api/v1/api-stats/api-keys/${encodeURIComponent(keyId)}${buildApiStatsSearch(query)}`)
 }

@@ -14,7 +14,7 @@ import { GraphPage } from "./pages/graph"
 import { HelpLayout, HelpSection } from "./pages/help"
 import { JobsPage } from "./pages/jobs"
 import { LogsPage } from "./pages/logs"
-import { SettingsLayout, ModelsSection, IngestSection, StorageSection, AccessSection, IntegrationsSection, RulesSection } from "./pages/settings"
+import { SettingsLayout, ModelsSection, IngestSection, StorageSection, AccessSection, ApiStatsSection, IntegrationsSection, RulesSection } from "./pages/settings"
 import { TimelinePage } from "./pages/timeline"
 import { WikiReaderPage } from "./pages/wiki"
 import { Root } from "./root"
@@ -36,6 +36,7 @@ const router = createBrowserRouter([{
       { path: "ingest", element: <IngestSection /> },
       { path: "storage", element: <StorageSection /> },
       { path: "access", element: <AccessSection /> },
+      { path: "api-stats", element: <ApiStatsSection /> },
       { path: "integrations", element: <IntegrationsSection /> },
       { path: "rules", element: <RulesSection /> },
     ] },

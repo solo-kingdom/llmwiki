@@ -14,6 +14,7 @@ import { openDatabase } from "../db/pool.js";
 import { loadSnapshot } from "../llm/provider_snapshot.js";
 import { CATALOG_SYNC_INTERVAL_MS, isCatalogStale, syncModelsDev } from "../llm/provider_sync.js";
 import { openStore } from "../store/postgres/db.js";
+import { ApiStatsCollector } from "../stats/collector.js";
 import { createApp } from "../server/app.js";
 import type { ServeOptions } from "../config.js";
 import { isLoopback, resolveWorkspaceDir } from "./workspace.js";
@@ -59,6 +60,9 @@ export async function runServe(options: ServeOptions): Promise<void> {
       mcpServer.setAuditDb(createAuditAdapter(store, activity));
     }
 
+    const statsCollector = new ApiStatsCollector(store);
+    statsCollector.start(true);
+
     const app = createApp({
       db: store,
       token: options.token,
@@ -71,6 +75,7 @@ export async function runServe(options: ServeOptions): Promise<void> {
       harnessManager,
       lockMgr,
       mcpServer,
+      statsCollector,
     });
 
     // Jobs and the HTTP API write the same wiki pages, so they queue on one lock manager.
@@ -126,6 +131,7 @@ export async function runServe(options: ServeOptions): Promise<void> {
       logger.info(`received ${signal}, shutting down`);
       clearInterval(trimTimer);
       clearInterval(catalogSyncTimer);
+      await statsCollector.stop();
       processor.stop();
       await harnessManager.closeAll();
       server.close();

@@ -615,6 +615,149 @@ export interface ApiKeyRecord {
   last_used_at: string | null;
 }
 
+export type ApiAuthType = "session" | "api_key" | "anonymous" | "invalid_key";
+export type ApiAuthOutcome = "ok" | "unauthorized_401" | "forbidden_403" | "rate_limited_429" | "error_5xx";
+export type ApiStatsRange = "1h" | "24h" | "7d" | "30d";
+export type ApiStatsStatusClass = "2xx" | "3xx" | "4xx" | "5xx";
+export type ApiStatsRouteSort = "count" | "error_rate" | "p95";
+
+export interface ApiAccessLogInput {
+  occurred_at: string;
+  method: string;
+  route_template: string;
+  status_code: number;
+  duration_ms: number;
+  auth_type: ApiAuthType;
+  user_id?: string | null;
+  api_key_id?: string | null;
+  api_key_prefix?: string | null;
+  api_key_name?: string | null;
+  auth_outcome: ApiAuthOutcome;
+  client_ip?: string | null;
+  user_agent?: string | null;
+  error_code?: string | null;
+}
+
+export interface ApiAccessLogRecord extends ApiAccessLogInput {
+  id: number;
+  user_id: string | null;
+  api_key_id: string | null;
+  api_key_prefix: string | null;
+  api_key_name: string | null;
+  client_ip: string | null;
+  user_agent: string | null;
+  error_code: string | null;
+}
+
+export interface ApiStatsFilter {
+  from: string;
+  to: string;
+  range?: ApiStatsRange;
+  method?: string;
+  route?: string;
+  status_class?: ApiStatsStatusClass;
+  auth_type?: ApiAuthType;
+  api_key_id?: string;
+}
+
+export interface ApiStatsSeriesPoint {
+  bucket_start: string;
+  requests: number;
+  error_4xx: number;
+  error_5xx: number;
+  p95_ms: number;
+}
+
+export interface ApiStatsOverviewResponse {
+  capabilities: {
+    has_api_keys: boolean;
+    scope: "global" | "user";
+  };
+  range: {
+    key: ApiStatsRange;
+    from: string;
+    to: string;
+    bucket: "minute" | "hour" | "day";
+  };
+  summary: {
+    total_requests: number;
+    rps: number;
+    success_rate: number;
+    error_4xx_rate: number;
+    error_5xx_rate: number;
+    avg_duration_ms: number;
+    p50_ms: number;
+    p95_ms: number;
+    p99_ms: number;
+    active_routes: number;
+  };
+  series: ApiStatsSeriesPoint[];
+  status_distribution: Array<{ status_class: ApiStatsStatusClass; count: number }>;
+  auth_sources: Array<{ auth_type: ApiAuthType; count: number }>;
+}
+
+export interface ApiStatsRouteItem {
+  method: string;
+  route_template: string;
+  count: number;
+  error_4xx: number;
+  error_5xx: number;
+  error_rate: number;
+  avg_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+}
+
+export interface ApiStatsRoutesResponse {
+  items: ApiStatsRouteItem[];
+}
+
+export interface ApiStatsErrorsResponse {
+  items: ApiAccessLogRecord[];
+}
+
+export interface ApiStatsApiKeyItem {
+  api_key_id: string;
+  api_key_prefix: string;
+  api_key_name: string;
+  user_id: string | null;
+  status: "active" | "revoked";
+  count: number;
+  share_pct: number;
+  error_4xx: number;
+  error_5xx: number;
+  p95_ms: number;
+  last_seen_at: string | null;
+}
+
+export interface ApiStatsApiKeysResponse {
+  summary: {
+    total_key_requests: number;
+    active_key_count: number;
+    unauthorized_401_count: number;
+    forbidden_403_count: number;
+  };
+  items: ApiStatsApiKeyItem[];
+}
+
+export interface ApiStatsApiKeyDetailResponse {
+  key: {
+    api_key_id: string;
+    api_key_prefix: string;
+    api_key_name: string;
+    status: "active" | "revoked" | "invalid";
+    total_requests: number;
+    error_4xx: number;
+    error_5xx: number;
+    p95_ms: number;
+    last_seen_at: string | null;
+  };
+  series: ApiStatsSeriesPoint[];
+  top_routes: ApiStatsRouteItem[];
+  error_routes: ApiStatsRouteItem[];
+  recent_errors: ApiAccessLogRecord[];
+}
+
 export const ACTIVE_INGEST_REVIEW_STATUSES = new Set([
   "planning",
   "ready_for_review",

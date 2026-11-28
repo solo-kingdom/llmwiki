@@ -13,6 +13,7 @@ import type { PageLockManager } from "../ingest/lock.js";
 import type { McpServer } from "../mcp/server.js";
 import type { Store } from "../store/interfaces.js";
 import { CONFIG_API_TOKEN } from "../store/types.js";
+import { ApiStatsCollector, apiStatsMiddleware } from "../stats/collector.js";
 import { bearerAuth } from "./auth.js";
 import { healthHandler } from "./health.js";
 
@@ -28,6 +29,7 @@ export interface AppDeps {
   harnessManager?: HarnessManager | null;
   lockMgr?: PageLockManager | null;
   mcpServer?: McpServer | null;
+  statsCollector?: ApiStatsCollector | null;
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -72,6 +74,11 @@ export function createApp(deps: AppDeps): Hono {
       maxAge: 300,
     }),
   );
+
+  const statsCollector = deps.statsCollector === undefined ? new ApiStatsCollector(deps.db) : deps.statsCollector;
+  if (statsCollector) {
+    app.use("*", apiStatsMiddleware(statsCollector));
+  }
 
   app.use(
     "*",
@@ -203,6 +210,11 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/v1/api-keys", api.listApiKeys);
   app.post("/api/v1/api-keys", api.createApiKey);
   app.delete("/api/v1/api-keys/:id", api.deleteApiKey);
+  app.get("/api/v1/api-stats/overview", api.getApiStatsOverview);
+  app.get("/api/v1/api-stats/routes", api.getApiStatsRoutes);
+  app.get("/api/v1/api-stats/errors", api.getApiStatsErrors);
+  app.get("/api/v1/api-stats/api-keys", api.getApiStatsApiKeys);
+  app.get("/api/v1/api-stats/api-keys/:keyId", api.getApiStatsApiKeyDetail);
   app.get("/api/v1/workspace/rule-files", api.getWorkspaceRuleFiles);
   app.put("/api/v1/workspace/rule-files", api.updateWorkspaceRuleFiles);
   app.get("/api/v1/logs", api.listActivityLogs);

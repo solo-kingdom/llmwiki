@@ -580,6 +580,32 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    version: 13,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS api_access_logs (
+        id BIGSERIAL PRIMARY KEY,
+        occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        method TEXT NOT NULL,
+        route_template TEXT NOT NULL,
+        status_code INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        auth_type TEXT NOT NULL,
+        user_id TEXT,
+        api_key_id TEXT,
+        api_key_prefix TEXT,
+        api_key_name TEXT,
+        auth_outcome TEXT NOT NULL,
+        client_ip TEXT,
+        user_agent TEXT,
+        error_code TEXT
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_api_access_logs_occurred ON api_access_logs(occurred_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_api_access_logs_route_occurred ON api_access_logs(route_template, occurred_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_api_access_logs_status_occurred ON api_access_logs(status_code, occurred_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_api_access_logs_key_occurred ON api_access_logs(api_key_id, occurred_at DESC)`,
+    ],
+  },
 ];
 
 export async function migrate(pool: Pool): Promise<void> {

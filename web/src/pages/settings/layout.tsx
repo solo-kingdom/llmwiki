@@ -1,4 +1,4 @@
-import { CpuIcon, DatabaseIcon, HardDriveIcon, KeyRoundIcon, PlugIcon, ScrollTextIcon } from "lucide-react"
+import { BarChart3Icon, CpuIcon, DatabaseIcon, HardDriveIcon, KeyRoundIcon, PlugIcon, ScrollTextIcon } from "lucide-react"
 import { Outlet } from "react-router"
 import { SectionLayout, type SectionNavItem } from "@/components/blocks/section-nav"
 import { ErrorState, RowsSkeleton } from "@/components/blocks/state-boundary"
@@ -11,6 +11,7 @@ export const SETTINGS_SECTIONS: SectionNavItem[] = [
   { label: "摄入与检索", to: "/settings/ingest", icon: <DatabaseIcon className="llmwiki-tone-cyan" /> },
   { label: "存储", to: "/settings/storage", icon: <HardDriveIcon className="llmwiki-tone-teal" /> },
   { label: "访问控制", to: "/settings/access", icon: <KeyRoundIcon className="llmwiki-tone-amber" /> },
+  { label: "接口统计", to: "/settings/api-stats", icon: <BarChart3Icon className="llmwiki-tone-indigo" /> },
   { label: "外部集成", to: "/settings/integrations", icon: <PlugIcon className="llmwiki-tone-violet" /> },
   { label: "知识库规则", to: "/settings/rules", icon: <ScrollTextIcon className="llmwiki-tone-emerald" /> },
 ]

@@ -4,7 +4,15 @@ import type { CacheEntry } from "../ingest/types.js";
 import type {
   ActivityLog,
   ActivityLogListFilter,
+  ApiAccessLogInput,
   ApiKeyRecord,
+  ApiStatsApiKeyDetailResponse,
+  ApiStatsApiKeysResponse,
+  ApiStatsErrorsResponse,
+  ApiStatsFilter,
+  ApiStatsOverviewResponse,
+  ApiStatsRouteSort,
+  ApiStatsRoutesResponse,
   ArchiveFile,
   ArchiveFileKind,
   ArchiveFolder,
@@ -388,6 +396,19 @@ export interface IngestCacheStore {
   deleteIngestCacheEntry?(cacheKey: string): Promise<void>;
 }
 
+export interface ApiAccessStatsStore {
+  insertApiAccessLogs(entries: ApiAccessLogInput[]): Promise<void>;
+  purgeExpiredApiAccessLogs(beforeIso: string, batchSize?: number): Promise<number>;
+  getApiStatsOverview(filter: ApiStatsFilter): Promise<ApiStatsOverviewResponse>;
+  getApiStatsRoutes(
+    filter: ApiStatsFilter,
+    options?: { sort?: ApiStatsRouteSort; limit?: number },
+  ): Promise<ApiStatsRoutesResponse>;
+  getApiStatsErrors(filter: ApiStatsFilter, limit?: number): Promise<ApiStatsErrorsResponse>;
+  getApiStatsApiKeys(filter: ApiStatsFilter): Promise<ApiStatsApiKeysResponse>;
+  getApiStatsApiKeyDetail(keyId: string, filter: ApiStatsFilter): Promise<ApiStatsApiKeyDetailResponse | null>;
+}
+
 export interface Store
   extends DocumentStore,
     FolderStore,
@@ -403,6 +424,7 @@ export interface Store
     ActivityStore,
     WorkspaceStore,
     ApiKeyStore,
-    IngestCacheStore {
+    IngestCacheStore,
+    ApiAccessStatsStore {
   close(): Promise<void>;
 }

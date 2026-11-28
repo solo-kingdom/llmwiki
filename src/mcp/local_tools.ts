@@ -1,13 +1,24 @@
+import type { ApiContext } from "../api/context.js";
+import { hybridSearchDetailed } from "../api/search.js";
+import { lintDocuments } from "../engine/lint.js";
 import {
   LINT_SEVERITY_ERROR,
   LINT_SEVERITY_INFO,
   LINT_SEVERITY_WARNING,
   type LintReport,
 } from "../engine/lint_types.js";
-import { lintDocuments, lintWorkspace } from "../engine/lint.js";
 import type { ToolLoopConfig } from "../llm/types.js";
 import type { Store } from "../store/interfaces.js";
-import type { ArchiveFilter, Document, SearchOptions } from "../store/types.js";
+import { SearchValidationError, validateSearchRegex } from "../store/postgres/chunks.js";
+import type {
+  ArchiveFilter,
+  ArchiveSearchHit,
+  Document,
+  SearchChunk,
+  SearchMatchMode,
+  SearchOptions,
+  SearchSortMode,
+} from "../store/types.js";
 import type { Tool } from "./types.js";
 import {
   executeLocalAudit,
@@ -23,18 +34,27 @@ import { executeWebFetch, webFetchTool } from "./web_fetch.js";
 
 export const searchTool: Tool = {
   name: "search",
-  description: "Browse or search the knowledge vault. Modes: list, search, references, lint.",
+  description:
+    "Browse or search the knowledge vault. Modes: list, search, references, lint. Search supports search_mode (hybrid/keyword/semantic), match (fuzzy/all_terms/phrase/regex), folder, tags, and scope (wiki/archives/all).",
   inputSchema: {
     type: "object",
     properties: {
       mode: { type: "string", enum: ["list", "search", "references", "lint"], default: "list" },
       query: { type: "string", default: "" },
       path: { type: "string", default: "*" },
+      folder: { type: "string", description: "Optional wiki/archive subfolder filter" },
       limit: { type: "integer", default: 10 },
+      search_mode: { type: "string", enum: ["hybrid", "keyword", "semantic"], default: "hybrid" },
+      match: { type: "string", enum: ["fuzzy", "all_terms", "phrase", "regex"], default: "fuzzy" },
+      case_sensitive: { type: "boolean", default: false },
+      scope: { type: "string", enum: ["wiki", "archives", "all"], default: "wiki" },
+      sort: { type: "string", enum: ["relevance", "updated_desc", "updated_asc"], default: "relevance" },
       types: { type: "array", items: { type: "string" } },
       kinds: { type: "array", items: { type: "string" } },
       statuses: { type: "array", items: { type: "string" } },
       confidences: { type: "array", items: { type: "string" } },
+      tags: { type: "array", items: { type: "string" } },
+      tag_mode: { type: "string", enum: ["any", "all"], default: "any" },
       archived: { type: "string", enum: ["exclude", "include", "only"], default: "exclude" },
     },
     required: [],
@@ -203,10 +223,16 @@ export async function executeLocalSearch(
   const hasExplicitLimit = typeof args["limit"] === "number" && Number.isFinite(args["limit"]) && args["limit"] > 0;
   const limit = hasExplicitLimit ? Math.floor(args["limit"] as number) : 10;
   const listLimit = hasExplicitLimit ? Math.floor(args["limit"] as number) : DEFAULT_LIST_LIMIT;
+  const explicitFolder = typeof args["folder"] === "string" ? args["folder"].trim() : "";
+  let folder = explicitFolder;
   let pathFilter = "";
   const rawPath = typeof args["path"] === "string" ? args["path"].trim() : "";
-  if (rawPath === "wiki" || rawPath === "wiki/" || rawPath.startsWith("wiki/") || rawPath.startsWith("/wiki/")) {
+  if (rawPath === "wiki" || rawPath === "wiki/" || rawPath === "/wiki" || rawPath === "/wiki/") {
     pathFilter = "wiki";
+  } else if (rawPath.startsWith("wiki/") || rawPath.startsWith("/wiki/")) {
+    const cleanSub = rawPath.replace(/^\/+|\/+$/g, "");
+    pathFilter = cleanSub;
+    if (!folder) folder = cleanSub.replace(/^wiki\//, "");
   } else if (rawPath === "sources" || rawPath === "raw/sources") {
     pathFilter = "sources";
   }
@@ -220,12 +246,27 @@ export async function executeLocalSearch(
     rawArchived === "include" || rawArchived === "only" || rawArchived === "exclude"
       ? rawArchived
       : "exclude";
+  const matchRaw = typeof args["match"] === "string" ? args["match"].trim().toLowerCase() : "fuzzy";
+  const matchMode: SearchMatchMode =
+    matchRaw === "all_terms" || matchRaw === "phrase" || matchRaw === "regex" ? matchRaw : "fuzzy";
+  const sortRaw = typeof args["sort"] === "string" ? args["sort"].trim().toLowerCase() : "relevance";
+  const sortMode: SearchSortMode =
+    sortRaw === "updated_desc" || sortRaw === "updated_asc" ? sortRaw : "relevance";
+  const tagMode = args["tag_mode"] === "all" ? "all" : "any";
+  const caseSensitive = args["case_sensitive"] === true;
+
   const searchOptions: SearchOptions = {
     page_types: strArray("types"),
     experience_kinds: strArray("kinds"),
     statuses: strArray("statuses"),
     confidences: strArray("confidences"),
+    tags: strArray("tags"),
+    tag_mode: tagMode,
     archived,
+    ...(folder ? { folder } : {}),
+    match: matchMode,
+    case_sensitive: caseSensitive,
+    sort: sortMode,
   };
 
   switch (mode) {
@@ -262,21 +303,89 @@ export async function executeLocalSearch(
     case "search": {
       const query = typeof args["query"] === "string" ? args["query"] : "";
       if (!query.trim()) return "Error: query is required for search mode";
-      const results = await db.searchChunks(query, limit, pathFilter, searchOptions);
-      if (results.length === 0) return `No results found for: ${query}`;
-      let output = `Found ${results.length} results for "${query}":\n\n`;
+      if (matchMode === "regex") {
+        try {
+          validateSearchRegex(query.trim());
+        } catch (error) {
+          return `Error: ${error instanceof SearchValidationError ? error.message : String(error)}`;
+        }
+      }
+      const rawScope = typeof args["scope"] === "string" ? args["scope"].trim().toLowerCase() : "wiki";
+      const scope = rawScope === "archives" || rawScope === "all" ? rawScope : "wiki";
+      const rawSearchMode =
+        typeof args["search_mode"] === "string" ? args["search_mode"].trim().toLowerCase() : "hybrid";
+      const searchMode =
+        rawSearchMode === "keyword" || rawSearchMode === "semantic" ? rawSearchMode : "hybrid";
+
+      let results: SearchChunk[] = [];
+      let effectiveMode = "keyword";
+      let degradedReason: string | undefined;
+
+      if (scope === "wiki" || scope === "all") {
+        const canHybrid =
+          searchMode !== "keyword" &&
+          matchMode !== "phrase" &&
+          matchMode !== "regex" &&
+          typeof db.searchVector === "function" &&
+          typeof db.getConfig === "function";
+        if (canHybrid) {
+          const detailed = await hybridSearchDetailed(
+            { db, workspace } as ApiContext,
+            query,
+            limit,
+            pathFilter,
+            searchOptions,
+            searchMode,
+          );
+          results = detailed.results;
+          effectiveMode = detailed.effectiveMode;
+          degradedReason = detailed.degradedReason;
+        } else {
+          results = await db.searchChunks(query, limit, pathFilter, searchOptions);
+        }
+      }
+
+      let archiveHits: ArchiveSearchHit[] = [];
+      if ((scope === "archives" || scope === "all") && typeof db.searchArchiveFiles === "function") {
+        archiveHits = await db.searchArchiveFiles(query.trim(), {
+          folder_path: folder || undefined,
+          match: matchMode,
+          case_sensitive: caseSensitive,
+          limit,
+        });
+      }
+
+      if (results.length === 0 && archiveHits.length === 0) {
+        return `No results found for: ${query}`;
+      }
+
+      const modeNote = degradedReason ? ` [effective_mode: ${effectiveMode}; degraded: ${degradedReason}]` : "";
+      let output = `Found ${results.length} wiki results${scope !== "wiki" ? ` and ${archiveHits.length} archive results` : ""} for "${query}"${modeNote}:\n\n`;
       for (const result of results) {
         const meta = [result.page_type, result.experience_kind, result.page_status, result.confidence]
           .filter(Boolean)
           .join("/");
-        const fullPath = formatSearchResultPath(result.path, result.filename);
+        const fullPath = result.relative_path || formatSearchResultPath(result.path, result.filename);
         const idPart = result.document_id ? `, id: \`${result.document_id}\`` : "";
         output += `### ${result.title || result.filename} (\`${fullPath}\`${idPart}) [${meta ? `${meta} · ` : ""}score: ${result.score.toFixed(2)}]\n`;
         if (result.header_breadcrumb) output += `Section: ${result.header_breadcrumb}\n`;
         if (result.symptoms && result.symptoms.length > 0) {
           output += `Symptoms: ${result.symptoms.join(", ")}\n`;
         }
+        if (result.matched_lines && result.matched_lines.length > 0) {
+          output += `Matched lines:\n${result.matched_lines.map((ml) => `  L${ml.line}: ${ml.text}`).join("\n")}\n`;
+        }
         output += `${truncateSearchChunk(result.content)}\n\n---\n\n`;
+      }
+      if (archiveHits.length > 0) {
+        output += `## Archive Results (${archiveHits.length}):\n\n`;
+        for (const hit of archiveHits) {
+          output += `- [${hit.file.id}] \`${hit.file.relative_path}\` (${hit.match_type}, score: ${hit.score.toFixed(2)})\n`;
+          if (hit.snippet) output += `  ${hit.snippet}\n`;
+          if (hit.matched_lines && hit.matched_lines.length > 0) {
+            output += `  Matched lines: ${hit.matched_lines.map((ml) => `L${ml.line}: ${ml.text}`).join(" | ")}\n`;
+          }
+        }
       }
       return output;
     }

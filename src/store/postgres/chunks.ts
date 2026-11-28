@@ -2,13 +2,73 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { wikiPageTypeFromPaths, WIKI_HIDDEN_SUBDIRS } from "../../engine/wiki_org.js";
 import type { IndexStore } from "../interfaces.js";
-import type { Chunk, SearchChunk, SearchOptions } from "../types.js";
+import type { Chunk, MatchedLine, SearchChunk, SearchOptions, SearchSortMode } from "../types.js";
 import { parseStringArrayJson, todayIsoDate } from "./doc_meta.js";
 import { asNumber, asString, asUtcTimestamp, exec, queryRows } from "./sql.js";
 
 const MAX_SEARCH_TOKENS = 12;
+const MAX_REGEX_LENGTH = 256;
 const CJK_SEQ_RE = /[\u4e00-\u9fff]+/g;
 const SEGMENT_SPLIT_RE = /[\s\p{P}\p{S}]+/u;
+
+export class SearchValidationError extends Error {
+  public readonly status = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = "SearchValidationError";
+  }
+}
+
+export function validateSearchRegex(pattern: string): void {
+  if (!pattern.trim()) {
+    throw new SearchValidationError("regex query cannot be empty");
+  }
+  if (pattern.length > MAX_REGEX_LENGTH) {
+    throw new SearchValidationError(`regex pattern exceeds ${MAX_REGEX_LENGTH} characters`);
+  }
+  try {
+    new RegExp(pattern);
+  } catch (error) {
+    throw new SearchValidationError(
+      `invalid regex pattern: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function extractMatchedLines(
+  content: string,
+  query: string,
+  match: "phrase" | "regex",
+  caseSensitive: boolean,
+  maxLines = 10,
+): MatchedLine[] {
+  if (!content || !query) return [];
+  const lines = content.split(/\r?\n/);
+  const matched: MatchedLine[] = [];
+  let re: RegExp | null = null;
+  if (match === "regex") {
+    validateSearchRegex(query);
+    re = new RegExp(query, caseSensitive ? "" : "i");
+  }
+  const needle = caseSensitive ? query : query.toLowerCase();
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const lineText = lines[i] ?? "";
+    const hit =
+      match === "regex"
+        ? re!.test(lineText)
+        : (caseSensitive ? lineText : lineText.toLowerCase()).includes(needle);
+    if (hit) {
+      const trimmed = lineText.trim();
+      matched.push({
+        line: i + 1,
+        text: trimmed.length > 240 ? `${trimmed.slice(0, 240)}…` : trimmed,
+      });
+      if (matched.length >= maxLines) break;
+    }
+  }
+  return matched;
+}
 
 export interface SearchQueryTokens {
   groups: string[][];
@@ -66,11 +126,11 @@ export function tokenizeSearchQuery(query: string): SearchQueryTokens {
   return { groups, flatTerms: [...flatSet] };
 }
 
-function escapeLike(value: string): string {
+export function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
-function buildTokenGroupMatchSql(
+export function buildTokenGroupMatchSql(
   groups: string[][],
   columns: string[],
   args: unknown[],
@@ -104,14 +164,20 @@ function normalizeSearchOptions(raw?: string[] | SearchOptions): SearchOptions {
   return raw;
 }
 
-function pathFilterClause(pathFilter: string): string {
-  if (pathFilter === "wiki") {
+function pathFilterClause(pathFilter: string, args: unknown[]): string {
+  const trimmed = pathFilter.trim();
+  if (trimmed === "wiki") {
     const hidden = [...WIKI_HIDDEN_SUBDIRS]
       .map((subdir) => `d.relative_path LIKE 'wiki/${subdir}/%'`)
       .join(" OR ");
     return `AND d.source_kind = 'wiki' AND NOT (${hidden}) `;
   }
-  if (pathFilter === "sources") return "AND d.source_kind != 'wiki' ";
+  if (trimmed === "sources") return "AND d.source_kind != 'wiki' ";
+  const clean = trimmed.replace(/^\/+|\/+$/g, "");
+  if (clean.startsWith("wiki/")) {
+    args.push(clean, `${clean}/%`);
+    return `AND d.source_kind = 'wiki' AND (d.relative_path = $${args.length - 1} OR d.relative_path LIKE $${args.length}) `;
+  }
   return "";
 }
 
@@ -120,12 +186,19 @@ function buildSearchFilterClause(
   options: SearchOptions,
   args: unknown[],
 ): string {
-  let sql = pathFilterClause(pathFilter);
+  let sql = pathFilterClause(pathFilter, args);
   const archived = options.archived ?? "exclude";
   if (archived === "exclude") {
     sql += "AND COALESCE(d.archived_at, '') = '' ";
   } else if (archived === "only") {
     sql += "AND COALESCE(d.archived_at, '') != '' ";
+  }
+  if (options.folder && options.folder.trim()) {
+    const cleanFolder = options.folder.trim().replace(/^\/+|\/+$/g, "").replace(/^wiki\//, "");
+    if (cleanFolder) {
+      args.push(`wiki/${cleanFolder}/%`);
+      sql += `AND d.relative_path LIKE $${args.length} `;
+    }
   }
   if (options.page_types?.length) {
     args.push(options.page_types);
@@ -143,9 +216,27 @@ function buildSearchFilterClause(
     args.push(options.confidences);
     sql += `AND d.confidence = ANY($${args.length}::text[]) `;
   }
+  const cleanTags = (options.tags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (cleanTags.length > 0) {
+    if (options.tag_mode === "all") {
+      args.push(cleanTags, cleanTags.length);
+      sql += `AND (SELECT COUNT(DISTINCT lower(t.val)) FROM jsonb_array_elements_text(CASE WHEN COALESCE(d.tags, '') ~ '^\\s*\\[' THEN d.tags::jsonb ELSE '[]'::jsonb END) AS t(val) WHERE lower(t.val) = ANY($${args.length - 1}::text[])) >= $${args.length} `;
+    } else {
+      args.push(cleanTags);
+      sql += `AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN COALESCE(d.tags, '') ~ '^\\s*\\[' THEN d.tags::jsonb ELSE '[]'::jsonb END) AS t(val) WHERE lower(t.val) = ANY($${args.length}::text[])) `;
+    }
+  }
   if (options.review_overdue) {
     args.push(options.today || todayIsoDate());
     sql += `AND COALESCE(d.archived_at, '') = '' AND COALESCE(d.review_after, '') != '' AND d.review_after < $${args.length} `;
+  }
+  if (options.updated_after && options.updated_after.trim()) {
+    args.push(options.updated_after.trim());
+    sql += `AND COALESCE(d.updated_at, '') >= $${args.length} `;
+  }
+  if (options.updated_before && options.updated_before.trim()) {
+    args.push(options.updated_before.trim());
+    sql += `AND COALESCE(d.updated_at, '') <= $${args.length} `;
   }
   return sql;
 }
@@ -153,20 +244,26 @@ function buildSearchFilterClause(
 const SEARCH_DOC_META_COLS = `
   COALESCE(d.page_type, ''), COALESCE(d.confidence, ''), COALESCE(d.page_status, ''),
   COALESCE(d.experience_kind, ''), COALESCE(d.last_verified, ''), COALESCE(d.review_after, ''),
-  COALESCE(d.archived_at, ''), COALESCE(d.symptoms, '[]')`;
+  COALESCE(d.archived_at, ''), COALESCE(d.symptoms, '[]'),
+  COALESCE(d.relative_path, ''), COALESCE(d.tags, '[]'), COALESCE(d.updated_at, '')`;
 
 function scanSearchChunk(row: unknown[]): SearchChunk {
   const pathVal = asString(row[7]);
+  const filename = asString(row[5]);
   const storedPageType = asString(row[10]);
+  const storedRelPath = asString(row[18]);
+  const cleanDir = pathVal.trim().replace(/^\/+|\/+$/g, "");
+  const fallbackRel = cleanDir ? (filename ? `${cleanDir}/${filename}` : cleanDir) : filename;
   return {
     document_id: asString(row[0]),
     content: asString(row[1]),
     page: asNumber(row[2]),
     header_breadcrumb: asString(row[3]),
     chunk_index: asNumber(row[4]),
-    filename: asString(row[5]),
+    filename,
     title: asString(row[6]),
     path: pathVal,
+    relative_path: storedRelPath || fallbackRel,
     file_type: asString(row[8]),
     score: Number(row[9] ?? 0),
     page_type: storedPageType || wikiPageTypeFromPaths("", pathVal.replace(/^\/+/, "")),
@@ -177,6 +274,8 @@ function scanSearchChunk(row: unknown[]): SearchChunk {
     review_after: asString(row[15]),
     archived_at: asString(row[16]),
     symptoms: parseStringArrayJson(asString(row[17])),
+    tags: parseStringArrayJson(asString(row[19])),
+    updated_at: asUtcTimestamp(row[20]),
   };
 }
 
@@ -194,13 +293,32 @@ function mergeSearchResults(primary: SearchChunk[], extra: SearchChunk[], limit:
   return merged;
 }
 
+function searchSortOrderClause(sort?: SearchSortMode, defaultTieBreak = "chunk_index ASC"): string {
+  if (sort === "updated_desc") return `updated_at DESC, score DESC, ${defaultTieBreak}`;
+  if (sort === "updated_asc") return `updated_at ASC, score DESC, ${defaultTieBreak}`;
+  return `score DESC, ${defaultTieBreak}`;
+}
+
 function filterBySearchOptions(results: SearchChunk[], options: SearchOptions): SearchChunk[] {
+  let out = results;
   const pageTypes = options.page_types ?? [];
-  if (pageTypes.length === 0) return results;
-  const allowed = new Set(pageTypes);
-  return results.filter((item) =>
-    allowed.has(item.page_type || wikiPageTypeFromPaths("", item.path.replace(/^\/+/, ""))),
-  );
+  if (pageTypes.length > 0) {
+    const allowed = new Set(pageTypes);
+    out = out.filter((item) =>
+      allowed.has(item.page_type || wikiPageTypeFromPaths("", item.path.replace(/^\/+/, ""))),
+    );
+  }
+  const cleanTags = (options.tags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (cleanTags.length > 0) {
+    out = out.filter((item) => {
+      if (!item.tags) return true;
+      const itemTags = new Set(item.tags.map((t) => t.trim().toLowerCase()));
+      return options.tag_mode === "all"
+        ? cleanTags.every((t) => itemTags.has(t))
+        : cleanTags.some((t) => itemTags.has(t));
+    });
+  }
+  return out;
 }
 
 export function chunksRepo(
@@ -211,54 +329,111 @@ export function chunksRepo(
 > {
   async function searchFTS(query: string, limit: number, pathFilter: string, options: SearchOptions) {
     const tokens = tokenizeSearchQuery(query);
+    const requireAll = options.match === "all_terms";
     const args: unknown[] = [query, limit];
-    const tokenMatch = buildTokenGroupMatchSql(tokens.groups, ["dc.content", "d.title"], args, false);
-    const groupCondition = tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : "";
+    const tokenMatch = buildTokenGroupMatchSql(tokens.groups, ["dc.content", "d.title"], args, requireAll);
     const hitScore = tokenMatch.whereSql ? `(${tokenMatch.groupHitExpr}) * 0.25 + ` : "";
-    let sql = `
-      SELECT d.id, dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
-        d.filename, d.title, d.path, d.file_type,
+    const matchExpr =
+      requireAll && tokenMatch.whereSql
+        ? tokenMatch.whereSql
+        : `(to_tsvector('simple', dc.content) @@ websearch_to_tsquery('simple', $1)
+             OR dc.content ILIKE '%' || $1 || '%'
+             ${tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : ""})`;
+    const filterSql = buildSearchFilterClause(pathFilter, options, args);
+    const orderSql = searchSortOrderClause(options.sort, "chunk_index ASC");
+
+    const selectCols = `
+        d.id AS document_id, dc.content AS content, dc.page AS page,
+        dc.header_breadcrumb AS header_breadcrumb, dc.chunk_index AS chunk_index,
+        d.filename AS filename, d.title AS title, d.path AS path, d.file_type AS file_type,
         (${hitScore}ts_rank_cd(to_tsvector('simple', dc.content), websearch_to_tsquery('simple', $1))
          + similarity(dc.content, $1)) AS score,
-        ${SEARCH_DOC_META_COLS}
+        COALESCE(d.page_type, '') AS page_type, COALESCE(d.confidence, '') AS confidence,
+        COALESCE(d.page_status, '') AS page_status, COALESCE(d.experience_kind, '') AS experience_kind,
+        COALESCE(d.last_verified, '') AS last_verified, COALESCE(d.review_after, '') AS review_after,
+        COALESCE(d.archived_at, '') AS archived_at, COALESCE(d.symptoms, '[]') AS symptoms,
+        COALESCE(d.relative_path, '') AS relative_path, COALESCE(d.tags, '[]') AS tags,
+        COALESCE(d.updated_at, '') AS updated_at`;
+
+    const whereBody = `
       FROM document_chunks dc
       JOIN documents d ON dc.document_id = d.id
       WHERE d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
-        AND (to_tsvector('simple', dc.content) @@ websearch_to_tsquery('simple', $1)
-             OR dc.content ILIKE '%' || $1 || '%'
-             ${groupCondition}) `;
-    sql += buildSearchFilterClause(pathFilter, options, args);
-    sql += "ORDER BY score DESC, dc.chunk_index LIMIT $2";
+        AND ${matchExpr} ${filterSql}`;
+
+    const sql =
+      options.group_by === "chunk"
+        ? `SELECT ${selectCols} ${whereBody} ORDER BY ${orderSql} LIMIT $2`
+        : `WITH ranked AS (
+             SELECT ${selectCols},
+               ROW_NUMBER() OVER (
+                 PARTITION BY d.id
+                 ORDER BY (${hitScore}ts_rank_cd(to_tsvector('simple', dc.content), websearch_to_tsquery('simple', $1))
+                   + similarity(dc.content, $1)) DESC, dc.chunk_index ASC
+               ) AS rn
+             ${whereBody}
+           )
+           SELECT document_id, content, page, header_breadcrumb, chunk_index,
+             filename, title, path, file_type, score,
+             page_type, confidence, page_status, experience_kind,
+             last_verified, review_after, archived_at, symptoms,
+             relative_path, tags, updated_at
+           FROM ranked
+           WHERE rn = 1
+           ORDER BY ${orderSql}
+           LIMIT $2`;
+
     const rows = await queryRows(pool, sql, args);
     return rows.map(scanSearchChunk);
   }
 
   async function searchLIKE(query: string, limit: number, pathFilter: string, options: SearchOptions) {
     const tokens = tokenizeSearchQuery(query);
+    const requireAll = options.match === "all_terms";
     const args: unknown[] = [query, limit];
-    const tokenMatch = buildTokenGroupMatchSql(tokens.groups, ["dc.content"], args, false);
-    const groupCondition = tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : "";
+    const tokenMatch = buildTokenGroupMatchSql(tokens.groups, ["dc.content", "d.title"], args, requireAll);
     const scoreExpr = tokenMatch.whereSql ? `(${tokenMatch.groupHitExpr}) * 0.2` : "0.0";
+    const matchExpr =
+      requireAll && tokenMatch.whereSql
+        ? tokenMatch.whereSql
+        : `(dc.content ILIKE '%' || $1 || '%' ${tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : ""})`;
     let sql = `
       SELECT d.id, dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
         d.filename, d.title, d.path, d.file_type, ${scoreExpr} AS score,
         ${SEARCH_DOC_META_COLS}
       FROM document_chunks dc
       JOIN documents d ON dc.document_id = d.id
-      WHERE (dc.content ILIKE '%' || $1 || '%' ${groupCondition}) AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = '' `;
+      WHERE ${matchExpr} AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = '' `;
     sql += buildSearchFilterClause(pathFilter, options, args);
-    sql += "ORDER BY score DESC LIMIT $2";
+    sql += `ORDER BY ${options.sort === "updated_desc" ? "d.updated_at DESC, score DESC" : options.sort === "updated_asc" ? "d.updated_at ASC, score DESC" : "score DESC"} LIMIT $2`;
     const rows = await queryRows(pool, sql, args);
     return rows.map(scanSearchChunk);
   }
 
   async function searchMetadata(query: string, limit: number, pathFilter: string, options: SearchOptions) {
     const tokens = tokenizeSearchQuery(query);
+    const requireAll = options.match === "all_terms";
     const args: unknown[] = [query, limit];
-    const metaCols = ["d.filename", "d.title", "d.path", "COALESCE(d.aliases, '[]')", "COALESCE(d.symptoms, '[]')"];
-    const tokenMatch = buildTokenGroupMatchSql(tokens.groups, metaCols, args, false);
-    const groupCondition = tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : "";
+    const metaCols = [
+      "d.filename",
+      "d.title",
+      "d.path",
+      "COALESCE(d.aliases, '[]')",
+      "COALESCE(d.symptoms, '[]')",
+      "COALESCE(d.tags, '[]')",
+    ];
+    const tokenMatch = buildTokenGroupMatchSql(tokens.groups, metaCols, args, requireAll);
     const groupScore = tokenMatch.whereSql ? `(${tokenMatch.groupHitExpr}) * 0.3` : "0.0";
+    const matchExpr =
+      requireAll && tokenMatch.whereSql
+        ? tokenMatch.whereSql
+        : `(d.filename ILIKE '%' || $1 || '%'
+             OR d.title ILIKE '%' || $1 || '%'
+             OR d.path ILIKE '%' || $1 || '%'
+             OR COALESCE(d.aliases, '[]') ILIKE '%' || $1 || '%'
+             OR COALESCE(d.symptoms, '[]') ILIKE '%' || $1 || '%'
+             OR COALESCE(d.tags, '[]') ILIKE '%' || $1 || '%'
+             ${tokenMatch.whereSql ? `OR ${tokenMatch.whereSql}` : ""})`;
     let sql = `
       SELECT d.id, COALESCE(SUBSTR(d.content, 1, 300), ''), 0, '', 0,
         d.filename, d.title, d.path, d.file_type,
@@ -266,16 +441,53 @@ export function chunksRepo(
         ${SEARCH_DOC_META_COLS}
       FROM documents d
       WHERE d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
-        AND (d.filename ILIKE '%' || $1 || '%'
-             OR d.title ILIKE '%' || $1 || '%'
-             OR d.path ILIKE '%' || $1 || '%'
-             OR COALESCE(d.aliases, '[]') ILIKE '%' || $1 || '%'
-             OR COALESCE(d.symptoms, '[]') ILIKE '%' || $1 || '%'
-             ${groupCondition}) `;
+        AND ${matchExpr} `;
     sql += buildSearchFilterClause(pathFilter, options, args);
-    sql += "ORDER BY score DESC, d.updated_at DESC LIMIT $2";
+    sql += `ORDER BY ${options.sort === "updated_desc" ? "d.updated_at DESC, score DESC" : options.sort === "updated_asc" ? "d.updated_at ASC, score DESC" : "score DESC, d.updated_at DESC"} LIMIT $2`;
     const rows = await queryRows(pool, sql, args);
     return rows.map(scanSearchChunk);
+  }
+
+  async function searchExactDocuments(
+    query: string,
+    limit: number,
+    pathFilter: string,
+    options: SearchOptions,
+    mode: "phrase" | "regex",
+  ): Promise<SearchChunk[]> {
+    const caseSensitive = Boolean(options.case_sensitive);
+    let args: unknown[];
+    let matchSql: string;
+    if (mode === "regex") {
+      validateSearchRegex(query);
+      const op = caseSensitive ? "~" : "~*";
+      args = [query, limit];
+      matchSql = `(d.content ${op} $1 OR d.title ${op} $1)`;
+    } else {
+      const op = caseSensitive ? "LIKE" : "ILIKE";
+      args = [`%${escapeLike(query)}%`, limit];
+      matchSql = `(d.content ${op} $1 ESCAPE '\\' OR d.title ${op} $1 ESCAPE '\\')`;
+    }
+    let sql = `
+      SELECT d.id, COALESCE(d.content, ''), 0, '', 0,
+        d.filename, d.title, d.path, d.file_type,
+        (CASE WHEN d.title ${mode === "regex" ? (caseSensitive ? "~" : "~*") : caseSensitive ? "LIKE" : "ILIKE"} $1${mode === "phrase" ? " ESCAPE '\\'" : ""} THEN 2.0 ELSE 1.0 END) AS score,
+        ${SEARCH_DOC_META_COLS}
+      FROM documents d
+      WHERE d.status != 'failed' AND COALESCE(d.deleted_at, '') = ''
+        AND ${matchSql} `;
+    sql += buildSearchFilterClause(pathFilter, options, args);
+    sql += `ORDER BY ${options.sort === "updated_desc" ? "d.updated_at DESC, score DESC" : options.sort === "updated_asc" ? "d.updated_at ASC, score DESC" : "score DESC, d.updated_at DESC"} LIMIT $2`;
+    const rows = await queryRows(pool, sql, args);
+    return rows.map((row) => {
+      const chunk = scanSearchChunk(row);
+      const matchedLines = extractMatchedLines(chunk.content, query, mode, caseSensitive);
+      return {
+        ...chunk,
+        match_type: mode,
+        matched_lines: matchedLines,
+      };
+    });
   }
 
   return {
@@ -313,6 +525,10 @@ export function chunksRepo(
       const trimmed = query.trim();
       if (!trimmed || limit <= 0) return [];
       const options = normalizeSearchOptions(rawOptions);
+      if (options.match === "phrase" || options.match === "regex") {
+        const exact = await searchExactDocuments(trimmed, limit, pathFilter, options, options.match);
+        return filterBySearchOptions(exact, options);
+      }
 
       let ftsError: unknown = null;
       let results: SearchChunk[] = [];
@@ -495,17 +711,48 @@ export function chunksRepo(
       if (vector.length === 0 || limit <= 0) return [];
       const options = normalizeSearchOptions(rawOptions);
       const args: unknown[] = [formatVector(vector), model, limit];
-      let sql = `
-        SELECT d.id, dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index,
-          d.filename, d.title, d.path, d.file_type,
+      const filterSql = buildSearchFilterClause(pathFilter, options, args);
+      const orderSql = searchSortOrderClause(options.sort, "chunk_index ASC");
+
+      const selectCols = `
+          d.id AS document_id, dc.content AS content, dc.page AS page,
+          dc.header_breadcrumb AS header_breadcrumb, dc.chunk_index AS chunk_index,
+          d.filename AS filename, d.title AS title, d.path AS path, d.file_type AS file_type,
           (1 - (ce.embedding <=> $1::vector)) AS score,
-          ${SEARCH_DOC_META_COLS}
+          COALESCE(d.page_type, '') AS page_type, COALESCE(d.confidence, '') AS confidence,
+          COALESCE(d.page_status, '') AS page_status, COALESCE(d.experience_kind, '') AS experience_kind,
+          COALESCE(d.last_verified, '') AS last_verified, COALESCE(d.review_after, '') AS review_after,
+          COALESCE(d.archived_at, '') AS archived_at, COALESCE(d.symptoms, '[]') AS symptoms,
+          COALESCE(d.relative_path, '') AS relative_path, COALESCE(d.tags, '[]') AS tags,
+          COALESCE(d.updated_at, '') AS updated_at`;
+
+      const whereBody = `
         FROM chunk_embeddings ce
         JOIN document_chunks dc ON dc.id = ce.chunk_id
         JOIN documents d ON dc.document_id = d.id
-        WHERE ce.model = $2 AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = '' `;
-      sql += buildSearchFilterClause(pathFilter, options, args);
-      sql += "ORDER BY ce.embedding <=> $1::vector LIMIT $3";
+        WHERE ce.model = $2 AND d.status != 'failed' AND COALESCE(d.deleted_at, '') = '' ${filterSql}`;
+
+      const sql =
+        options.group_by === "chunk"
+          ? `SELECT ${selectCols} ${whereBody} ORDER BY ce.embedding <=> $1::vector ASC LIMIT $3`
+          : `WITH ranked AS (
+               SELECT ${selectCols},
+                 ROW_NUMBER() OVER (
+                   PARTITION BY d.id
+                   ORDER BY ce.embedding <=> $1::vector ASC, dc.chunk_index ASC
+                 ) AS rn
+               ${whereBody}
+             )
+             SELECT document_id, content, page, header_breadcrumb, chunk_index,
+               filename, title, path, file_type, score,
+               page_type, confidence, page_status, experience_kind,
+               last_verified, review_after, archived_at, symptoms,
+               relative_path, tags, updated_at
+             FROM ranked
+             WHERE rn = 1
+             ORDER BY ${orderSql}
+             LIMIT $3`;
+
       const rows = await queryRows(pool, sql, args);
       return filterBySearchOptions(rows.map(scanSearchChunk), options);
     },

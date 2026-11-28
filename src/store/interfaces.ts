@@ -11,6 +11,7 @@ import type {
   ArchiveFolderWithCounts,
   ArchiveLinkedDocument,
   ArchiveSearchHit,
+  ArchiveSearchOptions,
   ArchiveSourceSummary,
   ArchiveStorageBackend,
   ChangeSet,
@@ -380,7 +381,7 @@ export interface ArchiveStore {
   updateArchiveFileSearchableText(id: string, searchableText: string): Promise<void>;
   searchArchiveFiles(
     query: string,
-    options?: { kind?: string; folder_path?: string; limit?: number },
+    options?: ArchiveSearchOptions,
   ): Promise<ArchiveSearchHit[]>;
   deleteArchiveFile(id: string): Promise<ArchiveFile | null>;
 

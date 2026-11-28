@@ -114,18 +114,26 @@ export function registerTools(
     {
       name: "search",
       description:
-        "Browse or search the knowledge vault. Modes: list (browse files), search (keyword search), references (citation graph), lint (wiki health checks).",
+        "Browse or search the knowledge vault. Modes: list (browse files), search (hybrid/keyword/semantic + exact/regex + scope), references (citation graph), lint (wiki health checks).",
       inputSchema: {
         type: "object",
         properties: {
           mode: { type: "string", enum: ["list", "search", "references", "lint"], default: "list" },
           query: { type: "string", default: "" },
           path: { type: "string", default: "*" },
+          folder: { type: "string", description: "Optional wiki/archive subfolder filter" },
           limit: { type: "integer", default: 10 },
+          search_mode: { type: "string", enum: ["hybrid", "keyword", "semantic"], default: "hybrid" },
+          match: { type: "string", enum: ["fuzzy", "all_terms", "phrase", "regex"], default: "fuzzy" },
+          case_sensitive: { type: "boolean", default: false },
+          scope: { type: "string", enum: ["wiki", "archives", "all"], default: "wiki" },
+          sort: { type: "string", enum: ["relevance", "updated_desc", "updated_asc"], default: "relevance" },
           types: { type: "array", items: { type: "string" } },
           kinds: { type: "array", items: { type: "string" } },
           statuses: { type: "array", items: { type: "string" } },
           confidences: { type: "array", items: { type: "string" } },
+          tags: { type: "array", items: { type: "string" } },
+          tag_mode: { type: "string", enum: ["any", "all"], default: "any" },
           archived: { type: "string", enum: ["exclude", "include", "only"], default: "exclude" },
         },
         required: [],
@@ -374,10 +382,11 @@ async function guideText(db: Store): Promise<string> {
   }
 
   output += "## Available Tools\n\n";
-  output += "- **search** — Full-text search, reference graph, or lint across DB documents\n";
-  output += "- **read** — Read a document by path or ID\n";
-  output += "- **write** — Create or update a wiki page (recorded in change_sets & revisions)\n";
-  output += "- **delete** — Remove a document from the vault\n";
+  output += "- **search** — Hybrid/keyword/exact/regex search, list, reference graph, or lint across Wiki & Archives\n";
+  output += "- **read / batch_read** — Read one or many documents by path or ID (with line range or outline_only)\n";
+  output += "- **write / batch_write** — Create, replace, patch (atomic edits + optimistic lock), or batch-mutate wiki pages\n";
+  output += "- **delete / move / folder / archive / reopen** — Lifecycle and folder hierarchy management\n";
+  output += "- **archive_list / archive_read / archive_search / archive_patch / archive_batch** — Raw Archive search, read, patch & batch operations\n";
   output += "- **audit / structure / gaps / similar** — DB-native diagnostics\n";
   output += "- **ping** — Test connectivity\n";
   return output;
